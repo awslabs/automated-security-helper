@@ -156,3 +156,25 @@ def test_the_guard_ignores_writes_under_an_excluded_path(tmp_path):
         (root / "uv" / "tools").mkdir()
         recorded = real_home_guard.drain()
     assert recorded == [("os.mkdir", os.path.abspath(root / "uv" / "tools"))]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the guard's roots are POSIX paths here")
+def test_allowing_lets_through_only_the_named_paths_and_only_inside_the_block(
+    tmp_path,
+):
+    """Control for ``allowing``: named files pass, a neighbor is recorded, and the
+    exemption ends with the block."""
+    root = tmp_path / "fake-xdg-data"
+    root.mkdir()
+    planted = root / "planted.txt"
+    neighbor = root / "neighbor.txt"
+    with real_home_guard.watching(root):
+        with real_home_guard.allowing([planted]):
+            planted.write_text("x", encoding="utf-8")
+            planted.unlink()
+            neighbor.write_text("x", encoding="utf-8")
+        inside = real_home_guard.drain()
+        planted.write_text("x", encoding="utf-8")
+        after = real_home_guard.drain()
+    assert inside == [("open", os.path.abspath(neighbor))]
+    assert after == [("open", os.path.abspath(planted))]
