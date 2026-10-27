@@ -24,7 +24,7 @@
     'exit_code': 3,
     'stderr': '',
     'stdout': '''
-      ❌ Invalid configuration: Configuration file not found: missing.yaml
+      ❌ Config file not found: missing.yaml
   
     ''',
   })
@@ -54,7 +54,7 @@
     'exit_code': 3,
     'stderr': '',
     'stdout': '''
-      ❌ Invalid configuration: Configuration file not found: missing.yaml
+      ❌ Config file not found: missing.yaml
   
     ''',
   })
