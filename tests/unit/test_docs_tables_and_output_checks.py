@@ -499,7 +499,7 @@ CLEAN_DEFAULTS = """# Defaults
 | `sarif` | yes |
 | `spdx` | no |
 | `yaml` | no |
-| `s3` | yes |
+| `s3` | no |
 
 <!-- doctest: options of=scanners -->
 | Scanner | Enabled by default |
