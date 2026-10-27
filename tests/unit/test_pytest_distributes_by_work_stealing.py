@@ -30,6 +30,8 @@ import re
 import shlex
 from pathlib import Path
 
+from tests.utils.helpers import iter_repo_files
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 THIS_FILE = Path(__file__).resolve()
 

@@ -299,6 +299,106 @@ _EXEMPT = {
     ),
 }
 
+_CONVERTER_OUTPUT = (
+    "What the converter wrote, under the work directory of test_plugin_context, "
+    "which is inside this test's own ash_temp_path. Only that test's teardown "
+    "removes it, so no other worker races the walk."
+)
+_TEST_OWN_TREE = (
+    "A directory this test (or its module-scoped fixture) made with tmp_path or "
+    "tmp_path_factory.mktemp and passed in; the guard cannot follow the argument. "
+    "Nothing outside that test removes it."
+)
+_NPM_AUDIT_CWD = (
+    "The directory the npm-audit child was started in: a staged copy under the "
+    "test's tmp_path, never the checkout or the scratch root."
+)
+
+#: Walks of a directory the test made for itself, passed in as an argument or
+#: returned by a call, so the guard cannot resolve it. Same rules as _EXEMPT.
+_EXEMPT.update(
+    {
+        (
+            "tests/unit/converters/test_archive_converter_limits.py",
+            "files_written",
+            "root",
+        ): _CONVERTER_OUTPUT,
+        (
+            "tests/unit/converters/test_archive_converter_limits.py",
+            "assert_extracted",
+            "extracted",
+        ): _CONVERTER_OUTPUT,
+        (
+            "tests/unit/converters/test_archive_target_directories.py",
+            "written",
+            "root",
+        ): _CONVERTER_OUTPUT,
+        (
+            "tests/unit/converters/test_archive_target_directories.py",
+            "test_a_failing_archive_leaves_nothing_where_another_was_extracted",
+            "Path(converter.results_dir)",
+        ): _CONVERTER_OUTPUT,
+        (
+            "tests/unit/converters/test_archive_plain_gzip_and_lfs_pointers.py",
+            "written",
+            "root",
+        ): _CONVERTER_OUTPUT,
+        (
+            "tests/unit/converters/test_archive_unreadable.py",
+            "files_under",
+            "root",
+        ): _CONVERTER_OUTPUT,
+        (
+            "tests/unit/interactions/test_scan_ignore_file_switch.py",
+            "test_the_scan_set_is_every_file_but_ash_own_exclusions",
+            "run.tree",
+        ): (
+            "The tree this module built under tmp_path_factory.mktemp for one scan "
+            "variant; the scans fixture returns it from a cache the guard cannot read."
+        ),
+        (
+            "tests/unit/reporters/test_secret_masking_across_reports.py",
+            "_written_outside_tool_output",
+            "output_dir",
+        ): _TEST_OWN_TREE,
+        (
+            "tests/unit/reporters/test_secret_masking_across_reports.py",
+            "test_the_projects_report_what_this_relies_on",
+            "two_project_output / 'projects' / 'web'",
+        ): _TEST_OWN_TREE,
+        (
+            "tests/unit/cli/mcp/test_the_sweep_never_removes_a_running_scans_tree.py",
+            "_age",
+            "sandbox",
+        ): _TEST_OWN_TREE,
+        (
+            "tests/unit/cli/mcp/test_session_workspace_is_removed_when_the_session_ends.py",
+            "_sandbox_with_age",
+            "sandbox",
+        ): _TEST_OWN_TREE,
+        (
+            "tests/unit/cli/mcp/test_session_workspace_lifecycle.py",
+            "_sandbox",
+            "sandbox",
+        ): _TEST_OWN_TREE,
+        (
+            "tests/unit/plugin_modules/ash_builtin/test_npm_audit_links_leaving_the_tree.py",
+            "test_the_child_copies_no_file_that_leaves_the_tree",
+            "child.cwd",
+        ): _NPM_AUDIT_CWD,
+        (
+            "tests/unit/plugin_modules/ash_builtin/test_npm_audit_links_leaving_the_tree.py",
+            "fake_run",
+            "cwd",
+        ): _NPM_AUDIT_CWD,
+        (
+            "tests/unit/plugin_modules/ash_builtin/test_npm_audit_project_rc_ignored.py",
+            "fake_run",
+            "cwd",
+        ): _NPM_AUDIT_CWD,
+    }
+)
+
 
 @pytest.fixture(scope="module")
 def sweep() -> Sweep:
