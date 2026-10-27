@@ -133,13 +133,10 @@ Returns:
   "end_time": "<iso8601 | null>",
   "status": "pending | running | completed | incomplete | failed | cancelled",
   "severity_threshold": "<the threshold the scan was judged by once it is completed or incomplete; null before that, and for a failed or cancelled scan>",
-  "requested_severity_threshold": "<run_ash_scan's severity_threshold, upper-cased, or null>",
   "config_path": "<path | null>",
   "warnings": [...],
   "error_message": "<str | null>",
   "is_complete": bool,
-  "results_available": bool,
-  "output_holds_previous_results": bool,
   "coverage_complete": "bool | null",
   "incomplete_scanners": [
     { "scanner": "grype", "status": "MISSING", "reason": "missing_dependencies", "detail": "MISSING" }
@@ -149,9 +146,7 @@ Returns:
   "unevaluated_rules": ["..."],
   "stale_content_databases": [{ "name": "grype-db", "scanner": "grype", "built": "<iso8601 | null>", "age": "...", "max_age": "...", "refresh": "..." }],
   "completed_scanners": int,
-  "finished_scanners": int,
   "total_scanners": int,
-  "scanner_status_counts": { "passed": int, "failed": int, "skipped": int, "running": int, "pending": int },
   "total_findings": int,
   "severity_counts": { "critical": int, "high": int, "medium": int, "low": int, "info": int, "suppressed": int },
   "scanners": {
@@ -162,13 +157,11 @@ Returns:
 }
 ```
 
-There is no overall percentage field. To compute progress, use `finished_scanners / total_scanners`: `finished_scanners` counts every scanner that has ended, whatever its status, and `completed_scanners` only the ones that PASSED. `scanner_status_counts` splits them into `passed`, `failed` (FAILED or ERROR), `skipped` (MISSING or SKIPPED), `running`, and `pending`. **Guard against `total_scanners == 0`** during the pre-flight phase (before any scanner has registered). Show "initializing" or 0% when `total_scanners` is zero.
+There is no overall percentage field. To compute progress, use `completed_scanners / total_scanners`: `completed_scanners` counts only the scanners whose progress status is completed, so it can stay below `total_scanners` when the scan ends with a scanner that failed or was skipped. **Guard against `total_scanners == 0`** during the pre-flight phase (before any scanner has registered). Show "initializing" or 0% when `total_scanners` is zero.
 
-There is no top-level `duration` field — derive elapsed time from `start_time` and `end_time` (or from current time while running).
+There is no top-level `duration` field; derive elapsed time from `start_time` and `end_time` (or from current time while running).
 
-**`is_complete` is `true` once the scan has ended**, whatever the ending: `completed`, `incomplete`, `failed`, or `cancelled`. It is decided by the scan's state alone, never by a results file on disk, which can be an earlier scan's. `results_available` is `true` for `completed` and `incomplete`, the scans whose results `get_scan_results` can read.
-
-**A failed or canceled scan has no results to read**, and `results_available` is `false`. ASH puts the previous scan's results back in `output_directory` once the scan has stopped, a moment after its status changes. `output_holds_previous_results` is then `true` and the scanner fields are empty, because those files are not this scan's, and `get_scan_results` and the other tools that read results from that directory refuse it with `error_category` `scan_incomplete`. A first scan has nothing to put back, and what it wrote before it stopped stays.
+**`is_complete` is `true` for `completed` and `incomplete`**, the scans whose results `get_scan_results` can read. Poll until it is `true`, then read `status`.
 
 **`incomplete` is terminal, with partial coverage.** The run finished and its results are readable, but a selected scanner was `MISSING` or `ERROR` (or lost targets), no scanner reached a verdict, a converter did not run, a rule could not be evaluated, or a content database was past its declared age bound. `incomplete_scanners` names each scanner and why, and `stale_content_databases` each stale database. The findings are real but partial, so read them, and do not report the target as clean. `failed` means the run crashed, left no readable results, or ran past the server's `scan_timeout_seconds`. `coverage_complete` is `null` while running and for `failed` or `cancelled`; with `fail_on_incomplete_scanners: false` a scan is `completed` with `coverage_complete: false` when scanners did not run.
 
@@ -374,7 +367,7 @@ Clone a repository into this session's workspace and make it the scan target.
 | `ssh_key_id` | string \| null | not set | Leave it out: the server registers no SSH keys, so any value is refused |
 | `depth` | integer | `1` | Clone depth, a positive whole number of commits; any other value, `0` included, is refused before anything is created |
 
-A refusal or a git failure returns `success: false` with an `error_type`: `clone_url_not_permitted` (a URL that begins with `-`, uses the `ext::` transport, or has a scheme other than `https` or `ssh`), `clone_ref_not_permitted` (a ref that begins with `-`), `local_clone_source_refused` (a local path or `file://` URL), `clone_host_not_permitted` (a host the server's `ASH_MCP_GIT_ALLOWED_HOSTS` does not list), `ssh_key_not_registered`, `invalid_clone_depth`, `invalid_session_id`, `source_delivery_busy` (a scan of the session runs), `clone_timed_out` (a git command ran past 10 minutes and was stopped), or `git_clone_failed` or `git_checkout_failed`, with git's own message in `error`.
+A refusal returns `success: false` with an `error_type`: `clone_url_not_permitted` (a URL with a scheme other than `https` or `ssh`, or whose host or port the server cannot read), `local_clone_source_refused` (a local path or `file://` URL), `clone_host_not_permitted` (a host the server's `ASH_MCP_GIT_ALLOWED_HOSTS` does not list), `ssh_key_not_registered`, `invalid_session_id`, `source_delivery_busy` (a scan of the session runs), `clone_timed_out` (a git command ran past 10 minutes and was stopped), `clone_too_large` (the clone passed the archive size or entry limits; shrink the request), or `clone_tree_unreadable` (the tree git wrote could not be read, which is a server-side fault and not a size to reduce). A URL that begins with `-` or uses the `ext::` transport, a ref that begins with `-`, a `depth` that is not a positive whole number, and a git failure return `success: false` and an `error` message, with no `error_type`.
 
 On failure, `error_type` is one of `clone_host_not_permitted`, `clone_timed_out`, `clone_too_large`, `clone_tree_unreadable`, `clone_url_not_permitted`, `invalid_session_id`, `local_clone_source_refused`, `session_identity_required`, `source_delivery_busy` and `ssh_key_not_registered`, or the class name of an exception.
 
