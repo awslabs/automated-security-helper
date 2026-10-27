@@ -530,6 +530,19 @@ def is_json_file(path: Path) -> bool:
     return Path(path).name.lower().endswith(".json")
 
 
+#: Windows' ERROR_CANT_RESOLVE_FILENAME: what a symbolic link that leads back to
+#: itself raises there, in place of the ELOOP a POSIX kernel gives.
+_WINERROR_CANT_RESOLVE_FILENAME = 1921
+
+
+def is_symlink_loop(exc: OSError) -> bool:
+    """Whether ``exc`` says a symbolic link leads back to itself."""
+    return (
+        exc.errno == errno.ELOOP
+        or getattr(exc, "winerror", None) == _WINERROR_CANT_RESOLVE_FILENAME
+    )
+
+
 def is_regular_file(path: Path) -> bool:
     """Whether `path` leads to a regular file; False for any error.
 
@@ -1299,7 +1312,7 @@ def _pyproject_is_a_source(
         )
         return _unreadable_pyproject(path, found_before, missing, notes)
     except OSError as exc:
-        if exc.errno == errno.ELOOP:
+        if is_symlink_loop(exc):
             exc = OSError(
                 errno.ELOOP,
                 "a symbolic link that leads back to itself",

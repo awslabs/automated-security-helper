@@ -4594,7 +4594,7 @@ def _config_file_not_loadable(config_path: Path) -> ASHConfigSourceError:
             )
         return ASHConfigFileNotFoundError(f"Configuration file not found: {where}")
     except OSError as exc:
-        if exc.errno == errno.ELOOP:
+        if is_symlink_loop(exc):
             return ASHConfigSourceError(
                 f"Configuration file {where} is a symbolic link that leads back to "
                 "itself, so it cannot be read."
