@@ -28,6 +28,244 @@ global_settings:
         secret, generated per run with secrets.choice, into the test's temporary
         fixture tree so trivy's secret scanner has something to find. Nothing reads
         a real credentials file.
+    # === Product code and documents: pinned or scoped to the file ===
+    - rule_id: B104
+      path: automated_security_helper/cli/mcp/__init__.py
+      line_start: 930
+      line_end: 930
+      reason: >-
+        False positive. The line only works out the host to show in the "running on"
+        message, for a server whose socket is already bound. Nothing binds to it, and
+        the line is pinned so that a bind elsewhere in the file still reports.
+    - rule_id: API_KEY_OR_SECRET
+      path: automated_security_helper/config/tool_config_trust.py
+      line_start: 122
+      line_end: 122
+      reason: >-
+        False positive. The line is one row of a table that names, for each scanner,
+        the option that points at a file; the detector reads a scanner name and a word
+        in the row. No value is held.
+    - rule_id: API_KEY_OR_SECRET
+      path: "deploy/cdk/templates/*.template.json"
+      reason: >-
+        False positive. The flagged lines are CloudFormation logical ids and references
+        to them (a hash-suffixed id for the MCP auth header resource, route table ids)
+        and a build command that names a repository URL variable. The templates hold
+        names, not values.
+    - rule_id: API_KEY_OR_SECRET
+      path: automated_security_helper/plugin_modules/ash_ferret_plugins/spec/2026-09-13-ferret-scan-plugin-v2-update-analysis.md
+      reason: >-
+        False positive. These design notes quote, in prose, the type annotation that
+        causes this false positive in ferret-scan.
+    - rule_id: API_KEY_OR_SECRET
+      path: CHANGELOG.md
+      reason: >-
+        False positive. A changelog sentence about a Security Hub credentials check; it
+        holds words, not a credential.
+    - rule_id: SSN
+      path: docs/content/docs/plugins/builtin/converters.md
+      reason: >-
+        False positive. The nine-digit numbers are the 256 MiB byte limits in the
+        converter option examples and table, which the detector reads as a social
+        security number. The number is left out of this reason because it would make
+        this file trip the same rule.
+    # === Test code and its support files: one entry per rule and file ===
+    # The same entries .ash/.ash.yaml holds for the scanners this file runs (bandit,
+    # gitleaks, ferret-scan); detect-secrets is off here, so its rules have none. The
+    # tests build made-up credentials, fixed temporary paths, wildcard addresses and
+    # shell calls on purpose, to check that ASH hides, refuses or confines them. Each
+    # entry names one rule and one file, never a directory. The reasons describe the
+    # pattern instead of quoting a line, because a quoted line would make this file
+    # trip the same rules. Sorted by rule, then path.
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/integration/codecommit_gate_regression/assert_case.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/snapshot/mcp/test_snapshot_mcp_session_tools.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/base/test_a_failure_after_the_tool_ran_keeps_its_exit_code.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/cli/mcp/conftest.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/cli/mcp/test_a_scan_runner_failure_shows_no_value_the_config_read.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/cli/mcp/test_delivered_config_env.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/cli/mcp/test_ending_a_session_deletes_its_workspace_under_a_hidden_name.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/cli/mcp/test_source_delivery_deletes_read_only_scratch.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/config/test_config_alias_round_trip.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/config/test_config_messages_hide_values.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/plugin_modules/ash_aws_plugins/test_security_hub_batch_import.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/plugin_modules/ash_snyk_plugins/test_snyk_code_scanner_behavior.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/plugins/test_the_registry_and_decorators_name_a_masked_module_by_its_mask.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/test_pinned_tool_github_lookup.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/utils/test_secret_masking.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
+    - rule_id: B102
+      path: tests/unit/characterization/test_harness_confinement.py
+      reason: "Test code. exec of source text the test itself holds, in the test's own namespace."
+    - rule_id: B102
+      path: tests/unit/cli/test_scan_messages_tell_the_truth.py
+      reason: "Test code. exec of source text the test itself holds, in the test's own namespace."
+    - rule_id: B103
+      path: tests/unit/assets/test_install_pinned_tool.py
+      reason: "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them."
+    - rule_id: B103
+      path: tests/unit/cli/mcp/test_source_delivery_deletes_read_only_scratch.py
+      reason: "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them."
+    - rule_id: B103
+      path: tests/unit/cli/mcp/test_source_delivery_scratch_that_resists_deletion.py
+      reason: "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them."
+    - rule_id: B103
+      path: tests/unit/config/test_a_checkout_boundary_needs_a_git_shaped_marker.py
+      reason: "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them."
+    - rule_id: B103
+      path: tests/unit/config/test_add_suppression.py
+      reason: "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them."
+    - rule_id: B103
+      path: tests/unit/config/test_an_undecided_walk_names_the_walk_in_the_warning.py
+      reason: "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them."
+    - rule_id: B103
+      path: tests/unit/plugin_modules/ash_builtin/scanners/test_scanners_name_a_file_that_is_not_utf8.py
+      reason: "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them."
+    - rule_id: B103
+      path: tests/unit/utils/test_scan_source.py
+      reason: "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them."
+    - rule_id: B103
+      path: tests/unit/utils/test_tool_config_dir.py
+      reason: "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them."
+    - rule_id: B104
+      path: tests/unit/cli/test_mcp_loopback_accepts_only_its_own_origin.py
+      reason: "Test code. The wildcard address is a value handed to the code under test to refuse or report. Nothing binds to it."
+    - rule_id: B104
+      path: tests/unit/cli/test_mcp_non_loopback_bind_is_refused.py
+      reason: "Test code. The wildcard address is a value handed to the code under test to refuse or report. Nothing binds to it."
+    - rule_id: B104
+      path: tests/unit/cli/test_mcp_upstream_host_check.py
+      reason: "Test code. The wildcard address is a value handed to the code under test to refuse or report. Nothing binds to it."
+    - rule_id: B202
+      path: tests/unit/cli/test_genai_guide_ships_with_install.py
+      reason: "Test code. extractall on an archive the test built, into the test's temporary directory."
+    - rule_id: B301
+      path: tests/unit/utils/test_env_resolved_scalar_survives_copying.py
+      reason: "Test code. Pickle round trip of objects the test creates."
+    - rule_id: B301
+      path: tests/unit/utils/test_link_refusal_family.py
+      reason: "Test code. Pickle round trip of objects the test creates."
+    - rule_id: B301
+      path: tests/unit/utils/test_shown_text_is_shown_once.py
+      reason: "Test code. Pickle round trip of objects the test creates."
+    - rule_id: B307
+      path: tests/unit/cli/mcp/test_shipped_mcp_guidance_matches_the_server.py
+      reason: "Test code. eval of the shipped guide's own example code, to check that it runs."
+    - rule_id: B310
+      path: tests/unit/characterization/test_harness_confinement.py
+      reason: "Test code. urlopen of the test's own loopback address, to check a refusal."
+    - rule_id: B324
+      path: tests/unit/characterization/_detect_secrets_double.py
+      reason: "Test code. sha1 is the hash the detect-secrets baseline format uses; the double writes it into a baseline the test reads back."
+    - rule_id: B506
+      path: tests/unit/config/test_a_patched_value_is_recorded_where_later_operations_move_it.py
+      reason: "Test code. yaml.load with a loader the test defines, on a file the test wrote."
+    - rule_id: B604
+      path: tests/conftest.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    - rule_id: B604
+      path: tests/unit/characterization/_harness.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    - rule_id: B604
+      path: tests/unit/plugin_modules/ash_builtin/test_bandit_excludes.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    - rule_id: B604
+      path: tests/unit/test_conftest_helpers.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    - rule_id: B604
+      path: tests/unit/utils/test_the_server_scoped_run_resolves_its_program_like_every_other_spawn.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    - rule_id: B604
+      path: tests/utils/home_rule.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    - rule_id: B604
+      path: tests/utils/tool_guard.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    - rule_id: B608
+      path: tests/unit/deploy/test_agentcore_stateless_fallback_tripwire.py
+      reason: "Test code. A failure message that reads like SQL. No query is built."
+    - rule_id: generic-api-key
+      path: tests/snapshot/container/test_snapshot_container_exit_codes.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/snapshot/container/test_snapshot_container_nix.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/base/test_a_failure_after_the_tool_ran_keeps_its_exit_code.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/cli/inspect/test_each_value_is_shown_once.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/cli/mcp/conftest.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/cli/mcp/test_a_scan_copys_name_is_computed_once_per_scan.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/cli/mcp/test_tool_errors_describe_a_wrapped_validation_error.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/cli/mcp/test_validation_errors_leave_out_the_input.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/cli/test_merge_shard_errors_hide_the_file.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/cli/test_report_refuses_invalid_plugin_options.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/config/test_config_messages_hide_values.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/config/test_results_errors_hide_the_file.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/interactions/test_workspace_config_warning_is_shown.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/models/test_report_id_unique_per_scan.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/plugins/test_a_debug_traceback_hides_env_read_module_paths.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/plugins/test_a_failed_imports_log_line_redacts_env_values.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/plugins/test_an_environment_value_equal_to_a_derived_module_form_keeps_whole_value_redaction.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/plugins/test_the_registry_and_decorators_name_a_masked_module_by_its_mask.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - path: automated_security_helper/schemas/cyclonedx_bom_1_6_schema/__init__.py
       rule_id: API_KEY_OR_SECRET
       reason: "False positive — generated CycloneDX schema definitions contain field names that match secret patterns"
