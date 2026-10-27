@@ -52,12 +52,12 @@ module "ash_pr_gate" {
   # ignoring low and medium findings entirely.
   min_severity = "low"
 
-  # ash_scan_extra_args is left unset. It cannot narrow the scan: the gate refuses
-  # --changed-files-only, --base-ref, the scanner selection and the other options
-  # in GATE_OWNED_SCAN_OPTIONS (files/ash_pr_gate.py), because a narrowed scan could
-  # approve a pull request over findings it never counted. Every pull request is
-  # scanned in full, so a repository whose scan does not fit Lambda's 900 seconds
-  # needs more lambda_memory_mb or the codepipeline-executor module.
+  # ash_scan_extra_args is left unset. It cannot narrow the scan: the gate
+  # refuses --changed-files-only, --base-ref, the scanner selection and the other
+  # options in GATE_OWNED_SCAN_OPTIONS (files/ash_pr_gate.py), because a narrowed
+  # scan could approve a pull request over findings it never counted. Every pull
+  # request is scanned in full, so a repository whose scan does not fit Lambda's
+  # 900 seconds needs more lambda_memory_mb or the codepipeline-executor module.
 
   # One scan per pull-request push, so an active repository cannot fan out into
   # an unbounded number of concurrent CPU-heavy invocations.

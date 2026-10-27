@@ -243,10 +243,11 @@ not adjustable.** The clone plus the scan has to fit:
 **The scan cannot be narrowed from `ash_scan_extra_args`.** This gate can approve
 a pull request, so the handler decides every option that changes what is scanned
 or how the verdict is reached, and refuses them in `ash_scan_extra_args`:
-`--changed-files-only` and `--base-ref` (they drop findings outside the diff before
-the exit code is computed), the scanner selection, the shard options, `--config`
-and `--config-overrides`, `--phases`, `--use-existing`, and the options it passes
-itself. `GATE_OWNED_SCAN_OPTIONS` in `files/ash_pr_gate.py` is the full list. A
+`--changed-files-only` and `--base-ref` are refused because they drop findings
+outside the diff before the exit code is computed, and so are the scanner
+selection, the shard options, `--config` and `--config-overrides`, `--phases`,
+`--use-existing`, and the options it passes itself. `GATE_OWNED_SCAN_OPTIONS` in
+`files/ash_pr_gate.py` is the full list. A
 refused option is not dropped: the scan reports an error outcome on every pull
 request, and any approval the gate gave is revoked, until the option is removed.
 
