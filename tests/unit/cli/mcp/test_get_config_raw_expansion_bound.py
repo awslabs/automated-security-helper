@@ -144,13 +144,21 @@ def _install_profile(tmp_path: Path) -> None:
     set_profile_registry(register_profiles([f"default={file}"]))
 
 
+ALIAS_REFUSED = "does not accept YAML aliases"
+
+
 def test_override_yaml_refuses_a_document_past_the_bound(tmp_path, lowered_bound):
+    """``override_yaml`` is parsed with the config loader, which composes no alias
+    at all (``mcp_tools._select_profile``: safe tags only and no aliases), so an
+    anchored stack is refused as a parse error before any expansion budget is
+    charged; the raw ``get_config`` path above is the one that expands and
+    bounds."""
     _install_profile(tmp_path)
 
     result = mcp_select_profile("default", override_yaml=_stack(levels=3, width=9))
 
     assert result["success"] is False
-    assert "expands to more than" in result["error"], result["error"]
+    assert ALIAS_REFUSED in result["error"], result["error"]
     assert "override_yaml" in result["error"], result["error"]
 
 
@@ -162,10 +170,8 @@ def test_override_yaml_refusal_carries_the_validation_error_prefix(
     result = mcp_select_profile("default", override_yaml=_stack(levels=3, width=9))
 
     assert result["success"] is False
-    assert result["error"].startswith("override_yaml validation error: "), result[
-        "error"
-    ]
-    assert "expands to more than" in result["error"], result["error"]
+    assert result["error"].startswith("override_yaml parse error: "), result["error"]
+    assert ALIAS_REFUSED in result["error"], result["error"]
 
 
 def test_override_yaml_refuses_shared_scalar_places_past_the_bound(
@@ -176,18 +182,16 @@ def test_override_yaml_refuses_shared_scalar_places_past_the_bound(
     result = mcp_select_profile("default", override_yaml=_scalar_sharing(width=60))
 
     assert result["success"] is False
-    assert "expands to more than" in result["error"], result["error"]
+    assert ALIAS_REFUSED in result["error"], result["error"]
 
 
 def test_override_yaml_with_modest_sharing_binds_the_alias_free_document(
     tmp_path, lowered_bound
 ):
-    """A valid override whose entries share one anchored node binds.
-
-    The shared node sits under ``converters``, a real section the profile's
-    allowlist opens, and the materialized config carries the alias-free
-    spelling of that node in each place it was reachable from, exactly as
-    the raw path answers one.
+    """An override whose entries share one anchored node is refused as written
+    (the loader composes no alias), and the same document with the shared node
+    written out in each place binds, the materialized config holding that
+    alias-free spelling in each place, exactly as the raw path answers one.
     """
     profile = tmp_path / "default.yaml"
     profile.write_text(
@@ -224,7 +228,17 @@ def test_override_yaml_with_modest_sharing_binds_the_alias_free_document(
         "  shared_two: *shared\n"
     )
 
-    result = mcp_select_profile("default", override_yaml=override, session_id="shared")
+    aliased = mcp_select_profile("default", override_yaml=override, session_id="shared")
+    assert aliased["success"] is False, aliased
+    assert ALIAS_REFUSED in aliased["error"], aliased["error"]
+
+    written_out = override.replace(
+        "  shared_two: *shared\n",
+        "  shared_two: {enabled: true, options: {note: same}}\n",
+    ).replace("&shared ", "")
+    result = mcp_select_profile(
+        "default", override_yaml=written_out, session_id="shared"
+    )
 
     assert result["success"] is True, result
     materialized = yaml.safe_load(
