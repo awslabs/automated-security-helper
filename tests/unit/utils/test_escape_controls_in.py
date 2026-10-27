@@ -51,5 +51,7 @@ def test_the_spellings_include_the_path_as_given_and_posix_style():
     assert Path(NAME).as_posix() in spellings
 
 
-def test_describe_config_path_escapes_the_path():
-    assert describe_config_path(Path(NAME)) == "/configs/op\\x1b[31mred\\nnext.yaml"
+def test_describe_config_path_names_the_path_raw_for_its_sink_to_show():
+    """The sink shows the message once (shown_on_one_line writes the newline
+    ``\\x0a``); a path escaped here first was shown twice (``\\\\x1b``)."""
+    assert describe_config_path(Path(NAME)) == NAME

@@ -290,7 +290,6 @@ from automated_security_helper.core.exceptions import (
     ASHConfigUnparsedError,
     ASHConfigUnsetVariableError,
 )
-from automated_security_helper.utils.display_text import escape_controls
 from automated_security_helper.utils.error_text import os_error_without_named_file
 from automated_security_helper.utils.link_locations import link_locations
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -980,9 +979,15 @@ def original_of_scan_copy(path: _AnyPurePath) -> _AnyPurePath:
 def describe_config_path(path: Path) -> str:
     """Name a config source for a message: the path, plus the table for pyproject.
 
-    The path is written with its control characters escaped
-    (``utils.display_text.escape_controls``), so a name holding a newline or a
-    terminal escape cannot start a line of its own or restyle the output.
+    The path is written as it is: the message it goes into is shown once by
+    its sink (utils/terminal_text.py's shown_on_one_line or shown_not_obeyed,
+    through the console's echo and secho, escape_markup and the log handlers),
+    which writes a newline in it ``\\x0a`` and a terminal escape ``\\x1b``. A
+    path escaped here first was shown twice: the sink doubled the backslash of
+    each escape (``\\\\x1b``), and a newline escaped here as ``\\n`` never read
+    as the ``\\x0a`` every other shown path reads as. The raw form is also what
+    utils/parser_text.py's own_lines finds inside a parser's message, to keep
+    the name's newline inside its line.
 
     A path object keeps its own flavor: before Python 3.12, ``Path()`` rebuilds
     a foreign-flavored path (a Windows-form path on this platform) from its
@@ -995,7 +1000,7 @@ def describe_config_path(path: Path) -> str:
     """
     path = path if isinstance(path, PurePath) else Path(path)
     path = original_of_scan_copy(path)
-    shown = escape_controls(path.as_posix())
+    shown = path.as_posix()
     if is_pyproject(path):
         line = _tool_ash_line(path)
         where = f" (line {line})" if line else ""
