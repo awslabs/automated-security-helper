@@ -397,6 +397,47 @@ class TestSemgrepOffline:
         assert spawn.flag_values("--metrics") == ["off"], spawn.command
 
 
+class TestSemgrepOnline:
+    """The version check is off online too: it reads a cache file under the home.
+
+    semgrep's version check opens ``~/.cache/semgrep_version`` after the scan has
+    finished. Where the home is read-only or sandboxed that open raises, semgrep
+    exits 2, and ASH records a scan that had produced its findings as failed. The
+    check only shows upgrade banners, which ASH never reads.
+    """
+
+    @TARGET_TYPES
+    def test_version_check_is_off(self, online, context, target_type):
+        online.delenv("SEMGREP_ENABLE_VERSION_CHECK", raising=False)
+        scanner = SemgrepScanner(context=context, config=SemgrepScannerConfig())
+        spawn = _record_scan(scanner, context, target_type, online)
+
+        assert _semgrep_version_check_off(spawn), (
+            "online semgrep runs its version check, which reads ~/.cache/semgrep_version: "
+            f"argv={spawn.command}, "
+            f"SEMGREP_ENABLE_VERSION_CHECK={spawn.env.get('SEMGREP_ENABLE_VERSION_CHECK')!r}"
+        )
+
+    @TARGET_TYPES
+    def test_an_exported_switch_does_not_turn_it_back_on(
+        self, online, context, target_type
+    ):
+        online.setenv("SEMGREP_ENABLE_VERSION_CHECK", "1")
+        scanner = SemgrepScanner(context=context, config=SemgrepScannerConfig())
+        spawn = _record_scan(scanner, context, target_type, online)
+
+        assert _semgrep_version_check_off(spawn), spawn.env.get(
+            "SEMGREP_ENABLE_VERSION_CHECK"
+        )
+
+    @TARGET_TYPES
+    def test_control_metrics_option_is_unchanged(self, online, context, target_type):
+        scanner = SemgrepScanner(context=context, config=SemgrepScannerConfig())
+        spawn = _record_scan(scanner, context, target_type, online)
+
+        assert spawn.flag_values("--metrics") == ["auto"], spawn.command
+
+
 class TestOpengrepOffline:
     @TARGET_TYPES
     def test_control_rules_come_only_from_local_files(
