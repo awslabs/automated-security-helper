@@ -177,7 +177,7 @@ jobs:
             text="${text//$'\xc2'[$'\x80'-$'\x9f']/ }"
             text="${text//$'\xe2\x80'[$'\xa8\xa9']/ }"
             while [[ "${text}" == *::* ]]; do text="${text//::/: :}"; done
-            while [[ "${text}" == *'##['* ]]; do text="${text//'##['/'# #['}"; done
+            while [[ "${text}" == *'##['* ]]; do text=${text//'##['/'# #['}; done
             printf '%s' "${text}"
           }
           EOF
