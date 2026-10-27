@@ -415,7 +415,7 @@ def _run_from_a_planted_repository(tmp_path, monkeypatch):
         "Resources:\n  B:\n    Type: AWS::S3::Bucket\n", encoding="utf-8"
     )
     outdir = tmp_path / "out"
-    with cdk_nag_worker.cdk_nag_worker_batch([str(template)], outdir):
+    with cdk_nag_worker.cdk_nag_worker_batch([str(template)], outdir, values=()):
         # The planted cdk_nag has no packs, so the child's answer is re-raised here.
         with pytest.raises(Exception, match="Unknown cdk-nag pack"):
             _call(template, outdir)
@@ -748,4 +748,4 @@ def test_each_child_gets_a_directory_of_its_own(tmp_path, monkeypatch):
     monkeypatch.setattr(cdk_nag_worker.uuid, "uuid4", lambda: taken)
 
     with pytest.raises(FileExistsError):
-        cdk_nag_worker._run_child(["t.yaml"], {}, outdir, tmp_path, None)
+        cdk_nag_worker._run_child(["t.yaml"], {}, outdir, tmp_path, None, ())
