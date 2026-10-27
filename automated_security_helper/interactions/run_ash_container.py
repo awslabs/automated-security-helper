@@ -367,8 +367,10 @@ def get_ash_revision(quiet: bool = False) -> str | None:
     ):
         # A package built before the build hook recorded commit ids records the
         # branch it was built on; the image gets that branch's tip, whatever has
-        # landed on it since.
-        ASH_LOGGER.warning(
+        # landed on it since. Through the local helper, so a quiet resolve (the
+        # read-back error that names the revision after the build logged it) does
+        # not log it a second time.
+        warning(
             f"This installation of ASH recorded the branch {return_val!r} it was built "
             f"on, not a commit, so the image installs that branch's current tip. Pass "
             f"--ash-revision-to-install to choose the revision."
