@@ -212,6 +212,10 @@ def run_jenkinsfile_runner(
     Jenkins itself starts no container (the closure has no Docker plugin), but a
     pipeline's ``sh`` step may run the docker CLI, so the launch removes every
     container that appeared while it ran.
+
+    Jenkinsfile Runner 1.0-beta-32 stops before it starts Jenkins with "--runHome is
+    not a directory" when the Jenkins home it is given does not exist, so the empty
+    directory is made here once the command line has been checked.
     """
     argv = jenkinsfile_runner_argv(
         leg,
@@ -225,6 +229,7 @@ def run_jenkinsfile_runner(
         manifest_path=manifest_path,
         hooks_dir=hooks_dir,
     )
+    Path(jenkins_home).mkdir(parents=True, exist_ok=True)
     core = jenkins_core(load_manifest(manifest_path), leg)
     env = launch_env(
         leg,

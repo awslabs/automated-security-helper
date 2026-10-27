@@ -457,6 +457,24 @@ def test_jenkinsfile_runner_runs_with_the_java_of_its_core(tmp_path, leg):
 
 
 @pytest.mark.parametrize("leg", JENKINS_LEGS)
+def test_the_jenkins_home_exists_when_jenkinsfile_runner_starts(tmp_path, leg):
+    """Jenkinsfile Runner refuses a --runHome that is not a directory."""
+    install = _jenkins_install(tmp_path, leg)
+    home = install["root"] / "jenkins-home"
+    assert not home.exists()
+    seen = []
+
+    class Checking(FakeRun):
+        def __call__(self, *args, **kwargs):
+            seen.append(home.is_dir())
+            return super().__call__(*args, **kwargs)
+
+    _run_jenkins(install, leg, Checking(returncode=0), tmp_path)
+    assert seen == [True]
+    assert list(home.iterdir()) == []
+
+
+@pytest.mark.parametrize("leg", JENKINS_LEGS)
 def test_jenkinsfile_runner_s_launch_has_its_time_limit(tmp_path, leg):
     install = _jenkins_install(tmp_path, leg)
     fake = FakeRun(returncode=0)
