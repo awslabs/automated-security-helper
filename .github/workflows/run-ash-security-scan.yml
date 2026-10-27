@@ -1658,6 +1658,15 @@ jobs:
       # RUNNER_TEMP and without ASH_CONFIG, as for OpenGrep below, so the scanned
       # repository's .ash.yaml cannot change what is installed.
       #
+      # With ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip (skip-unknown-tools with config-ref)
+      # each tool is installed by its own call, and a call the installed ASH refuses
+      # with "Unknown tool(s)" skips that tool. An ASH that has the setting skips such
+      # a name itself; one that predates the setting refuses the whole list, and
+      # that is what this step tolerates: ASH's own required check runs this
+      # workflow file with the ASH of the pull request's base commit, which can be
+      # older than both these tools and the setting. Any other failure of a call
+      # fails the step, as does any failure when the setting is off.
+      #
       # cfn-guard's rules land next to the bin path, in
       # ${RUNNER_TEMP}/share/cfn-guard-rules; the Run ASH step points
       # ASH_CFN_GUARD_RULES_DIR there.
@@ -1673,12 +1682,32 @@ jobs:
           set -euo pipefail
           tools=()
           for tool in "${INSTALL_ACTIONLINT}" "${INSTALL_CFN_GUARD}" "${INSTALL_GITLEAKS}" "${INSTALL_TRIVY}"; do
-            if [ -n "${tool}" ]; then tools+=(--tool "${tool}"); fi
+            if [ -n "${tool}" ]; then tools+=("${tool}"); fi
           done
-          (cd "${RUNNER_TEMP}" && env -u ASH_CONFIG \
-            uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
-              "${tools[@]}" \
-              --bin-path "${ASH_TOOL_BIN}")
+          install_tools() {
+            (cd "${RUNNER_TEMP}" && env -u ASH_CONFIG \
+              uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
+                "$@" \
+                --bin-path "${ASH_TOOL_BIN}")
+          }
+          if [ "${ASH_DEPENDENCIES_UNKNOWN_TOOLS:-}" != "skip" ]; then
+            args=()
+            for tool in "${tools[@]}"; do args+=(--tool "${tool}"); done
+            install_tools "${args[@]}"
+          else
+            output="${RUNNER_TEMP}/ash-install-tool.log"
+            for tool in "${tools[@]}"; do
+              status=0
+              install_tools --tool "${tool}" > "${output}" 2>&1 || status=$?
+              cat "${output}"
+              if [ "${status}" -eq 2 ] && grep -q -F 'Unknown tool(s)' "${output}"; then
+                echo "::notice::${tool} is not a tool the installed ASH knows, so it is not installed and its scanner does not run (ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip)."
+              elif [ "${status}" -ne 0 ]; then
+                exit "${status}"
+              fi
+            done
+            rm -f -- "${output}"
+          fi
           echo "${ASH_TOOL_BIN}" >> "$GITHUB_PATH"
 
       # OpenGrep goes through the same verified installer as Grype and Syft above.
