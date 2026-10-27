@@ -19,6 +19,7 @@ same stand-in reporting a database built an hour ago.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -55,11 +56,19 @@ sys.exit({code})
 
 
 def _status_tool(bin_dir: Path, status: dict, code: int) -> None:
+    body = f"#!{sys.executable}\n" + STATUS_TOOL.format(status=repr(status), code=code)
+    if sys.platform == "win32":
+        # CreateProcess starts no shebang script. ASH tries grype.exe, grype.bat and
+        # grype.cmd before the bare name, so the stand-in is a .cmd that runs the
+        # same script (its shebang line is a comment to Python).
+        (bin_dir / "grype_stand_in.py").write_text(body, encoding="utf-8")
+        (bin_dir / "grype.cmd").write_text(
+            f'@"{sys.executable}" "{bin_dir / "grype_stand_in.py"}" %*\r\n',
+            encoding="utf-8",
+        )
+        return
     script = bin_dir / "grype"
-    script.write_text(
-        f"#!{sys.executable}\n" + STATUS_TOOL.format(status=repr(status), code=code),
-        encoding="utf-8",
-    )
+    script.write_text(body, encoding="utf-8")
     script.chmod(0o755)
 
 
@@ -69,7 +78,14 @@ def layout(tmp_path, monkeypatch):
     bin_dir.mkdir()
     cache = tmp_path / "grype-cache"
     cache.mkdir()
-    monkeypatch.setenv("PATH", f"{bin_dir}:/usr/bin:/bin")
+    # The stand-in first, and no real grype after it. On Windows the only other
+    # entry is the system directory, where cmd.exe and the DLLs a .cmd needs live.
+    system_dirs = (
+        [os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")]
+        if sys.platform == "win32"
+        else ["/usr/bin", "/bin"]
+    )
+    monkeypatch.setenv("PATH", os.pathsep.join([str(bin_dir), *system_dirs]))
     monkeypatch.setenv("ASH_BIN_PATH", str(bin_dir))
     monkeypatch.setenv("GRYPE_DB_CACHE_DIR", str(cache))
     monkeypatch.setenv("ASH_OFFLINE", "YES")
