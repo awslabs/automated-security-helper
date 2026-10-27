@@ -45,7 +45,7 @@ Poll `get_scan_progress` until `is_complete` is `true`, as the `important.next_s
 
 A scan beyond the operator's `max_concurrent_scans` is refused with `error_type` `scan_start_failure` and an `error` that names the limit; start it again once a scan finishes or is canceled. A scan of a directory whose canceled scan is still stopping is refused the same way; retry once it has stopped. A scan still running after the operator's `scan_timeout_seconds` is stopped as `cancel_scan` stops one, and ends `failed` with an `error_message` that names the limit.
 
-On failure, `error_type` is one of `config_input_not_permitted`, `delivered_source_missing`, `invalid_session_id`, `no_source_delivered`, `output_dir_not_permitted`, `scan_start_failure`, `scan_target_not_permitted` and `session_source_mismatch`, or the class name of an exception.
+On failure, `error_type` is one of `config_check_failed`, `config_env_not_resolved`, `config_field_denied`, `config_input_not_permitted`, `config_policy_unreadable`, `delivered_source_missing`, `invalid_session_id`, `no_source_delivered`, `output_dir_not_permitted`, `scan_start_failure`, `scan_target_not_permitted`, `session_identity_required`, `session_scan_limit`, `session_source_mismatch` and `source_delivery_busy`, or the class name of an exception.
 
 ## get_scan_progress
 
@@ -109,7 +109,7 @@ There is no top-level `duration` field — derive elapsed time from `start_time`
 
 **Status enum:** the documented values are `pending | running | completed | incomplete | failed | cancelled`. The registry uses `pending` briefly while a scan is queued, transitions to `running` once execution begins, and may also expose the legacy `in_progress` string from older `ScanProgress` instances. Treat `pending`, `running`, and `in_progress` as equivalent "not done yet" states.
 
-On failure, `error_type` is `scan_not_found`, or the class name of an exception.
+On failure, `error_type` is one of `invalid_session_id`, `scan_not_found` and `session_identity_required`, or the class name of an exception.
 
 ## get_scan_results
 
@@ -162,7 +162,7 @@ All scans the server tracks (active + recently completed).
 
 No parameters. Returns a list of scan summaries.
 
-On failure, `error_type` is the class name of an exception.
+On failure, `error_type` is one of `invalid_session_id` and `session_identity_required`, or the class name of an exception.
 
 ## cancel_scan
 
@@ -175,7 +175,7 @@ Stops a running scan. The scanner tool running at the time is stopped with every
 
 Returns `success`, `status`, and `message`. The status is `cancelled` at once. A running scan stops within about 10 seconds; one still waiting for another scan of its session stops when that scan ends. Until it has stopped, `run_ash_scan` refuses another scan of the same directory as still stopping, and the scan counts against `max_concurrent_scans`. A scan that has already ended is not changed, and the response has `success: false` and the scan's status. For a `run_ash_workspace_scan`, `cancel_scan` takes one project's scan id and stops that project, which ends `failed`; the other projects carry on.
 
-On failure, `error_type` is the class name of an exception.
+On failure, `error_type` is one of `invalid_session_id` and `session_identity_required`, or the class name of an exception.
 
 ## check_installation
 
@@ -191,7 +191,7 @@ Delete this session's delivered source tree and workspace.
 
 No parameters. Deletes this session's delivered source tree and workspace.
 
-On failure, `error_type` is `invalid_session_id`, or the class name of an exception.
+On failure, `error_type` is one of `invalid_session_id`, `session_identity_required` and `source_delivery_busy`, or the class name of an exception.
 
 ## diff_scan_results
 
@@ -227,7 +227,7 @@ Get the resolved ASH config (defaults + user overrides merged).
 | `config_path` | string \| null | not set | Optional explicit path to config file. If None, auto-discovers. |
 | `raw` | boolean | `false` | If True, returns the user file contents without merging defaults. |
 
-On failure, `error_type` is one of `config_input_not_permitted` and `invalid_session_id`, or the class name of an exception.
+On failure, `error_type` is one of `config_check_failed`, `config_env_not_resolved`, `config_field_denied`, `config_input_not_permitted`, `config_policy_unreadable` and `invalid_session_id`, or the class name of an exception.
 
 ## list_profiles
 
@@ -254,11 +254,11 @@ Resolve a VS Code workspace file into a scan plan without scanning anything.
 | `workspace_config` | string \| null | not set | Optional path to a workspace policy file. Must exist if given; ASH will not fall back to searching for one. |
 | `allow_missing_projects` | boolean | `false` | Mark project directories that are absent or unreadable as skipped instead of refusing the workspace. |
 | `config_overrides` | array \| null | not set | Optional list of `key=value` config overrides, applied to each project's config so the reported threshold is the enforced one. |
-| `profile` | string \| null | not set | Name of a registered config profile to resolve under for this one call, instead of whatever select_profile bound to this session. Call list_profiles to see what the operator registered. |
+| `profile` | string \| null | not set | Name of a registered config profile to resolve under for this one call, instead of whatever select_profile bound to this session. Call list_profiles to see what the operator registered. The fields the profile sets are final for every project, and a project's own config fills the rest. |
 
 A workspace policy file, named or found in the workspace file's directory or its `.ash` directory, is used only when it is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names; any other refuses the workspace with exit code 4, or with exit code 3 when a client delivered it and it sets a field the server's policy denies.
 
-On failure, `error_type` is `invalid_session_id`, or the class name of an exception.
+On failure, `error_type` is one of `config_env_not_resolved`, `config_input_not_permitted` and `invalid_session_id`, or the class name of an exception.
 
 ## run_ash_workspace_scan
 
@@ -271,16 +271,16 @@ Scan every project in a VS Code workspace and return the per-project verdict.
 | `workspace_config` | string \| null | not set | Optional path to a workspace policy file. |
 | `allow_missing_projects` | boolean | `false` | Skip absent or unreadable project directories rather than refusing the workspace. |
 | `config_overrides` | array \| null | not set | Optional list of `key=value` config overrides. |
-| `output_dir` | string \| null | not set | Where to write the workspace output tree. Defaults to `<workspace root>/.ash/ash_output`. |
+| `output_dir` | string \| null | not set | Where to write the workspace output tree. Defaults to `<workspace root>/.ash/ash_output`. Refused when it, a directory or file ASH writes in it, or a project's `projects/<key>` is a symlink. |
 | `scanners` | array \| null | not set | Restrict every project to these scanner names. |
 | `excluded_scanners` | array \| null | not set | Exclude these scanners from every project. Takes precedence over `scanners`. |
 | `offline` | boolean | `false` | Run without network access. |
 | `clean_output` | boolean | `true` | Remove each project's previous aggregated-results file first. |
-| `profile` | string \| null | not set | Name of a registered config profile to scan under for this one call, instead of whatever select_profile bound to this session. An unknown name refuses the whole scan; running N repository scans under the default config because a profile name was misspelled, and reporting success, is exactly what the confinement refusal above exists to prevent. |
+| `profile` | string \| null | not set | Name of a registered config profile to scan under for this one call, instead of whatever select_profile bound to this session. An unknown name refuses the whole scan; running N repository scans under the default config because a profile name was misspelled, and reporting success, is exactly what the confinement refusal above exists to prevent. The fields the profile sets are final for every project, and a project's own config fills the rest. |
 
 A workspace policy file, named or found in the workspace file's directory or its `.ash` directory, is used only when it is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names; any other refuses the workspace with exit code 4, or with exit code 3 when a client delivered it and it sets a field the server's policy denies.
 
-On failure, `error_type` is `invalid_session_id`, or the class name of an exception.
+On failure, `error_type` is one of `config_env_not_resolved`, `config_input_not_permitted`, `invalid_session_id`, `session_scan_limit` and `source_delivery_busy`, or the class name of an exception.
 
 ## select_profile
 
@@ -295,7 +295,7 @@ Bind one of the operator's registered config profiles to this session.
 
 Refused with `success: false` and `error_type: session_workspace_busy` while the server removes this session's workspace for being unused longer than its time to live. Select the profile again; any upload in progress is gone with the workspace and is sent again from chunk 0.
 
-On failure, `error_type` is `invalid_session_id`, or the class name of an exception.
+On failure, `error_type` is one of `invalid_session_id`, `session_identity_required` and `session_workspace_busy`, or the class name of an exception.
 
 ## set_source_git
 
@@ -311,7 +311,7 @@ Clone a repository into this session's workspace and make it the scan target.
 
 A refusal or a git failure returns `success: false` with an `error_type`: `clone_url_not_permitted` (a URL that begins with `-`, uses the `ext::` transport, or has a scheme other than `https` or `ssh`), `clone_ref_not_permitted` (a ref that begins with `-`), `local_clone_source_refused` (a local path or `file://` URL), `clone_host_not_permitted` (a host the server's `ASH_MCP_GIT_ALLOWED_HOSTS` does not list), `ssh_key_not_registered`, `invalid_clone_depth`, `invalid_session_id`, `source_delivery_busy` (a scan of the session runs), `clone_timed_out` (a git command ran past 10 minutes and was stopped), or `git_clone_failed` or `git_checkout_failed`, with git's own message in `error`.
 
-On failure, `error_type` is one of `invalid_session_id` and `scan_target_not_permitted`, or the class name of an exception.
+On failure, `error_type` is one of `clone_host_not_permitted`, `clone_timed_out`, `clone_too_large`, `clone_tree_unreadable`, `clone_url_not_permitted`, `invalid_session_id`, `local_clone_source_refused`, `session_identity_required`, `source_delivery_busy` and `ssh_key_not_registered`, or the class name of an exception.
 
 ## set_source_zip_chunk
 
@@ -329,7 +329,7 @@ Pair with `set_source_zip_finalize`, which verifies the reassembled archive agai
 
 Refused with `success: false` and `error_type: session_workspace_busy` while the server removes this session's workspace for being unused longer than its time to live. The upload is gone with the workspace, so send the whole upload again, from chunk 0.
 
-On failure, `error_type` is `invalid_session_id`, or the class name of an exception.
+On failure, `error_type` is one of `invalid_session_id`, `session_identity_required` and `session_workspace_busy`, or the class name of an exception.
 
 ## set_source_zip_finalize
 
@@ -341,7 +341,7 @@ Verify an uploaded zip and extract it as this session's scan target.
 | `upload_id` | string | The identifier used for the preceding chunk calls. |
 | `expected_sha256` | string | Hex sha256 of the complete zip. |
 
-On failure, `error_type` is `invalid_session_id`, or the class name of an exception.
+On failure, `error_type` is one of `invalid_session_id`, `session_identity_required` and `source_delivery_busy`, or the class name of an exception.
 
 ## suggest_suppression
 
@@ -369,7 +369,7 @@ Validate an ASH configuration file or content string.
 
 `config_content` counts as the client's config, and so does a `config_path` that a client delivered or that is outside the directories `ASH_MCP_ALLOWED_CONFIG_ROOTS` names and its session's `config/` directory. Each field such a config may not set under the server's runtime-override policy is an error of type `denied_by_runtime_policy`, and a policy the server cannot read is one error of type `config_policy_unreadable`; for `config_content`, both only when a remote client calls. A `${VAR}` or `${VAR:default}` reference at the start of a plain value, or an `!ENV` tag, in such a config is an error of type `config_env_not_resolved`.
 
-Each entry of `errors` has a `type` that is one of `config_input_not_permitted`, `duplicate_field`, `file_not_found`, `internal_field`, `invalid_field`, `invalid_session_id`, `json_parse_error`, `missing_input`, `missing_required_field`, `unknown_field`, `validation_error` and `yaml_parse_error`, or the class name of an exception.
+Each entry of `errors` has a `type` that is one of `config_env_not_resolved`, `config_input_not_permitted`, `config_policy_unreadable`, `denied_by_runtime_policy`, `duplicate_field`, `file_not_found`, `internal_field`, `invalid_field`, `invalid_session_id`, `json_parse_error`, `missing_input`, `missing_required_field`, `unknown_field`, `validation_error` and `yaml_parse_error`, or the class name of an exception.
 
 ## Resources
 
