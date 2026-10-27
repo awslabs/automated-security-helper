@@ -130,7 +130,8 @@ say "precommit-mode scan: exit 0"
 # then the completeness gate exits 1. tests/unit/test_homebrew_formula_install.py
 # pins this list.
 rc=0
-(cd "$clean" && "$ash_bin" scan --output-dir "$WORK/out-default") || rc=$?
+# semgrep is excluded: its core process dies on this runner with "failed to create domain backup thread".
+(cd "$clean" && ASH_EXCLUDED_SCANNERS=semgrep "$ash_bin" scan --output-dir "$WORK/out-default") || rc=$?
 
 # ASH does not print a scanner's own stderr when it refuses the scanner's result, so a
 # scanner in ERROR leaves the job log with a summary and no cause. This prints what the
