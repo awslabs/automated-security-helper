@@ -253,7 +253,7 @@ def validate_no_unsupported_options(cls, data: Any) -> Any:
 | `show_match` | Display matched text in findings | `false` |
 | `enable_preprocessors` | Extract text from documents | `true` |
 | `finding_limit` | Max findings emitted via `ferret-scan --limit` (`0` = unlimited; guards against ferret-scan's 200 default silently truncating) | `0` |
-| `fail_on_incomplete` | Pass `ferret-scan --fail-on-incomplete` → ferret-scan exits 3 on partial coverage (accepted as non-fatal; SARIF still returned) | `false` |
+| `fail_on_incomplete` | Pass `ferret-scan --fail-on-incomplete`, so ferret-scan exits 3 on partial coverage (accepted as non-fatal; SARIF still returned) | `false` |
 | `respect_gitignore` | Pass `ferret-scan --respect-gitignore` (off by default; .gitignore hides high-value secret files) | `false` |
 | `disable_ip_types` | Comma-separated INTELLECTUAL_PROPERTY sub-types to skip via `ferret-scan --disable-ip-types` | `null` |
 | `explain` | Pass `ferret-scan --explain` for an offline per-finding rationale/verdict/suppression-reason | `false` |
@@ -1314,8 +1314,8 @@ scanners:
 > **Why `use_default_config: false`**: The bundled `ferret-config.yaml` is a
 > comprehensive reference config. Setting `false` means the scan uses only ferret-scan's
 > built-in defaults plus the explicit ASH options above, rather than loading the bundled
-> validator/profile patterns. (It is **not** needed for excludes — CLI `ferret-scan --exclude` and
-> `ferret-scan --recursive` win over the config's defaults regardless; see gotcha §10.)
+> validator/profile patterns. (It is **not** needed for excludes: CLI `ferret-scan --exclude` and
+> `ferret-scan --recursive` win over the config's defaults regardless; see gotcha 10.)
 >
 > `.ash/.ash_community_plugins.yaml` is inside the scanned tree, and from such a file
 > `use_default_config` and `profile` are ignored with a warning, because they choose

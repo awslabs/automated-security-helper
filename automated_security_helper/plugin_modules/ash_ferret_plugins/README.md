@@ -222,7 +222,7 @@ scanners:
 | `enable_preprocessors` | bool | `true` | Enable text extraction from documents |
 | `finding_limit` | int | `0` | Max findings ferret-scan emits (`ferret-scan --limit`). `0` = unlimited. ASH defaults to `0` because ferret-scan's own default of `200` silently truncates large scans. |
 | `fail_on_incomplete` | bool | `false` | Pass `ferret-scan --fail-on-incomplete` so ferret-scan exits 3 when a file could not be fully scanned (findings may be missing). ASH still returns the partial SARIF and records the invocation as unsuccessful/incomplete. |
-| `respect_gitignore` | bool | `false` | Pass `ferret-scan --respect-gitignore` to honor `.gitignore`. Off by default — `.gitignore` often hides high-value files (`.env`, `*.pem`) a sensitive-data scan should see. |
+| `respect_gitignore` | bool | `false` | Pass `ferret-scan --respect-gitignore` to honor `.gitignore`. Off by default, because `.gitignore` often hides high-value files (`.env`, `*.pem`) a sensitive-data scan should see. |
 | `disable_ip_types` | string | `null` | Comma-separated `INTELLECTUAL_PROPERTY` sub-types to skip (`ferret-scan --disable-ip-types`): `copyright,patent,trademark,trade_secret,internal_url`. |
 | `explain` | bool | `false` | Pass `ferret-scan --explain` for an offline per-finding rationale + verdict + drafted suppression reason. No data leaves the host. |
 | `validator_budget` | string | `null` | Per-validator time budget (`ferret-scan --validator-budget`), e.g. `SSN=500ms,all=2m`. Over-budget validators stop and mark the scan incomplete. |
