@@ -201,7 +201,13 @@ def test_the_bin_path_constant_is_absolute(tmp_path, value, expected):
     """
     home = tmp_path / "home"
     home.mkdir()
-    env = {**_child_env(), "ASH_BIN_PATH": value, "HOME": str(home)}
+    # USERPROFILE is the home directory on Windows; HOME is not read there.
+    env = {
+        **_child_env(),
+        "ASH_BIN_PATH": value,
+        "HOME": str(home),
+        "USERPROFILE": str(home),
+    }
     result = subprocess.run(
         [
             sys.executable,
