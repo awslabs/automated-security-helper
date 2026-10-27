@@ -1360,20 +1360,6 @@ global_settings:
         tests/unit/deploy/test_cdk_template_line_pinned_suppressions.py.
     - rule_id: HIPAA.Security-IAMNoInlinePolicy
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      line_start: 1323
-      line_end: 1323
-      reason: >-
-        LINE-PINNED to ScanFunctionRoleEc2Access99A7E33E, the line ASH reports for
-        that resource (the first line naming its logical id, the function's
-        ash:vpc-access-policy tag), and listed before the file-level entry below so it
-        claims this one record. A standalone AWS::IAM::Policy attached through Roles,
-        not a policy embedded in a role, created only when VpcId and VpcSubnetIds are
-        set. It holds the network-interface grant Lambda needs to attach the function
-        to a VPC, and is separate from the role's DefaultPolicy so it can carry that
-        condition. Pinned by
-        tests/unit/deploy/test_cdk_template_line_pinned_suppressions.py.
-    - rule_id: HIPAA.Security-IAMNoInlinePolicy
-      path: deploy/cdk/templates/AshCodeCommitGate.template.json
       reason: >-
         Four CDK-generated AWS::IAM::Policy resources: the image-build pair,
         ImageBootstrapStarterRoleDefaultPolicy, and ScanFunctionRoleDefaultPolicy,
@@ -1386,20 +1372,6 @@ global_settings:
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
       line_start: 1236
       line_end: 1236
-      reason: >-
-        LINE-PINNED to ScanFunctionRoleEc2Access99A7E33E, the line ASH reports for
-        that resource (the first line naming its logical id, the function's
-        ash:vpc-access-policy tag), and listed before the file-level entry below so it
-        claims this one record. A standalone AWS::IAM::Policy attached through Roles,
-        not a policy embedded in a role, created only when VpcId and VpcSubnetIds are
-        set. It holds the network-interface grant Lambda needs to attach the function
-        to a VPC, and is separate from the role's DefaultPolicy so it can carry that
-        condition. Pinned by
-        tests/unit/deploy/test_cdk_template_line_pinned_suppressions.py.
-    - rule_id: NIST.800.53.R4-IAMNoInlinePolicy
-      path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      line_start: 1323
-      line_end: 1323
       reason: >-
         LINE-PINNED to ScanFunctionRoleEc2Access99A7E33E, the line ASH reports for
         that resource (the first line naming its logical id, the function's
@@ -1435,20 +1407,6 @@ global_settings:
         tests/unit/deploy/test_cdk_template_line_pinned_suppressions.py.
     - rule_id: NIST.800.53.R5-IAMNoInlinePolicy
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      line_start: 1323
-      line_end: 1323
-      reason: >-
-        LINE-PINNED to ScanFunctionRoleEc2Access99A7E33E, the line ASH reports for
-        that resource (the first line naming its logical id, the function's
-        ash:vpc-access-policy tag), and listed before the file-level entry below so it
-        claims this one record. A standalone AWS::IAM::Policy attached through Roles,
-        not a policy embedded in a role, created only when VpcId and VpcSubnetIds are
-        set. It holds the network-interface grant Lambda needs to attach the function
-        to a VPC, and is separate from the role's DefaultPolicy so it can carry that
-        condition. Pinned by
-        tests/unit/deploy/test_cdk_template_line_pinned_suppressions.py.
-    - rule_id: NIST.800.53.R5-IAMNoInlinePolicy
-      path: deploy/cdk/templates/AshCodeCommitGate.template.json
       reason: >-
         IAMNoInlinePolicy as the NIST 800-53 Revision 5 pack raises it, against
         AshCodeCommitGate: the same four CDK DefaultPolicy resources, including the
@@ -1460,20 +1418,6 @@ global_settings:
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
       line_start: 1236
       line_end: 1236
-      reason: >-
-        LINE-PINNED to ScanFunctionRoleEc2Access99A7E33E, the line ASH reports for
-        that resource (the first line naming its logical id, the function's
-        ash:vpc-access-policy tag), and listed before the file-level entry below so it
-        claims this one record. A standalone AWS::IAM::Policy attached through Roles,
-        not a policy embedded in a role, created only when VpcId and VpcSubnetIds are
-        set. It holds the network-interface grant Lambda needs to attach the function
-        to a VPC, and is separate from the role's DefaultPolicy so it can carry that
-        condition. Pinned by
-        tests/unit/deploy/test_cdk_template_line_pinned_suppressions.py.
-    - rule_id: PCI.DSS.321-IAMNoInlinePolicy
-      path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      line_start: 1323
-      line_end: 1323
       reason: >-
         LINE-PINNED to ScanFunctionRoleEc2Access99A7E33E, the line ASH reports for
         that resource (the first line naming its logical id, the function's
@@ -2591,18 +2535,6 @@ global_settings:
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
       line_start: 1115
       line_end: 1115
-      reason: >-
-        LINE-PINNED to ScanFunction322CD7EE, the line ASH reports for that resource
-        (the first line naming its logical id), and listed before the file-level
-        entry below so it claims this one record. The validator checks the scan
-        function's KmsKeyArn once a VpcConfig is present; KmsKeyArn is an Fn::If over
-        HasKmsKey, so it presents as '' with no parameter bound, the same artifact the
-        file-level entry describes for the log groups. Pinned by
-        tests/unit/deploy/test_cdk_template_line_pinned_suppressions.py.
-    - rule_id: F3031
-      path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      line_start: 1202
-      line_end: 1202
       reason: >-
         LINE-PINNED to ScanFunction322CD7EE, the line ASH reports for that resource
         (the first line naming its logical id), and listed before the file-level
