@@ -594,7 +594,10 @@ class TestTheSymbolsHint:
         # The exact text, quoted for a shell: every requirement holds `<` or `>`,
         # which an unquoted command turns into a redirection.
         assert command == shlex.join([*UV_PIP, *declared]), command
-        assert "automated-security-helper" not in command
+        # The requirements, not the interpreter path in front of them, which holds the
+        # checkout's directory name wherever that is called automated-security-helper.
+        requirements = _words(command)[len(UV_PIP) :]
+        assert not any("automated-security-helper" in word for word in requirements)
         assert "@v" not in command
         assert find_bare_installs(command) == []
 
