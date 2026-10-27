@@ -856,18 +856,23 @@ def install_dependencies(
     # known without building it; see _declared_install_name.
     failures_by_name: dict[str, PluginInstallOutcome] = {}
 
-    def discover(plugin_type: str, warn: bool = True):
+    def discover(plugin_type: str, warn: bool = True, classes=None):
         """The plugins of one type, each built from its own section of the config.
 
         The install's own selection is lazy (candidates and build below); this
-        builds a whole kind at once, and the --tool check uses it quietly to ask
-        whether a requested name belongs to a kind --plugin-type left out, without
-        recording that kind's failures against this run's verdict.
+        builds a whole kind at once, or only ``classes`` of it, and the --tool
+        check uses it quietly to ask whether a requested name belongs to a kind
+        --plugin-type left out, without recording that kind's failures against
+        this run's outcome.
         """
         found: List[tuple] = []
         failed: List[PluginInstallOutcome] = []
         plugin_module_input = _plugin_kind(plugin_type)
-        for plugin_class in ash_plugin_manager.plugin_modules(plugin_module_input):
+        for plugin_class in (
+            ash_plugin_manager.plugin_modules(plugin_module_input)
+            if classes is None
+            else classes
+        ):
             try:
                 # The plugin's own section of the resolved config, looked up the way
                 # the scan path looks it up (ExecutionEngine.get_scanner). Without
@@ -1060,9 +1065,30 @@ def install_dependencies(
             for kind in PLUGIN_KINDS:
                 if kind in selected_kinds:
                     continue
-                found, failed = discover(kind, warn=False)
-                lookup_failures += failed
-                names = {name for _, name, _ in found}
+                # Read, not built: the names come from each plugin's config class
+                # and its section of the resolved config, as the selected kinds'
+                # candidates do above. discover() of a whole kind constructs every
+                # plugin of it, and bandit, checkov, semgrep and the jupyter
+                # converter probe their version while constructed, with `uv tool
+                # run --from <req> <tool> --version`, which resolves and downloads
+                # each tool's environment: `--plugin-type reporter --tool grype`
+                # downloaded the scanners and converters to say grype is a
+                # scanner. Only a plugin that declares no name is built to learn
+                # it, quietly, as the selected kinds' unnamed plugins are.
+                names = set()
+                unnamed = []
+                for plugin_class in ash_plugin_manager.plugin_modules(kind):
+                    declared = _declared_install_name(
+                        plugin_class, kind, resolved_config
+                    )
+                    if declared is None:
+                        unnamed.append(plugin_class)
+                    else:
+                        names.add(declared)
+                if unnamed:
+                    found, failed = discover(kind, warn=False, classes=unnamed)
+                    lookup_failures += failed
+                    names |= {name for _, name, _ in found}
                 for typed in unknown:
                     if tool_resolution[typed] in names:
                         elsewhere.setdefault(typed, []).append(kind)
