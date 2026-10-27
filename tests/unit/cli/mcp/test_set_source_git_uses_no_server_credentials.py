@@ -98,7 +98,8 @@ class GitRecorder:
 
     @property
     def git_calls(self) -> List[Dict[str, Any]]:
-        return [c for c in self.calls if c["cmd"] and Path(c["cmd"][0]).name == "git"]
+        # The stem: ASH hands git over by the path it found, git.exe on Windows.
+        return [c for c in self.calls if c["cmd"] and Path(c["cmd"][0]).stem == "git"]
 
 
 @pytest.fixture
