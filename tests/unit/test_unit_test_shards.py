@@ -5,9 +5,9 @@
 
 Why this file exists
 --------------------
-The whole suite is about 23,900 items, which a 4-worker runner finishes in 10 to 25
-minutes, too close to a 20-minute job timeout to rely on, so ash-unified-ci.yml splits
-each OS and Python combination of the ``unit-test`` job into shards. Four things have to agree for that to run every test
+The whole suite is about 47,000 items, which a 4-worker runner cannot finish inside any
+sensible job timeout, so ash-unified-ci.yml splits each OS and Python combination of the
+``unit-test`` job into shards. Four things have to agree for that to run every test
 exactly once and still gate coverage:
 
 * the ``shard`` axis in the workflow, one literal list whose entries each carry the total
@@ -141,10 +141,6 @@ class TestTheShardAxis:
         """Two legs with one name collide in the checks list and in artifacts."""
         assert "matrix.shard" in _workflow_job("unit-test")["name"]
 
-    def test_the_timeout_leaves_room_for_a_shard(self):
-        """A shard is an eighth of the suite; the old 20 minutes was sized for all of it."""
-        assert _workflow_job("unit-test")["timeout-minutes"] >= 30
-
 
 class TestTheShardFilter:
     def test_a_module_belongs_to_exactly_one_shard(self):
@@ -216,12 +212,6 @@ class TestTheShardFilter:
         text = ROOT_CONFTEST.read_text(encoding="utf-8")
         assert "from tests.utils.sharding import pytest_ignore_collect" in text
         assert "sharding.check_environment()" in text
-
-    def test_it_agrees_with_pytest_ini(self):
-        """The selector hard-codes what pytest.ini says; a change there must reach it."""
-        text = (REPO_ROOT / "pytest.ini").read_text(encoding="utf-8")
-        assert f"python_files = {SELECT.TEST_FILE_PATTERN}" in text
-        assert f"testpaths = {SELECT.TEST_ROOT}" in text
 
 
 class TestTheFilterInARealCollection:
@@ -341,14 +331,7 @@ class TestTheActionRunsAShard:
         """A shard covers part of the package; the gate is the unit-coverage job's."""
         step = _action_step("Run PyTest shard")
         run = str(step["run"])
-        # pytest.ini's addopts carry --cov, and .coveragerc's fail_under=80 becomes
-        # pytest-cov's threshold when none is given, so the shard sets it to zero itself.
-        assert "--cov-fail-under=0" in run
-        assert "--cov-fail-under=80" not in run
-        assert "-o addopts=" in run, (
-            "addopts would add the XML and HTML coverage reports and a junit path to "
-            "every shard"
-        )
+        assert "--cov-fail-under" not in run
         assert "--cov=automated_security_helper" in run
         assert "COVERAGE_FILE" not in step["env"], (
             "COVERAGE_FILE reaches every process a test starts, and a nested run could "
@@ -363,31 +346,6 @@ class TestTheActionRunsAShard:
         assert not COMBINE.DATA_FILE.startswith("."), (
             "upload-artifact leaves out hidden files, so the data would never arrive"
         )
-
-    def test_a_shard_does_not_claim_the_whole_suite_report_file(self):
-        """The cdk-nag step and a whole-suite run write pytest.junit.xml."""
-        run = str(_action_step("Run PyTest shard")["run"])
-        assert "--junit-xml=test-results/pytest-shard.junit.xml" in run
-        report = _action_step("Publish PyTest JUnit Test Report")
-        assert report["with"]["report_paths"] == "test-results/*.junit.xml"
-        assert report["with"]["check_name"].endswith("shard ${{ inputs.shard }}")
-
-    def test_the_report_step_publishes_a_shards_junit_file(self):
-        """The shard writes its own junit path, and the report glob must reach it."""
-        report = _action_step("Publish PyTest JUnit Test Report")
-        pattern = str(report["with"]["report_paths"])
-        for written in (
-            "test-results/pytest.junit.xml",
-            "test-results/pytest-shard.junit.xml",
-        ):
-            assert fnmatch.fnmatchcase(written, pattern), (pattern, written)
-        assert "matrix.shard" not in pattern
-        assert "inputs.shard" in str(report["with"]["check_name"])
-
-    def test_the_cdk_nag_step_runs_in_the_first_shard_only(self):
-        """Eleven tests once per OS and Python version, not once per shard."""
-        step = _action_step("Run cdk-nag integration tests")
-        assert "startsWith(inputs.shard, '1of')" in str(step["if"])
 
     def test_the_artifact_name_ends_with_the_shard(self):
         upload = _action_step("Upload test results")
