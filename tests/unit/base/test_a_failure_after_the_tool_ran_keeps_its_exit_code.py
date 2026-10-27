@@ -1413,9 +1413,18 @@ def test_a_scanner_whose_timeout_log_write_failed_reports_the_timeout(tmp_path):
 # -- a tool that ended on a signal ASH did not send ----------------------------------
 
 
+#: A SARIF log with one run and no results: what a tool writes for a clean scan.
+#: An EMPTY results file is nothing to grade (ScannerPluginBase._handle_empty_results
+#: raises), so a template run's clean reading needs a run.
+_CLEAN_SARIF = (
+    '{"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "template"}}}]}'
+)
+
+
 class _TemplateScanner(ScannerPluginBase):
     """A scanner on the default scan() template. It runs ``tool_command`` and leaves
-    an empty results file, which the template reads as no findings."""
+    a one-run results file with no findings, which the template reads as a clean
+    scan when the exit code is accepted."""
 
     tool_command: List[str] = []
 
@@ -1425,7 +1434,7 @@ class _TemplateScanner(ScannerPluginBase):
     def _execute_scan(self, target, target_type, global_ignore_paths):
         results_file = Path(self.results_dir) / "results.sarif"
         results_file.parent.mkdir(parents=True, exist_ok=True)
-        results_file.write_text("", encoding="utf-8")
+        results_file.write_text(_CLEAN_SARIF, encoding="utf-8")
         return list(self.tool_command), results_file, None
 
 
@@ -1478,7 +1487,7 @@ def test_a_tool_that_ended_on_a_signal_ash_did_not_send_is_an_error(
     """An OOM kill or a hang-up ended the tool, not ASH. The negative code is kept,
     the response says signaled with the signal's number and names it, and the scan
     is ERROR. The negative code is never made positive, so an accepted exit code
-    and an empty results file cannot read as a clean scan. Parametrized by name:
+    and a clean results file cannot read as a clean scan. Parametrized by name:
     these signals do not exist on Windows, and parametrize evaluates at
     collection."""
     signum = getattr(signal, signal_name)
@@ -1498,7 +1507,7 @@ def test_a_tool_that_ended_on_a_signal_ash_did_not_send_is_an_error(
 
 def test_control_a_tool_that_exits_with_an_accepted_code_passes(tmp_path, monkeypatch):
     """The cell above isn't vacuous: exit 1 is in the template's accepted set, and
-    the same empty results file reads as a clean scan."""
+    the same one-run results file reads as a clean scan."""
     container, scanner, responses = _template_run(
         tmp_path, monkeypatch, [sys.executable, "-c", "import sys; sys.exit(1)"]
     )
