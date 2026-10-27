@@ -14,6 +14,7 @@ file not found" with exit 1.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict
 
 import pytest
@@ -25,6 +26,20 @@ from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 
 FLAG = rac.CONFIG_FROM_SCANNED_REPOSITORY_FLAG
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _words(output: str) -> str:
+    """The console output as plain words.
+
+    The log is written through rich, which on some hosts (a Windows runner) styles
+    the text with color codes and wraps each message at the console width, with
+    the log's time and level columns as padding on every wrapped line. A phrase
+    that is one line on a wide console is several there, so the assertions read
+    the words with the codes removed and the whitespace collapsed.
+    """
+    return " ".join(_ANSI.sub("", output).split())
 
 
 @pytest.fixture(autouse=True)
@@ -86,9 +101,9 @@ def test_the_mark_an_older_image_does_not_know(container, tmp_path):
     [run] = container["runs"]
     assert FLAG in run
     assert result.exit_code == 3, result.output
-    assert "Rebuild the image from this ASH" in result.output
-    assert FLAG in result.output
-    assert "Results file not found" not in result.output
+    assert "Rebuild the image from this ASH" in _words(result.output)
+    assert FLAG in _words(result.output)
+    assert "Results file not found" not in _words(result.output)
 
 
 def test_any_other_usage_error_inside(container, tmp_path):
@@ -97,8 +112,8 @@ def test_any_other_usage_error_inside(container, tmp_path):
     result = _scan("--source-dir", "src", "--output-dir", str(tmp_path / "out"))
 
     assert result.exit_code == 3, result.output
-    assert "Rebuild the image from this ASH" in result.output
-    assert "Results file not found" not in result.output
+    assert "Rebuild the image from this ASH" in _words(result.output)
+    assert "Results file not found" not in _words(result.output)
 
 
 def test_success_without_results_is_unchanged(container, tmp_path):
@@ -109,4 +124,4 @@ def test_success_without_results_is_unchanged(container, tmp_path):
     result = _scan("--source-dir", "src", "--output-dir", str(tmp_path / "out"))
 
     assert result.exit_code == 1, result.output
-    assert "Results file not found" in result.output
+    assert "Results file not found" in _words(result.output)
