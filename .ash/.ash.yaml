@@ -2857,11 +2857,6 @@ global_settings:
       line_start: 973
       line_end: 973
       reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
-    - rule_id: threat-process-download-exec
-      path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 973
-      line_end: 973
-      reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
     - rule_id: threat-filesystem-destruction
       path: deploy/cdk-constructs/test/ash-scan-step.test.ts
       line_start: 367
@@ -2882,11 +2877,6 @@ global_settings:
       line_start: 272
       line_end: 272
       reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
-    - rule_id: threat-filesystem-destruction
-      path: tests/snapshot/test_snapshot_normalizer.py
-      line_start: 272
-      line_end: 272
-      reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_artifact_contents_gate.py
       line_start: 782
@@ -2898,16 +2888,6 @@ global_settings:
       line_end: 1469
       reason: "Symlink target in a synthetic archive that the gate under test must reject."
     - rule_id: threat-filesystem-read
-      path: tests/unit/test_artifact_contents_gate.py
-      line_start: 1469
-      line_end: 1469
-      reason: "Symlink target in a synthetic archive that the gate under test must reject."
-    - rule_id: threat-filesystem-read
-      path: tests/unit/test_defense_in_depth.py
-      line_start: 404
-      line_end: 404
-      reason: "'v1.0|cat /etc/passwd' is a revision string the test asserts is rejected."
-    - rule_id: threat-filesystem-read
       path: tests/unit/test_defense_in_depth.py
       line_start: 404
       line_end: 404
@@ -2917,16 +2897,6 @@ global_settings:
       line_start: 1131
       line_end: 1131
       reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
-    - rule_id: threat-filesystem-read
-      path: tests/unit/test_pinned_tool_version_check.py
-      line_start: 1131
-      line_end: 1131
-      reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
-    - rule_id: threat-runtime-obfuscation-base64exec
-      path: tests/unit/utils/test_opengrep_pinned_download.py
-      line_start: 392
-      line_end: 392
-      reason: "Decodes a nix SRI hash to hex to compare with the pinned table; nothing is executed."
     - rule_id: threat-runtime-obfuscation-base64exec
       path: tests/unit/utils/test_opengrep_pinned_download.py
       line_start: 392
