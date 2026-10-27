@@ -95,11 +95,11 @@ a run ASH itself failed to carry out (the scanner's errors name ASH's error).
 |---|---|---|
 | bandit | 0, 1 (issues found) | 2: any error (`bandit/cli/main.py`) |
 | checkov | 0, 1 (failed checks) | 2: the run crashed (`checkov/main.py`) |
-| grype | 0, 2 (a match at or above `grype --fail-on`) | 1: any error, such as a database it cannot load (`cmd/grype/cli/cli.go`) |
+| grype | 0, 2 (a match at or above `grype --fail-on`) | 1: any error, such as a database it cannot load (grype's `cmd/grype/cli` package) |
 | semgrep | 0, 1 (findings) | 2: fatal; 3 and up: specific failures, 7 for a rule configuration it cannot read (`semgrep/error.py`) |
 | opengrep | 0, 1 | the same values as semgrep (`src/osemgrep/core/Exit_code.ml`) |
-| trivy, trivy-repo | 0 | 1: any error (`cmd/trivy/main.go`) |
-| syft | 0 | 1: any error (`cmd/syft/main.go`) |
+| trivy, trivy-repo | 0 | 1: any error (trivy's `cmd/trivy` package) |
+| syft | 0 | 1: any error (syft's `cmd/syft` package) |
 | ferret-scan | 0, 3 (coverage cut short under `fail_on_incomplete`: the findings are reported and the row is `ERROR`, as its target counts as failed) | 1: any error |
 | snyk-code | 0, 1 (issues found) | 2: an error; 3: no supported project (`src/cli/exit-codes.ts`) |
 | gitleaks | 0, 2 (leaks found: ASH runs `gitleaks --exit-code=2`) | 1: any error, such as an unreadable config; gitleaks exits 1 for leaks too unless told otherwise, which is why ASH moves the leaks code |
