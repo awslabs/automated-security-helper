@@ -46,6 +46,10 @@ def _git(cwd: Path, *args: str) -> None:
             "commit.gpgsign=false",
             "-c",
             "core.hooksPath=/dev/null",
+            # Git for Windows ships core.symlinks=false in its system config, so
+            # without this a link is stored and checked out as a plain file.
+            "-c",
+            "core.symlinks=true",
             "-c",
             "user.name=test",
             "-c",
@@ -66,8 +70,12 @@ def deliver_local_repository(origin: Path, session_id: str) -> Path:
     """
     from automated_security_helper.cli.mcp import source_delivery as sd
 
+    # core.symlinks=true: the clone has to check the links out as links, which
+    # git on Windows does not do by default (see ``_git``).
     with patch.object(
-        sd, "_GIT_ARGV", (*sd._GIT_ARGV, "-c", "protocol.file.allow=always")
+        sd,
+        "_GIT_ARGV",
+        (*sd._GIT_ARGV, "-c", "protocol.file.allow=always", "-c", "core.symlinks=true"),
     ):
         return sd._clone_into_session(
             origin.as_uri(), None, depth=1, workspace_root=None, session_id=session_id
