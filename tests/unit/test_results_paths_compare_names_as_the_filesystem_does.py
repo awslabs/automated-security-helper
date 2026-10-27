@@ -21,6 +21,7 @@ run on any platform with ``sys.platform`` set.
 
 from __future__ import annotations
 
+import contextlib
 import sys
 
 import pytest
@@ -31,6 +32,22 @@ from automated_security_helper.utils.scan_output_dirs import (
 )
 from tests.unit.test_committed_output_refused_at_entry_points import _repo
 from tests.unit.workspace.test_execution import _git
+
+
+@contextlib.contextmanager
+def _platform(name: str):
+    """``sys.platform`` as *name* around the call under test, and only there.
+
+    The unit tests' tool guard (tests/unit/conftest.py) looks the programs the test
+    started up at teardown, through ``shutil.which``, whose Windows branch reads
+    ``_winapi``, which is None on a POSIX interpreter. The test's own monkeypatch is
+    still live at that teardown, so a ``win32`` left in place failed every such test
+    there with "'NoneType' object has no attribute 'NeedCurrentDirectoryForExePath'".
+    """
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(sys, "platform", name)
+        yield
+
 
 #: Committed with a case the scan's own names do not have.
 OTHER_CASE = {
@@ -45,9 +62,9 @@ def test_a_committed_name_in_another_case_is_counted_on_macos_and_windows(
     tmp_path, monkeypatch, platform
 ):
     source, output = _repo(tmp_path, monkeypatch, committed=OTHER_CASE)
-    monkeypatch.setattr(sys, "platform", platform)
 
-    found = committed_files_at_results_paths(output)
+    with _platform(platform):
+        found = committed_files_at_results_paths(output)
 
     assert [p.relative_to(output).as_posix() for p in found] == sorted(OTHER_CASE)
 
@@ -70,11 +87,11 @@ def test_a_scoped_check_keeps_a_name_in_another_case(tmp_path, monkeypatch, plat
     )
 
     source, output = _repo(tmp_path, monkeypatch, committed=OTHER_CASE)
-    monkeypatch.setattr(sys, "platform", platform)
 
-    found = committed_entries_in_the_way(
-        output, files=("ash_aggregated_results.json",), directories=("reports",)
-    )
+    with _platform(platform):
+        found = committed_entries_in_the_way(
+            output, files=("ash_aggregated_results.json",), directories=("reports",)
+        )
 
     assert [p.relative_to(output).as_posix() for p in found] == [
         "ASH_Aggregated_Results.json",
@@ -97,9 +114,8 @@ def test_the_workspace_spool_is_matched_the_same_way(
     source, output = _repo(
         tmp_path, monkeypatch, committed={".Workspace-Spool/api.run.json": "{}\n"}
     )
-    monkeypatch.setattr(sys, "platform", platform)
-
-    found = committed_entries_under(output, (WORKSPACE_SPOOL_DIR_NAME,))
+    with _platform(platform):
+        found = committed_entries_under(output, (WORKSPACE_SPOOL_DIR_NAME,))
 
     assert [p.relative_to(output).as_posix() for p in found] == (
         [".Workspace-Spool/api.run.json"] if counted else []
@@ -121,11 +137,10 @@ def test_the_on_disk_count_compares_names_the_same_way(
     (output / "Reports").mkdir()
     (output / "Reports" / "old.md").write_text("old\n", encoding="utf-8")
     assert _git(source, "config", "core.repositoryformatversion", "99").returncode == 0
-    monkeypatch.setattr(sys, "platform", platform)
-
-    if refused:
-        with pytest.raises(CommittedOutputFilesError) as refusal:
-            committed_entries_in_the_way(output)
-        assert "Reports/old.md" in str(refusal.value)
-    else:
-        assert committed_entries_in_the_way(output) == []
+    with _platform(platform):
+        if refused:
+            with pytest.raises(CommittedOutputFilesError) as refusal:
+                committed_entries_in_the_way(output)
+            assert "Reports/old.md" in str(refusal.value)
+        else:
+            assert committed_entries_in_the_way(output) == []
