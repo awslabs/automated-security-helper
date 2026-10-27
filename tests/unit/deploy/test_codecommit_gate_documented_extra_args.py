@@ -82,14 +82,19 @@ def test_the_example_gate_reaches_ash_scan(monkeypatch, tmp_path):
 
     gate = _load_gate()
     captured: list[list[str]] = []
-    monkeypatch.setattr(
-        gate,
-        "_run",
-        lambda argv, cwd=None, env=None: (
-            captured.append(list(argv))
-            or SimpleNamespace(returncode=0, stdout="", stderr="")
-        ),
-    )
+
+    def run(argv, cwd=None, env=None):
+        argv = list(argv)
+        if argv == ["ash", "scan", "--help"]:
+            # The gate's probe of the image's options, answered as an ASH that has
+            # --fail-on-incomplete-scanners; it is not a scan, so it is not recorded.
+            return SimpleNamespace(
+                returncode=0, stdout="  --fail-on-incomplete-scanners\n", stderr=""
+            )
+        captured.append(argv)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(gate, "_run", run)
     monkeypatch.setattr(gate, "WORK_ROOT", tmp_path / "ash-gate")
     extra = _example_extra_args()
     monkeypatch.setenv("ASH_SCAN_EXTRA_ARGS", extra)

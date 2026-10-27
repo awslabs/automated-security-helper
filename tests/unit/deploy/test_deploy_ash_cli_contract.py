@@ -401,6 +401,26 @@ def _environment(values: dict[str, str], clear_prefixes: tuple[str, ...]):
         yield
 
 
+def _gate_runner(captured: list[list[str]]):
+    """A stand-in for the gate's subprocess runner that records what it would run.
+
+    The gate first asks ``ash scan --help`` whether the image's ASH has
+    ``--fail-on-incomplete-scanners`` and refuses to scan when it does not; the probe
+    is answered as an ASH that has it, and is not a scan, so it is not recorded.
+    """
+
+    def run(argv, cwd=None, env=None):
+        argv = list(argv)
+        if argv == ["ash", "scan", "--help"]:
+            return SimpleNamespace(
+                returncode=0, stdout="  --fail-on-incomplete-scanners\n", stderr=""
+            )
+        captured.append(argv)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    return run
+
+
 def terraform_gate_invocations() -> list[Invocation]:
     """Run the Terraform gate's own run_scan and capture the argv it would execute."""
     gate = _load_by_path("_ash_pr_gate_cli_contract", TF_GATE)
@@ -409,14 +429,7 @@ def terraform_gate_invocations() -> list[Invocation]:
         for fail_on_findings in (True, False):
             captured: list[list[str]] = []
             with (
-                mock.patch.object(
-                    gate,
-                    "_run",
-                    lambda argv, cwd=None, env=None: (
-                        captured.append(list(argv))
-                        or SimpleNamespace(returncode=0, stdout="", stderr="")
-                    ),
-                ),
+                mock.patch.object(gate, "_run", _gate_runner(captured)),
                 mock.patch.object(gate, "WORK_ROOT", Path(work) / "ash-gate"),
             ):
                 with _environment(
