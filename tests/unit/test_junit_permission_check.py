@@ -196,7 +196,7 @@ class TestReportPathIsNotDotBlind:
         """`**` does not descend into hidden directories such as `.ash/`.
 
         Scoped to this workflow on purpose. run-unit-tests publishes
-        `**/pytest.junit.xml`, which is correct there: `test-results/` is not
+        `test-results/*.junit.xml`, which is correct there: `test-results/` is not
         hidden, so that glob does match. The dot-blindness only bites a report
         written under a dot-directory, which is this workflow's default.
         """
