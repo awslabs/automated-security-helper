@@ -706,16 +706,18 @@ def test_a_linked_default_output_name_hides_nothing(
 
 def test_the_drop_does_not_follow_a_linked_output_dir_into_the_tree(tmp_path):
     """``--output-dir out`` where the repository committed ``out`` as a link to
-    ``src``. With --ignore-suppressions, because the suppression step's own
-    output-directory exclusion, which this change leaves as it was, resolves the
-    output directory too; a sandboxed scan refuses such an output directory."""
+    ``src``. No context is built for such an output directory, sandboxed or not:
+    ASH's writes below it never follow a link, so the directory is refused when
+    the context registers it (base/plugin_context.py, ``_guard_output_dir``, and
+    utils/sandbox/fs_guard.py, ``register_writable_root``), and no drop runs. The
+    link itself names nothing, so a drop given it would keep every finding."""
+    from pydantic import ValidationError
+
     source = _linked_tree(tmp_path, "out", "src")
-    context = _context(source, source / "out")
-    context.ignore_suppressions = True
 
-    kept = _run_scripted(context, [_result(uri) for uri in LINKED_FINDINGS])
+    with pytest.raises(ValidationError, match="symlink"):
+        _context(source, source / "out")
 
-    assert kept == LINKED_FINDINGS
     assert named_output_dirs(source, source / "out") == []
 
 
