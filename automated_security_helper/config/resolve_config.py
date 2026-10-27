@@ -157,7 +157,6 @@ from automated_security_helper.config.sandbox_grants import (
     working_directory,
 )
 from automated_security_helper.config.config_validator import (
-    _string_leaves,
     describe_validation_error,
     environment_record_of_references,
     environment_record_read,
@@ -560,28 +559,6 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
     # attributes). Without them a run whose overrides were applied here, as to
     # the ASH_CONFIG configuration, printed and recorded those values.
     rebuilt.__pydantic_private__ = copy.deepcopy(config.__pydantic_private__)
-    # Each string an override's value holds joins the values a line that prints
-    # a section of this config hides (AshConfig._override_values). The value is
-    # the operator's, not the environment's, but it can be a credential, and
-    # get_plugin_config's debug line printed each reporter's section whole, an
-    # override's value in it (ash merge --debug, ash report --debug). Strings
-    # only: a bool or a number an override sets is no credential, and a short
-    # word such as "true" would be hidden wherever a line prints it. A second
-    # application (ash merge applies the overrides to each shard's record and
-    # replays them onto the trusted base) keeps the first's.
-    rebuilt._override_values = tuple(
-        dict.fromkeys(
-            (
-                *rebuilt._override_values,
-                *(
-                    leaf
-                    for _, value, _ in applied
-                    for leaf in _string_leaves(value)
-                    if leaf
-                ),
-            )
-        )
-    )
     # A model that already carries references (a second application) can
     # have its module list shortened here: the references it carried then
     # name entries the list no longer has.
@@ -4427,56 +4404,13 @@ def _resolve_config(
                         ),
                         extra=NO_MARKUP,
                     )
-                # A refused config whose files are all the scanned repository's
-                # is refused as a FILE, not as the run: the in-tree config is
-                # advisory, so its invalidity must not veto the operator's
-                # scan. It contributes nothing (no partial parse, no
-                # best-effort keys) and the resolution continues on the
-                # operator/default chain, as if the file were absent. A
-                # refusal after overrides is the operator's own, and a chain
-                # that reaches any file outside the repository is judged the
-                # operator's too, so both still refuse the run. Fail-closed:
-                # with no repository judge, the refusal stands.
-                refused_files = list(refusal.document.chain) or [Path(config_path)]
-                # The judge reads the file AND the name that reached it
-                # (is_repository_file(real, named)); a file the names map
-                # does not know is judged under its own path, and a file
-                # reached by several names must be the repository's under
-                # every one of them.
-                refused_names = refusal.document.names
-                # Containment is for DISCOVERED configs only: a discovered
-                # in-tree file is advisory by design, but a config the caller
-                # NAMED (--config, ASH_CONFIG, an MCP delivery) is a request,
-                # and a request's refusal belongs to the requester — the same
-                # trust position as the operator clause. A swallowed refusal
-                # here once let a scan proceed where the caller was owed
-                # "exited with code 3".
-                if (
-                    discovered_label is not None
-                    and not refusal.after_overrides
-                    and repository_file is not None
-                    # A tree an MCP client delivered is the client's request, by
-                    # any name on the way (a link inside it included): its
-                    # refused config refuses the run, as a NAMED delivery does.
-                    and not _has_a_client_file(refusal.document)
-                    and all(
-                        repository_file(path, named)
-                        for path in refused_files
-                        for named in (refused_names.get(path) or (path,))
-                    )
-                ):
-                    ASH_LOGGER.warning(
-                        shown_on_one_line(
-                            "The scanned repository's configuration file was "
-                            "refused and contributes nothing to this "
-                            f"resolution: {refusal}"
-                        ),
-                        extra=NO_MARKUP,
-                    )
-                    config = overlaid_fallback(config)
-                    if config_overrides and config:
-                        return apply_config_overrides(config, config_overrides)
-                    return config
+                # Refused, never replaced by the default config, for a
+                # discovered file as for a named one: the file is there to
+                # configure this run, and the defaults would scan with its
+                # suppressions, ignore paths and settings switched off
+                # (ConfigCheck, `ash config validate` and the CHANGELOG all
+                # promise exit 3 here, and the parse-error arm below refuses
+                # the same file the same way).
                 raise
             chain.extend(document.chain)
             if merged is not None:
