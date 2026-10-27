@@ -383,7 +383,7 @@ The `ash_aggregated_results.json` file includes comprehensive validation informa
 | [Opengrep](https://github.com/opengrep/opengrep) | Application code with Semgrep-compatible rules | Managed through uv tool isolation |
 | [detect-secrets](https://github.com/Yelp/detect-secrets) | Secrets in text files | Included with ASH |
 | [Checkov](https://github.com/bridgecrewio/checkov) | Infrastructure and configuration | Managed through uv tool isolation |
-| [cfn_nag](https://github.com/stelligent/cfn_nag) | CloudFormation | Ruby and cfn-nag |
+| [cfn-nag](https://github.com/stelligent/cfn_nag) | CloudFormation | Ruby and cfn-nag |
 | [cdk-nag](https://github.com/cdklabs/cdk-nag) | CloudFormation | Included with ASH |
 | [npm-audit](https://docs.npmjs.com/cli/commands/npm-audit) | Node.js dependencies | Node.js and npm |
 | [Grype](https://github.com/anchore/grype) | Dependency vulnerabilities | Grype |
