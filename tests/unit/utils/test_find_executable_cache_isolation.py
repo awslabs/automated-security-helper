@@ -53,8 +53,16 @@ def test_the_cache_is_empty_at_test_setup_and_a_plant_is_cleaned(tmp_path, monke
     fake = tmp_path / "zz-cache-isolation-plant"
     fake.write_text("#!/bin/sh\n", encoding="utf-8")
     fake.chmod(0o755)
-    key = ("zz-cache-isolation-plant", _PINNED_PATH, "")
-    subprocess_utils._find_executable_cache[key] = str(fake)
+    # The key and entry shapes _lookup reads: (command, sandbox, tree scope,
+    # PATH, ASH_BIN_PATH) -> (path, refused in-tree file).
+    key = (
+        "zz-cache-isolation-plant",
+        False,
+        subprocess_utils.tree_scope_key(),
+        _PINNED_PATH,
+        "",
+    )
+    subprocess_utils._find_executable_cache[key] = (str(fake), None)
     # The plant answers its own lookup NOW (the cell can fail): a lookup
     # under the same environment is served the entry while it exists.
     assert subprocess_utils.find_executable("zz-cache-isolation-plant") == str(fake)
