@@ -658,9 +658,13 @@ ENV _ASH_EXEC_MODE="local"
 # commit below describe the release in the image. Assigned first so a failure stops
 # the build rather than leaving the install unpinned. UV_NO_CACHE=1 keeps uv's cache
 # out of the layer.
+# ASH_OFFLINE=NO for this process only: ENV ASH_OFFLINE above is YES in an OFFLINE=YES
+# image, and in offline mode ASH downloads nothing, so opengrep, a bare executable
+# that only this install fetches, was never put in place. The build is online either
+# way (it fetched the rulesets and databases above); the finished image keeps the ENV.
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     uv_tmp="$(mktemp -d)" && \
-    { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 \
+    { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 ASH_OFFLINE=NO \
     ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}; \
     status=$?; rm -rf "${uv_tmp:?}"; exit "${status}"; }
 ENV PATH="${ASH_BIN_PATH}:$PATH"
@@ -782,7 +786,7 @@ ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
 # Python tools are installed again here and would otherwise float.
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     uv_tmp="$(mktemp -d)" && \
-    { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 \
+    { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 ASH_OFFLINE=NO \
     ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}; \
     status=$?; rm -rf "${uv_tmp:?}"; exit "${status}"; }
 
