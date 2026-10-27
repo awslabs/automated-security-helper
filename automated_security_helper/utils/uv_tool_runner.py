@@ -1010,6 +1010,10 @@ class UVToolRunner:
         from automated_security_helper.core.cancellation import raise_if_cancelled
 
         raise_if_cancelled()
+        # This thread's last refusal belongs to its last check: unavailable_reason
+        # names a refusal only when the check that answered False was refused.
+        checks = self._check_state()
+        checks.refusal = None
         # Read once per call: the getter re-resolves, and one call must ask
         # one executable one question.
         executable = self.uv_executable
@@ -1115,6 +1119,8 @@ class UVToolRunner:
                 # refusal) among them: not uv's answer, and its retry is one
                 # short failed spawn, not a probe timeout. No cache, no
                 # window.
+                if _refused_by_sandbox(error):
+                    checks.refusal = str(error)
                 return _failed(
                     f"the probe's spawn failed with {type(error).__name__}: {error}",
                     "the next call probes again",
@@ -1420,11 +1426,16 @@ class UVToolRunner:
                     # piece.
                     raw = result.stdout
 
-            except Exception:  # nosec B110 — version check failure is non-critical
+            except Exception as error:  # nosec B110 — version check failure is non-critical
                 raw = None
+                # A probe the active sandbox scope refused never ran, so it says
+                # nothing about the tool: not remembered for later callers.
+                refused = _refused_by_sandbox(error)
+            else:
+                refused = False
 
             # A check-only probe ran offline; a scan's would not. Not remembered.
-            if not is_checking_only():
+            if not refused and not is_checking_only():
                 with _uv_tool_runner_cache_lock:
                     # Only while no invalidation landed since the pre-probe
                     # read. The answer is still returned to this caller --
