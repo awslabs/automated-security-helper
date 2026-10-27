@@ -112,6 +112,13 @@ class _InnerOrchestrator:
         self.reporters = reporters
         self.use_existing = use_existing
         self.after_scan = after_scan
+        self.metadata: Dict[str, object] = {}
+
+    def add_metadata(self, **values) -> None:
+        """As ASHScanOrchestrator.add_metadata: the local run records the
+        changed-files marker and the scan source on the orchestrator before
+        execute_scan (run_ash_scan._run_local_mode)."""
+        self.metadata.update(values)
 
     def execute_scan(self, phases=None) -> AshAggregatedResults:
         results_file = self.output_dir / "ash_aggregated_results.json"
@@ -484,6 +491,10 @@ class _RefusedBeforeWriting:
     """An inner orchestrator whose reports are refused before any results are written."""
 
     config = None
+
+    def add_metadata(self, **values) -> None:
+        """Recorded before execute_scan, as on the real orchestrator; nothing
+        reads it here."""
 
     def execute_scan(self, phases=None):
         from automated_security_helper.utils.report_path_links import (
