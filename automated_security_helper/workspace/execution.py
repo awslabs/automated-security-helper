@@ -288,7 +288,6 @@ Failure modes and known limitations
 from __future__ import annotations
 
 import json
-import os
 import time
 import contextvars
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
@@ -357,6 +356,7 @@ from automated_security_helper.utils.output_dir_links import (
     refuse_linked_output_dir,
 )
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.scan_source import recorded_scan_source
 from automated_security_helper.utils.secret_masking import (
     exposed_secret_values,
@@ -1169,7 +1169,7 @@ def _scan_one_project(
                 "scan_source": recorded_scan_source(
                     Path(project.path),
                     git_repository_root,
-                    os.environ,
+                    snapshot_environ(),
                     workspace_project=True,
                 ),
             },

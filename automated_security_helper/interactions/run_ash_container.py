@@ -87,6 +87,7 @@ from automated_security_helper.utils.subprocess_utils import (
 )
 from automated_security_helper.utils.inner_run_outcome import OUTER_RUN_ID_ENV
 from automated_security_helper.utils.log import ASH_LOGGER, SHOW_LOCALS_VARIABLE
+from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.threads import ash_thread
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 from automated_security_helper.utils.version_management import _load_toml
@@ -1809,7 +1810,7 @@ def _readable_environment_values() -> Tuple[str, ...]:
     """
     return tuple(
         value
-        for name, value in os.environ.items()
+        for name, value in snapshot_environ().items()
         if value.strip() and is_readable_environment_name(name)
     )
 
@@ -4541,7 +4542,7 @@ def _assemble_run_command(
 
     # The runner markers: by name, or through a wrapper with their values. A value
     # the command line cannot take has already been refused, before any build.
-    cmd.extend(_runner_marker_args(oci_command_prefix, os.environ))
+    cmd.extend(_runner_marker_args(oci_command_prefix, snapshot_environ()))
 
     # Image name then ash subcommand
     cmd.append(image_name)
@@ -4978,7 +4979,7 @@ def run_ash_container(
         # A runner marker the wrapper's command line cannot take is refused here,
         # before anything is built, with exit 3 as ./ash refuses it.
         try:
-            _runner_marker_args(oci_command_prefix, os.environ)
+            _runner_marker_args(oci_command_prefix, snapshot_environ())
         except RunnerMarkerRefused as e:
             secho(str(e), fg=typer.colors.RED)
             return _not_started(
@@ -5245,7 +5246,7 @@ def run_ash_container(
                     env_file_dir, env_file = env_file_scope.enter_context(
                         _env_file(
                             environment_names,
-                            os.environ,
+                            snapshot_environ(),
                             resolved_oci_runner,
                             Path(source_dir),
                             Path(output_dir),

@@ -148,6 +148,7 @@ from automated_security_helper.utils.output_dir_links import (
 from automated_security_helper.utils.process_env import (
     hold_environ,
     release_environ,
+    snapshot_environ,
 )
 from automated_security_helper.utils.report_path_links import (
     ReportPathLinkRefused,
@@ -5558,7 +5559,7 @@ def _run_local_mode(
             # (utils/scan_source.py; a report made on another host cannot work it
             # out, and inside the container the launcher's label is used).
             scan_source=recorded_scan_source(
-                opts.source_dir, git_repository_root, os.environ
+                opts.source_dir, git_repository_root, snapshot_environ()
             ),
         )
         _config_fail_on_findings: Optional[bool] = getattr(

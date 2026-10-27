@@ -892,10 +892,11 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
             if _no_scan_source_notice_printed:
                 return
             _no_scan_source_notice_printed = True
+        from automated_security_helper.utils.process_env import snapshot_environ
         from automated_security_helper.utils.scan_source import why_no_scan_source
 
         reason = why_no_scan_source(
-            getattr(self.context, "source_dir", None) or ".", os.environ
+            getattr(self.context, "source_dir", None) or ".", snapshot_environ()
         )
         notice = (
             "aws-security-hub archives nothing from this run: "
