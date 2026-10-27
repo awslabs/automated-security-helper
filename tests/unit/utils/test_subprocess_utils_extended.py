@@ -1,11 +1,13 @@
 """Extended tests for subprocess_utils.py to increase coverage."""
 
+import os
 import subprocess  # nosec B404 — test exercises subprocess_utils module
 from unittest.mock import patch, MagicMock
 
 import pytest
 
 from automated_security_helper.utils.subprocess_utils import (
+    _executable_candidate_names,
     find_executable,
     clear_find_executable_cache,
     run_command,
@@ -57,7 +59,9 @@ def test_find_executable_found_in_ash_bin(mock_which, tmp_path, monkeypatch):
     result = find_executable("test_cmd")
 
     assert result == tool.as_posix()
-    mock_which.assert_called_once()
+    # which() is asked once for each spelling of the name: one on POSIX, and
+    # name.exe, name.bat, name.cmd and name on Windows.
+    assert mock_which.call_count == len(_executable_candidate_names("test_cmd"))
     clear_find_executable_cache()
 
 
