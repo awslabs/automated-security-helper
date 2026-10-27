@@ -240,3 +240,28 @@ def watching(root: Path, exclude: Iterable[Path] = ()) -> Iterator[None]:
                 _roots.remove(r)
             for p in dict.fromkeys(skipped):
                 _excluded.remove(p)
+
+
+@contextlib.contextmanager
+def allowing(paths: Iterable[Path]) -> Iterator[None]:
+    """Do not record writes to exactly ``paths`` (and anything under them) in the block.
+
+    For a test whose purpose is to plant a file in the account's real home, such as the
+    passwd-home escape test: the files it plants and the directories it makes for them
+    are named by the caller and nothing else is let through. The exclusions are removed
+    when the block ends, so a later write to the same place is recorded again.
+    """
+    with _lock:
+        skipped = [
+            p
+            for path in paths
+            for p in both_spellings(Path(path))
+            if p not in _excluded
+        ]
+        _excluded.extend(skipped)
+    try:
+        yield
+    finally:
+        with _lock:
+            for p in skipped:
+                _excluded.remove(p)
