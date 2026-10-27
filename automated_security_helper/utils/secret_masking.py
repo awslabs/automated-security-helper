@@ -1158,7 +1158,7 @@ def _mask_report(
         return index
     for result in sarif_report.get_all_results() or []:
         message = getattr(result, "message", None)
-        root = getattr(message, "root", message)
+        root: Any = getattr(message, "root", message)
         text = getattr(root, "text", None)
         # A root with a text is never None; the check says so to the type checker.
         if root is not None and isinstance(text, str):

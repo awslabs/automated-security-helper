@@ -70,7 +70,11 @@ def _scan(base: Path, archives: dict[str, bytes]) -> tuple[int, str, Path]:
             "--no-fail-on-findings",
         ],
         capture_output=True,
-        text=True,
+        # The scan writes UTF-8. Without an encoding, a Windows parent decodes the
+        # pipe with its ANSI code page, a byte it cannot map ends the reader thread,
+        # and stdout comes back as None.
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
         env=env,
         cwd=base,

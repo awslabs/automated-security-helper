@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import gzip
 import io
+import sys
 import tarfile
 import zipfile
 from pathlib import Path
@@ -97,6 +98,7 @@ def zip_that_also_reads_as_a_pointer() -> bytes:
             info.external_attr = 0o444 << 16
             info.create_system = 0
             archive.comment = b"\n"
+            # pragma: allowlist nextline secret
             archive.writestr(info, f"password = 'hunter{n}'")
         data = prefix + buffer.getvalue()
         inner = data[len(prefix) : -1]
@@ -166,7 +168,7 @@ class TestPlainGzip:
     def test_a_plain_gzip_is_decompressed_and_handed_on(
         self, name, inner, test_plugin_context, monkeypatch
     ):
-        content = b'{"api_key": "placeholder"}\n'
+        content = b'{"api_key": "placeholder"}\n'  # pragma: allowlist secret
         converter, results = convert(
             test_plugin_context, monkeypatch, {name: gzip.compress(content, mtime=0)}
         )
@@ -437,6 +439,10 @@ class TestGitLfsPointers:
         assert converter.refused_inputs == []
         assert converter.failed_inputs == []
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="the member name holds a colon, which Windows cannot create as a file",
+    )
     def test_a_tar_whose_first_name_starts_like_a_pointer_is_still_a_tar(
         self, test_plugin_context, monkeypatch
     ):

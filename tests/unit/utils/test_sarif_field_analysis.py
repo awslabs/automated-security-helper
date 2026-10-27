@@ -222,6 +222,10 @@ class TestTheCsvFilesUnderAnAsciiLocale:
         import subprocess
         import sys
 
+        # The second character is outside Windows' ANSI code page (cp1252), which
+        # is the locale encoding there and holds the first, so a file opened with
+        # no encoding fails on every platform.
+        field = "café字"
         sarif_dir = tmp_path / "ash_output"
         (sarif_dir / "reports").mkdir(parents=True)
         (sarif_dir / "reports" / "ash.sarif").write_text(
@@ -234,7 +238,7 @@ class TestTheCsvFilesUnderAnAsciiLocale:
                             "results": [
                                 {
                                     "ruleId": "R1",
-                                    "message": {"text": "x", "café": "1"},
+                                    "message": {"text": "x", field: "1"},
                                 }
                             ],
                         }
@@ -274,9 +278,17 @@ class TestTheCsvFilesUnderAnAsciiLocale:
             timeout=120,
         )
 
-        assert "ANSI_X3.4-1968" in ran.stderr or "ascii" in ran.stderr.lower(), (
-            f"the probe did not run under an ASCII locale: {ran.stderr[:200]}"
+        # Windows has no ASCII locale to select; its locale encoding is the ANSI
+        # code page, a "cpNNNN" name, which is not UTF-8 either.
+        locale_name = ran.stderr.strip().lower()
+        not_utf8 = (
+            locale_name.startswith("cp")
+            if sys.platform == "win32"
+            else "ANSI_X3.4-1968" in ran.stderr or "ascii" in locale_name
+        )
+        assert not_utf8, (
+            f"the probe did not run under a non-UTF-8 locale: {ran.stderr[:200]}"
         )
         assert ran.returncode == 0, ran.stderr[-2000:]
         csv_text = (output_dir / "sarif_fields.csv").read_text(encoding="utf-8")
-        assert "café" in csv_text
+        assert field in csv_text

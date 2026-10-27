@@ -42,14 +42,17 @@ from typing import Dict, List
 
 import pytest
 
+from tests.utils.runner_state import developer_runner_env
+
 pytestmark = [pytest.mark.container_runtime]
 
 # The ``ci`` stage's tag, which every leg running this module builds with an explicit
 # ``--build-target ci``; see test_snapshot_container_runtime.py.
 IMAGE = os.environ.get("ASH_IMAGE_NAME") or "automated-security-helper:ci"
+RUNNER = os.environ.get("OCI_RUNNER") or "docker"
 RUNNER_PREFIX = [
     *shlex.split(os.environ.get("OCI_RUNNER_WRAPPER", "")),
-    os.environ.get("OCI_RUNNER") or "docker",
+    RUNNER,
 ]
 
 ROOT_OWNED = (
@@ -63,7 +66,7 @@ ROOT_OWNED = (
 
 #: Left out of the search for files every user may write: the kernel's and the
 #: runner's filesystems, and the sticky scratch directories with what is in them.
-PRUNED = ("/proc", "/sys", "/dev", "/tmp", "/var/tmp", "/run/lock")
+PRUNED = ("/proc", "/sys", "/dev", "/tmp", "/var/tmp", "/run/lock")  # nosec B108
 
 
 def open_files_find(root: str = "/") -> str:
@@ -71,13 +74,14 @@ def open_files_find(root: str = "/") -> str:
 
     Symbolic links are left out (their mode is always 777 and means nothing), and
     so are directories with the sticky bit. ``root`` is ``/`` in the image; the
-    unit test passes a temporary tree.
+    unit test passes a temporary tree. The paths are printed by ``printf`` rather
+    than by GNU find's ``-printf``, which the BSD find on a macOS runner lacks.
     """
     base = root.rstrip("/")
     prune = " -o ".join(f"-path {shlex.quote(base + path)}" for path in PRUNED)
     return (
         f"find {shlex.quote(root)} -xdev \\( {prune} \\) -prune -o "
-        "! -type l -perm -0002 ! -perm -1000 -printf 'open %p\\n'"
+        "! -type l -perm -0002 ! -perm -1000 -exec printf 'open %s\\n' {} +"
     )
 
 
@@ -95,9 +99,13 @@ find /ash /.ash /deps/.semgrep /deps/.opengrep -xdev ! -type l ! -uid 0 \
 
 
 def _run_in_image(script: str, *, as_root: bool = False) -> subprocess.CompletedProcess:
+    # A podman reads its image store from XDG_DATA_HOME, which tests/conftest.py moves
+    # into the session's private home; the runner is given the developer's, where the
+    # leg built the image (tests/utils/runner_state.py).
     user = ["--user", "0:0"] if as_root else []
     return subprocess.run(  # nosec B603 - runner and image come from the CI leg
         [*RUNNER_PREFIX, "run", "--rm", *user, IMAGE, "sh", "-c", script],
+        env={**os.environ, **developer_runner_env(RUNNER)},
         capture_output=True,
         text=True,
         encoding="utf-8",

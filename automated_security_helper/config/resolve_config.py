@@ -61,6 +61,7 @@ from automated_security_helper.config.config_sources import (
     identity_to_hold,
     is_config_parse_error,
     is_json_file,
+    is_symlink_loop,
     is_toml_file,
     log_config_discovery,
     original_of_scan_copy,
@@ -4585,7 +4586,7 @@ def _config_file_not_loadable(config_path: Path) -> ASHConfigSourceError:
             )
         return ASHConfigFileNotFoundError(f"Configuration file not found: {where}")
     except OSError as exc:
-        if exc.errno == errno.ELOOP:
+        if is_symlink_loop(exc):
             return ASHConfigSourceError(
                 f"Configuration file {where} is a symbolic link that leads back to "
                 "itself, so it cannot be read."

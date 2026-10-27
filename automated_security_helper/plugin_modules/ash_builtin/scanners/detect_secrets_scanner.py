@@ -1155,15 +1155,16 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         tries, so a filter or plugin that verifies under another name cannot
         either (see ``utils/detect_secrets_worker.py``).
 
-        Returns None when the worker was killed at ``scan_timeout``. The caller then
-        keeps the collection it already holds (the parsed baseline, or empty). This
-        differs from the in-process scan, which kept whatever it had found before
-        the cutoff: a killed worker's partial results are not recoverable. The scan
-        is reported as timed out either way, so a partial result was never a
-        complete one.
+        A worker killed at ``scan_timeout`` fails the scan: the timeout is recorded
+        on the scanner (``scan_timed_out_after``) and ScannerError is raised, as the
+        template scan does for a tool it killed. The in-process scan kept whatever
+        it had found before the cutoff, but a killed worker's partial results are
+        not recoverable, and a report built from the baseline alone would be graded
+        as a clean scan.
 
         Raises:
-            ScannerError: the worker failed, or exited 0 without writing results.
+            ScannerError: the worker was killed at ``scan_timeout``, failed, or
+                exited 0 without writing results.
         """
         from detect_secrets.core.potential_secret import PotentialSecret
 
@@ -1308,23 +1309,36 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 # abort this record, which loses the limit instead.
                 read = guarded_values_read(self)
                 if read.values is None:
-                    self._plugin_log(
+                    timed_out_text = (
                         "detect-secrets scan timed out (the limit is not shown: "
-                        f"the plugin's values hook {read.failure()})",
-                        level=logging.WARNING,
-                        append_to_stream="stderr",
+                        f"the plugin's values hook {read.failure()})"
                     )
-                    return None
-                self._plugin_log(
-                    text_without_values(
+                else:
+                    timed_out_text = text_without_values(
                         "detect-secrets scan timed out after "
                         f"{timeout_limit_token(scan_timeout, read.values)}",
                         read.values,
-                    ),
+                    )
+                self._plugin_log(
+                    timed_out_text,
                     level=logging.WARNING,
                     append_to_stream="stderr",
                 )
-                return None
+                # A killed worker wrote no results, so the scan fails: the timeout
+                # is recorded on the scanner (scan_timed_out_after), which is how
+                # the executor names it, and ScannerError is raised, as the
+                # template scan does for a tool it killed. Returning None here
+                # sent scan() on with the collection it already held (the
+                # baseline's entries, or none) and the executor graded that
+                # PASSED: a tree that was never scanned read as clean. The text
+                # raised is the logged line, which carries no environment value.
+                self._record_timeout(response, scan_timeout)
+                raise ScannerError(
+                    f"{timed_out_text}, so the worker was killed and produced no "
+                    "results file. Raise scanners.detect-secrets.options.scan_timeout "
+                    "if this target legitimately needs longer, or set it to null to "
+                    "leave this scanner unbounded."
+                )
             if response.get("returncode") != 0 or not output_file.exists():
                 detail = (response.get("stderr") or response.get("error") or "").strip()
                 raise ScannerError(
@@ -1564,9 +1578,9 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 
             # The baseline is read here and handed to the worker as data rather than
             # as a path: the worker may run in a sandbox that cannot see a baseline
-            # outside the source tree. It is also loaded here, which only parses it,
-            # so that a scan killed at its timeout still reports the baseline's
-            # entries, as the in-process scan did.
+            # outside the source tree. It is also loaded here, which only parses it.
+            # A scan killed at its timeout does not fall back to these entries: it
+            # raises.
             baseline_document = None
             if (
                 target_type == "source"

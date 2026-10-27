@@ -1940,7 +1940,8 @@ async def mcp_scan_directory(
             claimed_session.try_start_scan(None)
         elif not claimed_session.try_start_scan(limit):
             claimed_session.release_scan()
-            return session_scan_limit_refusal("scan_directory", limit)
+            # try_start_scan turns a scan away only when a limit is reached.
+            return session_scan_limit_refusal("scan_directory", cast(int, limit))
         counted = claimed_session
     elif limit is not None:
         shared = sessionless_scan_count()

@@ -426,6 +426,15 @@ _REVIEWED_LOCAL_PROCESSES = {
     "automated_security_helper.utils.sandbox.backends": (
         "probes for the local sandbox programs, reached through subprocess_utils"
     ),
+    # Reached from the same reporters because utils.content_db_staleness imports
+    # EMPTY_TOOL_CONFIG from it (the empty config file its status commands pass).
+    # The reporters call none of its functions. Its own spawns, through
+    # spawn_run, are grype db update and trivy's database downloads, run by the
+    # scanners before an online scan; they send no scan data.
+    "automated_security_helper.utils.content_db_refresh": (
+        "spawn_run for grype and trivy database updates, a local tool; "
+        "reporters import only EMPTY_TOOL_CONFIG"
+    ),
 }
 
 #: Modules a reporter or event handler reaches that import a module chosen at run
@@ -574,7 +583,7 @@ def test_every_plugin_package_that_sends_data_off_the_host_is_listed(tmp_path):
         OFF_HOST_PLUGIN_PACKAGES,
     )
 
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 - fixed argv: this interpreter, literal probe
         [sys.executable, "-c", code],
         cwd=tmp_path,
         capture_output=True,
@@ -845,7 +854,7 @@ def test_no_reporter_outside_those_packages_connects_or_starts_a_process(tmp_pat
         off_host_package,
     )
 
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 - fixed argv: this interpreter, literal probe
         [
             sys.executable,
             "-c",

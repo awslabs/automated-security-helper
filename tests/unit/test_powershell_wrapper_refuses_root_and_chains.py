@@ -262,7 +262,11 @@ def test_an_uncaught_refusal_under_file_exits_1(pwsh, src, tmp_path):
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert "after" not in result.stdout
-    assert " ".join(result.stderr.split()).count(REFUSAL_TEXT) == 1, result.stderr
+    # PowerShell draws an uncaught error in a frame and puts "|" at the start of
+    # each wrapped line, so the frame characters are dropped before the text is
+    # looked for; where the console is narrower the frame wraps inside the sentence.
+    flattened = " ".join(result.stderr.replace("|", " ").split())
+    assert flattened.count(REFUSAL_TEXT) == 1, result.stderr
 
 
 def test_a_no_exit_session_stays_open_after_a_refusal(pwsh, src, tmp_path):

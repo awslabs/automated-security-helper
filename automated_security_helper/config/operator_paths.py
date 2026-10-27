@@ -185,6 +185,19 @@ def anchored_environment_path(value: Any, base_dir: Path) -> Any:
     return os.path.join(os.fspath(base_dir), value)
 
 
+def _names_a_root(value: str) -> bool:
+    """True for an absolute path, and on Windows for one rooted without a drive.
+
+    Python 3.13 stopped counting ``/opt/ca`` or ``\\opt\\ca`` as absolute on
+    Windows, because the drive it is on is the current one. Anchoring such a
+    value would put the config file's drive in front of the root the operator
+    wrote, so it is left as written, as it was on 3.12 and before.
+    """
+    if os.path.isabs(value):
+        return True
+    return os.name == "nt" and value[:1] in ("/", "\\")
+
+
 def anchored_path(value: Any, base_dir: Path, *, only_if_there: bool = False) -> Any:
     """``value`` made absolute against ``base_dir``, when it is a relative path.
 
@@ -196,7 +209,7 @@ def anchored_path(value: Any, base_dir: Path, *, only_if_there: bool = False) ->
         return value
     if value.startswith("~") or "$" in value or "://" in value or "\x00" in value:
         return value
-    if os.path.isabs(value):
+    if _names_a_root(value):
         return value
     candidate = os.path.normpath(os.path.join(os.fspath(base_dir), value))
     if only_if_there and not os.path.exists(candidate):

@@ -36,6 +36,8 @@ import pathlib
 import re
 from typing import Iterator, List, Tuple
 
+from tests.utils.helpers import iter_repo_files
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 DEPLOY = REPO_ROOT / "deploy"
 CDK_TEMPLATES = DEPLOY / "cdk" / "templates"

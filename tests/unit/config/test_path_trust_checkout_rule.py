@@ -320,7 +320,11 @@ def _scanned_checkout(tmp_path: Path, config: str = "project_name: scanned\n") -
 
 
 def _honored(value, target, config, key=CHECKOV_KEY):
-    return honored_path(str(value), source_dir=target, key=key, config=config)
+    # The spelling the config documents and overrides above use (``as_posix()``):
+    # ``OperatorPaths.named`` matches the value the config holds as written, and a
+    # Windows ``str(path)`` has backslashes, so it would name no operator option.
+    spelled = value.as_posix() if isinstance(value, Path) else str(value)
+    return honored_path(spelled, source_dir=target, key=key, config=config)
 
 
 def _config_naming(path: Path, rules: Path) -> Path:

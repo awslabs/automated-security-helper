@@ -187,7 +187,8 @@ class TestTrivy:
 
         spawn = _scan(_trivy(context), context, mode)
 
-        assert spawn.values("--config") == [os.path.realpath(operator)]
+        # ASH passes the config as a forward-slash path on every platform.
+        assert spawn.values("--config") == [Path(os.path.realpath(operator)).as_posix()]
 
     def test_refuses_trivy_config_inside_the_tree(self, mode, context):
         mode.setenv("TRIVY_CONFIG", str(context.source_dir / "trivy.yaml"))
@@ -255,4 +256,4 @@ class TestSyft:
 
         spawn = _scan(_syft(context, config_file=str(operator)), context, mode)
 
-        assert spawn.values("--config") == [os.path.realpath(operator)]
+        assert spawn.values("--config") == [Path(os.path.realpath(operator)).as_posix()]

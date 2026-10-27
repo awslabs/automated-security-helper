@@ -513,6 +513,29 @@ global_settings:
         GHSA-45c3-73f7-pv4m (CVE-2026-114605): dnspython 2.8.0 in uv.lock, the Python 3.10
         entry. The fixed release 2.9.0 requires Python 3.11; the Python 3.11 and later entry
         is at 2.9.0. Revisit when requires-python rises or a supporting release ships.
+    # === Time-boxed: filelock GHSA-v4x8-3wr5-3wq8, no patched version on Python 3.10 (expires 2026-11-20) ===
+    # filelock is affected through 4.2.0 and fixed in 4.2.1, but 4.1.1 and later
+    # require Python 3.11 and this project supports 3.10, so uv.lock carries a
+    # filelock 4.0.x entry for Python 3.10 that no upgrade can patch. The 3.11 and
+    # later entry is on 4.2.4 and is not affected. The advisory concerns
+    # ReadWriteLock, which ASH does not use: nothing in the repository imports
+    # filelock directly, and it arrives only as a dependency of virtualenv and
+    # python-discovery. pyproject.toml holds that entry on 4.0.x with a uv constraint
+    # because 4.1.0 is affected by three more advisories (all Medium).
+    # Revisit when filelock backports the fix to a release that supports Python
+    # 3.10, or when this project drops 3.10.
+    - rule_id: "GHSA-v4x8-3wr5-3wq8-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expiration: "2026-11-20"
+      reason: >-
+        GHSA-v4x8-3wr5-3wq8: filelock 4.0.12 in uv.lock, the Python 3.10 resolution.
+        No patched release supports Python 3.10 (the fix is 4.2.1, which requires
+        3.11). ASH does not call ReadWriteLock, the affected API, and does not
+        import filelock itself. The 3.11 and later entry is on the patched 4.2.4.
+        Revisit when a 3.10-compatible fix ships or Python 3.10 support ends; see
+        the block comment above.
     # === detect-secrets: broad patterns by path ===
     #
     # This header used to claim detect-secrets had "no inline nosec support".

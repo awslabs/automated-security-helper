@@ -28,7 +28,7 @@ from tests.utils.helpers import mark_git_checkout
 
 @pytest.fixture(autouse=True)
 def _no_real_runner(monkeypatch):
-    def refuse(cmd_list, check=True, debug=False, shell=False):
+    def refuse(cmd_list, check=True, debug=False, shell=False, env=None):
         raise AssertionError(f"a real runner command was attempted: {cmd_list}")
 
     monkeypatch.setattr(rac, "run_cmd_direct", refuse)

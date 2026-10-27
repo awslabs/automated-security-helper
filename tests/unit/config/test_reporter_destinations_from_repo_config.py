@@ -1062,7 +1062,7 @@ _DESTINATION_LIKE = re.compile(
 
 @pytest.fixture(scope="module")
 def reporter_fields(tmp_path_factory):
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 - fixed argv: this interpreter, literal probe
         [sys.executable, "-c", _DUMP_REPORTER_FIELDS],
         cwd=tmp_path_factory.mktemp("fields"),
         capture_output=True,
@@ -1284,7 +1284,7 @@ def test_the_field_walker_sees_unions_nested_models_and_aliases(tmp_path):
         "    walk(m, '', found, frozenset())\n"
         "print(json.dumps(found))\n"
     )
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 - fixed argv: this interpreter, literal probe
         [sys.executable, "-c", probe],
         cwd=tmp_path,
         capture_output=True,

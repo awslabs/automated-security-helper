@@ -70,6 +70,11 @@ UNUSUAL_NAMES = [
     pytest.param("tab\there", id="tab"),
 ]
 
+#: Every test below creates each name as a directory, so the three a Windows file
+#: system cannot hold (the glob characters, the backslash and the tab) are skipped
+#: there and run everywhere else.
+UNUSUAL_NAMES = created_on_disk(_NAMES_LEGAL_ON_POSIX)
+
 _SCRUBBED_ENV = (
     "CI",
     "IsCI",
@@ -91,7 +96,7 @@ _SCRUBBED_ENV = (
 def _no_real_runner(monkeypatch):
     """No test here may start a real OCI runner; ``commands`` below records instead."""
 
-    def refuse(cmd_list, check=True, debug=False, shell=False):
+    def refuse(cmd_list, check=True, debug=False, shell=False, env=None):
         raise AssertionError(f"a real runner command was attempted: {cmd_list}")
 
     monkeypatch.setattr(rac, "run_cmd_direct", refuse)
@@ -797,7 +802,10 @@ class TestALinkOutOfTheScannedTreeIsRefusedForEveryMountedConfig:
         root = workspace["root"]
         (root / "policies").mkdir()
         (root / "policies" / "p.yaml").write_text("workspace: {}\n", encoding="utf-8")
-        (root / "ash-workspace.yaml").symlink_to("policies/p.yaml")
+        # A relative link target is written with the host's separators: Windows does
+        # not resolve "policies/p.yaml" as a link target, so the link would dangle
+        # and the policy would not be discovered.
+        (root / "ash-workspace.yaml").symlink_to(Path("policies") / "p.yaml")
 
         _scan(
             "--mode",

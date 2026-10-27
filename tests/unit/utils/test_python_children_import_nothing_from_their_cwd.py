@@ -48,6 +48,7 @@ from tests.utils.helpers import bound_run_command
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PACKAGE = REPO_ROOT / "automated_security_helper"
+# pragma: allowlist nextline secret
 DETECT_SECRETS_WORKER = "automated_security_helper.utils.detect_secrets_worker"
 
 
@@ -200,7 +201,13 @@ def test_the_bin_path_constant_is_absolute(tmp_path, value, expected):
     """
     home = tmp_path / "home"
     home.mkdir()
-    env = {**_child_env(), "ASH_BIN_PATH": value, "HOME": str(home)}
+    # USERPROFILE is the home directory on Windows; HOME is not read there.
+    env = {
+        **_child_env(),
+        "ASH_BIN_PATH": value,
+        "HOME": str(home),
+        "USERPROFILE": str(home),
+    }
     result = subprocess.run(
         [
             sys.executable,

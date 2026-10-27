@@ -206,7 +206,11 @@ def test_a_refused_bind_with_port_0_binds_nothing(monkeypatch) -> None:
 
     with pytest.raises(typer.Exit) as excinfo:
         mcp_command(
-            ctx=_Ctx(), transport="streamable-http", host="0.0.0.0", port=0, quiet=True
+            ctx=_Ctx(),
+            transport="streamable-http",
+            host="0.0.0.0",  # nosec B104
+            port=0,
+            quiet=True,
         )
 
     assert excinfo.value.exit_code == ASH_EXIT_USAGE_ERROR
@@ -224,5 +228,5 @@ def test_a_loopback_app_is_refused_without_the_port_it_listens_on(build, port) -
 
 @pytest.mark.parametrize("build", [build_streamable_http_app, build_sse_app])
 def test_an_app_that_does_not_check_the_port_needs_none(build) -> None:
-    build(mount_path="/x", host="0.0.0.0", allowed_hosts=["ash.example"])
-    build(mount_path="/x", host="0.0.0.0", trust_upstream_host_check=True)
+    build(mount_path="/x", host="0.0.0.0", allowed_hosts=["ash.example"])  # nosec B104
+    build(mount_path="/x", host="0.0.0.0", trust_upstream_host_check=True)  # nosec B104

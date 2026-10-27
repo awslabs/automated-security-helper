@@ -95,5 +95,7 @@ def test_the_hook_mounts_the_source_read_only(extra, commands):
     source = [mount for mount in mounts if "destination=/src" in mount.split(",")]
     output = [mount for mount in mounts if "destination=/out" in mount.split(",")]
     assert len(source) == 1 and "readonly" in source[0].split(","), mounts
-    # The output is the default inside the source directory, on its own mount.
-    assert len(output) == 1 and output[0].endswith(".ash/ash_output,destination=/out")
+    # The output is the default inside the source directory, on its own mount. The
+    # source side is a host path, so its separators are the host's.
+    assert len(output) == 1
+    assert output[0].replace("\\", "/").endswith(".ash/ash_output,destination=/out")

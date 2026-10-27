@@ -1368,9 +1368,19 @@ jobs:
           if config_file.name.endswith(".json"):
               document = json.loads(text)
           elif config_file.name.endswith(".toml"):
-              import tomllib
+              try:
+                  import tomllib
 
-              document = tomllib.loads(text)
+                  parse_toml = tomllib.loads
+              except ModuleNotFoundError:
+                  # tomllib is standard library from Python 3.11, and the python-version
+                  # input accepts 3.10. There ASH reads TOML with the `toml` package it
+                  # declares as a dependency, which the uv environment above installs.
+                  import toml
+
+                  parse_toml = toml.loads
+
+              document = parse_toml(text)
               if config_file.name == "pyproject.toml":
                   document = (document.get("tool") or {}).get("ash")
               document = references(document)

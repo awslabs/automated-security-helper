@@ -110,7 +110,11 @@ def test_every_spawn_gets_them_offline(offline, tmp_path):
         stdout_preference="return",
         stderr_preference="return",
         cwd=tmp_path,
-        env={"PATH": os.environ.get("PATH", "")},
+        # Windows starts no interpreter without SYSTEMROOT, so it is passed along.
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            **{k: v for k, v in os.environ.items() if k.upper() == "SYSTEMROOT"},
+        },
         timeout=CHILD_TIMEOUT_SECONDS,
     )
 

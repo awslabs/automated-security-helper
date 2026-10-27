@@ -22,7 +22,7 @@ from automated_security_helper.utils.inner_run_outcome import (
     record_refusal_outcome,
 )
 
-RUN = "0123456789abcdef0123456789abcdef"
+RUN = "0123456789abcdef0123456789abcdef"  # pragma: allowlist secret
 
 
 def test_a_recorded_refusal_reads_back_for_its_own_run_only(tmp_path):

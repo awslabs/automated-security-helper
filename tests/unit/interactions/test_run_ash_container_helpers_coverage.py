@@ -879,7 +879,7 @@ def recorded_commands(monkeypatch):
     """Capture the command lists run_cmd_direct would have executed."""
     calls: List[List[str]] = []
 
-    def fake_run_cmd_direct(cmd_list, check=True, debug=False, shell=False):
+    def fake_run_cmd_direct(cmd_list, check=True, debug=False, shell=False, env=None):
         recorded = [str(item) for item in cmd_list if item is not None]
         calls.append(recorded)
         return create_completed_process(args=recorded, returncode=0)

@@ -100,6 +100,9 @@ def commands(monkeypatch, tmp_path) -> List[List[str]]:
     )
     monkeypatch.setattr(rac, "_runner_supports_buildx", lambda _runner: False)
     monkeypatch.setattr(rac, "run_cmd_direct", record)
+    # The default image is the `non-root` one named above; a Windows host defaults
+    # to `ci` (run_ash_container._resolve_build_target), so the host is not Windows.
+    monkeypatch.setattr(rac, "_host_is_windows", lambda: False)
     for name in (
         "CI",
         "ASH_IMAGE_NAME",

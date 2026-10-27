@@ -1000,6 +1000,35 @@ def _widenings(
                         False,
                     )
                 )
+        listed, scanners = _walk(section, ["read_path_scanners"])
+        if listed and isinstance(scanners, list):
+            extra = [
+                str(name) for name in scanners if name not in trusted.read_path_scanners
+            ]
+            if extra:
+                found.append(
+                    DocumentDenial(
+                        "sandbox.read_path_scanners",
+                        "/sandbox/read_path_scanners",
+                        f"lets {', '.join(extra)} read the host paths their own "
+                        "options ask for, which the server's sandbox settings do not",
+                        False,
+                    )
+                )
+        listed, scanners = _walk(section, ["env_scanners"])
+        if listed and isinstance(scanners, list):
+            extra = [str(name) for name in scanners if name not in trusted.env_scanners]
+            if extra:
+                found.append(
+                    DocumentDenial(
+                        "sandbox.env_scanners",
+                        "/sandbox/env_scanners",
+                        f"passes {', '.join(extra)} the environment variables "
+                        "their own options ask for, which the server's sandbox "
+                        "settings do not",
+                        False,
+                    )
+                )
         listed, mode = _walk(section, ["mode"])
         if listed and trusted.mode != "off" and mode != trusted.mode:
             found.append(
@@ -1202,7 +1231,13 @@ def _mark_client_supplied(
             for raw in entries if present and isinstance(entries, list) else []:
                 try:
                     entry = model.model_validate(raw)
-                except Exception:  # noqa: BLE001 -- validation is reported elsewhere
+                except Exception as exc:  # noqa: BLE001 -- reported elsewhere
+                    ASH_LOGGER.debug(
+                        "Skipping a %s entry that does not validate (%s): %r",
+                        field,
+                        type(exc).__name__,
+                        raw,
+                    )
                     continue
                 operators[field].append(entry.model_dump(exclude={"client_supplied"}))
     for field in models:

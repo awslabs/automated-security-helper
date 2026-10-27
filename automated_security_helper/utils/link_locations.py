@@ -21,6 +21,25 @@ from typing import List
 #: lookup does.
 MAX_LINKS_FOLLOWED = 40
 
+_EXTENDED_PREFIX = "\\\\?\\"
+_EXTENDED_UNC_PREFIX = "\\\\?\\UNC\\"
+
+
+def without_extended_prefix(target: str) -> str:
+    """``target`` without the Win32 extended-length prefix ``os.readlink`` can give it.
+
+    A link made with an absolute target reads back on Windows as ``\\\\?\\C:\\dir``.
+    The same place is ``C:\\dir`` everywhere else the walk and its callers name
+    it, and the two spellings do not compare equal, so a location kept in the
+    prefixed form would be taken for one outside the directory it sits in.
+    ``\\\\?\\UNC\\host\\share`` becomes ``\\\\host\\share``.
+    """
+    if target.startswith(_EXTENDED_UNC_PREFIX):
+        return "\\\\" + target[len(_EXTENDED_UNC_PREFIX) :]
+    if target.startswith(_EXTENDED_PREFIX):
+        return target[len(_EXTENDED_PREFIX) :]
+    return target
+
 
 def link_locations(path: str | Path) -> List[Path]:
     """Where each symlink sits that looking ``path`` up follows, in the order followed.
@@ -57,12 +76,13 @@ def link_locations(path: str | Path) -> List[Path]:
             if not step.is_symlink():
                 current = step
                 continue
-            target = Path(os.readlink(step))
+            text = os.readlink(step)
         except OSError:
             break
         if len(found) >= MAX_LINKS_FOLLOWED:
             break
         found.append(step)
+        target = Path(without_extended_prefix(text) if os.name == "nt" else text)
         if target.is_absolute():
             current = Path(target.anchor)
             pending = list(target.parts[1:]) + pending

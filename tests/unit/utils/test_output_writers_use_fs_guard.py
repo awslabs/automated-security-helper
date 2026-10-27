@@ -222,7 +222,7 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
     (_INSTALLER, "stage_third_party", "write_text"): (1, _INSTALLS),
     (_INSTALLER, "verify_third_party", "write_text"): (1, _INSTALLS),
     (f"{_ASH}/cli/config.py", "_apply_fixes", "write_text"): (1, _CONFIG),
-    (f"{_ASH}/cli/config.py", "_apply_unused_fixes", "write_text"): (1, _CONFIG),
+    (f"{_ASH}/cli/config.py", "_apply_unused_fixes", "write_bytes"): (1, _CONFIG),
     (f"{_ASH}/cli/config.py", "_ensure_output_gitignore", "write_text"): (
         1,
         _PROJECT_ASH_DIR,

@@ -363,7 +363,8 @@ def session_identity_refusal(
 ) -> Optional[Dict[str, Any]]:
     """The refusal a session-dependent tool returns for an unidentified caller.
 
-    Returns None when ``session_id`` names a session.
+    Returns None when ``session_id`` names a session, or is None: only the
+    :data:`UNIDENTIFIED_SESSION_ID` sentinel is refused.
     """
 
     if session_id != UNIDENTIFIED_SESSION_ID:

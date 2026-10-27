@@ -202,7 +202,9 @@ def test_create_url_download_command(mock_mkdir, mock_exists):
     # After the code-injection fix, values are passed as separate args
     # rather than interpolated into the -c script
     assert "https://example.com/file" in result.args
-    assert "/custom/destination" in result.args
+    # The destination is made absolute and written with forward slashes
+    # (create_url_download_command), so on Windows it carries the drive.
+    assert Path("/custom/destination").absolute().as_posix() in result.args
     assert "renamed_file" in result.args
     # Lowercased on the way in, and handed to the verified install as an argument.
     assert "a" * 64 in result.args

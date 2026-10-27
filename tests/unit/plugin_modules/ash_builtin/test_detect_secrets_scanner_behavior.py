@@ -22,6 +22,7 @@ property of the code, not a test artifact.
 import json
 import logging
 import multiprocessing
+import os
 import re
 import shlex
 import sys
@@ -125,7 +126,7 @@ def test_dependencies_are_always_satisfied_because_the_import_succeeded(scanner)
     assert scanner.validate_plugin_dependencies() is True
 
 
-_COMMIT = "0123456789abcdef0123456789abcdef01234567"
+_COMMIT = "0123456789abcdef0123456789abcdef01234567"  # pragma: allowlist secret
 
 
 def test_missing_library_log_line_prints_a_bracketed_path_as_is(
@@ -147,7 +148,8 @@ def test_missing_library_log_line_prints_a_bracketed_path_as_is(
 
     checkout = tmp_path / "c[bold]d" / "a[" / "]b"
     checkout.mkdir(parents=True)
-    assert "[/]" in str(checkout) and "[bold]" in str(checkout)
+    # The separator is "\" on Windows, so the path holds "[\]" there.
+    assert f"[{os.sep}]" in str(checkout) and "[bold]" in str(checkout)
     monkeypatch.setattr(
         ash_install,
         "_direct_url",
@@ -175,7 +177,7 @@ def test_missing_library_log_line_prints_a_bracketed_path_as_is(
 
     printed = " ".join(buffer.getvalue().split())
     assert "detect-secrets is not importable" in printed, printed
-    assert "c[bold]d" in printed and "a[/]b" in printed, printed
+    assert "c[bold]d" in printed and f"a[{os.sep}]b" in printed, printed
 
 
 @pytest.mark.parametrize(

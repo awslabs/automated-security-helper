@@ -31,6 +31,11 @@ What it models
   working directory Actions would use, with the environment layered workflow ->
   job -> step, and with ``uv``, ``uvx``, ``curl``, ``bundle``, ``gem``, ``ruby``
   and ``grype`` replaced by stubs that record argv, cwd and selected variables.
+  The bash is the first one that expands ``${var,,}`` (bash 4): the workflows run on
+  ubuntu-latest, where that is so, but the first ``bash`` on a macOS PATH is 3.2. A
+  host with no such bash skips a step that dies with "bad substitution" instead of
+  failing it (``step_bash``). On Windows the bash is Git for Windows' own
+  (``git_for_windows_bash``), since a bare ``bash`` there is the WSL launcher.
 * ``RUNNER_TEMP`` shared by a job's steps, for the one_line helper only: a step
   that loads ``${RUNNER_TEMP}/ash-one-line.sh`` runs after the job's own
   ``Write the one_line helper`` step, if the job has one before it
@@ -46,6 +51,7 @@ the caller puts in the context.
 
 from __future__ import annotations
 
+import functools
 import json
 import math
 import os
@@ -57,6 +63,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
+import pytest
 import yaml
 
 from tests.utils.workflow_commands import DEFINER_NAME, HELPER_FILE, HELPER_SOURCE
@@ -906,11 +913,102 @@ class StepRun:
         )
 
 
-def _shell_argv(shell: str | None, script: Path) -> list[str]:
+#: Where a bash 4 or newer may live on a host whose first ``bash`` on PATH is older.
+#: macOS keeps bash 3.2 at /bin/bash; Homebrew installs a newer one under the first
+#: two prefixes (Apple silicon, Intel), and Linuxbrew under the third.
+BASH_CANDIDATES = (
+    "/opt/homebrew/bin/bash",
+    "/usr/local/bin/bash",
+    "/home/linuxbrew/.linuxbrew/bin/bash",
+    "/usr/bin/bash",
+    "/bin/bash",
+)
+
+
+def _can_change_case(bash: str) -> bool:
+    """True when ``bash`` expands ``${var,,}``, which needs bash 4."""
+    # BASH_ENV would run a file before the probe and could add to its output.
+    env = {name: value for name, value in os.environ.items() if name != "BASH_ENV"}
+    try:
+        probe = subprocess.run(
+            [bash, "-c", 'x=A; printf %s "${x,,}"'],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return probe.returncode == 0 and probe.stdout == "a"
+
+
+@functools.cache
+def step_bash(path_env: str, candidates: tuple[str, ...]) -> str | None:
+    """A bash that expands ``${var,,}``, or None when no bash on this host does.
+
+    The workflows run on ubuntu-latest, whose bash is 5, and some steps lowercase with
+    ``${var,,}``. A step started with the first ``bash`` on a macOS PATH, which is
+    3.2, stops with "bad substitution". The first ``bash`` on ``path_env`` is tried
+    first, since it is what a step used before this lookup, then each of
+    ``candidates``. Each is probed once per (PATH, candidates) pair.
+    """
+    tried: set[str] = set()
+    for bash in (shutil.which("bash", path=path_env), *candidates):
+        if bash is None or not os.path.isfile(bash) or not os.access(bash, os.X_OK):
+            continue
+        real = os.path.realpath(bash)
+        if real in tried:
+            continue
+        tried.add(real)
+        if _can_change_case(bash):
+            return bash
+    return None
+
+
+@functools.cache
+def git_for_windows_bash() -> str | None:
+    """Git for Windows' ``bash.exe``, or None when this host has none.
+
+    A bare ``bash`` handed to CreateProcess is found in the system directory before
+    PATH is searched, and on a Windows runner that is the WSL launcher
+    (``C:\\Windows\\System32\\bash.exe``), which prints "Windows Subsystem for Linux
+    has no installed distributions" and runs nothing. Git for Windows ships the bash
+    the workflows' ``shell: bash`` steps use on a Windows runner, next to ``git``.
+    """
+    roots: list[Path] = []
+    git = shutil.which("git")
+    if git:
+        # ...\Git\cmd\git.exe, ...\Git\bin\git.exe or ...\Git\mingw64\bin\git.exe
+        resolved = Path(git).resolve()
+        roots += list(resolved.parents)[1:3]
+    for name in ("ProgramFiles", "ProgramW6432"):
+        if os.environ.get(name):
+            roots.append(Path(os.environ[name]) / "Git")
+    for root in roots:
+        candidate = root / "bin" / "bash.exe"
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def _bash_version(bash: str | None) -> str:
+    if bash is None:
+        return "no bash on PATH"
+    try:
+        probe = subprocess.run(
+            [bash, "--version"], capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.SubprocessError):
+        return bash
+    first_line = probe.stdout.splitlines()[0] if probe.stdout.strip() else "unknown"
+    return f"{bash}: {first_line}"
+
+
+def _shell_argv(shell: str | None, script: Path, bash: str = "bash") -> list[str]:
     if shell is None:
-        return ["bash", "-e", str(script)]
+        return [bash, "-e", str(script)]
     if shell == "bash":
-        return ["bash", "--noprofile", "--norc", "-eo", "pipefail", str(script)]
+        return [bash, "--noprofile", "--norc", "-eo", "pipefail", str(script)]
     if shell == "sh":
         return ["sh", "-e", str(script)]
     raise ExpressionError(f"shell {shell!r} is not modeled")
@@ -927,6 +1025,11 @@ def run_step(
     github_env: dict[str, str] | None = None,
 ) -> StepRun:
     """Run one step's ``run:`` block the way a Linux runner would, with stubs on PATH.
+
+    A bash step runs under a bash that expands ``${var,,}`` (``step_bash``). On a host
+    that has none, a step that stops with "bad substitution" is skipped, because the
+    workflow targets ubuntu-latest and the failure says nothing about it. On Windows
+    the step runs under Git for Windows' bash (``git_for_windows_bash``).
 
     ``github_env`` is what earlier steps wrote to ``GITHUB_ENV`` (``read_github_env``).
     The runner applies it over the workflow and job ``env:`` and under the step's own
@@ -997,14 +1100,37 @@ def run_step(
 
     script = sandbox.runner_temp / "_step_script.sh"
     script.write_text(to_string(render(step["run"], ctx)), encoding="utf-8")
+    # Windows runs Git for Windows' bash (5.x); a bare "bash" there is the WSL
+    # launcher on a runner (git_for_windows_bash). Elsewhere the step runs under a
+    # bash that can lowercase, if the host has one.
+    # The stub directory holds no bash, so it is left out of the lookup: the answer
+    # is then the same for every sandbox and is probed once per process.
+    bash, bash_is_old, host_path = "bash", False, ""
+    if os.name != "nt":
+        host_path = os.pathsep.join(
+            entry
+            for entry in env.get("PATH", "").split(os.pathsep)
+            if entry != str(sandbox.stub_dir)
+        )
+        found = step_bash(host_path, tuple(BASH_CANDIDATES))
+        bash, bash_is_old = found or "bash", found is None
+    else:
+        bash = git_for_windows_bash() or "bash"
     proc = subprocess.run(
-        _shell_argv(shell, script),
+        _shell_argv(shell, script, bash),
         cwd=cwd,
         env=env,
         capture_output=True,
         text=True,
         timeout=120,
     )
+    if bash_is_old and shell in (None, "bash") and "bad substitution" in proc.stderr:
+        first_bash = shutil.which("bash", path=host_path)
+        pytest.skip(
+            f"step {step.get('name')!r} expands ${{var,,}}, which needs bash 4. The "
+            "workflow runs on ubuntu-latest, whose bash is 5. Here the first bash on "
+            f"PATH is {_bash_version(first_bash)} and no newer one is installed"
+        )
     calls = [
         json.loads(line)
         for line in log.read_text(encoding="utf-8").splitlines()
