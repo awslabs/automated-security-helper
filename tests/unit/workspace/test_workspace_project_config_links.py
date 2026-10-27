@@ -18,6 +18,7 @@ import builtins
 import io
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any, List
 from unittest.mock import patch
@@ -45,6 +46,17 @@ SUPPRESSIONS = (
 
 class _Stop(Exception):
     pass
+
+
+#: On Windows a project's discovery under an MCP session's gate refuses any linked
+#: config source before it opens it (``config_sources._permitted``: resolving a
+#: link there can open a connection to the host a UNC target names), so a test
+#: that needs the link followed to the host file cannot reach what it asserts.
+#: The refusals this file pins (``_assert_refused_unread``) hold on every platform.
+follows_a_link = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="an MCP session refuses a linked config source on Windows before reading it",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -141,6 +153,7 @@ def test_the_plan_names_a_linked_project_config_by_its_path_in_the_project(
     )
 
 
+@follows_a_link
 def test_an_mcp_workspace_scan_marks_a_delivered_links_suppressions(
     _server, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -282,6 +295,7 @@ def test_the_scan_side_refuses_it_without_the_plans_check(_server, tmp_path) -> 
     assert CANARY not in str(raised[0])
 
 
+@follows_a_link
 def test_a_link_into_a_set_aside_directory_is_followed(
     _server, monkeypatch: pytest.MonkeyPatch
 ) -> None:
