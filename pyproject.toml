@@ -1603,6 +1603,19 @@ members = [ ".",]
 
 [tool.uv.sources]
 
+[tool.hatch.build]
+# hatchling walks every directory under the project root to find the files it
+# packages, and an `exclude` pattern on its own only drops the files it matches:
+# the walk still descends into the directory. `skip-excluded-dirs` makes it prune
+# the directory instead. That matters for a uv cache placed under the project root
+# (the Homebrew formula once set UV_CACHE_DIR there): uv writes and renames
+# temporary entries in its cache while hatchling builds ASH from the same tree, and
+# the walk failed in hatchling's safe_walk with FileNotFoundError on a directory
+# that had vanished between listing and stat. .venv needs no entry here: hatchling
+# never descends into it. tests/unit/test_homebrew_formula_install.py holds this.
+exclude = [ ".uv-cache/",]
+skip-excluded-dirs = true
+
 [tool.hatch.build.targets.sdist]
 # "/Dockerfile" is anchored to the project root. hatch reads include entries as
 # gitignore patterns, so a bare "Dockerfile" matched every file of that name at any
