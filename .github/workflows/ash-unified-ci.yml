@@ -1342,10 +1342,10 @@ jobs:
   # same silent pass this job exists to remove. --run-slow costs nothing in scope: measured,
   # there are exactly zero slow-marked items that are not also integration-marked.
   #
-  # A path, plus one file outside it. The predicate is keywords, not paths, so it reaches
-  # outside tests/integration/: tests/unit/cli/mcp/test_source_delivery_scan_e2e.py carries
-  # @pytest.mark.integration at the test. A bare `pytest tests/integration` would leave that
-  # one permanently skipped.
+  # One path. Every @pytest.mark.integration test lives under tests/integration/, the
+  # source-delivery end-to-end test included (tests/integration/cli/): under tests/unit/ the
+  # unit suite's tool guard (tests/unit/conftest.py) fails a test that starts a real
+  # scanner, which that test does on purpose.
   #
   # Not `-k integration`. It selects 126 rather than 115, because -k substring-matches node
   # ids as well as keywords and picks up 11 tests that are not gated and already run in
@@ -1419,7 +1419,6 @@ jobs:
           export PATH="$HOME/.ash/bin:$HOME/.local/bin:$PATH"
           uv run pytest \
             tests/integration \
-            tests/unit/cli/mcp/test_source_delivery_scan_e2e.py \
             --run-integration --run-slow \
             --no-cov -p no:randomly -n 0 \
             --junit-xml=test-results/integration.junit.xml
