@@ -822,6 +822,15 @@ def workspace_ignore_file_exclusions(
     return aggregate
 
 
+def _larger_code(first: Optional[int], second: Optional[int]) -> Optional[int]:
+    """The larger of two rolled-up codes, where null (no code) is below any code."""
+    if first is None:
+        return second
+    if second is None:
+        return first
+    return max(first, second)
+
+
 def _workspace_report_id(workspace_file: str) -> str:
     """The unified report's id: ``ASH-WORKSPACE-<file name>-<time>-<random>``.
 
