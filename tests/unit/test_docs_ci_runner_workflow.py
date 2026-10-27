@@ -1712,6 +1712,8 @@ def _pytest_ini_addopts() -> list[str]:
 #:   times its step budgets are checked against.
 #: * ``-n auto``: ``-n 0``, the blocks one at a time, since they share the Docker
 #:   daemon, the pull recording and the images the session builds.
+#: * ``--dist worksteal``: left out. With ``-n 0`` no worker starts, so there is no work
+#:   to distribute.
 ADDOPTS_IN_CI = (
     (("--verbose",), ()),
     (("--cov=automated_security_helper",), ()),
@@ -1721,6 +1723,7 @@ ADDOPTS_IN_CI = (
     (("--junit-xml=test-results/pytest.junit.xml",), ("--junit-xml=",)),
     (("--durations=10",), ("--durations=0", "--durations-min=0")),
     (("-n", "auto"), ("-n", "0")),
+    (("--dist", "worksteal"), ()),
     (("--cov-config=.coveragerc",), ()),
 )
 
@@ -1933,7 +1936,11 @@ PYTEST_CONFIG_NAMES = (
 )
 #: The conftest.py files pytest loads for the CI runs: those in the rootdir and in each
 #: directory down to the test modules'. Each is named in the path filter.
-CONFTESTS = ("tests/conftest.py", "tests/integration/docs/conftest.py")
+CONFTESTS = (
+    "tests/conftest.py",
+    "tests/integration/conftest.py",
+    "tests/integration/docs/conftest.py",
+)
 
 
 def _pytest_ini_settings() -> dict[str, str]:

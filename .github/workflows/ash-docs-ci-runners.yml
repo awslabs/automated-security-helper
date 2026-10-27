@@ -104,6 +104,7 @@ on:
       - ".github/workflows/ash-docs-ci-runners.yml" # this workflow
       - "tests/integration/docs/ci_runners/**" # the harness, the pins in runners.toml, the Jenkins plugin closures and init hook, the GitLab helper Dockerfile, and the install and check scripts
       - "tests/integration/docs/test_docs_ci_runners*.py" # the runs and the negative controls
+      - "tests/integration/conftest.py" # the preinstalled-tools guard of the integration suite, loaded with the runs
       - "tests/integration/docs/conftest.py" # options of the docs integration tests, loaded with the runs
       - "tests/conftest.py" # the ci_runner marker and the options that select the runs
       - "pytest.ini" # the pytest settings the runs read besides the flags on their command lines
