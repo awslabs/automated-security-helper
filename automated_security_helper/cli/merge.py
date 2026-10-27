@@ -342,6 +342,7 @@ from automated_security_helper.utils.report_path_links import ReportPathRefused
 from automated_security_helper.utils.sbom_merge import merge_cyclonedx_reports
 from automated_security_helper.utils.secret_masking import mask_secrets_in_results
 from automated_security_helper.utils.terminal_text import (
+    raw_controls_on_one_line,
     raw_controls_shown,
     shown_on_one_line,
 )
@@ -687,13 +688,19 @@ def _refusal_text(error: Exception) -> Text:
 def _invalid_config_text(error: Exception) -> Text:
     """The operator-config refusal as ``ash merge`` prints it, before exit 3.
 
-    As _refusal_text: the message quotes the path with its controls already
-    escaped (describe_config_path), so it is shown whole by _shown_lines, which
-    writes only a raw control as its escape, and printed as Text, which reads no
-    markup. Through escape_markup the backslash of each escape was doubled, so a
-    name holding ESC printed as ``\\\\x1b`` where ``\\x1b`` was meant.
+    The message quotes the operator's path as it is (describe_config_path), and
+    the refusal is one line, so the whole message is shown once on one line:
+    every control in it, a newline included, is written as its escape
+    (``\\x0a``), its backslashes are kept and its CI command forms broken
+    (utils/terminal_text.py raw_controls_on_one_line). Printed as Text, which
+    reads no markup. Through escape_markup the backslash of each escape was
+    doubled, so a name holding ESC printed as ``\\\\x1b`` where ``\\x1b`` was
+    meant, and through _shown_lines a newline in the path started a line of its
+    own.
     """
-    return Text(f"Invalid configuration: {_shown_lines(str(error))}", style="red")
+    return Text(
+        f"Invalid configuration: {raw_controls_on_one_line(str(error))}", style="red"
+    )
 
 
 @functools.lru_cache(maxsize=1)

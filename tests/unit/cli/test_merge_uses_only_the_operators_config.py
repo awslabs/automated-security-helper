@@ -392,7 +392,9 @@ def test_the_refusal_escapes_control_characters_in_the_path(case, tmp_path):
     output = result["output"]
     assert "\x1b" not in output, repr(output[-2000:])
     assert "\nnext" not in output, repr(output[-2000:])
-    assert _flat("op\\x1b[31mred\\nnext") in _flat(output), repr(output[-2000:])
+    # Shown on one line, a newline is written \x0a (utils/terminal_text.py), the
+    # spelling every shown path uses; \n is repr's.
+    assert _flat("op\\x1b[31mred\\x0anext") in _flat(output), repr(output[-2000:])
 
 
 def test_control_a_usable_operator_config_merges(tmp_path):
