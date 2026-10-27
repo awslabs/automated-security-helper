@@ -583,7 +583,11 @@ class TestSpawnsRefuseInTreePrograms:
         self, repo, monkeypatch
     ):
         monkeypatch.setenv(ALLOW_IN_TREE_TOOLS_ENV, "1")
-        path = os.pathsep.join([str(repo / ".venv" / "bin"), "/usr/bin"])
+        # Both entries anchored: a child's PATH keeps only those, and "/usr/bin"
+        # has no drive letter on Windows.
+        path = os.pathsep.join(
+            [str(repo / ".venv" / "bin"), os.path.abspath("/usr/bin")]
+        )
         monkeypatch.setenv("PATH", path)
 
         with scanning_tree(repo):
