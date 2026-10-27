@@ -37,7 +37,7 @@ def test_a_value_the_file_cannot_encode_is_refused_naming_the_variable(tmp_path)
     with pytest.raises(ContainerInputError, match="ASH_RECV_TOKEN"):
         run_ash_container._write_env_file(
             ["ASH_RECV_TOKEN"],
-            {"ASH_RECV_TOKEN": "a\udce9b"},
+            {"ASH_RECV_TOKEN": "a\udce9b"},  # nosec B105 - test input, not a secret
             "docker",
             source,
             out,
