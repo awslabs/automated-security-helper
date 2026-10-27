@@ -33,7 +33,7 @@ import os
 import platform
 import re
 import shutil
-import subprocess
+import subprocess  # nosec B404 - runs the real trivy binary and ash CLI under test
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -81,7 +81,7 @@ def _platform() -> str:
 
 def _version_of(binary: str) -> str | None:
     try:
-        out = subprocess.run(
+        out = subprocess.run(  # nosec B603 - fixed argv, asks the binary under test for its version
             [binary, "--version"], capture_output=True, text=True, timeout=30
         ).stdout
     except (OSError, subprocess.SubprocessError):
@@ -115,7 +115,7 @@ def trivy_cache(trivy_bin_dir, tmp_path_factory) -> Path:
     """A private trivy cache holding a freshly downloaded vulnerability database."""
     cache = tmp_path_factory.mktemp("trivy-cache")
     trivy = shutil.which("trivy", path=str(trivy_bin_dir))
-    proc = subprocess.run(
+    proc = subprocess.run(  # nosec B603 - runs the trivy binary under test, fixed argv
         [trivy, "image", "--download-db-only", "--cache-dir", str(cache)],
         capture_output=True,
         text=True,
@@ -484,7 +484,7 @@ def _ash() -> str:
 def _run_ash(source: Path, output: Path, config: dict, env: dict, *extra: str):
     config_path = source.parent / "ash.yaml"
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
-    proc = subprocess.run(
+    proc = subprocess.run(  # nosec B603 - starts the real ash CLI under test, fixed argv
         [
             _ash(),
             "scan",
@@ -830,7 +830,7 @@ def _plant_ignore_policy(root: Path) -> None:
 
 def _trivy_on_its_own(source: Path, out: Path, subcommand: str) -> set:
     """``trivy <subcommand>`` in ``source`` with trivy's own config discovery."""
-    proc = subprocess.run(
+    proc = subprocess.run(  # nosec B603 B607 - control run of trivy by name, as a user would
         [
             "trivy",
             subcommand,
@@ -955,7 +955,7 @@ def test_trivy_repo_does_not_apply_an_ignore_policy_from_the_trees_trivy_yaml(
     tmp_path, trivy_env
 ):
     source = _copy_fixture(tmp_path)
-    subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+    subprocess.run(["git", "init", "-q"], cwd=source, check=True)  # nosec B603 B607 - fixed argv, git init on a tmp_path copy
     config = _trivy_repo_config(["vuln"])
     proc, log = _run_ash(
         source, tmp_path / "out0", config, trivy_env, "--scanners", "trivy-repo"
@@ -992,7 +992,7 @@ def test_trivy_repo_does_not_read_the_trees_trivy_secret_yaml(tmp_path, trivy_en
         f"AWS_ACCESS_KEY_ID={key_id}\nAWS_SECRET_ACCESS_KEY={secret}\n",
         encoding="utf-8",
     )
-    subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+    subprocess.run(["git", "init", "-q"], cwd=source, check=True)  # nosec B603 B607 - fixed argv, git init on a tmp_path copy
     config = _trivy_repo_config(["secret"])
     proc, log = _run_ash(
         source, tmp_path / "out0", config, trivy_env, "--scanners", "trivy-repo"

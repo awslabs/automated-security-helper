@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404 - runs git and the real ash CLI under test
 import sys
 from pathlib import Path
 
@@ -124,7 +124,7 @@ def test_real_zizmor_paths_are_relative_to_a_scanned_subdirectory(tmp_path):
     """zizmor reports URIs from the git root; ASH must report them from source_dir."""
     repository = tmp_path / "repository"
     shutil.copytree(FIXTURE_REPO, repository / "service")
-    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)  # nosec B603 B607 - fixed argv, git init on a tmp_path copy
     _, report = _scan(repository / "service")
     found = {(rule, uri) for rule, uri, _ in _findings(report)}
     assert REQUIRED_FINDINGS <= found, found
@@ -142,8 +142,8 @@ def test_real_zizmor_keeps_a_nested_repository_apart_from_the_outer_one(tmp_path
         FIXTURE_REPO / ".github/workflows/vulnerable.yml",
         nested / ".github" / "workflows" / "ci.yml",
     )
-    subprocess.run(["git", "init", "-q", str(source_dir)], check=True)
-    subprocess.run(["git", "init", "-q", str(nested)], check=True)
+    subprocess.run(["git", "init", "-q", str(source_dir)], check=True)  # nosec B603 B607 - fixed argv, git init on a tmp_path copy
+    subprocess.run(["git", "init", "-q", str(nested)], check=True)  # nosec B603 B607 - fixed argv, git init on a tmp_path copy
     _, report = _scan(source_dir)
     found = {(rule, uri) for rule, uri, _ in _findings(report)}
     assert ("zizmor/template-injection", "vendor/lib/.github/workflows/ci.yml") in found

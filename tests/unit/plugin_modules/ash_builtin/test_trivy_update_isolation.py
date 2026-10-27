@@ -20,7 +20,7 @@ version that ran the update itself from ASH's working directory.
 from __future__ import annotations
 
 import os
-import subprocess
+import subprocess  # nosec B404 - only builds a CompletedProcess for the fake run
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
