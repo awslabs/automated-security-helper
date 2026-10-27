@@ -158,8 +158,21 @@ def test_the_scan_pre_check_refuses_a_module_list_that_is_not_a_list() -> None:
             )
         )
 
-    assert result.get("error_type") == "config_field_denied", result
+    # The scan tool reads the config first and refuses one that does not validate
+    # (mcp_tools.mcp_scan_directory, the checked.load_error branch), naming the
+    # field, before the denial check runs. Either way the scan is refused with a
+    # response and never started.
+    assert result["success"] is False, result
+    assert "ash_plugin_modules" in result["error"], result
     assert not started.called
+
+    # The denial check on its own still returns a refusal for this file instead
+    # of raising.
+    denial = mcp_tools._client_config_denial(
+        str(source / "ash.yaml"), source, REMOTE, "scan_directory"
+    )
+    assert denial is not None, "the denial check passed a file it cannot read"
+    assert denial["success"] is False, denial
 
 
 def test_a_pre_check_that_raises_is_a_scan_start_failure() -> None:
