@@ -1,11 +1,14 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""In ``ash scan --workspace``, ``--config`` is the config of a project that has none.
+"""In ``ash scan --workspace``, ``--config`` is the operator's config, layered over every project's.
 
 That is the design (``ProjectScanSettings.default_config_path``,
-``resolver._resolve_project_config``): each project's own config wins, and the
-operator's ``--config`` replaces ASH's built-in defaults for a project without one.
+``resolver._resolve_project_config``): every field the operator's file sets is
+final for every project, a project's own config fills only the fields it leaves
+unset, and a project without one uses the operator's file alone in place of ASH's
+built-in defaults. Every file the operator's config is built from must be the
+operator's, so it sits outside the workspace root (``check_operator_config``).
 ``ash scan`` resolves the plan with ``--config``, so the plan and the scan side
 honor it alike: a project's verdict is taken from the plan, and it is judged at
 the same threshold its scanners run under. The MCP workspace tools already pass
@@ -40,14 +43,20 @@ def scan_calls(monkeypatch):
 
 
 def _workspace(tmp_path):
+    # The workspace root is the .code-workspace file's directory, and the
+    # operator's --config is refused when a file it is built from is inside it
+    # (resolve_config.check_operator_config), so the operator's file sits
+    # beside the root, never under it.
+    root = tmp_path / "workspace"
+    root.mkdir()
     for project in ("api", "web"):
-        (tmp_path / project).mkdir()
-    (tmp_path / "web" / ".ash").mkdir()
-    (tmp_path / "web" / ".ash" / "ash.yaml").write_text(
+        (root / project).mkdir()
+    (root / "web" / ".ash").mkdir()
+    (root / "web" / ".ash" / "ash.yaml").write_text(
         "project_name: web\nglobal_settings:\n  severity_threshold: LOW\n",
         encoding="utf-8",
     )
-    workspace = tmp_path / "dev.code-workspace"
+    workspace = root / "dev.code-workspace"
     workspace.write_text(
         json.dumps({"folders": [{"path": "api"}, {"path": "web"}]}), encoding="utf-8"
     )
@@ -78,6 +87,9 @@ def test_a_project_without_a_config_is_planned_under_the_named_config(
 
 
 def test_a_project_with_its_own_config_keeps_it(tmp_path, scan_calls):
+    """The project's own file stays its config, with the operator's layered over
+    it: the fields the operator sets are final (the CRITICAL threshold here),
+    and the project's file fills only the rest."""
     workspace, operator_config = _workspace(tmp_path)
 
     runner.invoke(
@@ -85,7 +97,11 @@ def test_a_project_with_its_own_config_keeps_it(tmp_path, scan_calls):
     )
 
     web = next(p for p in scan_calls[0]["workspace_plan"].projects if p.key == "web")
-    assert web.severity_threshold == "LOW"
+    assert web.config_source is not None
+    assert web.config_source.endswith("web/.ash/ash.yaml"), web.config_source
+    assert web.operator_config is not None
+    assert web.operator_config.endswith("strict.yaml"), web.operator_config
+    assert web.severity_threshold == "CRITICAL"
 
 
 def test_dry_run_prints_the_threshold_the_scan_applies(tmp_path, scan_calls):
