@@ -1252,12 +1252,25 @@ class TestTheConfigComesFromTheCommitTheAshInstallIsPinnedTo:
     def _pin(self, repo: Repository, context, inputs) -> dict[str, Any]:
         workflow, job = _job()
         (step,) = [s for s in job["steps"] if s.get("id") == "ash-pin"]
+        scoped = ga.with_inputs(context, inputs)
+        # The pin reads the resolve step's outputs (steps.ash-source), which carry
+        # the checked ash-version and ash-repo; both are set by this caller.
+        checked = scoped["steps"][ga.INPUT_CHECK_STEP_ID]["outputs"]
+        scoped["steps"] = {
+            **scoped["steps"],
+            "ash-source": {
+                "outputs": {
+                    "version": checked["ash_version"],
+                    "repo": checked["ash_repo"],
+                }
+            },
+        }
         run = ga.run_step(
             repo.sandbox,
             workflow,
             job,
             step,
-            ga.with_inputs(context, inputs),
+            scoped,
             extra_env=repo.ash_url_env(),
         )
         assert run.proc.returncode == 0, run.describe()

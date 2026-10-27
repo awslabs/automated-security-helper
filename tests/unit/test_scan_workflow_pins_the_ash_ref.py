@@ -10,17 +10,20 @@ Why this file exists
 name again, so a merge that landed while the job ran could give one step one ASH and
 the next step another, or install one ASH and the cfn-nag Gemfile of another.
 
-The job's first step after the input check now resolves ``ash-version`` in
-``ash-repo`` to a commit with ``git ls-remote`` and writes ``ASH_UVX_SOURCE`` and
-``ASH_ASSETS_URL`` with that commit to ``GITHUB_ENV``, which the runner applies over
-the workflow-level values for every later step.
+The "Resolve the ASH to install" step turns the checked inputs into a repository
+and a ref (an empty input means the workflow file's own commit; see
+test_reusable_workflow_defaults.py), and the pin step right after it resolves that
+ref in that repository to a commit with ``git ls-remote`` and writes
+``ASH_UVX_SOURCE`` and ``ASH_ASSETS_URL`` with that commit to ``GITHUB_ENV``, which
+the runner applies over the workflow-level values for every later step.
 
 What this asserts
 -----------------
-1. The pinning step is the job's first step after the input check, which only reads
-   its environment, and for a branch name, a full branch ref,
-   an annotated tag and a lightweight tag it writes the commit the ref points at (the
-   tag's commit, not the tag object) into both variables.
+1. The pinning step follows only the input check, which only reads its environment,
+   the one_line definer and the resolve step, which contacts nothing; and for a
+   branch name, a full branch ref, an annotated tag and a lightweight tag it writes
+   the commit the ref points at (the tag's commit, not the tag object) into both
+   variables.
 2. Every later step that installs ASH or fetches the cfn-nag Gemfile uses that commit,
    even after the branch has moved on.
 3. A full commit id is used as given, without contacting the repository.
@@ -43,6 +46,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -134,19 +138,44 @@ def _workflow_and_job() -> tuple[ga.Workflow, dict[str, Any]]:
     return workflow, workflow.jobs["ash"]
 
 
+PIN_STEP_ID = "ash-pin"
+RESOLVE_STEP_ID = "ash-source"
+RESOLVE_STEP_NAME = "Resolve the ASH to install"
+
+
 def _pin_step() -> dict[str, Any]:
     _, job = _workflow_and_job()
-    found = [
-        step
-        for step in job.get("steps") or []
-        if "GITHUB_ENV" in str(step.get("run") or "")
-        and "ASH_UVX_SOURCE=" in str(step.get("run") or "")
-    ]
-    assert len(found) == 1, (
-        "expected one step that writes ASH_UVX_SOURCE to GITHUB_ENV, found "
-        f"{[s.get('name') for s in found]}"
-    )
+    found = [step for step in job.get("steps") or [] if step.get("id") == PIN_STEP_ID]
+    assert len(found) == 1, f"expected one step with id {PIN_STEP_ID!r}, found {found}"
+    run = str(found[0].get("run") or "")
+    # The resolve step writes ASH_UVX_SOURCE with the name as given; the pin is the
+    # step that writes both variables with the commit.
+    assert "GITHUB_ENV" in run and "ASH_UVX_SOURCE=" in run and "ASH_ASSETS_URL=" in run
     return found[0]
+
+
+def _with_resolved_source(context: dict[str, Any]) -> dict[str, Any]:
+    """The resolve step's outputs for the checked ash-version and ash-repo.
+
+    The pin step reads steps.ash-source.outputs (the resolve step keeps a given
+    value and percent-encodes it for the URL; test_reusable_workflow_defaults.py
+    runs that step itself), so a test that runs the pin alone supplies them from the
+    input check's outputs the way the resolve step would write them.
+    """
+    checked = context["steps"][ga.INPUT_CHECK_STEP_ID]["outputs"]
+    version, repo = checked["ash_version"], checked["ash_repo"]
+    out = dict(context)
+    out["steps"] = {
+        **context["steps"],
+        RESOLVE_STEP_ID: {
+            "outputs": {
+                "version": version,
+                "version-url": urllib.parse.quote(version, safe="/"),
+                "repo": repo,
+            }
+        },
+    }
+    return out
 
 
 def _context(ash_version: str, ash_repo: str = ASH_REPO) -> dict[str, Any]:
@@ -167,7 +196,9 @@ def _context(ash_version: str, ash_repo: str = ASH_REPO) -> dict[str, Any]:
             "install-cfn-nag": True,
         }
     }
-    return ga.with_inputs(context, ga.call_inputs(caller, workflow, context))
+    return _with_resolved_source(
+        ga.with_inputs(context, ga.call_inputs(caller, workflow, context))
+    )
 
 
 def _run_pin(tmp_path: Path, repo: AshRepository, context, origin: Path | None = None):
@@ -189,8 +220,11 @@ class TestTheAshRefIsResolvedOnce:
         # The input check (test_an_input_cannot_add_a_workflow_command.py) runs
         # first, so nothing prints an input before it is checked. It runs no tool and
         # writes only its own outputs. The one_line definer comes next: it writes the
-        # helper file and nothing else (tests/utils/workflow_commands.py). So the pin
-        # is still the first step that resolves or installs anything.
+        # helper file and nothing else (tests/utils/workflow_commands.py). The
+        # resolve step comes third: it reads the checked inputs and the job context
+        # and contacts no repository (test_reusable_workflow_defaults.py runs it). So
+        # the pin is still the first step that resolves anything remotely or
+        # installs anything.
         _, job = _workflow_and_job()
         steps = job.get("steps") or []
         names = [step.get("name") for step in steps]
@@ -198,6 +232,7 @@ class TestTheAshRefIsResolvedOnce:
         assert names[:index] == [
             "Refuse an input that could start a workflow command",
             wc.DEFINER_NAME,
+            RESOLVE_STEP_NAME,
         ], f"the steps before the one that pins the ASH ref: {names[:index]}"
         check = steps[0]
         assert "uses" not in check, check
@@ -209,6 +244,12 @@ class TestTheAshRefIsResolvedOnce:
         definer = steps[1]
         assert "uses" not in definer, definer
         assert definer.get("run") == wc.DEFINER_RUN, definer.get("run")
+        resolve = steps[2]
+        assert resolve.get("id") == RESOLVE_STEP_ID, resolve
+        assert "uses" not in resolve, resolve
+        script = str(resolve.get("run") or "")
+        for word in ("git ls-remote", "git fetch", "uv ", "uvx ", "curl "):
+            assert word not in script, f"the resolve step runs {word.strip()!r}"
 
     @pytest.mark.parametrize(
         "ash_version,expected",
@@ -287,6 +328,8 @@ class TestTheAshRefIsResolvedOnce:
             **context["steps"],
             ga.INPUT_CHECK_STEP_ID: {"outputs": ga.read_github_output(check_sandbox)},
         }
+        # The resolve step's outputs, from what the check wrote.
+        context = _with_resolved_source(context)
         sandbox, run = _run_pin(tmp_path, repo, context)
         assert run.proc.returncode == 0, run.describe()
         assert _source_ref(ga.read_github_env(sandbox)["ASH_UVX_SOURCE"]) == repo.second
@@ -337,8 +380,9 @@ class TestARefusalPrintsOneErrorLineAndNotTheValue:
     they refused, so `ash-repo: "a/b\\n::warning::EXTRA"` issued a warning of the
     caller's choosing. They must print one `::error::` line that does not hold it.
 
-    The pin step reads the input check's outputs; ga.with_inputs supplies those as the
-    check would write them, so this runs the pin step's own refusals."""
+    The pin step reads the resolve step's outputs, which carry the input check's
+    values; ga.with_inputs and _with_resolved_source supply those as the two steps
+    would write them, so this runs the pin step's own refusals."""
 
     @pytest.mark.parametrize("brk", ["\n", "\r"], ids=["line feed", "carriage return"])
     @pytest.mark.parametrize("which", ["ash-repo", "ash-version"])
