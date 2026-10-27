@@ -15,6 +15,19 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scan
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
 
+@pytest.fixture(autouse=True)
+def _unresolved_names_reach_the_mocked_spawn(monkeypatch):
+    """Hand names that resolve nowhere to the mocked subprocess.run on Windows too.
+
+    opengrep is not installed here, and on Windows ASH refuses an unresolved name
+    before spawning it (subprocess_utils._refuse_unresolved_on_windows). These tests
+    are about what the version probe does with the spawn's answer.
+    """
+    from automated_security_helper.utils import subprocess_utils
+
+    monkeypatch.setattr(subprocess_utils, "_refuse_unresolved_on_windows", False)
+
+
 @pytest.fixture
 def opengrep_scanner(test_plugin_context):
     """Create a test Opengrep scanner."""
