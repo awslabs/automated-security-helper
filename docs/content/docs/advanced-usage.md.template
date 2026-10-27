@@ -22,7 +22,7 @@ ash --mode local
 ### Tools inside the scanned directory
 
 ASH does not start a scanner or any other tool that it finds inside the directory it
-is scanning. `uv run ash scan .` puts the repository's `.venv/bin` first on `PATH`,
+is scanning. `uv run ash scan --source-dir .` puts the repository's `.venv/bin` first on `PATH`,
 and `npm run` does the same with `node_modules/.bin`, so under either a scanner
 installed in the project, such as a `bandit` or `semgrep` dependency, is part of the
 repository being scanned. ASH skips it and uses the next copy on `PATH`, or the one
@@ -232,7 +232,7 @@ over the network on their own:
 - trivy-repo, and trivy when `misconfig` is in its `scanners`, do not run trivy's
   Terraform checks offline. trivy downloads the source of every `module` block a
   `.tf` file names (from the Terraform registry, with the host's `git`, or over
-  HTTPS), and has no setting that stops it, so ASH passes `--misconfig-scanners` with
+  HTTPS), and has no setting that stops it, so ASH passes `trivy --misconfig-scanners` with
   trivy's own default list minus `terraform`. If that list cannot be read from
   `trivy repository --help` (`trivy fs --help` for trivy), trivy's misconfiguration
   checks are skipped offline. checkov still checks Terraform. Any `git` a tool runs offline gets

@@ -112,13 +112,13 @@ it needs.
   `TRIVY_CONFIG` for a file outside the scanned tree), against the cache directory
   the scan reads. A lock in that cache directory makes
   concurrent scans take turns, and each tool is updated once per scan. The scanners
-  then run with their own update turned off (`--skip-db-update`,
+  then run with their own update turned off (`trivy --skip-db-update`,
   `GRYPE_DB_AUTO_UPDATE=false`). Offline nothing is updated, and in both cases ASH's
   staleness check still holds the database to its bound. trivy's Java database
   (about 935 MiB) is not updated and trivy and trivy-repo run with
-  `--skip-java-db-update`: `trivy fs` and `trivy repository` do not analyze JAR, WAR
+  `trivy --skip-java-db-update`: `trivy fs` and `trivy repository` do not analyze JAR, WAR
   or EAR files and never read it. In every run, sandboxed or not, online or offline,
-  trivy and trivy-repo keep their scan cache in memory (`--cache-backend=memory`),
+  trivy and trivy-repo keep their scan cache in memory (`trivy --cache-backend=memory`),
   because trivy otherwise opens
   `fanal/fanal.db` in a cache directory it may only read, and exits 1. A cache can
   be read-only outside a sandbox too, when it is shared or baked into an image.
@@ -129,7 +129,7 @@ it needs.
   `~/Library/Caches` on macOS, and `%LOCALAPPDATA%\cache` (grype) or
   `%LocalAppData%` (trivy) on Windows. grype keeps its database in `grype/db` under
   it and trivy in `trivy`. The sandbox does not pass `XDG_CACHE_HOME`, so in every
-  run, sandboxed or not, ASH names the directory to the scan (`--cache-dir`,
+  run, sandboxed or not, ASH names the directory to the scan (`trivy --cache-dir`,
   `GRYPE_DB_CACHE_DIR`), to the update and to the staleness check, and all three read
   the same database. A `cache.dir` in a `trivy.yaml` or a `db.cache-dir` in a grype
   config does not move it; set the variable instead. ASH logs a warning naming the
@@ -221,7 +221,7 @@ it needs.
   reached. The variables that name these endpoints (`SSH_AUTH_SOCK`,
   `DBUS_SESSION_BUS_ADDRESS`, `DOCKER_HOST`, `CONTAINER_HOST`, `XDG_RUNTIME_DIR`)
   are not passed in. firejail sets `DBUS_SESSION_BUS_ADDRESS` itself, to a path of
-  its own that `--dbus-user=none` leaves unserved.
+  its own that `firejail --dbus-user=none` leaves unserved.
 - A results directory that is, or is reached through, a symlink is refused (the
   scanner is recorded `MISSING`). The default output directory is inside the source
   tree, so the scanned repository could otherwise plant one pointing anywhere.
@@ -713,13 +713,13 @@ process from a thread it created itself would not inherit it. No builtin scanner
 bubblewrap builds an empty root from a tmpfs and mounts into it only what the policy
 lists, in new user, mount, PID, IPC, UTS, cgroup and (when the scanner gets no network)
 network namespaces. It needs no setuid binary on distributions that allow unprivileged
-user namespaces. ASH passes `--die-with-parent` and `--new-session`, so a scanner
+user namespaces. ASH passes `bwrap --die-with-parent` and `bwrap --new-session`, so a scanner
 cannot outlive ASH or inject keystrokes into the terminal through `TIOCSTI`.
 
 bwrap's mounts hide `/run` and `$HOME`, but not a Unix socket inside a directory it
 does mount (the Nix daemon's socket is under `/nix`), and a scanner with a network
 shares the host's network namespace and every abstract Unix socket bound there. So
-the scanner is started through the Landlock wrapper in `--socket-filter` mode, which
+the scanner is started through the Landlock wrapper in its socket-filter mode, which
 installs only its seccomp socket filter (described under Landlock) and then execs the
 scanner. IP sockets are left to the network namespace, so a tool can still use its own
 loopback when it has no network. ASH's probe runs the filter inside bwrap once, so an
@@ -735,7 +735,7 @@ running `bwrap ... true` once per process, so a `bwrap` that is installed but ca
 start is reported as unavailable with the error it printed, not used and found broken
 mid-scan.
 
-The throwaway cache overlay uses `--overlay-src`/`--tmp-overlay`, which needs
+The throwaway cache overlay uses `bwrap --overlay-src` and `bwrap --tmp-overlay`, which need
 bubblewrap 0.8 and Linux 5.11. On older systems those caches are mounted read-only
 instead, as under the other backends, and the log says so.
 
@@ -745,10 +745,10 @@ firejail is a setuid-root binary, a privileged program of its own (it has had
 privilege-escalation advisories), and its filesystem model is "everything visible, then
 restrict" rather than "nothing visible, then allow". ASH uses
 `--noprofile --private-dev --nonewprivs --caps.drop=all --seccomp --nogroups`,
-`--dbus-user=none --dbus-system=none`, `--net=none` when the scanner gets no network,
+`firejail --dbus-user=none --dbus-system=none`, `firejail --net=none` when the scanner gets no network,
 makes `/` read-only, blacklists the container runtime sockets, `/run/user/<uid>` and
 `$SSH_AUTH_SOCK`, whitelists inside `$HOME` (and `/tmp`) only the paths the policy
-lists, uses `--private-tmp` when the policy lists nothing under `/tmp`, and makes the
+lists, uses `firejail --private-tmp` when the policy lists nothing under `/tmp`, and makes the
 results directory read-write. Paths outside `$HOME` that your user can read remain readable, and scanner
 caches are read-only because firejail has no throwaway overlay. Because
 everything outside `$HOME` stays visible, `/run` and its sockets included, the

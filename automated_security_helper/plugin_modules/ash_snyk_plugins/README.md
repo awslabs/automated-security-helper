@@ -161,7 +161,7 @@ depth, and leaves the files they name out of its analysis: the `exclude.code` an
 `exclude.global` entries of a `.snyk` file, and the rules of a `.dcignore` file.
 Its legacy implementation also reads any file whose name ends in `.snyk`,
 `.dcignore` or `.gitignore`. It has no option that turns this off, and
-`snyk code test` takes no `--policy-path`. So when the tree has such a file,
+`snyk code test` takes no `snyk test --policy-path`. So when the tree has such a file,
 snyk-code does not run, and its error names the files. A `.snyk` file with only
 open source `ignore` entries or other `exclude` sections does not count, and
 neither does `.gitignore`, which ASH's own scan set honors too.
