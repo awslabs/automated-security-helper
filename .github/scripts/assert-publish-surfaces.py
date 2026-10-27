@@ -440,7 +440,7 @@ ALLOWLIST: tuple[Entry, ...] = (
         kind=KIND_UPLOAD,
         action=_UPLOAD,
         publishes=(
-            "name=${{ inputs.artifact-name }} "
+            "name=${{ steps.inputs.outputs.artifact_name }} "
             "path=${{ steps.inputs.outputs.output_dir }}/reports"
             "|${{ steps.inputs.outputs.output_dir }}/ash_aggregated_results.json"
             "|${{ steps.inputs.outputs.output_dir }}/projects/*/reports"
@@ -451,7 +451,8 @@ ALLOWLIST: tuple[Entry, ...] = (
             "belong to the calling repository's scan and are published into the "
             "caller's run, not this one; on this repository the workflow only "
             "runs against this public tree. The artifact name is the caller's "
-            "artifact-name input (default ash_output), so a matrix or a repeated "
+            "artifact-name input (default ash_output), read as the input check's "
+            "output like every string input, so a matrix or a repeated "
             "call can give each upload its own name."
         ),
     ),
