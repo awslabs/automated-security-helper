@@ -675,23 +675,53 @@ def test_a_linked_output_directory_is_refused_without_a_run_too(
 @pytest.mark.parametrize("where", ["a-real-directory", "a-source-named-through-a-link"])
 def test_a_real_output_directory_runs(where, pwsh, recording_docker, tmp_path):
     """Control: a real directory inside the source, also when the source is named
-    through a link above it, which is the operator's own spelling."""
+    through a link above it, which is the operator's own spelling. That link sits
+    beside the working directory, not below it: a link below the working directory
+    or -SourceDir on the way to the output is refused (the next test), since in CI
+    the working directory is the scanned checkout and the repository could have
+    committed it."""
     (tmp_path / "work" / "src").mkdir(parents=True)
+    cwd = tmp_path
     base = "work"
     if where == "a-source-named-through-a-link":
         (tmp_path / "work-link").symlink_to(tmp_path / "work", target_is_directory=True)
-        base = "work-link"
+        cwd = tmp_path / "here"
+        cwd.mkdir()
+        base = (tmp_path / "work-link").as_posix()
 
     result = _invoke(
         pwsh,
         tmp_path,
         recording_docker,
-        f"-SourceDir {base}/src -OutputDir {base}/src/.ash/out",
+        f"-SourceDir '{base}/src' -OutputDir '{base}/src/.ash/out'",
+        cwd=cwd,
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
     output = tmp_path / "work" / "src" / ".ash" / "out"
     assert output.is_dir() and not output.is_symlink()
+
+
+def test_a_link_below_the_working_directory_on_the_way_to_the_output_is_refused(
+    pwsh, recording_docker, tmp_path
+):
+    """The same spelling from the directory that holds the link: a link below the
+    working directory on the way to the output may be one the scanned repository
+    committed, so nothing is written through it and nothing runs."""
+    (tmp_path / "work" / "src").mkdir(parents=True)
+    (tmp_path / "work-link").symlink_to(tmp_path / "work", target_is_directory=True)
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        "-SourceDir work-link/src -OutputDir work-link/src/.ash/out",
+    )
+
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "reached through a link" in " ".join(result.stderr.split())
+    assert not (tmp_path / "docker-args.txt").exists()
+    assert not (tmp_path / "work" / "src" / ".ash").exists()
 
 
 @pytest.mark.skipif(
