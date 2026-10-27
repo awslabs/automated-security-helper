@@ -139,7 +139,13 @@ def discover_plugins(
             if hasattr(module, "ASH_REPORTERS"):
                 discovered["reporters"].extend(module.ASH_REPORTERS)
 
-        except ImportError as e:
+        except Exception as e:  # noqa: BLE001 -- one path for every import failure
+            # Not only ImportError, as the loader's import arm
+            # (loader.load_additional_plugin_modules): the loader has already
+            # recorded a module whose body raised and removed it from
+            # sys.modules, so this re-import raises the same error again; it
+            # must not escape as an unexpected failure (exit 1) past the
+            # recorded, exit-3 refusal refuse_failed_plugin_imports raises next.
             ASH_LOGGER.warning(
                 f"Failed to import plugin {label}: {shown_import_failure(e, name, label)}"
             )
