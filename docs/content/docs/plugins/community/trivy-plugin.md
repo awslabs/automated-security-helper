@@ -110,9 +110,10 @@ scanners:
 
 ### Configuration Options
 
+<!-- doctest: options of=scanners.trivy-repo -->
 | Option               | Type      | Default                                      | Description                                                             |
 | -------------------- | --------- | -------------------------------------------- | ----------------------------------------------------------------------- |
-| `scanners`           | List[str] | `["vuln", "misconfig", "secret", "license"]` | Types of scans to perform                                               |
+| `scanners`           | List[str] | `["vuln", "secret", "misconfig", "license"]` | Types of scans to perform                                               |
 | `severity_threshold` | str       | `null`                                       | Minimum severity that fails the scan (`ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`); `null` uses the global threshold. Findings below it are still reported; ASH does not pass it as `trivy --severity` |
 | `ignore_unfixed`     | bool      | `true`                                       | Ignore vulnerabilities without available fixes                          |
 | `license_full`       | bool      | `true`                                       | Enable full license scanning (more comprehensive but slower)            |

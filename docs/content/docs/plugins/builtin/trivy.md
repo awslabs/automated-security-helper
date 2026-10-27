@@ -19,7 +19,7 @@ trivy is a native binary, so `--python-only` does not run it.
 
 trivy has four scanners. This scanner runs one of them unless you, as the operator, ask for more:
 
-| trivy scanner | By default | Why |
+| trivy scanner | Enabled | Why |
 |---------------|---------|-----|
 | `vuln` | on | Known vulnerabilities in dependencies, from trivy's own database. grype answers the same question from a different database; a second database is the reason to enable trivy. ASH does not deduplicate across scanners, so a vulnerability both find is reported by each, trivy usually under the CVE id and grype under the GHSA id, and one suppression by `rule_id` does not cover both. |
 | `secret` | off | detect-secrets runs by default. Both would report the same credential under different rule ids, and a suppression for one does not cover the other. |

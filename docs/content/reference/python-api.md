@@ -167,8 +167,6 @@ Every parameter is optional and can be passed by keyword. Unless the table says 
 | `untrusted_config` | `False` | Used by the MCP server; see below. |
 | `trusted_config_path` | `None` | Used by the MCP server; see below. |
 | `client_config_policy` | `None` | Used by the MCP server; see below. |
-| `severity_threshold_restriction` | `None` | Used by the MCP server: a threshold the scan must be at least as strict as. The scan runs at the stricter of this and `global_settings.severity_threshold`. Local mode only. |
-| `keep_previous_results` | `False` | Used by the MCP server: keeps the previous scan's results until this scan has its own, instead of deleting them when it starts. Local and workspace mode only. |
 
 `config_base_gate`, `untrusted_config`, `trusted_config_path`, and `client_config_policy` let the MCP server apply the MCP-client limits of the [Configuration trust model](../concepts/trust-model.md) to the scans it runs; leave them at their defaults. `untrusted_config` raises `ValueError` in container or nix mode and with a `workspace_plan`, and `client_config_policy` raises it in container or nix mode.
 
