@@ -22,6 +22,7 @@ from automated_security_helper.cli.mcp import (
     build_streamable_http_app,
     mcp_command,
 )
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.core.exceptions import ASHValidationError
 
 INITIALIZE = {
@@ -118,7 +119,7 @@ def test_the_opt_out_is_refused_where_it_means_nothing(startup, kwargs) -> None:
     with pytest.raises(typer.Exit) as excinfo:
         mcp_command(ctx=_Ctx(), quiet=True, **kwargs)
 
-    assert excinfo.value.exit_code == 3
+    assert excinfo.value.exit_code == ASH_EXIT_USAGE_ERROR
     assert startup["bound"] is False
 
 
@@ -138,7 +139,7 @@ def test_the_opt_out_is_refused_on_a_loopback_bind(startup, transport, host) -> 
             quiet=True,
         )
 
-    assert excinfo.value.exit_code == 3
+    assert excinfo.value.exit_code == ASH_EXIT_USAGE_ERROR
     assert startup["bound"] is False
 
 

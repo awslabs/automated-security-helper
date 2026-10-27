@@ -27,6 +27,7 @@ from automated_security_helper.cli.mcp import (
     _auth_value_from_bytes,
     _header_wire_bytes,
 )
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.core.exceptions import ASHValidationError
 
 ENTRYPOINT = (
@@ -167,7 +168,7 @@ class TestTrustUpstreamHostCheck:
 
         assert "--trust-upstream-host-check" not in argv
         result = CliRunner().invoke(ash_app, argv[1:])
-        assert result.exit_code == 3, result.output
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
         assert bound["bound"] is False
 
 

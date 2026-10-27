@@ -35,6 +35,7 @@ from automated_security_helper.cli.mcp import (
     build_streamable_http_app,
     mcp_command,
 )
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.core.exceptions import ASHValidationError
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -108,7 +109,7 @@ class TestNonLoopbackBindWithoutAllowlist:
                 ctx=_ResilientFalseCtx(), transport=transport, host=host, quiet=True
             )
 
-        assert excinfo.value.exit_code == 3
+        assert excinfo.value.exit_code == ASH_EXIT_USAGE_ERROR
         assert startup["bound"] is False, "the server bound a socket anyway"
 
     @pytest.mark.parametrize("transport", HTTP_TRANSPORTS)
@@ -119,7 +120,7 @@ class TestNonLoopbackBindWithoutAllowlist:
             ash_app, ["mcp", "--transport", transport, "--host", "0.0.0.0"]
         )
 
-        assert result.exit_code == 3, (
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR, (
             f"`ash mcp --transport {transport} --host 0.0.0.0` started: "
             f"exit {result.exit_code}\n{result.output}"
         )
@@ -136,7 +137,7 @@ class TestNonLoopbackBindWithoutAllowlist:
                 quiet=True,
             )
 
-        assert excinfo.value.exit_code == 3
+        assert excinfo.value.exit_code == ASH_EXIT_USAGE_ERROR
 
 
 class TestBindsThatStillStart:
@@ -271,5 +272,5 @@ def test_the_terraform_entrypoint_defaults_refuse_a_wildcard_bind(
 
     result = CliRunner().invoke(ash_app, argv[1:])
 
-    assert result.exit_code == 3, (argv, result.output)
+    assert result.exit_code == ASH_EXIT_USAGE_ERROR, (argv, result.output)
     assert startup["bound"] is False

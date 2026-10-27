@@ -1650,7 +1650,7 @@ A stateless server issues no session, so by default its callers have no session 
 
 The flag is only valid with `--transport streamable-http`, and passing it on another transport is refused rather than ignored. `stdio` has a single implicit session and `sse` holds an open connection per client, so neither has a session to make stateless; silently dropping the flag would leave you running a stateful server and finding out only when a request landed on the wrong replica in production. `--no-stateless-http` is indistinguishable from the default, so it is accepted on every transport.
 
-`--allowed-host` is repeatable and names the Host header values the server will accept. The MCP SDK enables DNS-rebinding protection automatically when the bind address is `127.0.0.1`, `localhost` or `::1`; bind anywhere else and that autodetect leaves protection off, so the server would answer any Host and any Origin. ASH refuses that: a non-loopback `--host` without `--allowed-host` exits with status 3 and an error naming `--allowed-host` and `--trust-upstream-host-check`. `--allowed-host` keeps protection on for a non-loopback bind, because supplying it replaces the SDK's autodetect with an explicit allowlist. That is the right posture behind a proxy whose hostname you know:
+`--allowed-host` is repeatable and names the Host header values the server will accept. The MCP SDK enables DNS-rebinding protection automatically when the bind address is `127.0.0.1`, `localhost` or `::1`; bind anywhere else and that autodetect leaves protection off, so the server would answer any Host and any Origin. ASH refuses that: a non-loopback `--host` without `--allowed-host` exits 5, a [usage error](#usage-errors), with an error naming `--allowed-host` and `--trust-upstream-host-check`. `--allowed-host` keeps protection on for a non-loopback bind, because supplying it replaces the SDK's autodetect with an explicit allowlist. That is the right posture behind a proxy whose hostname you know:
 
 ```bash
 ash mcp --transport streamable-http --host 0.0.0.0 --port 8000 \
@@ -1893,8 +1893,11 @@ runs, and writes no report. Exactly these exit 5:
   reverse, a `--shard-index` outside `0` to `--shard-count` minus one, either with
   `--workspace`, a `--scanners` list that `--exclude-scanners` cancels out, and
   `ash mcp`'s `--stateless-http` without `--transport streamable-http`,
-  `--auth-header-name` without `--auth-header-value` or the reverse, and `--quiet`
-  with `--verbose` or `--debug`.
+  `--auth-header-name` without `--auth-header-value` or the reverse, `--quiet`
+  with `--verbose` or `--debug`, a non-loopback `--host` with neither
+  `--allowed-host` nor `--trust-upstream-host-check`, `--allowed-host` together
+  with `--trust-upstream-host-check`, and `--trust-upstream-host-check` on a
+  loopback `--host` or on `--transport stdio`.
 - A path that names nothing usable: a `--source-dir` (or `ASH_SOURCE_DIR`) that does
   not exist, is not a directory, or cannot be entered, for `ash scan` and the
   `ash config` commands that take it; an `ash scan --output-dir` that is a file,
