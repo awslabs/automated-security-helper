@@ -30,7 +30,15 @@ Converter implementation for Archive file extraction.
 - Command: none (runs in the ASH process)
 - Install: none declared
 
-This plugin has no options.
+Options, under `converters.archive.options`. A key not listed here is accepted and kept, without validation.
+
+<!-- doctest: options of=converters.archive -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="converters.archive.options.max_members"></a>`max_members` | integer, greater than 0 | `100000` | The most members an archive may have, directories included. An archive with more is not extracted. All the archives one scan extracts may hold four times this many together. |
+| <a id="converters.archive.options.max_member_bytes"></a>`max_member_bytes` | integer, greater than 0 | `268435456` | The largest size in bytes one member of an archive may declare. An archive with a larger member is not extracted. Default 256 MiB. |
+| <a id="converters.archive.options.max_total_bytes"></a>`max_total_bytes` | integer, greater than 0 | `1073741824` | The most bytes an archive's members may declare added up, each counted as at least 512. An archive whose members declare more is not extracted. All the archives one scan extracts may declare four times this together. Default 1 GiB. |
+| <a id="converters.archive.options.max_compression_ratio"></a>`max_compression_ratio` | integer, greater than 0 | `100` | The most times its own size on disk that an archive's members may declare added up. An archive that declares more is not extracted. Checked only once the members declare more than 512 KiB in all. |
 
 ## `jupyter`
 
