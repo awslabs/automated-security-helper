@@ -1410,6 +1410,20 @@ global_settings:
         tests/unit/deploy/test_cdk_template_line_pinned_suppressions.py.
     - rule_id: HIPAA.Security-IAMNoInlinePolicy
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      line_start: 1323
+      line_end: 1323
+      reason: >-
+        LINE-PINNED to ScanFunctionRoleEc2Access99A7E33E, the line ASH reports for
+        that resource (the first line naming its logical id, the function's
+        ash:vpc-access-policy tag), and listed before the file-level entry below so it
+        claims this one record. A standalone AWS::IAM::Policy attached through Roles,
+        not a policy embedded in a role, created only when VpcId and VpcSubnetIds are
+        set. It holds the network-interface grant Lambda needs to attach the function
+        to a VPC, and is separate from the role's DefaultPolicy so it can carry that
+        condition. Pinned by
+        tests/unit/deploy/test_cdk_template_line_pinned_suppressions.py.
+    - rule_id: HIPAA.Security-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
       reason: >-
         Four CDK-generated AWS::IAM::Policy resources: the image-build pair,
         ImageBootstrapStarterRoleDefaultPolicy, and ScanFunctionRoleDefaultPolicy,
@@ -1418,6 +1432,20 @@ global_settings:
         verdict. As in the other four templates, no role here carries a Policies
         array. See the block comment above for why the rule's subject is not what
         this template holds.
+    - rule_id: NIST.800.53.R4-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      line_start: 1323
+      line_end: 1323
+      reason: >-
+        LINE-PINNED to ScanFunctionRoleEc2Access99A7E33E, the line ASH reports for
+        that resource (the first line naming its logical id, the function's
+        ash:vpc-access-policy tag), and listed before the file-level entry below so it
+        claims this one record. A standalone AWS::IAM::Policy attached through Roles,
+        not a policy embedded in a role, created only when VpcId and VpcSubnetIds are
+        set. It holds the network-interface grant Lambda needs to attach the function
+        to a VPC, and is separate from the role's DefaultPolicy so it can carry that
+        condition. Pinned by
+        tests/unit/deploy/test_cdk_template_line_pinned_suppressions.py.
     - rule_id: NIST.800.53.R4-IAMNoInlinePolicy
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
       line_start: 1323
@@ -1457,6 +1485,20 @@ global_settings:
         tests/unit/deploy/test_cdk_template_line_pinned_suppressions.py.
     - rule_id: NIST.800.53.R5-IAMNoInlinePolicy
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      line_start: 1323
+      line_end: 1323
+      reason: >-
+        LINE-PINNED to ScanFunctionRoleEc2Access99A7E33E, the line ASH reports for
+        that resource (the first line naming its logical id, the function's
+        ash:vpc-access-policy tag), and listed before the file-level entry below so it
+        claims this one record. A standalone AWS::IAM::Policy attached through Roles,
+        not a policy embedded in a role, created only when VpcId and VpcSubnetIds are
+        set. It holds the network-interface grant Lambda needs to attach the function
+        to a VPC, and is separate from the role's DefaultPolicy so it can carry that
+        condition. Pinned by
+        tests/unit/deploy/test_cdk_template_line_pinned_suppressions.py.
+    - rule_id: NIST.800.53.R5-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
       reason: >-
         IAMNoInlinePolicy as the NIST 800-53 Revision 5 pack raises it, against
         AshCodeCommitGate: the same four CDK DefaultPolicy resources, including the
@@ -1464,6 +1506,20 @@ global_settings:
         immediately above and is not restated. The entry exists because a
         suppression is keyed by rule id and the pack prefix makes this a distinct
         id, so leaving it out would keep these findings actionable.
+    - rule_id: PCI.DSS.321-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      line_start: 1323
+      line_end: 1323
+      reason: >-
+        LINE-PINNED to ScanFunctionRoleEc2Access99A7E33E, the line ASH reports for
+        that resource (the first line naming its logical id, the function's
+        ash:vpc-access-policy tag), and listed before the file-level entry below so it
+        claims this one record. A standalone AWS::IAM::Policy attached through Roles,
+        not a policy embedded in a role, created only when VpcId and VpcSubnetIds are
+        set. It holds the network-interface grant Lambda needs to attach the function
+        to a VPC, and is separate from the role's DefaultPolicy so it can carry that
+        condition. Pinned by
+        tests/unit/deploy/test_cdk_template_line_pinned_suppressions.py.
     - rule_id: PCI.DSS.321-IAMNoInlinePolicy
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
       line_start: 1323
@@ -2595,6 +2651,18 @@ global_settings:
         tests/unit/deploy/test_cdk_template_line_pinned_suppressions.py.
     - rule_id: F3031
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      line_start: 1202
+      line_end: 1202
+      reason: >-
+        LINE-PINNED to ScanFunction322CD7EE, the line ASH reports for that resource
+        (the first line naming its logical id), and listed before the file-level
+        entry below so it claims this one record. The validator checks the scan
+        function's KmsKeyArn once a VpcConfig is present; KmsKeyArn is an Fn::If over
+        HasKmsKey, so it presents as '' with no parameter bound, the same artifact the
+        file-level entry describes for the log groups. Pinned by
+        tests/unit/deploy/test_cdk_template_line_pinned_suppressions.py.
+    - rule_id: F3031
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
       reason: >-
         Three records: the ImageBuild, ImageBootstrapStarter and ScanLogs log
         groups. ScanLogs is the group the pull-request scan function writes to, and
@@ -2862,6 +2930,11 @@ global_settings:
       line_start: 973
       line_end: 973
       reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
+    - rule_id: threat-process-download-exec
+      path: automated_security_helper/assets/install-pinned-tool.py
+      line_start: 973
+      line_end: 973
+      reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
     - rule_id: threat-filesystem-destruction
       path: deploy/cdk-constructs/test/ash-scan-step.test.ts
       line_start: 367
@@ -2876,6 +2949,11 @@ global_settings:
       path: tests/snapshot/test_snapshot_normalizer.py
       line_start: 264
       line_end: 264
+      reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
+    - rule_id: threat-filesystem-destruction
+      path: tests/snapshot/test_snapshot_normalizer.py
+      line_start: 272
+      line_end: 272
       reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
     - rule_id: threat-filesystem-destruction
       path: tests/snapshot/test_snapshot_normalizer.py
@@ -2903,6 +2981,16 @@ global_settings:
       line_end: 1469
       reason: "Symlink target in a synthetic archive that the gate under test must reject."
     - rule_id: threat-filesystem-read
+      path: tests/unit/test_artifact_contents_gate.py
+      line_start: 1469
+      line_end: 1469
+      reason: "Symlink target in a synthetic archive that the gate under test must reject."
+    - rule_id: threat-filesystem-read
+      path: tests/unit/test_defense_in_depth.py
+      line_start: 404
+      line_end: 404
+      reason: "'v1.0|cat /etc/passwd' is a revision string the test asserts is rejected."
+    - rule_id: threat-filesystem-read
       path: tests/unit/test_defense_in_depth.py
       line_start: 404
       line_end: 404
@@ -2922,6 +3010,16 @@ global_settings:
       line_start: 1131
       line_end: 1131
       reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
+    - rule_id: threat-filesystem-read
+      path: tests/unit/test_pinned_tool_version_check.py
+      line_start: 1131
+      line_end: 1131
+      reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
+    - rule_id: threat-runtime-obfuscation-base64exec
+      path: tests/unit/utils/test_opengrep_pinned_download.py
+      line_start: 392
+      line_end: 392
+      reason: "Decodes a nix SRI hash to hex to compare with the pinned table; nothing is executed."
     - rule_id: threat-runtime-obfuscation-base64exec
       path: tests/unit/utils/test_opengrep_pinned_download.py
       line_start: 392
