@@ -183,7 +183,9 @@ def user_config_data(ash_config: AshConfig) -> Dict[str, Any]:
 
     Every setting, defaults included, except what only ASH itself should write:
     the `build` section and the per-plugin fields ConfigValidator warns about
-    (`name`, `extension`, ...). `mcp-resource-management` is left out while it
+    (`name`, `extension`, ...), and `client_supplied` on a suppression or an
+    ignore path, which ASH sets and a config file cannot set.
+    `mcp-resource-management` is left out while it
     holds the defaults, and kept once a user has changed it. Dumped in JSON
     mode, so an enum or a date is written as its value and the YAML carries no
     Python tags.
@@ -203,6 +205,10 @@ def user_config_data(ash_config: AshConfig) -> Dict[str, Any]:
             ConverterConfigSegment.model_fields,
             ConfigValidator.INTERNAL_CONVERTER_FIELDS,
         ),
+        "global_settings": {
+            "ignore_paths": {"__all__": {"client_supplied"}},
+            "suppressions": {"__all__": {"client_supplied"}},
+        },
     }
     if ash_config.mcp_resource_management == MCPResourceManagementConfig():
         exclude["mcp_resource_management"] = True

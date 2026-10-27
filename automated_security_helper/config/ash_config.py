@@ -3682,7 +3682,9 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
     )
     from automated_security_helper.core.exceptions import ASHConfigSourceError
 
-    entry = suppression.model_dump(exclude_none=True)
+    # Without client_supplied: ASH sets it, and a value written in a config file
+    # is ignored (IgnorePathWithReason.client_supplied).
+    entry = suppression.model_dump(exclude_none=True, exclude={"client_supplied"})
     if is_toml_file(config_path):
         raise _left_unchanged(
             f"Suppressions are saved by editing YAML; {config_path} is TOML. Add "
@@ -4072,7 +4074,9 @@ def _json_config_with_entry(
     if any(_same_suppression(e, suppression) for e in suppressions):
         return (None, [])
     held = list(suppressions)
-    suppressions.append(suppression.model_dump(exclude_none=True))
+    suppressions.append(
+        suppression.model_dump(exclude_none=True, exclude={"client_supplied"})
+    )
     return (json.dumps(data, indent=2) + "\n", held)
 
 
