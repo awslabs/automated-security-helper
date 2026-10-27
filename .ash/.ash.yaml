@@ -46,14 +46,6 @@ global_settings:
       reason: >-
         False positive. The table entry maps the detect-secrets scanner to the secrets
         tool category.
-    - rule_id: B104
-      path: automated_security_helper/cli/mcp/__init__.py
-      line_start: 930
-      line_end: 930
-      reason: >-
-        False positive. The line only works out the host to show in the "running on"
-        message, for a server whose socket is already bound. Nothing binds to it, and
-        the line is pinned so that a bind elsewhere in the file still reports.
     # === Test code and its support files: one entry per rule and file ===
     # The tests build made-up credentials, fixed temporary paths, wildcard addresses and
     # shell calls on purpose, to check that ASH hides, refuses or confines them. Each

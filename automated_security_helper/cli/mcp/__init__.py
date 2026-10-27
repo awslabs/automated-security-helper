@@ -926,7 +926,7 @@ def _log_where_the_server_listens(config, listen_socket) -> None:
     """
     import logging
 
-    host = "0.0.0.0" if config.host is None else config.host
+    host = "0.0.0.0" if config.host is None else config.host  # nosec B104 - the host shown in the "running on" line; the socket is already bound, nothing binds here
     address = "%s://[%s]:%d" if ":" in host else "%s://%s:%d"
     logging.getLogger("uvicorn.error").info(
         f"Uvicorn running on {address} (Press CTRL+C to quit)",
