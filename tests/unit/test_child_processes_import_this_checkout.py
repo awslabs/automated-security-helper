@@ -176,7 +176,7 @@ _FRESH_INTERPRETER = (
 #: another call, or the call given a working directory, has a key of its own and
 #: fails.
 ALLOWED: Dict[str, str] = {
-    "tests/test_data/sandbox_escape/escape_plugins/__init__.py"
+    "tests/test_data/sandbox_escape/escape_ash_plugins/__init__.py"
     "::SandboxEscapeScanner.scan::unread-script#1@_run_subprocess": (
         "runs the probe the sandbox test names, escape_probe.py or "
         "macos_services_probe.py, which import the standard library only"
