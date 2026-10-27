@@ -53,7 +53,6 @@ from automated_security_helper.utils.undecodable_text import (
 )
 from automated_security_helper.utils.uri_separators import (
     WINDOWS_ABSOLUTE,
-    root_text,
     sanitized_uri_text,
 )
 

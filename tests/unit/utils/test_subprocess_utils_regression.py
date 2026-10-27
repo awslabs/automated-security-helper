@@ -10,8 +10,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from automated_security_helper.utils.subprocess_utils import SPAWN_FAILURE_RETURNCODE
-
 
 @pytest.fixture(autouse=True)
 def _unresolved_names_reach_the_mocked_spawn(monkeypatch):

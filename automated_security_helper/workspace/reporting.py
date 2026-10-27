@@ -124,7 +124,6 @@ from automated_security_helper.base.reporter_plugin import (
     reporter_matches_requested_formats,
     write_report_file,
 )
-from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.report_path_links import (
     ensure_reports_dir,

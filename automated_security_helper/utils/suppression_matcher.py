@@ -19,7 +19,6 @@ from automated_security_helper.models.core import (
 )
 from automated_security_helper.utils.path_matching import (
     _path_pattern_matches,
-    _recursive_glob_match,
     directory_spelling,
     ignore_path_pattern,
 )

@@ -47,9 +47,7 @@ from automated_security_helper.config.ash_config import (
     AshConfig,
     ReporterConfigSegment,
     ScannerConfigSegment,
-    TaggedReference,
     load_config_yaml,
-    represent_tagged_reference,
 )
 from automated_security_helper.config.config_writer import (
     SCHEMA_COMMENT,
@@ -86,7 +84,6 @@ from automated_security_helper.config.plugin_module_trust import (
     refuse_plugin_modules_a_scan_refuses,
 )
 from automated_security_helper.config.resolve_config import (
-    check_config_path,
     find_config_file,
     resolve_config,
 )
