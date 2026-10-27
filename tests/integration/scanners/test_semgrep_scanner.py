@@ -100,8 +100,10 @@ def test_semgrep_scanner_uv_tool_integration(test_plugin_context):
         # ``sys.executable``/``sys.prefix``, so probing the wrong one leaves the
         # scan's cache cold. The bare-name assertion this replaces could not tell
         # those two invocations apart.
+        # ``values`` is what the probe redacts from its own log lines: the values
+        # the scanner's config read from the environment, none for this config.
         mock_runner_instance.get_tool_version.assert_called_with(
-            "semgrep", scanner._uv_from_spec()
+            "semgrep", scanner._uv_from_spec(), values=()
         )
 
     # Test validation with UV tool available
