@@ -42,6 +42,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from hatchling.builders.sdist import SdistBuilder
+from hatchling.builders.wheel import WheelBuilder
 from packaging.markers import Marker
 from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
@@ -240,6 +242,35 @@ class TestTheCiLegScansWithTheDefaultSelection:
             f"homebrew.sh should check the default scan's statuses once: {allowed}"
         )
         assert set(allowed[0].split(",")) == {"cfn-nag", "grype", "opengrep", "syft"}
+
+
+class TestTheBuildBackendSkipsTheUvCache:
+    """hatchling walks the whole project root while uv may still be writing into it.
+
+    The formula builds ASH with `uv sync` from the unpacked source tree. hatchling
+    lists every directory under the project root to decide what goes in the wheel,
+    and it prunes a directory only when the directory is excluded AND
+    `skip-excluded-dirs` is on: an `exclude` pattern alone drops the files it matches
+    but the walk still descends. A uv cache under the project root was walked while
+    uv was renaming temporary entries in it, and the walk died in `safe_walk` with
+    FileNotFoundError on a directory that had vanished between listing and stat.
+    The formula keeps its cache outside the tree now; this holds the backend side,
+    so a `.uv-cache` put in the tree by anyone (a UV_CACHE_DIR of their own, an
+    older formula) is never walked. It reads hatchling's own decision for this
+    repository's configuration, not the text of pyproject.toml.
+    """
+
+    @pytest.mark.parametrize("builder_class", [WheelBuilder, SdistBuilder])
+    def test_a_uv_cache_in_the_project_root_is_pruned(
+        self, builder_class: type[WheelBuilder | SdistBuilder]
+    ) -> None:
+        config = builder_class(str(REPO_ROOT)).config
+
+        assert config.directory_is_excluded(".uv-cache", "")
+        # Controls: the package itself is walked, and the virtualenv is a directory
+        # hatchling never descends into on its own.
+        assert not config.directory_is_excluded("automated_security_helper", "")
+        assert config.directory_is_excluded(".venv", "")
 
 
 def _status_checker():
