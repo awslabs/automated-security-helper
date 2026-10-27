@@ -280,9 +280,11 @@ def test_a_no_exit_session_stays_open_after_a_refusal(pwsh, src, tmp_path):
     assert "alive 3" in result.stdout
 
 
-def test_another_error_leaves_the_code_non_zero(pwsh, src, tmp_path):
-    """So ``catch { exit $LASTEXITCODE }`` cannot exit 0 after a failure that is not
-    a refusal: here the output directory cannot be created under a file."""
+def test_an_output_directory_under_a_file_leaves_ashs_usage_code(pwsh, src, tmp_path):
+    """So ``catch { exit $LASTEXITCODE }`` cannot exit 0 after a failure before any
+    runner is looked for: an output directory that cannot be created, here under a
+    file, is refused with 5, ASH's usage-error code, in the words of ``ash scan`` and
+    ./ash (utils/ash_helpers.ps1, "Output directory cannot be created")."""
     (tmp_path / "blocker").write_text("", encoding="utf-8")
     result = _pwsh_script(
         pwsh,
@@ -293,21 +295,22 @@ def test_another_error_leaves_the_code_non_zero(pwsh, src, tmp_path):
         '-OutputDir blocker/out } catch { "code $LASTEXITCODE" }',
     )
 
-    assert result.stdout.split() == ["code", "1"], result.stdout + result.stderr
+    assert result.stdout.split() == ["code", "5"], result.stdout + result.stderr
 
 
 @pytest.mark.skipif(
     os.name == "nt", reason="the stand-in runner is a POSIX shell script"
 )
 def test_another_error_in_the_run_leaves_the_code_non_zero(pwsh, src, tmp_path):
-    """The same once the run has started: ``id -u`` leaves $LASTEXITCODE at 0, then a
-    malformed ASH_BASE_OCI_LAYOUT stops the build before any runner command.
+    """So ``catch { exit $LASTEXITCODE }`` cannot exit 0 after a failure that is not
+    a refusal, once the run has started: ``id -u`` leaves $LASTEXITCODE at 0, then
+    the build fails, and a failed build keeps the build's own code.
 
     Invoke-ASH keeps only the runner's name and runs it from PATH, so the stand-in
     goes first on PATH: no real runner is reached even if that ever changes."""
     runner = tmp_path / "bin" / "docker"
     runner.parent.mkdir()
-    runner.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    runner.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
     runner.chmod(0o755)
     result = _pwsh_script(
         pwsh,
@@ -315,7 +318,6 @@ def test_another_error_in_the_run_leaves_the_code_non_zero(pwsh, src, tmp_path):
         "$ErrorActionPreference = 'Stop'\n"
         f"$env:PATH = '{runner.parent.as_posix()}' + "
         "[System.IO.Path]::PathSeparator + $env:PATH\n"
-        "$env:ASH_BASE_OCI_LAYOUT = 'not-a-layout'\n"
         "try { Invoke-ASH -OCIRunner docker -BuildTarget ci "
         '-SourceDir src -OutputDir out } catch { "code $LASTEXITCODE" }',
     )
