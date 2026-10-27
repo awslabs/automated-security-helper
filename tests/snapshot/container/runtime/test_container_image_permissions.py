@@ -74,13 +74,14 @@ def open_files_find(root: str = "/") -> str:
 
     Symbolic links are left out (their mode is always 777 and means nothing), and
     so are directories with the sticky bit. ``root`` is ``/`` in the image; the
-    unit test passes a temporary tree.
+    unit test passes a temporary tree. The paths are printed by ``printf`` rather
+    than by GNU find's ``-printf``, which the BSD find on a macOS runner lacks.
     """
     base = root.rstrip("/")
     prune = " -o ".join(f"-path {shlex.quote(base + path)}" for path in PRUNED)
     return (
         f"find {shlex.quote(root)} -xdev \\( {prune} \\) -prune -o "
-        "! -type l -perm -0002 ! -perm -1000 -printf 'open %p\\n'"
+        "! -type l -perm -0002 ! -perm -1000 -exec printf 'open %s\\n' {} +"
     )
 
 
