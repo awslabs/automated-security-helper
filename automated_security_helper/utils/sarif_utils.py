@@ -1053,8 +1053,13 @@ class _OutputDirExclusion:
         )
         self.excluded += 1
 
-    def excludes(self, result: Result) -> bool:
-        """Whether any of ``result``'s locations is ASH's output; counts it if so."""
+    def held_location(self, result: Result) -> str | None:
+        """The normalized URI of the first location of ``result`` in ASH's output.
+
+        None when no location is there. Counts nothing: the caller records the
+        result once it decides to remove it, since one located in a file the
+        repository committed to the output directory is kept.
+        """
         for location in result.locations or []:
             if not (
                 location.physicalLocation
@@ -1066,9 +1071,16 @@ class _OutputDirExclusion:
                 continue
             uri = self.normalize(raw_uri)
             if self.holds(uri):
-                self.record(uri)
-                return True
-        return False
+                return uri
+        return None
+
+    def excludes(self, result: Result) -> bool:
+        """Whether any of ``result``'s locations is ASH's output; counts it if so."""
+        uri = self.held_location(result)
+        if uri is None:
+            return False
+        self.record(uri)
+        return True
 
     def report(self) -> None:
         """Say how many results were removed, when any were.
@@ -1459,16 +1471,39 @@ def exclude_output_dir_results(
     and every caller skips it under the flag, so without this a scanner that reads
     the whole tree reported ASH's files as findings. Results under the output
     directory's work directory, where converters write files to be scanned, are
-    kept, as they are there.
+    kept, as they are there, and so are results located in a file the repository
+    committed to the output directory, as ``apply_suppressions_to_sarif`` keeps
+    them: those are findings about the scanned tree, and the flag lifts
+    suppressions, which a committed file is not. With the default output
+    directory, ``.ash/ash_output``, a key committed there was reported by no
+    scanner under the flag. The committed files are read the first time a result
+    falls in the output directory (``committed_output_files``, which walks nothing
+    and writes nothing), so a report with none there reads nothing.
     """
     if not sarif_report or not sarif_report.runs:
         return sarif_report
     output_exclusion = _OutputDirExclusion(plugin_context)
+    committed: set[Path] | None = None
+
+    def kept(result: Result) -> bool:
+        nonlocal committed
+        uri = output_exclusion.held_location(result)
+        if uri is None:
+            return True
+        if committed is None:
+            from automated_security_helper.utils.scan_output_dirs import (
+                committed_output_files,
+            )
+
+            committed = committed_output_files(plugin_context)
+        if output_exclusion._resolve_cache[uri] in committed:
+            return True
+        output_exclusion.record(uri)
+        return False
+
     for run in sarif_report.runs:
         if not run.results:
             continue
-        run.results = [
-            result for result in run.results if not output_exclusion.excludes(result)
-        ]
+        run.results = [result for result in run.results if kept(result)]
     output_exclusion.report()
     return sarif_report
