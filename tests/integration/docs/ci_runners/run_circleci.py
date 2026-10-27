@@ -8,8 +8,12 @@ v0.1.47860, the last release that has it, while ``config validate`` and ``config
 process`` run with v1.5.0. Each CLI checks for updates and sends telemetry unless told
 not to, and each reads its own switches. On a hosted runner ``CI=true`` would turn
 some of that off, but ``env -i`` drops it, and setting ``CI`` changes other behavior of
-v1.5.0, so each CLI gets exactly its own switches and ``CI`` is never set. Every
-command line also passes ``--skip-update-check``.
+v1.5.0, so each CLI gets exactly its own switches and ``CI`` is never set. The v1.5.0
+command lines also pass ``--skip-update-check``. ``local execute`` does not: it passes
+its arguments on to the pinned build agent, which stops with "Error: unknown flag:
+--skip-update-check" after "Fetching latest build environment", so v0.1.47860 gets the
+same setting from ``CIRCLECI_CLI_SKIP_UPDATE_CHECK`` alone (its root command reads it
+as the flag's default).
 
 ``local execute`` runs the build agent pinned in runners.toml (``--build-agent-version``
 with its digest), mounts the wheel under test at /ash-wheel and a report directory at
@@ -91,7 +95,6 @@ def circleci_local_execute_argv(
         "local",
         "execute",
         job,
-        "--skip-update-check",
         "--build-agent-version",
         image_digest(image_ref(manifest, PICARD_IMAGE)),
         "-c",

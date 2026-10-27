@@ -1184,7 +1184,11 @@ def test_local_execute_mounts_the_wheel_and_the_reports_and_pins_the_build_agent
         report_dir=tmp_path / "reports",
     )
     assert argv[:4] == [str(tmp_path / "circleci"), "local", "execute", "ash"]
-    assert "--skip-update-check" in argv
+    # The pinned build agent rejects the forwarded flag; the update check is off by
+    # CIRCLECI_CLI_SKIP_UPDATE_CHECK.
+    assert "--skip-update-check" not in argv
+    switches = _api("run_circleci", "SWITCHES")
+    assert switches["local-execute"]["CIRCLECI_CLI_SKIP_UPDATE_CHECK"] == "true"
     assert sorted(_value(argv, "-v")) == sorted(
         [f"{tmp_path / 'wheel'}:/ash-wheel", f"{tmp_path / 'reports'}:/ash-reports"]
     )
