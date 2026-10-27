@@ -1184,7 +1184,7 @@ def test_validate_config_on_stdio_does_not_flag_the_callers_own_content(
     from automated_security_helper.cli.mcp_tools import mcp_validate_config
 
     result = mcp_validate_config(config_content=BEDROCK_REGION, session_id=None)
-    assert result == {"valid": True, "errors": []}, result
+    assert result == {"valid": True, "errors": [], "warnings": []}, result
 
 
 def test_validate_config_checks_a_delivered_base_too(_server) -> None:
@@ -1216,9 +1216,9 @@ def test_a_local_scan_takes_the_completeness_gate_from_its_resolved_config(
     calls: List[Any] = []
     real = ras._resolve_config_fail_on_incomplete_scanners
 
-    def recording(opts: Any) -> Any:
+    def recording(opts: Any, **kwargs: Any) -> Any:
         calls.append(opts)
-        return real(opts)
+        return real(opts, **kwargs)
 
     target = _server["target"]
     output = target / ".ash" / "ash_output"

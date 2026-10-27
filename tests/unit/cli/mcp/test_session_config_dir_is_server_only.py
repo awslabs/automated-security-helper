@@ -240,6 +240,7 @@ def test_the_files_the_server_writes_are_set_aside(_server, filename: str) -> No
     assert mcp_validate_config(config_path=str(written), session_id=REMOTE) == {
         "valid": True,
         "errors": [],
+        "warnings": [],
     }
     got = mcp_get_config(config_path=str(written), session_id=REMOTE)
     assert "error_type" not in got, got
