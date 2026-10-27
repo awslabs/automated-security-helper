@@ -185,6 +185,22 @@ class TestTheFormulaInstallsTheLockedDependencies:
         assert "assert_includes %w[PASSED FAILED], status" in body
         assert '"ash exited 2" : "ash exited 0"' in body
 
+    def test_the_keg_keeps_rpath_install_names(self) -> None:
+        """After the build, Homebrew rewrites every dylib ID in the keg to the
+        library's absolute opt path, and gives up on a Mach-O whose header has no
+        room for the longer name: `brew install` then exits 1 at "Failed to fix
+        install linkage" with the formula fully built. The locked orjson wheel's
+        extension module is such a file, a dylib with the ID
+        `@rpath/orjson.cpython-312-darwin.so` and no header padding (the wheel is
+        prebuilt, not linked under Homebrew's -headerpad_max_install_names), and
+        it stopped both macOS legs that got past `uv sync`. `preserve_rpath` tells
+        Homebrew to leave `@rpath` IDs alone; Python loads extension modules by
+        path, so nothing reads the install name.
+        """
+        assert re.search(r"^  preserve_rpath$", _formula(), re.MULTILINE), (
+            "Formula/ash.rb does not declare `preserve_rpath`"
+        )
+
     def test_no_resource_based_install_is_left_behind(self):
         """`virtualenv_install_with_resources` with no resources is the defect."""
         assert "virtualenv_install_with_resources" not in _install_method()
@@ -488,7 +504,7 @@ class Formula
   include FileUtils
 
   class << self
-    %i[desc homepage url license depends_on test sha256 head livecheck].each do |name|
+    %i[desc homepage url license depends_on test sha256 head livecheck preserve_rpath].each do |name|
       define_method(name) { |*_args, **_kwargs, &_block| nil }
     end
 
