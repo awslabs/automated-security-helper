@@ -467,7 +467,10 @@ def test_a_warning_before_logging_is_set_up_reaches_stderr_shown(tmp_path) -> No
         replaced.group(1),
         tested,
     )
-    assert "not_an_installed_module_for_ash" in stderr, stderr[-2000:]
+    # The answered frames are in the message: a get_config that refused or
+    # failed the load, instead of resolving it, warns about nothing, and the
+    # answer to id 2 says which.
+    assert "not_an_installed_module_for_ash" in stderr, (lines, stderr[-2000:])
     assert not re.search(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]", stderr), repr(stderr[-2000:])
     assert not re.search(r"^\s*::|##[A-Za-z]*\[", stderr, re.MULTILINE), repr(
         stderr[-2000:]

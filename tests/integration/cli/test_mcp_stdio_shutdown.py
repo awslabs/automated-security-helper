@@ -528,20 +528,20 @@ PLAIN_SERVER = (
 )
 
 
-def test_an_invalid_operator_config_refuses_the_scan_and_leaves_exit_0(tmp_path):
+def test_an_invalid_operator_config_refuses_to_start_with_exit_3(tmp_path):
     """The nearest real ASHValidationError an `ash mcp` process meets.
 
     ASH_CONFIG names the operator's config, and the base it extends is missing,
-    so loading it raises ASHConfigSourceError, an ASHValidationError. The server
-    reads that config per scan, inside the run_ash_scan tool, so the scan is
-    refused with the error, the server goes on serving, and it exits 0 when its
-    client closes the connection. A mcp_command mapping of ASHValidationError
-    from the server to exit 3 would be dead code too: nothing inside its try
-    raises one, since the option checks exit 3 before it, and everything after
-    runs in a request handler or a scan.
+    so loading it raises ASHConfigSourceError, an ASHValidationError. ASH_CONFIG
+    is the policy of every scan that names no config of its own, so the server
+    loads it once, at startup (mcp_command's _ash_config_refusal), before
+    anything is served: a file it cannot load is refused there with exit 3, the
+    code an invalid config exits with, and the error on stderr names the base.
+    Nothing is served first, so a client that connects reads EOF on stdout. A
+    server that read the file per scan instead would start, and every scan that
+    named no config would then run on the built-in default in place of the
+    operator's policy.
     """
-    from mcp.types import LATEST_PROTOCOL_VERSION
-
     project = _project(tmp_path)
     operator_config = tmp_path / "operator-ash.yaml"
     operator_config.write_text("extends: ./missing-base.yaml\n", encoding="utf-8")
@@ -558,43 +558,19 @@ def test_an_invalid_operator_config_refuses_the_scan_and_leaves_exit_0(tmp_path)
             env=env,
         )
     try:
-        _request(
-            process,
-            1,
-            "initialize",
-            {
-                "protocolVersion": LATEST_PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": {"name": "ash-operator-config-test", "version": "0"},
-            },
-        )
-        process.stdin.write(
-            b'{"jsonrpc": "2.0", "method": "notifications/initialized"}\n'
-        )
-        process.stdin.flush()
-        refused = _request(
-            process,
-            2,
-            "tools/call",
-            {"name": "run_ash_scan", "arguments": {"source_dir": str(project)}},
-        )["result"]["structuredContent"]["result"]
-        # Still serving after the refusal.
-        listed = _request(
-            process,
-            3,
-            "tools/call",
-            {"name": "list_active_scans", "arguments": {}},
-        )
-
-        process.stdin.close()
         status = _wait_for_exit(process)
+        served = process.stdout.read()
     finally:
         if process.poll() is None:
             process.kill()
             process.wait()
 
     stderr_text = stderr_path.read_text(encoding="utf-8", errors="replace")
-    assert refused["success"] is False, refused
-    assert "missing-base.yaml" in str(refused), refused
-    assert "result" in listed, listed
-    assert status == 0, (status, stderr_text[-2000:])
+    # The refusal is printed through a console that wraps at 80 columns when
+    # stderr is not a terminal, so the text is read with its line breaks and
+    # spaces removed: a path or a sentence split across lines still matches.
+    compact = "".join(stderr_text.split())
+    assert status == 3, (status, stderr_text[-2000:])
+    assert "ValidationError:" in compact, stderr_text[-2000:]
+    assert "missing-base.yaml" in compact, stderr_text[-2000:]
+    assert served == b"", served[:2000]
