@@ -312,6 +312,12 @@ def test_an_operator_config_file_in_the_tree_that_links_out_is_not_read(
     config_file in the tree linked to a file outside it put that line into
     ash.log, the aggregated results and the console. Now zizmor is not run, the
     scanner is ERROR, and nothing of that file is in the output."""
+    # The child scan runs offline, and every test has a home of its own, so no zizmor
+    # from an earlier test is there to find. Resolve (and if needed install) it
+    # online in this test's home first, as test_real_zizmor_offline does; the child
+    # inherits the home and finds it. Without it the scanner is MISSING before it
+    # reads the config_file, and the refusal below is never reached.
+    assert _scanner(source).validate_plugin_dependencies() is True
     marker = "first-line-of-a-file-outside-the-tree"
     outside = tmp_path / "outside"
     outside.mkdir()

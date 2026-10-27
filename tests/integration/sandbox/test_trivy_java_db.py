@@ -158,7 +158,14 @@ def _scan(repo: Path, output: Path, mode: str, env: dict) -> set:
     return found
 
 
-@pytest.mark.parametrize("backend", ["bwrap", "firejail", "landlock"])
+@pytest.mark.parametrize(
+    "backend",
+    [
+        pytest.param("bwrap", marks=pytest.mark.requires_userns),
+        "firejail",
+        "landlock",
+    ],
+)
 def test_a_jar_and_a_stale_java_database_change_nothing_in_the_sandbox(
     tmp_path, backend
 ):

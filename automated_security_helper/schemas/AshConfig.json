@@ -651,7 +651,7 @@
                 "install_timeout": 300,
                 "offline": false,
                 "scan_timeout": 1800,
-                "severity_threshold": null,
+                "severity_threshold": "ALL",
                 "tool_version": ">=1.7.0,<2.0.0"
               }
             },
@@ -1317,7 +1317,7 @@
             "install_timeout": 300,
             "offline": false,
             "scan_timeout": 1800,
-            "severity_threshold": null,
+            "severity_threshold": "ALL",
             "tool_version": ">=1.7.0,<2.0.0"
           },
           "description": "Configure Bandit scanner"
@@ -1347,10 +1347,6 @@
         },
         "config_file": {
           "anyOf": [
-            {
-              "format": "path",
-              "type": "string"
-            },
             {
               "type": "string"
             },
@@ -1404,24 +1400,11 @@
           "title": "Scan Timeout"
         },
         "severity_threshold": {
-          "anyOf": [
-            {
-              "enum": [
-                "ALL",
-                "LOW",
-                "MEDIUM",
-                "HIGH",
-                "CRITICAL"
-              ],
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
-          "title": "Severity Threshold"
+          "default": "ALL",
+          "description": "Severity threshold for bandit scan (ALL, LOW, MEDIUM, HIGH)",
+          "pattern": "^(ALL|LOW|MEDIUM|HIGH)$",
+          "title": "Severity Threshold",
+          "type": "string"
         },
         "tool_version": {
           "anyOf": [
@@ -4487,7 +4470,7 @@
               "install_timeout": 300,
               "offline": false,
               "scan_timeout": 1800,
-              "severity_threshold": null,
+              "severity_threshold": "ALL",
               "tool_version": ">=1.7.0,<2.0.0"
             }
           },

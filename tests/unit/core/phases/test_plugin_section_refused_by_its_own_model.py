@@ -238,4 +238,4 @@ def test_a_converter_section_its_model_refuses_fails_that_converter(tmp_path):
     assert "ValidationError" in failures["JupyterConverter"], failures
     assert "install_timeout" in failures["JupyterConverter"], failures
     assert results.converter_results["archive"].failure is None
-    assert [name for name, _ in incomplete_converters(results)] == ["JupyterConverter"]
+    assert [row.name for row in incomplete_converters(results)] == ["JupyterConverter"]

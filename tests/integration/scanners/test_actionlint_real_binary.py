@@ -234,8 +234,9 @@ def _scan(
         "--scanners",
         "actionlint",
         "--no-progress",
-        "--fail-on-findings",
-        "false",
+        # An on/off flag: `--fail-on-findings false` is refused, since `ash scan`
+        # takes no extra arguments.
+        "--no-fail-on-findings",
         *extra,
         env={**os.environ, "ASH_OFFLINE": "true"},
         cwd=cwd,

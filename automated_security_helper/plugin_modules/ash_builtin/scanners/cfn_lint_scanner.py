@@ -442,7 +442,10 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         self.tool_type = ScannerToolType.IAC
         self.use_uv_tool = True
         self._setup_uv_tool_install_commands()
-        self.tool_version = self._get_uv_tool_version("cfn-lint")
+        # The version probe is recorded here and run once, by the dependency
+        # check, the SARIF step or the inventory (resolve_deferred_tool_version):
+        # construction must start nothing, whoever constructs the scanner.
+        self._deferred_tool_version_probe = ("cfn-lint", self._uv_from_spec())
         super().model_post_init(context)
 
     def _options(self) -> CfnLintScannerConfigOptions:
@@ -505,6 +508,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
 
     def validate_plugin_dependencies(self) -> bool:
         """The bandit/checkov resolution: uv, then a verified binary on PATH, then install."""
+        self.resolve_deferred_tool_version()
         if self.dependency_unavailable_reason:
             return False
         if not self._validate_uv_tool_availability():

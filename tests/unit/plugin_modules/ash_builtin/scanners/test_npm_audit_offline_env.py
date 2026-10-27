@@ -134,6 +134,33 @@ def test_offline_mode_with_a_lockfile_is_missing(test_plugin_context, tmp_path):
     assert returned == [False]
 
 
+def test_the_offline_dependency_check_records_the_lockfile_as_not_audited(
+    test_plugin_context, tmp_path
+):
+    """A scan records the scanner MISSING on a False from the dependency check and
+    never calls scan(), so the check is where the unaudited lockfile is recorded;
+    ScanPhase copies it onto the MISSING row."""
+    scanner = _scanner(test_plugin_context, offline=True)
+    root = tmp_path / "repo"
+    nested = root / "packages" / "sub"
+    nested.mkdir(parents=True)
+    (nested / "package.json").write_text('{"name":"sub"}')
+    (nested / "package-lock.json").write_text("{}")
+    scanner.context.source_dir = root
+
+    with patch(
+        "automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner.scan_set",
+        return_value=[str(nested / "package.json"), str(nested / "package-lock.json")],
+    ):
+        satisfied = scanner.validate_plugin_dependencies()
+
+    assert satisfied is False
+    assert [entry["path"] for entry in scanner.inputs_not_scanned] == [
+        "packages/sub/package-lock.json"
+    ]
+    assert all(entry["reason"] for entry in scanner.inputs_not_scanned)
+
+
 @pytest.mark.parametrize("offline", [False])
 def test_online_mode_passes_no_environment_override(
     test_plugin_context, tmp_path, offline

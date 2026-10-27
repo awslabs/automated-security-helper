@@ -570,6 +570,20 @@ pattern another walked file that nothing ignores holds is left out rather than
 widened, and so is a path with a comma; ferret-scan reads those files and ASH drops
 their findings. The configured `exclude_patterns` are passed as written.
 
+The substring branch is why the plugin's exclusion of a link that leaves the scanned
+tree (`_link_exclude_patterns`) refuses the target when another walked file's path
+contains the link's pattern: on 2.4.x, the pattern for a link `conf.py` would also
+leave out `conf.py.bak` and everything below `conf.py.d/`.
+
+It is also why the global ignore paths are not passed as written. A bare `.` or
+`api` would leave out every path holding it. `_ignore_exclude_patterns` passes the
+paths ASH itself ignores (`ignored_entries`, which matches each ignore path as ASH
+does when it drops findings): a file as its escaped full path, and a fully ignored
+directory as its escaped full path followed by `/*`, the output-directory form. A
+pattern another walked file that nothing ignores holds is left out rather than
+widened, and so is a path with a comma; ferret-scan reads those files and ASH drops
+their findings. The configured `exclude_patterns` are passed as written.
+
 ### 10. CLI Args Override the Bundled Config's Defaults (`--exclude`, `--recursive`)
 
 Correction (verified against ferret-scan v2.4.5): an earlier version of this note claimed
