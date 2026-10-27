@@ -208,6 +208,7 @@ scanners:
 
 ### Configuration Options
 
+<!-- doctest: options of=scanners.ferret-scan -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `confidence_levels` | string | `"all"` | Confidence levels: `high`, `medium`, `low`, or combinations |

@@ -241,12 +241,13 @@ def validate_no_unsupported_options(cls, data: Any) -> Any:
 
 ### Plugin-Specific Options (CAN be configured)
 
+<!-- doctest: options of=scanners.ferret-scan -->
 | Option | Description | Default |
 |--------|-------------|---------|
 | `confidence_levels` | Filter by confidence: high, medium, low | `"all"` |
 | `checks` | Specific checks to run | `"all"` |
 | `recursive` | Scan directories recursively | `true` |
-| `config_file` | Path to ferret config file | Auto-discovered |
+| `config_file` | Path to ferret config file; auto-discovered when unset | `null` |
 | `profile` | Profile name from config file | None |
 | `exclude_patterns` | Patterns to exclude from scanning | `[]` |
 | `show_match` | Display matched text in findings | `false` |
@@ -254,13 +255,13 @@ def validate_no_unsupported_options(cls, data: Any) -> Any:
 | `finding_limit` | Max findings emitted via `--limit` (`0` = unlimited; guards against ferret-scan's 200 default silently truncating) | `0` |
 | `fail_on_incomplete` | Pass `--fail-on-incomplete` → ferret-scan exits 3 on partial coverage (accepted as non-fatal; SARIF still returned) | `false` |
 | `respect_gitignore` | Pass `--respect-gitignore` (off by default; .gitignore hides high-value secret files) | `false` |
-| `disable_ip_types` | Comma-separated INTELLECTUAL_PROPERTY sub-types to skip via `--disable-ip-types` | `None` |
+| `disable_ip_types` | Comma-separated INTELLECTUAL_PROPERTY sub-types to skip via `--disable-ip-types` | `null` |
 | `explain` | Pass `--explain` for an offline per-finding rationale/verdict/suppression-reason | `false` |
-| `validator_budget` | Per-validator time budget via `--validator-budget` (e.g. `all=2m`) | `None` |
-| `max_live_bytes` | Memory cap on extracted content via `--max-live-bytes` (e.g. `256MB`) | `None` |
+| `validator_budget` | Per-validator time budget via `--validator-budget` (e.g. `all=2m`) | `null` |
+| `max_live_bytes` | Memory cap on extracted content via `--max-live-bytes` (e.g. `256MB`) | `null` |
 | `ferret_debug` | Enable ferret-scan's own debug logging (preprocessing/validation flow) | `false` |
 | `ferret_verbose` | Enable ferret-scan's own verbose output (detailed finding info) | `false` |
-| `tool_version` | Version constraint for installation | `">=2.4.5,<2.6.0"` |
+| `tool_version` | Version constraint for installation; unset uses `>=2.4.5,<2.6.0` | `null` |
 | `skip_version_check` | Bypass version validation | `false` |
 
 Note: Bare `debug` and `verbose` are blocked to avoid confusion with ASH's `--debug`/`--verbose` flags. Use the `ferret_` prefixed versions instead.

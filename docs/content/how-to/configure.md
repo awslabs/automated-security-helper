@@ -117,7 +117,7 @@ ash --source-dir . --scanners detect-secrets --offline --no-progress \
 
 The form is `key.path=value`:
 
-- The key is a dotted path into the config, such as `scanners.bandit.options.confidence_level`. Plugin names use their hyphenated config names (`detect-secrets`, `cdk-nag`), and a key reaches a plugin's section the way a section's name is matched, so `reporters.CSV.enabled` sets the `csv` section's. There is no list indexing.
+- The key is a dotted path into the config, such as `scanners.bandit.options.confidence_level`. Plugin names use their hyphenated config names (`detect-secrets`, `cdk-nag`), and a key reaches a plugin's section by that name, so `reporters.csv.enabled` sets the `csv` section's. There is no list indexing.
 - The value is split from the key at the first `=`. `true`, `false`, `null`, and `none`, in any case, become booleans and null; numbers become numbers; and a value wrapped in `[...]` or `{...}` is read as JSON (a `[...]` that is not valid JSON is split at its commas). Anything else is a string. Threshold values are case-sensitive, so `HIGH` is a threshold and `high` is an error.
 - `key.path+=value` appends to an existing list instead of replacing it: `--config-overrides 'global_settings.ignore_paths+=[{"path": "vendor/**", "reason": "Third-party code"}]'`. On a key that is not a list yet, it sets the value.
 
