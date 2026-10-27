@@ -487,7 +487,14 @@ runs:
         ash --version
         OFFLINE_FLAG=""
         if [ "${ASH_TEST_OFFLINE}" = "true" ]; then
-          OFFLINE_FLAG="--offline"
+          # npm-audit audits nothing offline: npm, pnpm and yarn audit only against the
+          # registry's advisory service, which offline mode does not reach. The scanner
+          # records MISSING for that (its own message names this flag), and the
+          # completeness check rightly fails a MISSING scanner. The tool is in the image;
+          # what is absent is the network, so there is nothing to install. Excluding the
+          # scanner records SKIPPED, the stated operator choice; the other 15 still run
+          # and the completeness check is unchanged. The online legs keep npm-audit.
+          OFFLINE_FLAG="--offline --exclude-scanners npm-audit"
         fi
         # Teed so the cache report below can count the build steps the layer cache
         # served. pipefail (bash's default here) keeps ash's exit status.
