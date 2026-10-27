@@ -1070,6 +1070,7 @@ class ASHScanOrchestrator(BaseModel):
             output=str(self.output_dir),
             debug=self.debug,
             run_id=self._run_id,
+            honor_ignore_files=honors_ignore_files(self.config),
             workspace_output_dir=(
                 None
                 if self.workspace_output_dir is None

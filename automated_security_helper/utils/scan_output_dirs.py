@@ -1245,7 +1245,10 @@ def scan_set_of(context: Any) -> List[str]:
     "nothing to exclude" let it through: the scanner stops, and the scan exits 1
     with it incomplete.
     """
-    from automated_security_helper.utils.get_scan_set import scan_set
+    from automated_security_helper.utils.get_scan_set import (
+        honors_ignore_files,
+        scan_set,
+    )
 
     output_dir = getattr(context, "output_dir", None)
     if output_dir is None:
@@ -1256,6 +1259,7 @@ def scan_set_of(context: Any) -> List[str]:
             source=str(context.source_dir),
             output=str(output_dir),
             run_id=getattr(context, "run_id", None),
+            honor_ignore_files=honors_ignore_files(getattr(context, "config", None)),
             workspace_output_dir=(
                 None if workspace_output_dir is None else str(workspace_output_dir)
             ),

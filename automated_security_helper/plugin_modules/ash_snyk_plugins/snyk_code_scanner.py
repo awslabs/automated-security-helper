@@ -821,7 +821,10 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         import dataclasses
         import tempfile
 
-        from automated_security_helper.utils.get_scan_set import scan_set
+        from automated_security_helper.utils.get_scan_set import (
+            honors_ignore_files,
+            scan_set,
+        )
         from automated_security_helper.utils.sandbox.fs_guard import (
             open_for_write_bytes,
         )
@@ -880,6 +883,9 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         for name in scan_set(
             source=str(root),
             output=str(self.context.output_dir),
+            honor_ignore_files=honors_ignore_files(
+                getattr(self.context, "config", None)
+            ),
             run_id=getattr(self.context, "run_id", None),
         ):
             # Only the line ending a cached list leaves: "a.js " is its own file.

@@ -40,7 +40,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Invocation,
 )
 from automated_security_helper.utils.error_text import ESCAPE_CODES, shown_tool_stderr
-from automated_security_helper.utils.get_scan_set import scan_set
+from automated_security_helper.utils.get_scan_set import honors_ignore_files, scan_set
 from automated_security_helper.utils.link_exclusions import drop_ignored
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
@@ -267,6 +267,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 scan_set(
                     source=self.context.source_dir,
                     output=self.context.output_dir,
+                    honor_ignore_files=honors_ignore_files(
+                        getattr(self.context, "config", None)
+                    ),
                     run_id=getattr(self.context, "run_id", None),
                 ),
                 self.context.source_dir,

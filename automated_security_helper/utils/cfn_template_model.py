@@ -429,7 +429,10 @@ def cloudformation_candidate_files(
     if target_type == "converted":
         files = [Path(p) for p in Path(context.work_dir).glob("**/*.*")]
     else:
-        from automated_security_helper.utils.get_scan_set import scan_set
+        from automated_security_helper.utils.get_scan_set import (
+            honors_ignore_files,
+            scan_set,
+        )
         from automated_security_helper.utils.link_exclusions import drop_ignored
         from automated_security_helper.utils.suppression_matcher import (
             active_ignore_paths,
@@ -444,6 +447,9 @@ def cloudformation_candidate_files(
                 scan_set(
                     source=os.fspath(context.source_dir),
                     output=os.fspath(context.output_dir),
+                    honor_ignore_files=honors_ignore_files(
+                        getattr(context, "config", None)
+                    ),
                     run_id=getattr(context, "run_id", None),
                 ),
                 context.source_dir,
