@@ -77,6 +77,7 @@ from automated_security_helper.interactions import run_ash_container
 from tests.unit.test_base_image_override_reaches_every_build_entrypoint import (
     _REQUIRES_BASH,
 )
+from tests.utils.host_ids import with_fixed_ids
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = REPO_ROOT / "Dockerfile"
@@ -444,6 +445,10 @@ class TestTheBashEntrypoint:
             "ARGV_LOG": str(argv_log),
             "DATE_TIMES": str(clock),
         }
+        # An unprivileged `id` first on PATH: ./ash refuses the default non-root build
+        # with UID 0 or GID 0 before it reaches the runner, so under a root suite the
+        # host's own `id` would leave nothing to assert over.
+        env = with_fixed_ids(env, tmp_path / "fixed-id-bin")
         args = [
             "bash",
             str(ASH_SCRIPT),
