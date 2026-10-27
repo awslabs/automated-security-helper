@@ -22,8 +22,13 @@ import time
 
 import pytest
 
-from automated_security_helper.utils.sandbox import landlock_exec
-from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, KillAfter
+# The wrapper binds libc at import (ctypes.CDLL(None)), which Windows rejects, so the
+# module is skipped before the import, as test_sandbox_socket_filter.py does.
+if sys.platform != "linux":
+    pytest.skip("the wrapper uses prctl and /proc, Linux only", allow_module_level=True)
+
+from automated_security_helper.utils.sandbox import landlock_exec  # noqa: E402
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, KillAfter  # noqa: E402
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "linux", reason="the wrapper uses prctl and /proc, Linux only"
