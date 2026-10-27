@@ -584,7 +584,7 @@ def test_a_config_in_an_ops_checkout_does_not_turn_it_on_or_aim_it(
         for m in warnings_logged
         if m.startswith("Ignoring")
         and f"reporters.{key}.enabled" in m
-        and str(ops / "ash.yaml") in m
+        and (ops / "ash.yaml").as_posix() in m
     ]
     assert len(named) == 1, warnings_logged
     assert named[0].endswith(KEEP_A_SETTING), named[0]
