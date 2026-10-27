@@ -157,6 +157,13 @@ class TestTheScannerInstallingBanditFailsTheRun:
             "get_tool_version",
             lambda self, tool_name, package_name=None, *args, **kwargs: None,
         )
+        # Before an install the mixin asks for the cache's whereabouts (`uv cache
+        # dir`), another start the guard records; answered as a failed command is.
+        monkeypatch.setattr(
+            UVToolRunner,
+            "get_cache_info",
+            lambda self: {"cache_available": False, "error": "no uv under the guard"},
+        )
         monkeypatch.setattr(UVToolRunner, "is_tool_installed", lambda self, name: False)
         monkeypatch.setattr(
             "automated_security_helper.utils.subprocess_utils.find_executable",
