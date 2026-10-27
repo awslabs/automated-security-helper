@@ -456,10 +456,6 @@ def _raw_markup_trace(error: MarkupError, record: logging.LogRecord) -> str:
     return whole
 
 
-class LogFileHandler(ShownHandlerErrors, logging.FileHandler):
-    """logging.FileHandler, reporting a record it cannot write shown."""
-
-
 class ConsoleHandler(ShownHandlerErrors, RichHandler):
     """The console's RichHandler: each message, and each traceback, as text shown.
 
@@ -1417,8 +1413,11 @@ def check_commands_of_stdout() -> None:
     _check_commands_of_std("stdout")
 
 
-class _GuardedFileHandler(logging.FileHandler):
+class LogFileHandler(ShownHandlerErrors, logging.FileHandler):
     """A FileHandler that opens its file as ``fs_guard.open_for_write`` does.
+
+    A record it cannot write is reported shown (:class:`ShownHandlerErrors`), as
+    every one of ASH's log handlers reports one.
 
     Appending, since get_logger has already truncated the file when asked to. A link
     at the file name, or a file another name refers to, raises instead of being
@@ -1504,7 +1503,7 @@ def get_logger(
     replaced = list(logger.handlers)
     remove_ash_handlers(logger)
     for handler in replaced:
-        if isinstance(handler, _GuardedFileHandler) and handler not in logger.handlers:
+        if isinstance(handler, LogFileHandler) and handler not in logger.handlers:
             handler.close()
 
     # Inside a run (run_log_scope), the handlers this call adds are the run's
@@ -1696,14 +1695,14 @@ def _log_file_handler(path: Path, truncate: bool) -> logging.FileHandler:
 
     Both opens go through fs_guard.open_for_write below the output directory
     get_logger registered, so a link at the name, or a file another name refers to,
-    raises before anything is written; see _GuardedFileHandler.
+    raises before anything is written; see LogFileHandler.
     """
     # Not at the top: fs_guard imports this module. Do not hoist.
     from automated_security_helper.utils.sandbox import fs_guard
 
     with fs_guard.open_for_write(path, append=not truncate, root=path.parent):
         pass
-    return _GuardedFileHandler(path.as_posix())
+    return LogFileHandler(path.as_posix())
 
 
 def _coerce_log_level(value: str | int) -> Optional[int]:
