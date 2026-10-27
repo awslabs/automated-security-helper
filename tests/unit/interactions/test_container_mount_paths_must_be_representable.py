@@ -30,6 +30,7 @@ from automated_security_helper.interactions.run_ash_container import (
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 from tests.utils.host_file_names import skip_unless_the_host_can_name
+from tests.utils.windows_file_names import created_on_disk
 
 #: Each character the mount syntax cannot carry, in a directory name. Windows cannot
 #: hold a double quote, a line feed or a carriage return in a name either, so the
