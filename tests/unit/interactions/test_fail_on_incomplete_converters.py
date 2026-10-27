@@ -133,7 +133,7 @@ class TestIncompleteConvertersAreListed:
             )
         )
 
-        assert incomplete_converters(results) == [
+        assert [(row.name, row.reason) for row in incomplete_converters(results)] == [
             ("jupyter", "could not convert 1 input: [x].ipynb")
         ]
 
@@ -145,7 +145,9 @@ class TestIncompleteConvertersAreListed:
             )
         )
 
-        assert incomplete_converters(results) == [("archive", "OSError: disk full")]
+        assert [(row.name, row.reason) for row in incomplete_converters(results)] == [
+            ("archive", "OSError: disk full")
+        ]
 
     def test_failed_inputs_read_back_from_a_results_file_still_count(self):
         """A merged or reloaded row carries plain data; the gate reads it the same."""
@@ -153,9 +155,10 @@ class TestIncompleteConvertersAreListed:
             {"failed_inputs": [{"path": "b.tar", "reason": "ReadError: truncated"}]}
         )
 
-        assert incomplete_converters(_results(archive=row)) == [
-            ("archive", "could not convert 1 input: b.tar")
-        ]
+        assert [
+            (listed.name, listed.reason)
+            for listed in incomplete_converters(_results(archive=row))
+        ] == [("archive", "could not convert 1 input: b.tar")]
 
     def test_failed_inputs_fail_the_exit_code(self, tmp_path):
         results = _results(

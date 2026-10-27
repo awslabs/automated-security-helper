@@ -47,14 +47,14 @@ def assert_inert(text: str) -> None:
 
 
 def test_a_failed_input_name_is_inert_in_the_gate_reason():
-    ((name, reason),) = gate(failed=[ESCAPE_RESET, REORDERED])
+    ((name, reason, _),) = gate(failed=[ESCAPE_RESET, REORDERED])
 
     assert name == "archive"
     assert_inert(reason)
 
 
 def test_a_limit_refusal_name_is_inert_in_the_gate_reason():
-    ((_, reason),) = gate(refused=[ESCAPE_RESET, REORDERED])
+    ((_, reason, _),) = gate(refused=[ESCAPE_RESET, REORDERED])
 
     assert_inert(reason)
     assert "(max_members)" in reason
