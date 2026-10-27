@@ -486,6 +486,33 @@ global_settings:
         GHSA-v4x8-3wr5-3wq8: filelock 4.0.3 in uv.lock, the Python 3.10 entry. Dev group only;
         no filelock release above 4.2.0 supports Python 3.10. The Python 3.11 and later entry
         is at 4.2.1. Revisit when requires-python rises or a supporting release ships.
+    # === Time-boxed: dnspython CVE-2026-114605 / GHSA-45c3-73f7-pv4m on Python 3.10 (expires 2026-11-27) ===
+    # uv.lock holds two dnspython entries. The one for Python 3.11 and later is at 2.9.0,
+    # the first fixed release. The one for Python 3.10 stays at 2.8.0 because 2.9.0
+    # requires Python 3.11 and requires-python is >=3.10. dnspython comes in through
+    # email-validator, which pydantic[email] uses to validate email syntax. The version
+    # is pinned in the entries, so the 2.9.0 entry is never covered and a different 3.10
+    # version reports again. trivy reports the CVE id and grype the GHSA id with the
+    # package name appended, so there is one entry per spelling. Revisit when
+    # requires-python rises or a dnspython release supporting Python 3.10 ships.
+    - rule_id: "CVE-2026-114605*"
+      path: "uv.lock"
+      package_name: "dnspython"
+      package_version: "2.8.0"
+      expiration: "2026-11-27"
+      reason: >-
+        CVE-2026-114605 (GHSA-45c3-73f7-pv4m): dnspython 2.8.0 in uv.lock, the Python 3.10
+        entry. The fixed release 2.9.0 requires Python 3.11; the Python 3.11 and later entry
+        is at 2.9.0. Revisit when requires-python rises or a supporting release ships.
+    - rule_id: "GHSA-45c3-73f7-pv4m*"
+      path: "uv.lock"
+      package_name: "dnspython"
+      package_version: "2.8.0"
+      expiration: "2026-11-27"
+      reason: >-
+        GHSA-45c3-73f7-pv4m (CVE-2026-114605): dnspython 2.8.0 in uv.lock, the Python 3.10
+        entry. The fixed release 2.9.0 requires Python 3.11; the Python 3.11 and later entry
+        is at 2.9.0. Revisit when requires-python rises or a supporting release ships.
     # === detect-secrets: broad patterns by path ===
     #
     # This header used to claim detect-secrets had "no inline nosec support".

@@ -12,14 +12,19 @@ exactly once and still gate coverage:
 
 * the ``shard`` axis in the workflow, one literal list whose entries each carry the total
   they were cut for (``3of8``);
-* ``.github/scripts/select-test-shard.py``, which deals the test files out by those names;
+* ``tests/utils/sharding.py``, a ``pytest_ignore_collect`` hook that ignores the test
+  modules another shard owns, so pytest's own ``testpaths``, ``python_files`` and ignore
+  rules still decide what is collected;
 * the ``run-unit-tests`` action, which runs the whole suite for ``1of1`` and one shard
   otherwise, and uploads the shard's coverage data;
-* the ``unit-coverage`` job, which downloads the shards of one combination and applies the
-  80% gate to their combined data, failing when a shard is missing.
+* the ``unit-coverage`` job, which downloads the shards of one OS family and applies the
+  80% gate to their combined data, failing when a shard is missing or unreadable.
 
 A shard dropped from the axis would silently stop running its slice of the suite, and
-every remaining shard would still pass. The first test below is that guard.
+every remaining shard would still pass. The first test below is that guard. A split made
+outside pytest (a list of files on the command line) would also skip pytest's ignore
+rules for those files; the real-collection tests below run pytest on a planted tree to
+hold the hook to the unsharded run's collection.
 
 What it does not cover
 ----------------------
@@ -29,7 +34,13 @@ measurement the CI run makes.
 
 from __future__ import annotations
 
+import configparser
 import importlib.util
+import os
+import shlex
+import subprocess
+import sys
+import textwrap
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -37,9 +48,13 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.utils import sharding
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 UNIFIED_CI = REPO_ROOT / ".github" / "workflows" / "ash-unified-ci.yml"
 RUN_UNIT_TESTS = REPO_ROOT / ".github" / "actions" / "run-unit-tests" / "action.yml"
+PYTEST_INI = REPO_ROOT / "pytest.ini"
+ROOT_CONFTEST = REPO_ROOT / "tests" / "conftest.py"
 SCRIPTS = REPO_ROOT / ".github" / "scripts"
 
 #: The OS families the unit-coverage job gates, each with the runner.arch GitHub reports for
@@ -64,7 +79,6 @@ def _load_script(filename: str) -> ModuleType:
     return module
 
 
-SELECT = _load_script("select-test-shard.py")
 COMBINE = _load_script("combine-unit-coverage.py")
 
 
@@ -85,11 +99,29 @@ def _shard_axis() -> list[str]:
     return [str(entry) for entry in axis]
 
 
+def _pytest_ini_patterns(key: str) -> list[str]:
+    parser = configparser.ConfigParser()
+    parser.read(PYTEST_INI, encoding="utf-8")
+    return shlex.split(parser.get("pytest", key, fallback=""))
+
+
+def _clean_env(**extra: str) -> dict[str, str]:
+    """The environment of a child that must not join this run's coverage or options."""
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith(("PYTEST_", "COV_CORE_", "COVERAGE_"))
+        and k != sharding.ENV_VAR
+    }
+    env.update(extra)
+    return env
+
+
 class TestTheShardAxis:
     def test_it_lists_every_shard_of_one_total_once(self):
         """Dropping, repeating or renumbering an entry leaves part of the suite unrun."""
         axis = _shard_axis()
-        parsed = [SELECT.parse_shard(entry) for entry in axis]
+        parsed = [sharding.parse_shard(entry) for entry in axis]
         counts = {count for _, count in parsed}
         assert len(counts) == 1, f"the shards disagree on their total: {axis}"
         (count,) = counts
@@ -110,33 +142,171 @@ class TestTheShardAxis:
         assert "matrix.shard" in _workflow_job("unit-test")["name"]
 
 
-class TestTheSelector:
-    def test_the_shards_deal_every_file_exactly_once(self):
-        count = SELECT.parse_shard(_shard_axis()[0])[1]
-        files = [f"tests/unit/test_module_{i:04d}.py" for i in range(1000)]
-        dealt = [
-            name
-            for index in range(1, count + 1)
-            for name in SELECT.select(files, index, count)
+class TestTheShardFilter:
+    def test_a_module_belongs_to_exactly_one_shard(self):
+        count = sharding.parse_shard(_shard_axis()[0])[1]
+        modules = [f"tests/unit/pkg{i % 7}/test_module_{i:04d}.py" for i in range(1000)]
+        patterns = _pytest_ini_patterns("python_files")
+        root = Path("/rootdir")
+        for module in modules:
+            keepers = [
+                index
+                for index in range(1, count + 1)
+                if not sharding.ignored_by_shard(
+                    root / module, root, patterns, (index, count)
+                )
+            ]
+            assert len(keepers) == 1, (module, keepers)
+
+    def test_the_shards_are_not_all_one_big_shard(self):
+        count = sharding.parse_shard(_shard_axis()[0])[1]
+        owners = [
+            sharding.owner(f"tests/unit/test_module_{i:04d}.py", count)
+            for i in range(1000)
         ]
-        assert sorted(dealt) == files
-        sizes = [len(SELECT.select(files, i, count)) for i in range(1, count + 1)]
-        assert max(sizes) - min(sizes) <= 1, sizes
+        sizes = [owners.count(index) for index in range(1, count + 1)]
+        assert min(sizes) > 0.5 * (1000 / count), sizes
+        assert max(sizes) < 1.5 * (1000 / count), sizes
+
+    def test_a_file_pytest_does_not_take_as_a_test_module_is_left_alone(self):
+        """The filter reads python_files from pytest.ini, so it never ignores data files."""
+        patterns = _pytest_ini_patterns("python_files")
+        root = Path("/rootdir")
+        for name in ("conftest.py", "helpers.py", "data.json", "README.md"):
+            assert not sharding.matches_python_files(Path(name), patterns), name
+            for shard in ((1, 3), (2, 3), (3, 3)):
+                assert not sharding.ignored_by_shard(
+                    root / "tests" / name, root, patterns, shard
+                ), (name, shard)
+
+    def test_every_python_files_pattern_in_pytest_ini_is_matched(self):
+        patterns = _pytest_ini_patterns("python_files")
+        assert patterns, "pytest.ini sets no python_files"
+        for pattern in patterns:
+            sample = Path(pattern.replace("*", "sample"))
+            assert sharding.matches_python_files(sample, patterns), pattern
+
+    def test_a_module_outside_the_rootdir_is_never_ignored(self):
+        patterns = _pytest_ini_patterns("python_files")
+        for shard in ((1, 2), (2, 2)):
+            assert not sharding.ignored_by_shard(
+                Path("/elsewhere/tests/test_x.py"),
+                Path("/rootdir"),
+                patterns,
+                shard,
+            )
+
+    def test_the_environment_variable_is_read_strictly(self):
+        assert sharding.shard_from_env({}) is None
+        assert sharding.shard_from_env({sharding.ENV_VAR: ""}) is None
+        assert sharding.shard_from_env({sharding.ENV_VAR: "3of8"}) == (3, 8)
 
     @pytest.mark.parametrize(
-        "text", ["", "0of8", "9of8", "1of0", "3", "3of", "of8", "1of8x", "-1of8"]
+        "text", ["0of8", "9of8", "1of0", "3", "3of", "of8", "1of8x", "-1of8", "3 of 8"]
     )
     def test_a_malformed_shard_is_refused(self, text):
         with pytest.raises(ValueError):
-            SELECT.parse_shard(text)
+            sharding.shard_from_env({sharding.ENV_VAR: text})
 
-    def test_only_test_modules_are_selected(self):
-        """The same names pytest.ini's python_files selects, and nothing else."""
-        assert SELECT.TEST_FILE_PATTERN == "test_*.py"
-        assert SELECT.TEST_ROOT == "tests"
+    def test_the_root_conftest_registers_the_hook(self):
+        text = ROOT_CONFTEST.read_text(encoding="utf-8")
+        assert "from tests.utils.sharding import pytest_ignore_collect" in text
+        assert "sharding.check_environment()" in text
 
 
-class TestTheActionKeepsTheWholeSuiteForm:
+class TestTheFilterInARealCollection:
+    """pytest itself, on a planted tree, collects the same tests sharded and unsharded."""
+
+    #: One module per name, each with one test; the tree has a second python_files
+    #: pattern, a norecursedirs directory, and a helper that looks like a test file but
+    #: matches no pattern.
+    MODULES = (
+        [f"suite/test_{name}.py" for name in "abcdefgh"]
+        + ["suite/sub/test_i.py", "suite/sub/check_j.py"]
+        + ["suite/skipme/test_k.py", "suite/helper_l.py"]
+    )
+
+    def _plant(self, root: Path) -> None:
+        (root / "pytest.ini").write_text(
+            textwrap.dedent(
+                """\
+                [pytest]
+                testpaths = suite
+                python_files = test_*.py check_*.py
+                norecursedirs = skipme
+                """
+            ),
+            encoding="utf-8",
+        )
+        for relative in self.MODULES:
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            test_name = "test_" + path.stem.split("_")[-1]
+            path.write_text(f"def {test_name}():\n    pass\n", encoding="utf-8")
+
+    def _collect(self, root: Path, shard: str | None) -> tuple[int, set[str]]:
+        extra = {sharding.ENV_VAR: shard} if shard else {}
+        env = _clean_env(PYTHONPATH=str(REPO_ROOT), **extra)
+        done = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "--collect-only",
+                "-q",
+                "-c",
+                str(root / "pytest.ini"),
+                "--rootdir",
+                str(root),
+                "--confcutdir",
+                str(root),
+                "-p",
+                "tests.utils.sharding",
+                "-p",
+                "no:cacheprovider",
+                "-p",
+                "no:randomly",
+            ],
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        ids = {line for line in done.stdout.splitlines() if "::" in line}
+        return done.returncode, ids
+
+    def test_the_shards_together_collect_what_the_unsharded_run_does(self, tmp_path):
+        self._plant(tmp_path)
+        code, whole = self._collect(tmp_path, None)
+        assert code == 0, whole
+        # The planted tree's own rules: both patterns, and neither the norecursedirs
+        # directory nor the file that matches no pattern.
+        assert any("test_a.py" in i for i in whole)
+        assert any("check_j.py" in i for i in whole)
+        assert not any("skipme" in i for i in whole), whole
+        assert not any("helper_l" in i for i in whole), whole
+
+        count = 3
+        per_shard = []
+        for index in range(1, count + 1):
+            code, ids = self._collect(tmp_path, f"{index}of{count}")
+            assert code in (0, 5), (index, code)
+            per_shard.append(ids)
+        union = set().union(*per_shard)
+        assert union == whole, (whole - union, union - whole)
+        assert sum(len(ids) for ids in per_shard) == len(whole), "a test ran twice"
+        assert sum(1 for ids in per_shard if ids) >= 2, (
+            "the shards did not split the tests"
+        )
+
+    def test_a_malformed_shard_fails_the_run(self, tmp_path):
+        self._plant(tmp_path)
+        code, _ = self._collect(tmp_path, "9of8")
+        assert code != 0
+
+
+class TestTheActionRunsAShard:
     def test_the_default_shard_is_the_whole_suite(self):
         action = yaml.safe_load(RUN_UNIT_TESTS.read_text(encoding="utf-8"))
         assert action["inputs"]["shard"]["default"] == "1of1"
@@ -147,17 +317,33 @@ class TestTheActionKeepsTheWholeSuiteForm:
         assert whole["if"] == "inputs.shard == '1of1'"
         assert part["if"] == "inputs.shard != '1of1'"
 
+    def test_a_shard_names_no_test_file_on_the_command_line(self):
+        """A file named there skips pytest's ignore rules and its python_files match."""
+        step = _action_step("Run PyTest shard")
+        argv = shlex.split(str(step["run"]).replace("\\\n", " "))
+        assert argv[:3] == ["uv", "run", "pytest"], argv
+        for arg in argv[3:]:
+            assert arg.startswith("-"), f"positional argument {arg!r} names a path"
+        assert step["env"]["ASH_TEST_SHARD"] == "${{ inputs.shard }}"
+        assert step["env"]["ASH_TEST_SHARD"] and sharding.ENV_VAR == "ASH_TEST_SHARD"
+
     def test_a_shard_measures_coverage_without_gating_it(self):
         """A shard covers part of the package; the gate is the unit-coverage job's."""
         step = _action_step("Run PyTest shard")
         run = str(step["run"])
         assert "--cov-fail-under" not in run
         assert "--cov=automated_security_helper" in run
-        assert "@test-results/shard-files.txt" in run
-        coverage_file = Path(step["env"]["COVERAGE_FILE"])
-        assert coverage_file.parent == Path("test-results")
-        assert coverage_file.name == COMBINE.DATA_FILE
-        assert not coverage_file.name.startswith("."), (
+        assert "COVERAGE_FILE" not in step["env"], (
+            "COVERAGE_FILE reaches every process a test starts, and a nested run could "
+            "merge its data into the shard's"
+        )
+
+    def test_the_shards_data_is_kept_for_the_upload_even_after_a_red_run(self):
+        step = _action_step("Keep this shard's coverage data")
+        assert "failure()" in step["if"] and "success()" in step["if"]
+        assert "inputs.shard != '1of1'" in step["if"]
+        assert f"test-results/{COMBINE.DATA_FILE}" in str(step["run"])
+        assert not COMBINE.DATA_FILE.startswith("."), (
             "upload-artifact leaves out hidden files, so the data would never arrive"
         )
 
@@ -189,11 +375,8 @@ class TestTheCoverageJobReadsWhatTheShardsUpload:
 
     def test_the_arch_labels_are_the_ones_the_action_puts_in_the_name(self):
         """The script rebuilds the artifact name; the action is where it is made."""
-        script = str(
-            _action_step("Resolve this runner's architecture from the runner itself")[
-                "run"
-            ]
-        )
+        step = _action_step("Resolve this runner's architecture from the runner itself")
+        script = str(step["run"])
         for runner_arch, label in COMBINE.ARCH_LABELS.items():
             assert f"{runner_arch}) label={label} ;;" in script, (runner_arch, label)
 
@@ -212,7 +395,8 @@ class TestTheCoverageJobReadsWhatTheShardsUpload:
     def test_it_downloads_and_combines_its_family(self):
         job = _workflow_job("unit-coverage")
         assert job["needs"] == "unit-test"
-        assert "cancelled()" in job["if"], (
+        # Exactly: ${{ cancelled() }} would read the other way round.
+        assert job["if"] == "${{ !cancelled() }}", (
             "without !cancelled() a failed shard skips the job, and a skipped required "
             "dependency reads as a pass"
         )
@@ -239,3 +423,119 @@ class TestTheCoverageJobReadsWhatTheShardsUpload:
 
     def test_the_gate_still_lists_it(self):
         assert "unit-coverage" in _workflow_job("required-checks")["needs"]
+
+
+class TestTheCombineGate:
+    """The gate the unit-coverage job runs, on real coverage data planted in a temp dir."""
+
+    MODULE = textwrap.dedent(
+        """\
+        def a():
+            return 1
+
+
+        def b():
+            return 2
+
+
+        def c():
+            return 3
+
+
+        def d():
+            return 4
+        """
+    )
+    DRIVER = textwrap.dedent(
+        """\
+        import sys
+
+        sys.path.insert(0, sys.argv[1])
+        import plant_mod
+
+        for name in sys.argv[2:]:
+            getattr(plant_mod, name)()
+        """
+    )
+
+    def _shard(self, tmp_path: Path, results: Path, index: int, calls: list[str]):
+        """A shard artifact whose data came from running the named functions."""
+        prefix = COMBINE.artifact_prefix("ubuntu-latest", COVERAGE_PYTHON, "X64")
+        directory = results / f"{prefix}-shard{index}of2"
+        directory.mkdir(parents=True, exist_ok=True)
+        src = tmp_path / "src"
+        src.mkdir(exist_ok=True)
+        (src / "plant_mod.py").write_text(self.MODULE, encoding="utf-8")
+        driver = tmp_path / "driver.py"
+        driver.write_text(self.DRIVER, encoding="utf-8")
+        done = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "coverage",
+                "run",
+                f"--data-file={directory / COMBINE.DATA_FILE}",
+                f"--source={src}",
+                str(driver),
+                str(src),
+                *calls,
+            ],
+            cwd=tmp_path,
+            env=_clean_env(),
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        assert done.returncode == 0, done.stdout + done.stderr
+        return directory
+
+    def _gate(self, tmp_path: Path, monkeypatch, results: Path) -> int:
+        for name in list(os.environ):
+            if name.startswith(("COV_CORE_", "COVERAGE_")):
+                monkeypatch.delenv(name)
+        monkeypatch.setenv("RUNNER_ARCH", "X64")
+        monkeypatch.chdir(tmp_path)
+        return COMBINE.main(
+            [
+                "--results-dir",
+                str(results),
+                "--os",
+                "ubuntu-latest",
+                "--python-version",
+                COVERAGE_PYTHON,
+                "--fail-under",
+                "80",
+            ]
+        )
+
+    def test_shards_that_together_cover_enough_pass(self, tmp_path, monkeypatch):
+        results = tmp_path / "results"
+        self._shard(tmp_path, results, 1, ["a", "b"])
+        self._shard(tmp_path, results, 2, ["c", "d"])
+        assert self._gate(tmp_path, monkeypatch, results) == 0
+
+    def test_shards_that_cover_too_little_fail_with_coverages_own_status(
+        self, tmp_path, monkeypatch
+    ):
+        """The same planted module, with both shards running the same function."""
+        results = tmp_path / "results"
+        self._shard(tmp_path, results, 1, ["a"])
+        self._shard(tmp_path, results, 2, ["a"])
+        assert self._gate(tmp_path, monkeypatch, results) == 2
+
+    def test_a_missing_shard_fails_even_when_the_others_cover_enough(
+        self, tmp_path, monkeypatch
+    ):
+        """One shard alone covers 100 percent here, and still may not stand in for two."""
+        results = tmp_path / "results"
+        self._shard(tmp_path, results, 1, ["a", "b", "c", "d"])
+        assert self._gate(tmp_path, monkeypatch, results) == 1
+
+    def test_an_unreadable_data_file_fails_instead_of_being_skipped(
+        self, tmp_path, monkeypatch
+    ):
+        results = tmp_path / "results"
+        self._shard(tmp_path, results, 1, ["a", "b", "c", "d"])
+        broken = self._shard(tmp_path, results, 2, ["a"])
+        (broken / COMBINE.DATA_FILE).write_bytes(b"not a coverage data file")
+        assert self._gate(tmp_path, monkeypatch, results) == 1

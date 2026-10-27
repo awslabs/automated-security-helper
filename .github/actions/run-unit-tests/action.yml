@@ -114,27 +114,18 @@ runs:
           --cov-report=html:test-results/coverage_html \
           --cov-fail-under=80
 
-    # The test files this shard owns, one per line. Passing them as arguments, rather than
-    # deselecting after collection, also keeps each shard from collecting the whole tree,
-    # which took about four and a half minutes per run on the unsharded suite.
-    # The self-test runs first: a selector that dealt out a subset would otherwise pass.
-    - name: Select this shard's test files
-      if: inputs.shard != '1of1'
-      shell: bash
-      env:
-        SHARD: ${{ inputs.shard }}
-      run: |
-        uv run python .github/scripts/select-test-shard.py --self-test
-        uv run python .github/scripts/select-test-shard.py \
-          --shard "${SHARD}" --output test-results/shard-files.txt
-
     # One shard of the suite, with the same extras gates as "Run PyTest" above.
     #
-    # Coverage is measured and written to test-results/coverage.data, which the artifact
-    # upload below carries to the unit-coverage job; --cov-report= prints and writes
-    # nothing else, and no threshold is set here because a shard covers only part of the
-    # package. The data file has no leading dot on purpose: upload-artifact leaves out
-    # hidden files unless told otherwise.
+    # ASH_TEST_SHARD makes tests/conftest.py's pytest_ignore_collect hook (tests/utils/
+    # sharding.py) ignore the test modules another shard owns. No file is named on the
+    # command line: a file named there would skip pytest's own ignore rules and its
+    # python_files match, so pytest collects exactly as it does for the whole suite and the
+    # hook only removes modules, which are then never imported.
+    #
+    # Coverage is measured, with no threshold, because a shard covers only part of the
+    # package; --cov-report= prints and writes no report. The data stays in pytest-cov's
+    # default .coverage, not a COVERAGE_FILE set here: that variable would reach every
+    # process a test starts and could merge a nested run's data into this shard's.
     #
     # Its own --junit-xml path, so it does not claim the file "Run PyTest" names. The
     # report step's glob matches both.
@@ -144,14 +135,24 @@ runs:
       env:
         ASH_REQUIRE_SYMBOLS_EXTRA: "1"
         ASH_REQUIRE_CDK_EXTRA: "1"
-        COVERAGE_FILE: test-results/coverage.data
+        ASH_TEST_SHARD: ${{ inputs.shard }}
       run: |
         uv run pytest \
-          @test-results/shard-files.txt \
           --cov=automated_security_helper \
           --cov-config=.coveragerc \
           --cov-report= \
           --junit-xml=test-results/pytest-shard.junit.xml
+
+    # The shard's coverage data, where the artifact upload below carries it to the
+    # unit-coverage job. It runs after a failed test run too, since that run's data is
+    # still the shard's. The name has no leading dot on purpose: upload-artifact leaves out
+    # hidden files unless told otherwise.
+    - name: Keep this shard's coverage data
+      if: (success() || failure()) && inputs.shard != '1of1'
+      shell: bash
+      run: |
+        mkdir -p test-results
+        cp .coverage test-results/coverage.data
 
     # Runs the cdk-nag integration tests, which the default pytest invocation above does
     # NOT run: tests/conftest.py skips anything whose keywords include "integration", and

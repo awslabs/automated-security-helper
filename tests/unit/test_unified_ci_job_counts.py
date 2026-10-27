@@ -134,6 +134,16 @@ class TestTheExpansion:
         # holds the shard axis itself to one list of eight).
         assert LEGS["unit-test"] == 25 * 8
 
+    def test_no_matrix_is_past_githubs_limit_of_256_jobs(self):
+        """GitHub rejects the workflow, not just the leg, past 256 jobs from one matrix.
+
+        unit-test is the closest: 25 OS and Python combinations times 8 shards is 200, and
+        one more Python version (240) fits where one more OS as well (288) does not.
+        """
+        too_big = {name: legs for name, legs in LEGS.items() if legs > 256}
+        assert not too_big, too_big
+        assert LEGS["unit-test"] <= 256
+
     def test_an_include_that_merges_adds_no_cell(self):
         job = {
             "strategy": {

@@ -12,7 +12,9 @@ per artifact, and does what the unsharded "Run PyTest" step did in one process:
 1. Check that every shard of the set is there. The shard names carry their own count
    (``...-shard3of8``), so a shard that crashed before uploading, or a matrix entry that
    was deleted, shows as a missing index. Combining the shards that happen to exist would
-   report coverage for a subset and could pass.
+   report coverage for a subset and could pass. Each shard's data file must also read
+   back and hold measured files, because ``coverage combine`` skips a file it cannot read
+   with a warning.
 2. ``coverage combine`` their data files.
 3. Print the Markdown table to the step summary when asked.
 4. ``coverage report --fail-under=<threshold>``, whose exit status is this script's.
@@ -151,6 +153,26 @@ def self_test() -> list[str]:
     return failures
 
 
+def data_problem(path: Path) -> str | None:
+    """Why a shard's data file cannot stand in for its slice of the suite, or None.
+
+    ``coverage combine`` warns and skips a data file it cannot read, and fails only when it
+    read none, so a truncated file from one shard would otherwise be combined without it.
+    Reading each file first, and requiring it to hold measured files, closes that.
+    """
+    try:
+        from coverage import CoverageData
+
+        data = CoverageData(basename=str(path))
+        data.read()
+        measured = data.measured_files()
+    except Exception as error:  # noqa: BLE001 - any failure to read is the finding
+        return f"{path.parent.name}/{path.name} cannot be read: {error}"
+    if not measured:
+        return f"{path.parent.name}/{path.name} holds no measured files"
+    return None
+
+
 def _coverage(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, "-m", "coverage", *args], check=False)
 
@@ -209,10 +231,14 @@ def main(argv: list[str] | None = None) -> int:
     data_files = []
     for shard_dir in shard_dirs:
         data = shard_dir / DATA_FILE
-        if data.is_file():
-            data_files.append(str(data))
-        else:
+        if not data.is_file():
             problems.append(f"{shard_dir.name} has no {DATA_FILE}")
+            continue
+        problem = data_problem(data)
+        if problem:
+            problems.append(problem)
+        else:
+            data_files.append(str(data))
     if problems:
         for problem in problems:
             print(f"combine-unit-coverage: {problem}", file=sys.stderr)

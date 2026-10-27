@@ -97,8 +97,13 @@ def test_an_unknown_content_database_name_is_shown(capsys):
     _assert_shown(err)
 
 
-def test_a_build_time_that_does_not_parse_is_refused_and_shown(capsys):
-    """--built is read from grype's own report of its database."""
+def test_a_build_time_that_does_not_parse_is_refused_without_the_value(capsys):
+    """--built is read from grype's own report of its database, and the workflows
+    print this helper's output into a step log, where a line holding "::" or "##["
+    is a workflow command. So a value that does not parse is refused with the rule
+    named and the value itself NOT printed (the check-age cases of
+    test_content_databases.py pin the same): stricter than shown, and what the
+    text that is printed must still be is shown, not obeyed."""
     from automated_security_helper.utils import content_databases
 
     code = content_databases.main(
@@ -107,7 +112,8 @@ def test_a_build_time_that_does_not_parse_is_refused_and_shown(capsys):
 
     err = capsys.readouterr().err
     assert code == 2
-    assert "add-mask" in err, err
+    assert "add-mask" not in err, err
+    assert "RFC 3339" in err, err
     _assert_shown(err)
 
 
