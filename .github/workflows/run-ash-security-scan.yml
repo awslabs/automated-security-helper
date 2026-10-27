@@ -433,7 +433,8 @@ jobs:
             given="${!var}"
             value="${given%$'\n'}"
             name="${var#INPUT_}"
-            name="${name,,}"
+            # tr, not bash's lowercasing expansion: bash 3.2 (macOS runners) has none.
+            name="$(printf '%s' "${name}" | tr '[:upper:]' '[:lower:]')"
             case "${value}" in
               *[[:cntrl:]]* | *$'\xc2'[$'\x80'-$'\x9f']* | *$'\xe2\x80'[$'\xa8\xa9']* | *'##['*)
                 echo "::error::the ${name//_/-} input holds a line break, another control character or the legacy command marker, so it is refused without being printed. A block scalar of one line is fine; more than one line is refused."
@@ -684,8 +685,11 @@ jobs:
               exit 1
             fi
           fi
+          # tr, not bash's lowercasing expansion: bash 3.2 (macOS runners) has none.
+          checked_repo_lower="$(printf '%s' "${CHECKED_ASH_REPO}" | tr '[:upper:]' '[:lower:]')"
+          workflow_repo_lower="$(printf '%s' "${workflow_repo}" | tr '[:upper:]' '[:lower:]')"
           if [ -z "${CHECKED_ASH_VERSION}" ] && [ -n "${CHECKED_ASH_REPO}" ] \
-              && [ "${CHECKED_ASH_REPO,,}" != "${workflow_repo,,}" ]; then
+              && [ "${checked_repo_lower}" != "${workflow_repo_lower}" ]; then
             echo "::error::ash-repo is $(one_line "${CHECKED_ASH_REPO}") but ash-version is empty. An empty ash-version means the commit this workflow file was called at, $(one_line "${workflow_sha}"), which belongs to $(one_line "${workflow_repo}"); installing it from $(one_line "${CHECKED_ASH_REPO}") would not install that repository's code. Set ash-version to the tag, branch or commit to install from $(one_line "${CHECKED_ASH_REPO}")."
             exit 1
           fi
@@ -752,7 +756,8 @@ jobs:
             exit 1
           fi
           if [[ "${ASH_VERSION}" =~ ^[0-9a-fA-F]{40}$ ]]; then
-            COMMIT="${ASH_VERSION,,}"
+            # tr, not bash's lowercasing expansion: bash 3.2 (macOS runners) has none.
+            COMMIT="$(printf '%s' "${ASH_VERSION}" | tr '[:upper:]' '[:lower:]')"
           else
             if [[ "${ASH_VERSION}" == refs/* ]]; then
               CANDIDATES=("${ASH_VERSION}")
@@ -1046,8 +1051,11 @@ jobs:
           # a merge landing in between cannot pair one commit's ASH with another's
           # config.
           FETCH="${CONFIG_REF}"
+          # tr, not bash's lowercasing expansion: bash 3.2 (macOS runners) has none.
+          ASH_REPO_LOWER="$(printf '%s' "${ASH_REPO}" | tr '[:upper:]' '[:lower:]')"
+          SCANNED_REPO_LOWER="$(printf '%s' "${SCANNED_REPO}" | tr '[:upper:]' '[:lower:]')"
           if [ -n "${ASH_COMMIT}" ] && [ "${CONFIG_REF}" = "${ASH_VERSION}" ] \
-              && [ "${ASH_REPO,,}" = "${SCANNED_REPO,,}" ]; then
+              && [ "${ASH_REPO_LOWER}" = "${SCANNED_REPO_LOWER}" ]; then
             FETCH="${ASH_COMMIT}"
           fi
           git fetch --no-tags --no-recurse-submodules --depth=1 origin "${FETCH}"
