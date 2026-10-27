@@ -149,7 +149,7 @@ Install with Homebrew:
 
 <!-- doctest: illustrative reason="installs ASH with Homebrew over the network" -->
 ```bash
-brew tapawslabs/automated-security-helper https://github.com/awslabs/automated-security-helper.git
+brew tap awslabs/automated-security-helper https://github.com/awslabs/automated-security-helper.git
 brew install ash
 ```
 
@@ -157,7 +157,7 @@ Install from source:
 
 <!-- doctest: illustrative reason="clones this repository and installs it over the network" -->
 ```bash
-git clone --branchv{{VERSION}} https://github.com/awslabs/automated-security-helper.git
+git clone --branch v{{VERSION}} https://github.com/awslabs/automated-security-helper.git
 cd automated-security-helper
 pip install .
 ```
@@ -281,7 +281,7 @@ For agent instructions, install the `ash-mcp` skill:
 
 <!-- doctest: illustrative reason="installs an agent skill over the network" -->
 ```bash
-npx skills addawslabs/automated-security-helper
+npx skills add awslabs/automated-security-helper
 ```
 
 The skill supplies workflow guidance. Configure the MCP server as above, or use

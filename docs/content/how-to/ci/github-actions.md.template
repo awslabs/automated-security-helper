@@ -539,7 +539,6 @@ These two steps replace the checkout and `Run ASH` steps of the job in
     fetch-depth: 0
     persist-credentials: false
 - name: Run ASH
-  if: github.event_name == 'pull_request'
   env:
     BASE_REF: ${{ github.base_ref }}
   run: |
@@ -548,20 +547,23 @@ These two steps replace the checkout and `Run ASH` steps of the job in
       echo "::error::no random token could be read for stop-commands, so the command did not run"
       exit 1
     fi
+    set --
+    if [ -n "${BASE_REF}" ]; then
+      set -- --changed-files-only --base-ref "origin/${BASE_REF}"
+    fi
     printf '::stop-commands::%s\n' "${token}"
     status=0
     ash scan --mode local --no-progress \
       --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db \
-      --changed-files-only --base-ref "origin/${BASE_REF}" \
+      "$@" \
       2>&1 || status=$?
     printf '\n::%s::\n' "${token}"
     exit "${status}"
 ```
 
-With these steps the job scans pull requests only: on a push the `if:` skips `Run ASH`
-and the SARIF upload fails with no file to upload, so keep a full scan for pushes as a
-step of its own, such as a copy of `Run ASH` named `Run ASH on push` with
-`if: github.event_name != 'pull_request'`.
+`github.base_ref` is set on a pull request and empty on a push, so the one step filters
+a pull request to its changed files and scans a push in full, and the SARIF upload has
+its file on both events.
 
 Code scanning already shows a pull request only the alerts on lines it changed, so for the
 SARIF upload alone you do not need this option.

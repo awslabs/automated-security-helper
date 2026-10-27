@@ -302,8 +302,8 @@ The scanner tools and data that ASH installed stay behind. To remove them too:
 - The scanners installed as uv tools. Name the ones `uv tool list` shows, because
   `uv tool uninstall` fails for a name that is not installed:
   `uv tool uninstall bandit checkov semgrep nbconvert`. Earlier ASH releases also
-  installed `cfn-lint` and `zizmor` as uv tools, so add either that `uv tool list`
-  still shows.
+  installed `cfn-lint` and `zizmor` as uv tools, so add whichever of them
+  `uv tool list` still shows.
 - The cfn-nag gem: `gem uninstall cfn-nag`. The gems it depends on stay installed.
 - The scanners' own caches, such as `~/.cache/grype` and `~/.cache/trivy`.
 - The `.ash/ash_output/` directory that each scan writes in the project it scanned.
