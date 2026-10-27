@@ -198,7 +198,9 @@ class TestIsUvAvailable:
 
         with sandbox_scope(RefusingScope("jupyter", "no bwrap here")):  # type: ignore[arg-type]
             assert runner.is_uv_available() is False
-        with patch("subprocess.run") as mock_run:
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain"
+        ) as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
             assert runner.is_uv_available() is True
 
@@ -226,7 +228,9 @@ class TestIsUvAvailable:
 
         with sandbox_scope(RefusingScope("jupyter", "no bwrap here")):  # type: ignore[arg-type]
             runner.is_uv_available()
-        with patch("subprocess.run") as mock_run:
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain"
+        ) as mock_run:
             mock_run.return_value = MagicMock(returncode=1)
             assert runner.is_uv_available() is False
 
@@ -355,7 +359,9 @@ class TestGetToolVersion:
         runner._uv_available_cache = True
         with sandbox_scope(RefusingScope("bandit", "no bwrap here")):  # type: ignore[arg-type]
             assert runner.get_tool_version("bandit") is None
-        with patch("subprocess.run") as mock_run:
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain"
+        ) as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="bandit 1.7.8\n")
             assert runner.get_tool_version("bandit") == "bandit 1.7.8"
 
