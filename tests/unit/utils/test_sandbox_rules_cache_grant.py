@@ -83,6 +83,8 @@ def layout(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    # USERPROFILE is the home directory on Windows; HOME is not read there.
+    monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("ASH_OFFLINE", "YES")
     source = tmp_path / "source"
     source.mkdir()
