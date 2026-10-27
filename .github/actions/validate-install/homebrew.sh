@@ -124,14 +124,15 @@ say "precommit-mode scan: exit 0"
 
 # The default selection. Every scanner the formula provides for has to run, PASSED,
 # FAILED or SKIPPED: the Python ones, cdk-nag and npm-audit. ERROR fails the check,
-# as a crash is not a scan. grype, syft, opengrep and cfn-nag are separate programs
-# the formula does not install (the README sends users to `ash dependencies install`
-# and `gem install cfn-nag`), so they may be MISSING, and then the completeness gate
-# exits 1.
+# as a crash is not a scan. gitleaks, grype, opengrep, syft, trivy and cfn-nag are
+# separate programs the formula does not install (the README sends users to
+# `ash dependencies install` and `gem install cfn-nag`), so they may be MISSING, and
+# then the completeness gate exits 1. tests/unit/test_homebrew_formula_install.py
+# pins this list.
 rc=0
 (cd "$clean" && "$ash_bin" scan --output-dir "$WORK/out-default") || rc=$?
 missing="$("$PYTHON" "$REPO/.github/actions/validate-install/check-scanner-statuses.py" \
-  "$WORK/out-default/ash_aggregated_results.json" --may-be-missing cfn-nag,grype,opengrep,syft)" ||
+  "$WORK/out-default/ash_aggregated_results.json" --may-be-missing cfn-nag,gitleaks,grype,opengrep,syft,trivy)" ||
   fail "a default scan recorded a scanner the formula provides for as neither PASSED, FAILED nor SKIPPED (see above)"
 expected=0
 [ -z "$missing" ] || expected=1
