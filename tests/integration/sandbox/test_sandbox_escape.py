@@ -660,13 +660,17 @@ def test_the_default_output_directory_inside_the_tree_is_unaffected(
     assert not listeners.received, f"{backend} let data reach a listener"
 
 
-def test_an_unavailable_sandbox_reports_missing_and_never_runs_the_scanner(
+def test_an_unavailable_named_sandbox_is_an_error_and_never_runs_the_scanner(
     tmp_path, listeners
 ):
     """Asking for a backend this machine lacks must not fall back to unsandboxed.
 
     sandbox-exec exists only on macOS and bwrap only on Linux, so one of the two is
-    unavailable on every runner.
+    unavailable on every runner. The backend is asked for by name, so the scan
+    grades it ERROR with a reason naming that backend: the tool could not start as
+    requested (tests/unit/core/phases/test_a_refused_sandbox_grades_the_scan.py).
+    MISSING is the grade for ``auto`` with no working backend, where it reads as a
+    missing dependency like any other.
     """
     unavailable = "bwrap" if sys.platform == "darwin" else "sandbox-exec"
     outcomes, _, result = _scan(tmp_path, listeners, unavailable)
@@ -674,11 +678,13 @@ def test_an_unavailable_sandbox_reports_missing_and_never_runs_the_scanner(
     output = " ".join((result.stdout + result.stderr).split())
     assert outcomes is None, f"the scanner ran under an unavailable sandbox: {outcomes}"
     assert result.returncode == 1, output[-4000:]
-    assert "sandbox-escape: MISSING" in output, output[-4000:]
-    assert "scanner sandbox unavailable" in output, output[-4000:]
+    assert "sandbox-escape: ERROR" in output, output[-4000:]
+    assert f"could not start its tool: {unavailable} is not available on" in output, (
+        output[-4000:]
+    )
     results = json.loads((tmp_path / "out" / "ash_aggregated_results.json").read_text())
     row = results["scanner_results"]["sandbox-escape"]
-    assert row["status"] == "MISSING"
+    assert row["status"] == "ERROR"
     assert not listeners.received
 
 
