@@ -12,7 +12,26 @@ import pytest
 from automated_security_helper.utils.link_locations import (
     MAX_LINKS_FOLLOWED,
     link_locations,
+    without_extended_prefix,
 )
+
+
+@pytest.mark.parametrize(
+    "readlink, spelled",
+    [
+        ("\\\\?\\C:\\a\\b", "C:\\a\\b"),
+        ("\\\\?\\UNC\\host\\share\\f", "\\\\host\\share\\f"),
+        ("C:\\a\\b", "C:\\a\\b"),
+        ("\\\\host\\share\\f", "\\\\host\\share\\f"),
+        ("../a/b", "../a/b"),
+        ("/a/b", "/a/b"),
+    ],
+)
+def test_the_win32_extended_length_prefix_is_dropped_from_a_link_target(
+    readlink: str, spelled: str
+) -> None:
+    """``os.readlink`` gives ``\\\\?\\C:\\a`` on Windows; the walk names the place ``C:\\a``."""
+    assert without_extended_prefix(readlink) == spelled
 
 
 def _symlink(link: Path, target: Path | str) -> None:
