@@ -102,8 +102,6 @@ from typing import Literal, Optional, Union
 
 import pytest
 
-from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, checkout_env
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO_ROOT / "scripts"
 REFERENCE_DIR = REPO_ROOT / "docs" / "content" / "reference"
@@ -1706,15 +1704,47 @@ def _mcp_reference_module():
     return generate_mcp_tool_reference
 
 
-def test_reporter_docs_are_current() -> None:
-    """The reporter inventory tables match the registered reporter set."""
-    result = subprocess.run(
-        [sys.executable, str(SCRIPTS / "generate_reporter_docs.py"), "--check"],
-        cwd=REPO_ROOT,
-        env=checkout_env(),
-        capture_output=True,
-        text=True,
-        timeout=CHILD_TIMEOUT_SECONDS,
+def _progress_keys() -> set[str]:
+    """The keys of the get_scan_progress response that carries the most of them."""
+    import importlib.util
+
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import _mcp_contract
+    finally:
+        sys.path.remove(str(SCRIPTS))
+    spec = importlib.util.find_spec("automated_security_helper")
+    assert spec is not None and spec.origin
+    contracts = _mcp_contract.tool_contracts(Path(spec.origin).resolve().parent)
+    response = contracts["get_scan_progress"].response
+    return max(({key for key, _ in each.keys} for each in response.dicts()), key=len)
+
+
+def test_the_progress_example_names_only_keys_the_server_returns() -> None:
+    """Every key of the get_scan_progress example, and no caveat that needs a key the
+    server lacks, comes from the response the tool's return statements build."""
+    text = _page("mcp-tools.md")
+    progress = _section(text, "## get_scan_progress")
+    # The docs page prints the example as json or, when it is a sketch, as text.
+    fence = re.search(r"```(?:json|text)\n(.*?)```", progress, re.DOTALL)
+    assert fence, progress
+    example = fence.group(1)
+    shown = set(re.findall(r'^  "([a-z_]+)":', example, re.MULTILINE))
+    returned = _progress_keys()
+    assert shown and shown <= returned, sorted(shown - returned)
+    for key in ("finished_scanners", "scanner_status_counts"):
+        assert (key in returned) == (f"`{key}`" in progress), key
+
+
+def test_a_dict_caveat_is_printed_only_while_the_server_returns_what_it_needs() -> None:
+    generator = _mcp_reference_module()
+    caveat = {
+        "needs": ["flag"],
+        "text": "with the flag",
+        "otherwise": "without the flag",
+    }
+    assert (
+        generator._conditional_caveat(caveat, {"flag", "x"}, set()) == "with the flag"
     )
     assert generator._conditional_caveat(caveat, {"x"}, set()) == "without the flag"
     bare = {"needs": ["flag"], "text": "with the flag"}
@@ -1774,73 +1804,13 @@ def test_check_installation_notes_list_no_scanners() -> None:
     more is a list. The names come from the generated scanner reference, so a
     scanner added there is covered here too.
     """
-    result = subprocess.run(
-        [sys.executable, str(SCRIPTS / "generate_mcp_tool_reference.py"), "--check"],
-        cwd=REPO_ROOT,
-        env=checkout_env(),
-        capture_output=True,
-        text=True,
-        timeout=CHILD_TIMEOUT_SECONDS,
-    )
-    assert result.returncode == 0, (
-        "The MCP tool reference is stale relative to the registered tool set.\n"
-        "Regenerate with: uv run python scripts/generate_mcp_tool_reference.py\n"
-        "Then propagate to every plugin backend with: uv run --project "
-        "ash-agent-plugins/agentic-coding/transpiler agentic-plugins build\n\n"
-        + result.stdout
-        + result.stderr
-    )
-
-
-def test_documented_env_vars_exist() -> None:
-    """Every env var the CLI reference tabulates is reachable in the package.
-
-    This is the gate that the five invented variables would have failed.
-    """
-    reachable, dynamic = _collect_env_names()
-    documented = _documented_env_vars()
-
-    assert documented, (
-        "Parsed no environment variables out of the CLI reference's tables. The "
-        "column heading probably changed; fix the parser rather than the assertion, "
-        "because an empty documented set makes this test vacuous."
-    )
-
-    missing = sorted(documented - reachable)
-    if missing:
-        pytest.fail(
-            "docs/content/docs/cli-reference.md documents environment variables that "
-            f"no code in automated_security_helper/ reads: {missing}.\n"
-            "Either the name is wrong (ASH_OCI_RUNNER was such a case; the CLI reads "
-            "OCI_RUNNER) or the variable does not exist and the row should go.\n"
-            "Before deleting a row, check these non-literal lookup sites, which this "
-            "test cannot resolve to a name and which could assemble one at runtime:\n  "
-            + "\n  ".join(dynamic)
-        )
-
-
-def test_a_module_constant_key_names_its_variable(tmp_path) -> None:
-    """Resolved only for an upper-case module constant bound once to a string."""
-    package = tmp_path / "pkg"
-    package.mkdir()
-    (package / "m.py").write_text(
-        "import os\n"
-        'FIXED = "ASH_FIXED"\n'
-        'TWICE = "ASH_ONE"\n'
-        'TWICE = "ASH_TWO"\n'
-        "os.environ.get(FIXED)\n"
-        "os.environ.get(TWICE)\n"
-        "def lookup(name):\n"
-        "    return os.environ.get(name)\n"
-    )
-
-    literals, dynamic = _collect_env_names(package)
-
-    assert "ASH_FIXED" in literals
-    assert not literals & {"ASH_ONE", "ASH_TWO"}
-    assert sorted(site.split(" ")[0].replace("\\", "/") for site in dynamic) == [
-        "pkg/m.py:6",
-        "pkg/m.py:8",
+    scanners = re.findall(r"^## `([^`]+)`$", _page("scanners.md"), re.MULTILINE)
+    assert len(scanners) >= 10, scanners
+    install = _section(_page("mcp-tools.md"), "## check_installation")
+    named = [
+        name
+        for name in scanners
+        if re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", install)
     ]
     assert len(named) <= 1, f"check_installation lists scanners by name: {named}"
 

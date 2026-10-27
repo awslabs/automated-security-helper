@@ -314,6 +314,10 @@ class OutputDirectoryNotUsableError(MCPResourceError):
 _EXIT_CODE_BY_EXCEPTION: Tuple[Tuple[type, WorkspaceExitCode], ...] = (
     (WorkspaceDefinitionError, WorkspaceExitCode.WORKSPACE_ERROR),
     (ASHConfigValidationError, WorkspaceExitCode.INVALID_PROJECT_CONFIG),
+    # An output directory reached through a link: 3, as the CLI exits for every
+    # such refusal (OUTPUT_DIR_REFUSED_EXIT_CODE), and not 4, because the
+    # workspace definition is not what is wrong.
+    (OutputDirLinkRefused, WorkspaceExitCode.INVALID_PROJECT_CONFIG),
     # execute_workspace refuses a --scanners selection no project could run before
     # starting any; the CLI exits with the usage-error code for it.
     (ScannerSelectionError, WorkspaceExitCode.USAGE_ERROR),

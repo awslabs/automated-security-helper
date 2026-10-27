@@ -425,6 +425,7 @@ def _session_holds_a_binding() -> Callable[[str], bool]:
 
     return holds_binding
 
+
 #: Sessions the registry holds before it looks for idle ones to forget. A stateless
 #: server with ``--trust-upstream-session-id`` sees one new id per client, and no
 #: end of session, so without this the map only grows (a session that never
@@ -880,16 +881,6 @@ def _forget_session_in_memory(session_id: str) -> None:
     get_default_registry().forget(session_id)
 
 
-def _forget_session_in_memory(session_id: str) -> None:
-    """Drop the bound profile and the registry entry, leaving the workspace on disk."""
-    from automated_security_helper.cli.mcp.profile_registry import (
-        clear_session_state,
-    )
-
-    clear_session_state(session_id)
-    get_default_registry().forget(session_id)
-
-
 def finish_ended_session(session_id: Optional[str]) -> None:
     """Complete the removal of a session that ended while its scan or write ran."""
     if session_id is None:
@@ -927,23 +918,6 @@ class SessionChangeInProgressError(SessionWorkspaceBusyError):
     """
 
     error_type = SESSION_CHANGE_IN_PROGRESS
-
-
-class SessionWorkspaceBusyError(RuntimeError):
-    """A write to a session's state was refused: another request holds its workspace.
-
-    The holder is the TTL sweep removing an idle session, a ``clear_source``,
-    or the end of the session. Any of them can end without removing the
-    upload's files -- the sweep re-reads the session's age while it holds it
-    and keeps a session used meanwhile, steps back while a scan on another
-    server holds the session, and stops on a read error -- so no refusal of
-    this type means the upload is gone. The one retry rule that is right in
-    every case: send the request again as it is once the hold ends. A chunk
-    keeps its sequence number, and only an out-of-order answer means the
-    upload was removed; the upload is then sent again from its first chunk.
-    """
-
-    error_type = SESSION_WORKSPACE_BUSY
 
 
 @contextlib.contextmanager
