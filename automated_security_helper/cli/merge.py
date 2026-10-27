@@ -229,7 +229,6 @@ from rich.text import Text
 # reasons about this exact import form. It is utils/console.py's print, not rich's:
 # its console checks each line it writes off a terminal, so none reads as a CI command.
 from automated_security_helper.utils.console import print  # noqa: A004
-from rich.markup import escape
 
 from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.plugin_context import PluginContext
@@ -2847,7 +2846,7 @@ def merge_command(
     except PluginModuleError as exc:
         # Escaped: the message quotes the configured name, which may hold markup
         # characters.
-        print(f"[red]Invalid configuration: {escape(str(exc))}[/red]")
+        print(f"[red]Invalid configuration: {escape_markup(str(exc))}[/red]")
         raise typer.Exit(3)
 
     output_dir_path = _relocate_colliding_output_dir(Path(output_dir))
@@ -3296,13 +3295,10 @@ def _print_merge_summary(
         # was empty enough to be refused outright. Naming the scanners matters
         # more here than in a single scan: the operator has n CI jobs and no other
         # way to tell which one to look at.
-        from rich.markup import escape as rich_escape
-
         from automated_security_helper.interactions.run_ash_scan import (
             incomplete_converters,
             incomplete_scanners,
         )
-        from automated_security_helper.utils.converter_refusals import inert_text
 
         incomplete = incomplete_scanners(merged)
         if incomplete:
@@ -3334,9 +3330,8 @@ def _print_merge_summary(
                 f"was incomplete: {len(converters)} converter(s) did not process "
                 f"the files they were given[/bold red]"
             )
-            # A row is (name, reason, kinds): read by field, not unpacked.
+            # A row is (name, reason, kinds): read by field, not unpacked. Shown
+            # and printed as Text, as the scanner lines above are.
             for row in converters:
-                print(
-                    f"  [red]{rich_escape(inert_text(row.name))}: "
-                    f"{rich_escape(inert_text(row.reason))}[/red]"
-                )
+                line = _shown_lines(f"  {_shown(row.name)}: {_shown(row.reason)}")
+                print(Text(line, style="red"))

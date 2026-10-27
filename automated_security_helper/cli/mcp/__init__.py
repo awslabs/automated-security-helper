@@ -25,7 +25,6 @@ import types
 from pathlib import Path
 from typing import Annotated, Callable, Dict, List, Optional
 import typer
-from rich.markup import escape
 
 from automated_security_helper.cli.mcp.http_sessions import (
     DEFAULT_SESSION_WORKSPACE_TTL_SECONDS,
@@ -1497,7 +1496,7 @@ def mcp_command(
         # then wraps at 80 columns, and a command split before its source is a
         # pip install with no requirement.
         _stderr.print(
-            f"  [cyan]{escape(ash_reinstall_command())}[/cyan]",
+            f"  [cyan]{escape_markup(ash_reinstall_command())}[/cyan]",
             soft_wrap=True,
         )
         # For a checkout, the MCP testing guide's sync. --inexact keeps the extras
@@ -1563,7 +1562,7 @@ def mcp_command(
     unknown = unknown_transport_override()
     if unknown is not None:
         _stderr.print(
-            f"[red]Validation Error: {ASH_MCP_TRANSPORT_ENV}={escape(repr(unknown))} "
+            f"[red]Validation Error: {ASH_MCP_TRANSPORT_ENV}={escape_markup(repr(unknown))} "
             f"names no transport; use one of {sorted(KNOWN_TRANSPORTS)} (any case), "
             f"or unset it.[/red]",
             highlight=False,
@@ -1584,7 +1583,7 @@ def mcp_command(
     refusal = _ash_config_refusal()
     if refusal is not None:
         _stderr.print(
-            f"[red]Validation Error: {escape(refusal)} "
+            f"[red]Validation Error: {escape_markup(refusal)} "
             f"Point ASH_CONFIG at the operator's config file, or unset it to scan "
             f"with the built-in default.[/red]",
             highlight=False,
