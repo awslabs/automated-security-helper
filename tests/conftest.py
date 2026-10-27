@@ -1033,6 +1033,18 @@ def pytest_addoption(parser):
             default=False,
             help=f"Run the {marker} tests (needs that runtime on this host)",
         )
+    _add_ci_runner_options(parser)
+    parser.addoption(
+        "--run-changed-only",
+        action="store_true",
+        default=False,
+        help="Run only tests for changed files",
+    )
+    parser.addoption(
+        "--base-branch",
+        default="main",
+        help="Base branch for --run-changed-only option",
+    )
 
 
 #: Snapshot tests of output only a real container runtime or Nix can produce, and the
