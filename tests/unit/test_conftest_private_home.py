@@ -265,3 +265,27 @@ def test_the_root_conftest_binds_each_top_level_name_once():
             lines_by_name.setdefault(name, []).append(node.lineno)
     twice = {name: lines for name, lines in lines_by_name.items() if len(lines) > 1}
     assert not twice, twice
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the guard's roots are POSIX paths here")
+def test_allowing_lets_through_only_the_named_paths_and_only_inside_the_block(
+    tmp_path,
+):
+    """Control for ``allowing``: named files pass, a neighbor is recorded, and the
+    exemption ends with the block."""
+    root = tmp_path / "fake-xdg-data"
+    root.mkdir()
+    planted = root / "planted.txt"
+    neighbor = root / "neighbor.txt"
+    with real_home_guard.watching(root):
+        with real_home_guard.allowing([planted]):
+            planted.write_text("x", encoding="utf-8")
+            planted.unlink()
+            with pytest.raises(PermissionError, match="refused by the test guard"):
+                neighbor.write_text("x", encoding="utf-8")
+        inside = real_home_guard.drain()
+        with pytest.raises(PermissionError, match="refused by the test guard"):
+            planted.write_text("x", encoding="utf-8")
+        after = real_home_guard.drain()
+    assert inside == [("open", os.path.abspath(neighbor))]
+    assert after == [("open", os.path.abspath(planted))]
