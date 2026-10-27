@@ -243,7 +243,11 @@ class TestEachScanPathAppliesIt:
         assert IN_OUTPUT not in _uris(results.sarif)
         assert IN_TREE in _uris(results.sarif)
 
-    def test_ash_merge(self, tmp_path):
+    def test_ash_merge_keeps_what_the_shards_kept(self, tmp_path):
+        """Each shard already dropped its own output-directory results, with its
+        own run ID and git answer, so ``ash merge`` does not decide again: it has
+        no run ID and may run outside git, and deciding again dropped a committed
+        file every shard kept."""
         from automated_security_helper.cli.merge import apply_aggregated_suppressions
 
         context = _context(tmp_path)
@@ -252,19 +256,33 @@ class TestEachScanPathAppliesIt:
 
         merged = apply_aggregated_suppressions(model, context)
 
-        assert _uris(merged.sarif) == [IN_TREE, IN_WORK]
+        assert _uris(merged.sarif) == [IN_TREE, IN_OUTPUT, IN_WORK]
 
 
 @pytest.mark.parametrize("flag", [False, True])
 def test_the_output_directory_is_excluded_either_way(tmp_path, flag):
-    """The same SARIF through the merge pass, with and without the flag."""
-    from automated_security_helper.cli.merge import apply_aggregated_suppressions
+    """The same SARIF through the per-scanner pass, with and without the flag.
+
+    That pass applies suppressions without the flag and only the output-directory
+    exclusion with it; both leave out the output directory.
+    """
+    from automated_security_helper.core.phases.scan_result_processor import (
+        ScanResultProcessor,
+    )
+    from automated_security_helper.models.scan_results_container import (
+        ScanResultsContainer,
+    )
 
     context = _context(tmp_path)
     context.ignore_suppressions = flag
-    model = AshAggregatedResults()
-    model.sarif = _sarif(IN_TREE, IN_OUTPUT)
+    container = ScanResultsContainer(
+        scanner_name="scripted",
+        target_type="source",
+        raw_results=_sarif(IN_TREE, IN_OUTPUT),
+    )
+    aggregated = AshAggregatedResults()
 
-    merged = apply_aggregated_suppressions(model, context)
+    ScanResultProcessor(plugin_context=context).process_container(container, aggregated)
 
-    assert _uris(merged.sarif) == [IN_TREE]
+    assert IN_OUTPUT not in _uris(aggregated.sarif)
+    assert IN_TREE in _uris(aggregated.sarif)
