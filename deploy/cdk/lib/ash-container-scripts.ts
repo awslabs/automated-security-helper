@@ -519,6 +519,13 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  * the value that satisfies the refusal there is an `AshVersion` whose `ash mcp`
  * accepts `--allowed-host`.
  *
+ * The script used to say the same two things in shell comments, and they moved here
+ * to buy back template bytes (see the next section). Host checking is one of two
+ * things, an allowlist or the operator's statement that something in front of ASH
+ * checks Host, never both and never neither. The auth header needs both halves, a
+ * name and a value: a name with no value would make ASH compare every request
+ * against an empty secret, so that case exits 64 instead of starting.
+ *
  * WHERE TO PUT AN EXPLANATION, AND WHY IT MATTERS HERE
  * ---------------------------------------------------
  * Comments inside the script below are not free. The script is inlined into the
@@ -585,8 +592,6 @@ elif ash_mcp_supports '--no-stateless-http'; then
   set -- "$@" --no-stateless-http
 fi
 
-# Host checking: a Host allowlist, or the operator's statement that something in
-# front of ASH checks Host. One of the two, never both, never neither.
 if [ -n "\${ASH_MCP_ALLOWED_HOST:-}" ]; then
   if ! ash_mcp_supports '--allowed-host'; then
     echo "ash-mcp-entrypoint: a Host allowlist of '\${ASH_MCP_ALLOWED_HOST}' was requested, but the ASH in this image has no --allowed-host option and would accept every Host header. Deploy an AshVersion whose 'ash mcp' accepts --allowed-host." >&2
@@ -617,8 +622,6 @@ else
   exit 65
 fi
 
-# Both halves are required: a header name with no value would make ASH compare
-# against an empty secret.
 if [ -n "\${ASH_MCP_AUTH_HEADER_NAME:-}" ] && [ -n "$ASH_AUTH_VALUE" ]; then
   set -- "$@" --auth-header-name "\${ASH_MCP_AUTH_HEADER_NAME}"
   if ash_mcp_supports '--auth-header-value-fd'; then
