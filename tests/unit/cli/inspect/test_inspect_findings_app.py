@@ -1363,8 +1363,12 @@ class TestSnippetsReadFromSourceAreMasked:
                 ],
             }
         )
+        # The file is read only inside the scanned directory (scan_root): the
+        # finding's file lives in tmp_path, so that is the root.
         app = FindingsExplorerApp(
-            extract_findings(model), mask_source=source_snippet_masker(model)
+            extract_findings(model),
+            mask_source=source_snippet_masker(model),
+            scan_root=tmp_path,
         )
         return app, value
 
