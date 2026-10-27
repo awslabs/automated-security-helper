@@ -44,7 +44,8 @@
     "the gate exists to remove.",
     "",
     "Paths are repository-relative and POSIX-separated. The census covers .ts, .tsx, .mts,",
-    ".cts, .js and .mjs, minus .d.ts declarations and test sources."
+    ".cts, .js and .mjs, minus .d.ts declarations, test sources and the scanner fixtures",
+    "under tests/test_data/."
   ],
   "exclusions": [
     {

@@ -23,7 +23,7 @@ claimed.
 
 ## Requirements
 
-`aws-cdk-lib >= 2.273.0` and `constructs >= 10.8.1`, both peer dependencies, so
+`aws-cdk-lib ^2.273.0` and `constructs ^10.8.1`, both peer dependencies, so
 your app supplies them. The `aws-cdk-lib` floor is the same `>=2.273.0` this
 repository's `pyproject.toml` uses for cdk-nag: 2.273.0 is the oldest release
 with no known advisories against it or its bundled dependencies
@@ -35,16 +35,20 @@ against the oldest version it claims to support.
 
 To use it today, build it and depend on the directory:
 
+<!-- doctest: illustrative reason="needs Node.js and npm" -->
 ```console
 cd deploy/cdk-constructs
 npm ci
 npm run build
 ```
 
+<!-- doctest: config kind=other reason="an npm package.json" -->
 ```jsonc
 // in your app's package.json
-"dependencies": {
-  "ash-cdk-constructs": "file:../path/to/deploy/cdk-constructs"
+{
+  "dependencies": {
+    "ash-cdk-constructs": "file:../path/to/deploy/cdk-constructs"
+  }
 }
 ```
 
@@ -108,12 +112,21 @@ new ASHScanStep('SecurityScan', {
 `shardCount: 4` produces five actions: four shards that run in parallel, and one
 merge action that runs after them.
 
+Sharding needs `ash scan --shard-index <i> --shard-count <n>` and `ash merge`,
+which no ASH release up to v3.7.1 has. Set `version` to a tag or commit whose ASH
+has both (or, with `PREINSTALLED`, use an image built from one); otherwise every
+shard action fails and the merge never runs.
+
+A `shardCount` above 5 fails at synthesis. The merge action takes one input
+artifact per shard, and CodePipeline allows a CodeBuild action at most five input
+artifacts.
+
 | `shardCount` | Actions | Which action decides pass/fail |
 | --- | --- | --- |
 | `1` (default) | `SecurityScan` | the scan itself |
 | `n > 1` | `SecurityScanShard0` … `SecurityScanShard{n-1}`, then `SecurityScanMerge` | the merge action |
 
-### Why shards cannot fail the build
+### Why shards do not fail on findings
 
 This is the part of the design worth understanding before changing anything.
 
@@ -133,6 +146,11 @@ the merge action always runs at a later run order than every shard; and
 `--fail-on-findings` and `--no-fail-on-findings` so the escape hatch cannot be
 used to move the verdict.
 
+A shard still fails on anything other than findings. The shard command does not
+ignore its exit code, so an ASH exit for an incomplete scanner (which ASH checks
+by default), an invalid configuration or an unknown option fails that shard, and
+the merge action does not run.
+
 Because the merge action's exit code *is* the pipeline's verdict, `ash merge`
 must exit non-zero when the merged findings breach the configured threshold.
 
@@ -150,16 +168,18 @@ consumer run the same commands:
 | --- | --- | --- |
 | `buildspec.yml` | full unsharded scan | yes |
 | `buildspec-shard.yml` | one shard; set `ASH_SHARD_INDEX` and `ASH_SHARD_COUNT` | no, by design |
-| `buildspec-merge.yml` | merge; set `ASH_SHARD_RESULTS` to the shard directories | yes |
+| `buildspec-merge.yml` | merge; set the shard-results variable declared in its `env.variables` block to the shard directories | yes |
 
 Regenerate them with:
 
+<!-- doctest: illustrative reason="needs Node.js and npm" -->
 ```console
 cd deploy/cdk-constructs && npm ci && npm run generate:buildspec
 ```
 
 Verify them without rewriting anything — this is what a CI drift gate should run:
 
+<!-- doctest: illustrative reason="needs Node.js and npm" -->
 ```console
 cd deploy/cdk-constructs && npm ci && npm run check:buildspec
 ```
@@ -185,12 +205,13 @@ Windows for a file nobody edited.
 `ASHScanStep(id, props)` extends `pipelines.Step` and implements
 `pipelines.ICodePipelineActionFactory`.
 
+<!-- doctest: options of=typescript:deploy/cdk-constructs/src/ash-scan-step.ts:ASHScanStepProps -->
 | Prop | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `input` | `IFileSetProducer` | required | the file set to scan |
-| `shardCount` | `number` | `1` | `1`–`50`; above 1 adds the merge action |
+| `shardCount` | `number` | `1` | `1`–`5` in practice: the constructor accepts up to 50, but synthesis fails above 5; above 1 adds the merge action |
 | `installMode` | `ASHInstallMode` | `PIP` | `PIP`, `UVX`, `PREINSTALLED` |
-| `version` | `string` | pinned release tag | a git ref: tag, branch or commit |
+| `version` | `string` | the release this construct comes from | a git ref: tag, branch or commit |
 | `sourceRepository` | `string` | upstream ASH repo | `https://` only |
 | `severityThreshold` | `ASHSeverityThreshold` | `LOW` | `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `NONE` |
 | `outputDirectory` | `string` | `.ash/ash_output` | |
@@ -220,17 +241,19 @@ shard, not in the merge: either a shard ran `ash scan` without both flags, or a
 shard's container registered zero scanners, for instance because a scanner plugin
 failed to load. The merge action is where it surfaces, not where it broke.
 
-Setting `shardCount` higher than the number of enabled scanners is wasteful rather
-than broken. The surplus shards are assigned no scanners, still record provenance
-and still merge; they just cost a CodeBuild start each. That was measured at 50
-shards over a 5-scanner tree — 45 empty assignments, all 50 stamped, merged
-findings identical to one unsharded scan — and `ash merge` carries a regression
-test at that same ceiling, so it is a supported configuration rather than one that
-happens to work.
+For `ash merge`, a shard count higher than the number of enabled scanners is
+wasteful rather than broken. The surplus shards are assigned no scanners, still
+record provenance and still merge; each costs a CodeBuild start. That was
+measured with `ash merge` at 50 shards over a 5-scanner tree (45 empty
+assignments, all 50 stamped, merged findings identical to one unsharded scan), and
+`ash merge` carries a regression test at that same count. With this construct,
+synthesis fails above 5 shards, for the input-artifact reason under
+[Sharding](#sharding).
 
 `version` is a git ref, not a distribution version, because ASH is installed from
-its repository. It defaults to a pinned release tag, so two runs of the same
-pipeline definition scan with the same ASH; pointing it at a branch gives that up.
+its repository. It defaults to the tag of the ASH release this construct comes
+from, which every release moves to itself, so two runs of the same pipeline
+definition scan with the same ASH; pointing it at a branch gives that up.
 
 The ref has to be a plain git ref: a tag, a branch name or a commit id made of
 letters, digits and `. _ / -`, not starting with `-` or `.`, with no `..`, no empty
@@ -243,8 +266,9 @@ that breaks the rule, before pip or uvx runs.
 
 ## How ASH gets installed
 
-Every install mode fetches ASH from its git repository. None installs by
-distribution name, and that is deliberate:
+`PIP` and `UVX` fetch ASH from its git repository, and `PREINSTALLED` uses the
+`ash` already in your image. None installs by distribution name, and that is
+deliberate:
 
 - ASH is **not published to PyPI**. The name `automated-security-helper` on PyPI
   is an unrelated single-release placeholder package with no connection to this
@@ -256,6 +280,7 @@ distribution name, and that is deliberate:
 
 So the install is what this repository documents for CI:
 
+<!-- doctest: illustrative reason="installs from the network" -->
 ```console
 pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
 ```
@@ -265,13 +290,16 @@ name becomes preferable and a mode for it is worth adding. Until then there isn'
 one, and a name-based install should not be introduced on the assumption that it
 might get published later.
 
-In the generated buildspecs the ref comes from an `ASH_VERSION` environment
-variable defaulting to the pinned tag, so a consumer can scan with a different
-ASH release by overriding one variable rather than editing a generated file:
+In the generated buildspecs the ref comes from the version variable declared in
+each file's `env.variables` block, which defaults to the pinned tag. A consumer
+can scan with a different ASH ref by overriding that one variable rather than
+editing a generated file. The shard and merge buildspecs need a ref that has the
+commands listed under [Sharding](#sharding).
 
+<!-- doctest: illustrative reason="needs AWS credentials" -->
 ```console
 aws codebuild start-build --project-name my-scan \
-  --environment-variables-override name=ASH_VERSION,value=v3.6.0,type=PLAINTEXT
+  --environment-variables-override name=<version variable>,value=<git ref>,type=PLAINTEXT
 ```
 
 The install phase's first command checks that `ASH_VERSION` is a plain git ref, as
@@ -279,6 +307,7 @@ described above, and fails the build when it is not.
 
 ## Development
 
+<!-- doctest: illustrative reason="needs Node.js and npm" -->
 ```console
 npm ci
 npm run build      # runs jsii; a jsii violation in an exported signature fails here

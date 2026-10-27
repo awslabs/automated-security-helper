@@ -106,21 +106,25 @@ ZERO_SHA = "0" * 40
 # * automated_security_helper/schemas/*.json: the published config and results JSON
 #   schemas. Written whole by `python -m automated_security_helper.schemas.generate_schemas`;
 #   the lint job regenerates them and fails on any difference.
-# * docs/content/docs/cli-reference-generated.md: written whole by
-#   scripts/generate_cli_docs.py; tests/unit/test_generated_docs_freshness.py regenerates
-#   and diffs it.
 # * ash-agent-plugins/.../transpiler/_base/references/tool-reference.md: written whole by
 #   scripts/generate_mcp_tool_reference.py (its editorial notes live in that script, not
 #   in the file); the same freshness test runs its --check.
+# * docs/content/reference/<page>.md for each generated reference page: written whole by
+#   the scripts/generate_*.py named in the page's banner; the same freshness test runs
+#   each one's --check. Listed by name rather than as reference/*.md, because a
+#   hand-written page added to that directory later is not golden.
 #
 # Out, deliberately:
 # * The per-backend copies of tool-reference.md under ash-agent-plugins/.../plugins/ and
 #   skills/ash-mcp/references/: byte copies of the _base file, held equal by the
 #   transpiler's own byte-compare gate. The _base change is where the reason belongs;
 #   requiring it again on each copy adds annotations and no information.
-# * Pages with regions maintained by scripts/generate_reporter_docs.py (output-formats.md,
-#   plugins/**.md): only the marker-delimited regions are generated, the rest is prose,
-#   so a whole-file rule would demand a trailer for a typo fix.
+# * docs/content/docs/cli-reference-generated.md: the CLI reference's previous location.
+#   Nothing writes it since scripts/generate_cli_docs.py moved to
+#   docs/content/reference/cli.md, and the docs rewrite deletes it.
+# * output-formats.md and the plugins/ pages that once held regions written by
+#   scripts/generate_reporter_docs.py: it writes only docs/content/reference/reporters.md
+#   now, and the docs rewrite replaces those pages.
 # * docs/content/docs/cli-reference.md: hand-written.
 # * ash-agent-plugins/.../transpiler/generated_models/*.py: generated code, not output a
 #   user sees.
@@ -129,11 +133,20 @@ GOLDEN: tuple[tuple[str, str], ...] = (
     ("__snapshots__", "syrupy snapshot"),
     (".github/actions/validate-mcp/*.golden.json", "MCP tool-surface golden"),
     ("automated_security_helper/schemas/*.json", "generated JSON schema"),
-    ("docs/content/docs/cli-reference-generated.md", "generated CLI reference"),
     (
         "ash-agent-plugins/agentic-coding/transpiler/_base/references/tool-reference.md",
         "generated MCP tool reference",
     ),
+    ("docs/content/reference/cli.md", "generated CLI reference"),
+    ("docs/content/reference/configuration.md", "generated configuration reference"),
+    ("docs/content/reference/converters.md", "generated converter reference"),
+    (
+        "docs/content/reference/environment-variables.md",
+        "generated environment variable reference",
+    ),
+    ("docs/content/reference/mcp-tools.md", "generated MCP tool reference page"),
+    ("docs/content/reference/reporters.md", "generated reporter reference"),
+    ("docs/content/reference/scanners.md", "generated scanner reference"),
 )
 
 
@@ -742,13 +755,13 @@ def _case_renamed_golden_with_trailer(r: _Repo) -> list[str]:
 
 def _case_schema_and_generated_doc(r: _Repo) -> list[str]:
     r.write("automated_security_helper/schemas/AshConfig.json", "{}\n")
-    r.write("docs/content/docs/cli-reference-generated.md", "x\n")
+    r.write("docs/content/reference/cli.md", "x\n")
     r.write("docs/content/docs/cli-reference.md", "hand-written\n")
     r.commit("docs: regenerate")
     return sorted(
         [
             "automated_security_helper/schemas/AshConfig.json",
-            "docs/content/docs/cli-reference-generated.md",
+            "docs/content/reference/cli.md",
         ]
     )
 

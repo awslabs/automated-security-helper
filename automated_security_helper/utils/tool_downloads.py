@@ -326,6 +326,7 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # ``LC_ALL=C`` order, gave the same value. Both installers refuse an extraction that
 # does not hash to it, and an installed bundle is checked against it and nothing else.
 #
+#
 # The three tables are adjacent so that one line-pinned suppression covers them (see
 # .ash/.ash_community_plugins.yaml); keep nothing but digests between them.
 # ---------------------------------------------------------------------------
@@ -703,9 +704,16 @@ PERMISSIVE_SPDX = frozenset(
         "ISC",
         "MIT",
         "MIT-0",
+        "OpenSSL",
         "Unlicense",
     }
 )
+
+# License exceptions an expression may name after WITH. An exception only adds
+# permissions to the license it modifies, so it is not classified on its own: the
+# license before WITH decides whether the entry is copyleft. Listed so an unknown
+# token after WITH still fails the tests instead of passing as an exception.
+SPDX_EXCEPTIONS = frozenset({"GCC-exception-2.0"})
 
 _SPDX_OPERATORS = frozenset({"AND", "OR", "WITH"})
 
@@ -741,10 +749,11 @@ class ThirdPartyLicense:
     ASH dependency from PyPI, at whatever version pyproject's range resolves to,
     and that copy carries its own license metadata in its dist-info.
 
-    ``version_probe`` is for a component that is not an executable on PATH, such
-    as a rules bundle another tool reads. When set, the PATH and ``--version``
-    checks are replaced by running this argv, whose output must report
-    ``version``.
+    ``version_probe`` is for a component that is not an executable on PATH: a
+    rules bundle another tool reads, or a native library inside a uv tool's
+    environment. When set, the PATH and ``--version`` checks are replaced by
+    running this argv, whose output must report ``version``. ``{uv_tool_dir}`` in
+    an argument is replaced with what ``uv tool dir`` prints.
 
     ``distribution`` is set for a tool ``ash dependencies install`` installs with
     ``uv tool install``: the PyPI name of the distribution, whose installed
@@ -761,15 +770,38 @@ class ThirdPartyLicense:
     executables: "tuple[str, ...]" = ()
     version_probe: "tuple[str, ...]" = ()
     distribution: "str | None" = None
+    # Appended to the "Corresponding source" section of a copyleft entry whose
+    # binary also carries code from outside its own repository (a statically
+    # linked binary's library dependencies), saying where that source is.
+    source_note: "str | None" = None
+    # The upstream tag when it is not spelled like ``version`` (OpenSSL's
+    # "OpenSSL_1_1_1w"), or "" when the release has no tag (PCRE1).
+    tag: "str | None" = None
+    # Set for a library another wheel bundles: what bundles it, for SOURCE. Its version
+    # is that wheel's choice, so the pin checker lists it without looking it up.
+    bundled_in: "str | None" = None
 
     @property
     def executable_names(self) -> tuple[str, ...]:
         return self.executables or (self.tool,)
 
     @property
-    def spdx_identifiers(self) -> list[str]:
+    def spdx_tokens(self) -> list[str]:
+        """Every identifier in ``license``: licenses and exceptions alike."""
         tokens = self.license.replace("(", " ").replace(")", " ").split()
         return [t for t in tokens if t not in _SPDX_OPERATORS]
+
+    @property
+    def spdx_exceptions(self) -> list[str]:
+        """The identifiers that follow WITH: exceptions, not licenses."""
+        tokens = self.license.replace("(", " ").replace(")", " ").split()
+        return [b for a, b in zip(tokens, tokens[1:]) if a == "WITH"]
+
+    @property
+    def spdx_identifiers(self) -> list[str]:
+        """The license identifiers in ``license``, without operators or exceptions."""
+        exceptions = self.spdx_exceptions
+        return [t for t in self.spdx_tokens if t not in exceptions]
 
     @property
     def copyleft(self) -> bool:
@@ -785,6 +817,12 @@ class ThirdPartyLicense:
             f"git -C {directory} submodule update --init --recursive",
         ]
 
+    @property
+    def _release_tag(self) -> str:
+        if self.tag is None:
+            return self.version
+        return self.tag or "none (the repository has no tag for it; see Commit)"
+
     def source_notice(self, installed_from: "str | None" = None) -> str:
         """The text of the ``SOURCE`` file written beside the license files."""
         lines = [
@@ -795,18 +833,23 @@ class ThirdPartyLicense:
             ),
             "",
             f"Upstream repository: {self.repository}",
-            f"Release tag:         {self.version}",
+            f"Release tag:         {self._release_tag}",
             f"Commit:              {self.commit}",
         ]
         if installed_from:
             lines.append(f"Installed from:      {installed_from}")
-        lines += [
-            "",
-            (
+        if self.bundled_in:
+            statement = (
+                f"ASH ships this library as {self.bundled_in} bundles it, unmodified. "
+                "The binary was built for that wheel, not published by the project "
+                "above; the commit above is the upstream source of this release."
+            )
+        else:
+            statement = (
                 "ASH bundles this program unmodified, as published by its upstream "
                 "project."
-            ),
-        ]
+            )
+        lines += ["", statement]
         if self.copyleft:
             lines += [
                 "",
@@ -826,6 +869,8 @@ class ThirdPartyLicense:
                 "",
                 *(f"  {command}" for command in self.source_checkout),
             ]
+            if self.source_note:
+                lines += ["", self.source_note]
         return "\n".join(lines) + "\n"
 
     def index_record(self) -> "dict[str, object]":

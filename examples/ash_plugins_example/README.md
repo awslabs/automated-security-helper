@@ -23,6 +23,7 @@ scan with this package, so the code here is kept working.
 Install the package into the Python environment ASH runs in. ASH imports it by name,
 so it has to be importable there. From a checkout of the ASH repository:
 
+<!-- doctest: illustrative reason="installs into the virtual environment that runs ASH" -->
 ```bash
 # ASH installed with uv tool install: reinstall it with the package added
 uv tool install --with ./examples/ash_plugins_example git+https://github.com/awslabs/automated-security-helper.git
@@ -39,6 +40,7 @@ its git repository, and the PyPI project with that name is not published by ASH.
 ASH loads only its built-in plugins unless a plugin module is named. Name this one in
 any of three ways:
 
+<!-- doctest: illustrative reason="needs the example package installed" -->
 ```bash
 # On the command line
 ash --source-dir /path/to/code --ash-plugin-modules my_ash_plugins

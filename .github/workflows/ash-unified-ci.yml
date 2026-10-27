@@ -1468,10 +1468,26 @@ jobs:
   # tests/integration/scanners/test_detect_secrets_scanner.py:111 and :139. Those are
   # unconditional @pytest.mark.skip with a written reason, and they report as skipped with
   # that reason rather than vanishing.
+  #
+  # THE DOCS EXAMPLES ARE A SECOND STEP, NOT PART OF THE POPULATIONS ABOVE
+  #
+  # tests/integration/docs runs every runnable shell and python block in the docs
+  # (scripts/docs_checks.py decides which), one test per page. The integration step
+  # passes --ignore for that directory, so every figure above still describes the same
+  # population it was measured on, and the docs examples run in their own step with
+  # their own time limit. Two reasons for the split: their population is a property of
+  # the docs, not of the test code, and moves with every page added; and a page whose
+  # commands hang must not take the integration suite's verdict down with it when the
+  # job times out. It collects one test per page with a runnable block, the proofs in
+  # test_docs_runner_can_fail.py that the runner reports each kind of failure, and a
+  # guard that discovery found any page at all. No count is written here, because it
+  # changes whenever a page gains or loses a runnable block.
+  # -n 4 because pages are independent sessions in their own directories and the
+  # runner is mostly waiting on subprocesses; ubuntu-latest has 4 vCPUs.
   integration-test:
     name: integration-test (ubuntu-latest)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -1543,9 +1559,20 @@ jobs:
           export ASH_CFN_GUARD_RULES_DIR="$HOME/.ash/share/cfn-guard-rules"
           uv run pytest \
             tests/integration \
+            --ignore=tests/integration/docs \
             --run-integration --run-slow \
             --no-cov -p no:randomly -n 0 \
             --junit-xml=test-results/integration.junit.xml
+      # Runs even when the step above failed, so the two verdicts stay separate.
+      - name: Run the docs examples
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        run: |
+          uv run pytest \
+            tests/integration/docs \
+            --run-integration \
+            --no-cov -p no:randomly -n 4 \
+            --junit-xml=test-results/docs-examples.junit.xml
       # A red run leaves per-test evidence rather than only the summary line.
       - name: Collect the suite report
         if: failure()
@@ -1555,6 +1582,62 @@ jobs:
           path: test-results/integration.junit.xml
           retention-days: 7
           if-no-files-found: warn
+      - name: Collect the docs examples report
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: docs-examples-report
+          path: test-results/docs-examples.junit.xml
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # Documentation site: the strict build and the versioned-site check
+  # ---------------------------------------------------------------------------
+  #
+  # The third docs layer, after the static checks in lint and the docs examples in
+  # integration-test (docs/content/contributing/documentation.md). It runs here, on every
+  # pull request and merge queue entry, so required-checks depends on it and a page that
+  # breaks the site build cannot merge. It used to run only in ash-repo-docs.yml, which no
+  # required check depends on, so a failed build there did not block a merge.
+  # ash-repo-docs.yml now only deploys.
+  #
+  # `mkdocs build --strict` fails on every warning that mkdocs.yml's validation settings
+  # raise: broken links and anchors, nav entries with no page, and pages missing from the
+  # nav. scripts/docs_checks.py (check_site_build) keeps those settings strict and reads
+  # this job's steps, so neither can be relaxed without lint failing.
+  #
+  # `docs_versions.py check` publishes two releases and main to a throwaway branch of this
+  # checkout, with every proxy pointed at a port that refuses connections, and checks what
+  # a reader of each version gets: the version selector, each version's notice, latest/,
+  # and the redirects at the site root. It deletes the branch and never pushes, and this
+  # job's token could not push anyway.
+  #
+  # One block on purpose: the job reads nothing from the jobs around it, so it merges as a
+  # unit when other changes rewrite this file.
+  build-docs:
+    name: build-docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      # The versions check commits to a local branch and never fetches or pushes, so
+      # the checkout keeps no credentials.
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "false"
+      - name: Install dependencies
+        run: uv sync
+      - name: Build the documentation site
+        run: uv run mkdocs build --clean --strict
+      - name: Check the versioned site
+        run: uv run python scripts/docs_versions.py check
 
   # The Jupyter converter's integration tests on the two platforms integration-test does
   # not run. Only these, because they provision their tool the way ASH does -- the
@@ -2163,6 +2246,7 @@ jobs:
       - deploy-aws-helpers
       - integration-test
       - converter-integration
+      - build-docs
       - install-validation
       - homebrew-macos
       - sandbox

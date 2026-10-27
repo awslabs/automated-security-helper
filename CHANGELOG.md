@@ -349,10 +349,19 @@
   `--scanners` list does. `ash dependencies install --tool <name>` gives the same hint.
 - **The container image ships license files for the new scanners' tools.**
   actionlint, gitleaks, and cfn-guard with the Guard Rules Registry bundle it reads
-  get `THIRD_PARTY_LICENSES` entries, as do the uv tools cfn-lint (MIT-0) and zizmor,
-  read from each installed wheel's dist-info and checked against its RECORD. Every
-  uv install in the image now runs with `UV_NO_CACHE=1`, so uv's cache is no longer
-  kept in any layer.
+  get `THIRD_PARTY_LICENSES` entries, as do the uv tools cfn-lint (MIT-0) and
+  zizmor, read from each installed wheel's dist-info and checked
+  against its RECORD. Every uv install in the
+  image now runs with `UV_NO_CACHE=1`, so uv's cache is no longer kept in any layer.
+
+- **The reusable scan workflow hands its artifact over by ID.**
+  `run-ash-security-scan.yml` has a new `artifact-id` output: the ID
+  actions/upload-artifact gave the scan's artifact. `upload-ash-sarif.yml` has a new
+  optional `artifact-id` input. When it is set, it must be a number, and the report is
+  downloaded by that ID, which names exactly the artifact the scan job uploaded in
+  whichever attempt it ran. When it is empty, the default, the report is downloaded by
+  name, as before, so existing callers need no change. Pass it the scan job's
+  `artifact-id` output, as the usage comment in `upload-ash-sarif.yml` shows.
 
 - **The reusable scan workflow hands its artifact over by ID.**
   `run-ash-security-scan.yml` has a new `artifact-id` output: the ID
@@ -3867,9 +3876,8 @@
   plugin's section under every spelling ASH reads as that plugin's config,
   including when the entry names plugins with a glob such as `trivy-*`.
 
-  Each value that is not honored is named in a warning when the config is
-  resolved. See
-  [Settings a repository's config cannot choose](docs/content/docs/configuration-guide.md#settings-a-repositorys-config-cannot-choose).
+  Each value that is not honored is logged once as a warning naming the key. See
+  [Settings a repository's config cannot choose](https://awslabs.github.io/automated-security-helper/concepts/trust-model/#denied-settings).
 
 - **A config file inside the scanned tree can no longer relax the stale content
   database check.** `content_db_staleness: warn`, and a
@@ -4137,7 +4145,7 @@
   under `ASH_OFFLINE`. A local `--offline` scan with no semgrep or opengrep rule cache
   now reports that scanner MISSING with the cache guidance and exits 1 as an incomplete
   scan, where it used to pass by going online. See
-  [Which scanners run offline](docs/content/docs/advanced-usage.md#which-scanners-run-offline).
+  [Which scanners run offline](https://awslabs.github.io/automated-security-helper/how-to/run-offline/#scanners).
   To seed the cache, build the image with `ash build-image --offline`, or for a local
   scan download the rulesets from `https://semgrep.dev/c/<ruleset>` into the
   directories named by `SEMGREP_RULES_CACHE_DIR` and `OPENGREP_RULES_CACHE_DIR` and
@@ -7111,7 +7119,7 @@
   reporter was a stub that wrote the whole results model as YAML into
   `ash.spdx.json`, and `ash report` exited 1 trying to print that as JSON. It now
   emits an SPDX 2.3 JSON document built from the scan's CycloneDX SBOM, validated
-  against the SPDX 2.3 schema; see [Output formats](docs/content/docs/output-formats.md#spdx).
+  against the SPDX 2.3 schema; see [Output formats](https://awslabs.github.io/automated-security-helper/reference/reporters/#spdx).
   The reporter is still disabled by default.
 
 - **`ash report` passes a reporter its configured options.** The command assigned the
@@ -7972,6 +7980,66 @@
   `diff_scan_results` baseline, no longer match; take a new baseline. An
   `additional_reports` entry that carries its own `id` keeps it.
 
+- **A converter whose dependencies were unavailable says why in the results.**
+  Its `converter_results` row in `ash_aggregated_results.json` carries
+  `dependency_unavailable_reason`: the reason its dependency check recorded,
+  with the home directory written as `~` and values read from the environment
+  hidden, or a message naming the converter when the check recorded none or
+  raised. It is None on every row whose `dependencies_satisfied` is true. The
+  console's warning and `ash.log` already gave the reason; `ash merge` and an
+  MCP client, which read the results, now have it too, as they have a MISSING
+  scanner's `missing_reason`.
+
+- **Reports name the configured project.** `project_name` (the config file,
+  `ASH_PROJECT_NAME`, else `ash-scan`) is the project in the HTML, Markdown and
+  text reports, `metadata.project` in `ash.flat.json` and
+  `metadata.project_name` in `ash_aggregated_results.json`; it was always `ASH`.
+  The SPDX document name, root package name and `documentNamespace` prefix change
+  with it. A workspace project's reports keep the project's label.
+
+- **`ash.sarif` describes each scanner by its own version and links each finding
+  to its rule.** Each scanner's `tool.extensions[]` entry, and
+  `properties.scanner_version` on its findings, carry the scanner's version (it
+  was ASH's), left out when unknown. Each finding gains a `rule` reference
+  (`rule.toolComponent` to the scanner's extension and `rule.index` to the rule
+  in it), as SARIF 2.1.0 asks for rules defined in an extension (3.27.7), and an
+  explicit `level`. `tool.driver.name`, rule ids and locations are unchanged.
+
+- **`report_id` is unique per scan.** It is
+  `ASH-<UTC YYYYMMDDHHMMSS>-<12 hex digits>`; it was `ASH-` and the UTC date, so
+  every scan on a day shared one. `ash merge` gives the union an id derived from
+  its shards' ids (the same shards give the same id in any order), and a
+  workspace aggregate uses `ASH-WORKSPACE-<file stem>-<UTC time>-<12 hex digits>`,
+  with characters of the stem outside ASCII letters, digits, `_`, `.` and `-`
+  replaced by `-` and the result trimmed of leading and trailing `-` (a stem with
+  a space used to make the results file unloadable).
+
+- **`ash.cdx.json` without an SBOM is a valid CycloneDX document that says its
+  inventory is unknown.** When no SBOM scanner produced one, it was `{}`; it is
+  now `{"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1,
+  "components": [], "compositions": [{"aggregate": "unknown"}]}`, so a consumer
+  does not read "no components" as "nothing to report".
+
+- **Bedrock's `actionable_only` sends what the threshold counts.** It dropped
+  suppressed findings but sent every unsuppressed one, LOW and INFO included; it
+  now also leaves out findings below the threshold of the scanner that reported
+  them (that scanner's `severity_threshold`, else the global one).
+
+- **Every finding's `id` in `ash.flat.json`, `ash.csv` and the MCP tools changes
+  once.** It was `<scanner>-<rule>-<8 hex digits of a hash of the message>`, so
+  two findings of one rule with one message shared an `id`, and rewording a
+  message changed it. It is now `<scanner>-<rule>-<12 hex digits>` of a hash over
+  the finding's identity: its SARIF fingerprints when they tell findings apart,
+  otherwise its file and lines, plus the package name and path and the workspace
+  project. Findings that share all of that are told apart by a digest of their
+  column and message, and only exact duplicates are numbered, so a newcomer does
+  not take an existing finding's id. A converted file's findings are identified by
+  the file's path under the converted files, not under the output directory.
+  detect-secrets now reports the column each secret starts at, so two secrets on
+  one line have two ids. Ids recorded from an earlier release, such as a saved
+  `diff_scan_results` baseline, no longer match; take a new baseline. An
+  `additional_reports` entry that carries its own `id` keeps it.
+
 ### Configuration sources
 
 - **`pyproject.toml [tool.ash]` and `ashrc` files are config sources (#313).**
@@ -8373,12 +8441,14 @@ These affect working on ASH, not the installed package.
 
 _via `ash` CLI_
 
+<!-- doctest: illustrative reason="historical: the ASH v2 command line" -->
 ```sh
 ash --no-run --build-target ci
 ```
 
 _via `docker` or other OCI CLI_
 
+<!-- doctest: illustrative reason="needs Docker" -->
 ```sh
 docker build --tag automated-security-helper:ci --target ci .
 ```

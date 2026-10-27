@@ -18,11 +18,13 @@ The Trivy plugin enables ASH to leverage Trivy's powerful scanning capabilities 
 The plugin requires Trivy CLI to be installed and available in your system PATH.
 
 **macOS (Homebrew)**:
+<!-- doctest: illustrative reason="installs a tool over the network" -->
 ```bash
 brew install trivy
 ```
 
 **Linux**:
+<!-- doctest: illustrative reason="installs a tool over the network" -->
 ```bash
 # Download and install latest release
 curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
@@ -32,6 +34,7 @@ curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/inst
 
 ### Verify Installation
 
+<!-- doctest: illustrative reason="needs trivy installed on the host" -->
 ```bash
 trivy --version
 ```
@@ -52,6 +55,7 @@ scanners:
 
 ### Run Trivy Scan
 
+<!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
 # Scan current directory
 uv run ash --scanners trivy-repo
@@ -147,6 +151,7 @@ scanners:
 
 ### Combined with Other Scanners
 
+<!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
 # Use Trivy alongside other ASH scanners
 uv run ash --scanners trivy-repo,bandit,semgrep
@@ -173,6 +178,7 @@ Trivy results are integrated into ASH's unified reporting system:
 ### Common Issues
 
 **Trivy not found**:
+<!-- doctest: illustrative reason="installs a tool over the network" -->
 ```bash
 # Check if Trivy is in PATH
 which trivy
@@ -182,6 +188,7 @@ brew install trivy
 ```
 
 **Database download issues**:
+<!-- doctest: illustrative reason="needs trivy installed on the host" -->
 ```bash
 # Manually update Trivy database
 trivy image --download-db-only
@@ -198,6 +205,7 @@ when it is due, needs the cache directory to be writable. That directory is
 `$XDG_CACHE_HOME/trivy` or `~/.cache/trivy` on Linux, `~/Library/Caches/trivy`
 on macOS, and `%LocalAppData%\trivy` on Windows.
 
+<!-- doctest: illustrative reason="needs trivy installed on the host" -->
 ```bash
 # Ensure the cache directory is writable before updating the database
 ls -la ~/.cache/trivy/
@@ -207,6 +215,7 @@ ls -la ~/.cache/trivy/
 
 Enable verbose logging to troubleshoot issues:
 
+<!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
 uv run ash --scanners trivy-repo --log-level DEBUG
 ```

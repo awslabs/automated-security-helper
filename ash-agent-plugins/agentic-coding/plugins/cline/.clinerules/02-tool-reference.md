@@ -9,8 +9,9 @@ The ASH MCP server exposes twenty-two tools and five resources.
 
 ## run_ash_scan
 
-Starts a scan asynchronously. Returns a `scan_id` immediately — the scan continues in the background regardless of MCP connection state.
+Starts a scan in the server process and returns a `scan_id` at once. The scan stops if the server process exits; over stdio, that is when the client disconnects.
 
+<!-- doctest: options of=mcp.run_ash_scan -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `source_dir` | string \| null | current dir | Absolute path to scan |
@@ -18,9 +19,11 @@ Starts a scan asynchronously. Returns a `scan_id` immediately — the scan conti
 | `config_path` | string \| null | `null` | Custom config path. When not set: the profile this session bound with `select_profile`, else the config ASH discovers in the source directory, else the file `ASH_CONFIG` names in the server's environment, else the built-in defaults |
 | `clean_output` | boolean | `true` | Wipe stale reports before starting |
 
-Output reports are written to `<source_dir>/.ash/ash_output/` — there is no parameter to override this. Scanner selection, mode, and other tuning live in `.ash/.ash.yaml`, not in tool arguments.
+Output reports are written to `<source_dir>/.ash/ash_output/` — there is no parameter to override this. Scanner selection, mode, and other tuning live in the project's ASH config, not in tool arguments.
 
 Returns:
+
+<!-- doctest: config kind=mcp-response of=mcp.run_ash_scan -->
 ```json
 {
   "success": true,
@@ -40,7 +43,7 @@ The `directory_path` field tells you the resolved absolute path the server is sc
 
 Poll `get_scan_progress` until `is_complete` is `true`, then read `status`. `is_complete` is `true` for every ending, including `failed` and `cancelled`. (See `get_scan_progress` below.)
 
-**A refused config keeps its own `error_type`.** The scan does not start, and the response is `success: false` with one of these `error_type` values and the reason in `error`:
+A scan beyond the operator's `max_concurrent_scans` is refused with `error_type` `scan_start_failure` and an `error` that names the limit; start it again once a scan finishes or is canceled. A scan of a directory whose canceled scan is still stopping is refused the same way; retry once it has stopped. A scan still running after the operator's `scan_timeout_seconds` is stopped as `cancel_scan` stops one, and ends `failed` with an `error_message` that names the limit.
 
 - `config_input_not_permitted`: `config_path`, or a base its `extends` chain names, is outside the directories this session may read a config from.
 - `config_check_failed`: the check of the config sources in the scan target could not finish (an unreadable entry, a link loop), so the scan was not started. The config was not found to be outside the permitted roots -- that case is `config_input_not_permitted` -- so check the config files in the target for unreadable entries and link loops.
@@ -52,14 +55,17 @@ The target and source checks have their own `error_type` values too (`scan_targe
 
 ## get_scan_progress
 
-Poll progress every 5 seconds until complete. Keeps the MCP connection alive while the scan runs.
+Poll progress every 5 seconds until `is_complete` is `true`, then read `status`: `completed`, `incomplete`, `failed`, or `cancelled`. The scan continues server-side independently of polling.
 
+<!-- doctest: options of=mcp.get_scan_progress -->
 | Param | Type | Notes |
 |-------|------|-------|
 | `scan_id` | string | From `run_ash_scan` |
 
 Returns:
-```json
+
+<!-- doctest: config kind=mcp-response of=mcp.get_scan_progress -->
+```text
 {
   "scan_id": "...",
   "directory_path": "/path/to/scanned/project",
@@ -98,7 +104,7 @@ Returns:
 
 There is no overall percentage field. To compute progress, use `finished_scanners / total_scanners`, which counts every scanner that ended; `completed_scanners` counts those that PASSED only — but **guard against `total_scanners == 0`** during the pre-flight phase (before any scanner has registered). Show "initializing" or 0% when `total_scanners` is zero.
 
-There is no top-level `duration` field — derive elapsed time from `start_time` and `end_time` (or from current time while running).
+There is no top-level `duration` field; derive elapsed time from `start_time` and `end_time` (or from current time while running).
 
 **`is_complete` is `true` once the scan has ended**, whatever the ending: `completed`, `incomplete`, `failed` or `cancelled`. It is decided by the scan's state alone, never by a results file on disk, which can be a previous scan's. `results_available` is `true` for `completed` and `incomplete`, the scans whose results `get_scan_results` can read.
 
@@ -108,10 +114,13 @@ There is no top-level `duration` field — derive elapsed time from `start_time`
 
 **Status enum:** the documented values are `pending | running | completed | incomplete | failed | cancelled`. The registry uses `pending` briefly while a scan is queued, transitions to `running` once execution begins, and may also expose the legacy `in_progress` string from older `ScanProgress` instances. Treat `pending`, `running`, and `in_progress` as equivalent "not done yet" states.
 
+On failure, `error_type` is one of `invalid_session_id`, `scan_not_found` and `session_identity_required`, or the class name of an exception.
+
 ## get_scan_results
 
 Fetch finalized results with filtering. Run only after `get_scan_progress` reports complete.
 
+<!-- doctest: options of=mcp.get_scan_results -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `output_dir` | string | `".ash/ash_output"` | Absolute path strongly recommended; the server resolves relative paths against its own cwd, which usually isn't your project root |
@@ -120,29 +129,37 @@ Fetch finalized results with filtering. Run only after `get_scan_progress` repor
 | `severities` | string | all | `critical,high,medium,low,info` |
 | `actionable_only` | boolean | `false` | Keep only the actionable findings, the ones behind exit code 2: unsuppressed and at or above the severity threshold the scan was judged by (a scanner's own where its config sets one). Drop the rest and add `findings`, a flat list of them that honors `scanners` and `severities` (`full` level only) |
 
-Returns full or filtered findings depending on `filter_level`.
+With `filter_level` `full`, `raw_results` is the aggregated results document without its `sarif`, `cyclonedx`, and `ash_config` sections; `summary` returns the metadata and the counts by severity and by scanner, and `minimal` the status. Individual findings are in the report files: `get_scan_result_paths` lists them, and the `flat-json` reporter, which is enabled by default, writes `reports/ash.flat.json` under `output_dir`.
 
 `status` is `completed` or `incomplete`, decided by the same rule as the scan's exit code, with `coverage_complete` and `incomplete_scanners` as in `get_scan_progress`. An `incomplete` scan's findings are returned in full.
+
+On failure, `error_type` is `invalid_session_id`, or the class name of an exception.
 
 ## get_scan_summary
 
 Metadata and counts only — no individual findings. Cheap for quick health checks.
 
+<!-- doctest: options of=mcp.get_scan_summary -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `output_dir` | string | `".ash/ash_output"` | Absolute path |
 
 Returns total count, severity breakdown, scanner statuses.
 
+On failure, `error_type` is `invalid_session_id`, or the class name of an exception.
+
 ## get_scan_result_paths
 
 Returns file paths to all generated reports. Useful when you want to read HTML, SARIF, CSV, or markdown directly with file tools instead of pulling JSON over MCP.
 
+<!-- doctest: options of=mcp.get_scan_result_paths -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `output_dir` | string | `".ash/ash_output"` | Absolute path |
 
 Returns a dict mapping format names to absolute paths.
+
+On failure, `error_type` is one of `DirectoryNotFound`, `invalid_session_id` and `scan_target_not_permitted`, or the class name of an exception.
 
 ## list_active_scans
 
@@ -150,13 +167,16 @@ All scans the server tracks (active + recently completed).
 
 No parameters. Returns a list of scan summaries.
 
+On failure, `error_type` is one of `invalid_session_id` and `session_identity_required`, or the class name of an exception.
+
 ## cancel_scan
 
 Stop a running scan. The scanner running at the time is stopped, no further scanner starts, and no reports or results file are written after the cancel.
 
+<!-- doctest: options of=mcp.cancel_scan -->
 | Param | Type | Notes |
 |-------|------|-------|
-| `scan_id` | string | The scan to stop |
+| `scan_id` | string | The scan to cancel |
 
 Returns `success: true` and `status: cancelled`. A scan that already finished cannot be cancelled: `success` is `false` and `status` is the status it finished with.
 
@@ -180,15 +200,19 @@ Refused while a scan of this session is running: `success: false`, `error_type: 
 
 Compare two ash_aggregated_results.json files and return a structured diff.
 
+<!-- doctest: options of=mcp.diff_scan_results -->
 | Param | Type | Notes |
 |-------|------|-------|
 | `before_path` | string | Path to the baseline ash_aggregated_results.json file. |
 | `after_path` | string | Path to the comparison ash_aggregated_results.json file. |
 
+On failure, `error_type` is `invalid_session_id`, or the class name of an exception.
+
 ## explain_finding
 
 Return structured details for a single finding by ID.
 
+<!-- doctest: options of=mcp.explain_finding -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `finding_id` | string | *required* | The FlatVulnerability ID to look up (e.g. "bandit-B601-880359fd90e1"). |
@@ -198,13 +222,14 @@ Return structured details for a single finding by ID.
 
 Get the resolved ASH config (defaults + user overrides merged).
 
+<!-- doctest: options of=mcp.get_config -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `config_path` | string \| null | `null` | Optional explicit path to config file. If None, auto-discovers. |
 | `raw` | boolean | `false` | If True, returns the file's contents as written, without merging defaults or reading the environment. A value the config's loader would read from the environment (an `!ENV` value, or an unquoted `${VAR:default}`) comes back as `!ENV ` and the reference, never as its value; a quoted string that only looks like a reference comes back as written. |
 | `search_dir` | string \| null | `null` | The directory the caller's scan will target (scan_directory's directory_path). With config_path None it is where the config is discovered; with a named config_path it is the target the file is judged for, so the answer refuses exactly what a scan of that target refuses -- an entry such a scan drops with a warning never refuses the answer. Without it, a named file is judged for this session's delivered source, or else the server's working directory. |
 
-A config this session may not read, or one a client delivered that the server refuses, returns `success: false` with `error_type` `config_input_not_permitted`, `config_field_denied`, `config_policy_unreadable` or `config_env_not_resolved`, as `run_ash_scan` does for the same file.
+On failure, `error_type` is one of `config_check_failed`, `config_env_not_resolved`, `config_field_denied`, `config_input_not_permitted`, `config_policy_unreadable` and `invalid_session_id`, or the class name of an exception.
 
 ## list_profiles
 
@@ -222,27 +247,33 @@ No parameters. Returns one entry per registered scanner with its config name, de
 
 Resolve a VS Code workspace file into a scan plan without scanning anything.
 
+<!-- doctest: options of=mcp.resolve_ash_workspace -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `workspace_file` | string | *required* | Absolute path to the .code-workspace file. |
-| `workspace_config` | string \| null | `null` | Optional path to a workspace policy file. Must exist if given; ASH will not fall back to searching for one. |
+| `workspace_config` | string \| null | not set | Optional path to a workspace policy file. Must exist if given; ASH will not fall back to searching for one. |
 | `allow_missing_projects` | boolean | `false` | Mark project directories that are absent or unreadable as skipped instead of refusing the workspace. |
-| `config_overrides` | array \| null | `null` | Optional list of `key=value` config overrides, applied to each project's config so the reported threshold is the enforced one. |
-| `profile` | string \| null | `null` | Name of a registered config profile to resolve under for this one call, instead of whatever select_profile bound to this session. Call list_profiles to see what the operator registered. The fields the profile sets are final for every project, and a project's own config fills the rest. |
+| `config_overrides` | array \| null | not set | Optional list of `key=value` config overrides, applied to each project's config so the reported threshold is the enforced one. |
+| `profile` | string \| null | not set | Name of a registered config profile to resolve under for this one call, instead of whatever select_profile bound to this session. Call list_profiles to see what the operator registered. The fields the profile sets are final for every project, and a project's own config fills the rest. |
+
+A workspace policy file, named or found in the workspace file's directory or its `.ash` directory, is used only when it is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names; any other refuses the workspace with exit code 4, or with exit code 3 when a client delivered it and it sets a field the server's policy denies.
+
+On failure, `error_type` is one of `config_env_not_resolved`, `config_input_not_permitted` and `invalid_session_id`, or the class name of an exception.
 
 ## run_ash_workspace_scan
 
 Scan every project in a VS Code workspace and return the per-project verdict.
 
+<!-- doctest: options of=mcp.run_ash_workspace_scan -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `workspace_file` | string | *required* | Absolute path to the .code-workspace file. |
-| `workspace_config` | string \| null | `null` | Optional path to a workspace policy file. |
+| `workspace_config` | string \| null | not set | Optional path to a workspace policy file. |
 | `allow_missing_projects` | boolean | `false` | Skip absent or unreadable project directories rather than refusing the workspace. |
-| `config_overrides` | array \| null | `null` | Optional list of `key=value` config overrides. |
-| `output_dir` | string \| null | `null` | Where to write the workspace output tree. Defaults to `<workspace root>/.ash/ash_output`. Refused when it, a directory or file ASH writes in it, or a project's `projects/<key>` is a symlink. |
-| `scanners` | array \| null | `null` | Restrict every project to these scanner names. |
-| `excluded_scanners` | array \| null | `null` | Exclude these scanners from every project. Takes precedence over `scanners`. |
+| `config_overrides` | array \| null | not set | Optional list of `key=value` config overrides. |
+| `output_dir` | string \| null | not set | Where to write the workspace output tree. Defaults to `<workspace root>/.ash/ash_output`. Refused when it, a directory or file ASH writes in it, or a project's `projects/<key>` is a symlink. |
+| `scanners` | array \| null | not set | Restrict every project to these scanner names. |
+| `excluded_scanners` | array \| null | not set | Exclude these scanners from every project. Takes precedence over `scanners`. |
 | `offline` | boolean | `false` | Run without network access. |
 | `clean_output` | boolean | `true` | Hide each project's previous results once the scan has its directory. Either way they are put back for a project whose scan does not finish. A scan refused because a project already has a scan touches nothing in any project's output. |
 | `profile` | string \| null | `null` | Name of a registered config profile to scan under for this one call, instead of whatever select_profile bound to this session. An unknown name refuses the whole scan; running N repository scans under the default config because a profile name was misspelled, and reporting success, is exactly what the confinement refusal above exists to prevent. The fields the profile sets are final for every project, and a project's own config fills the rest. |
@@ -251,16 +282,22 @@ Scan every project in a VS Code workspace and return the per-project verdict.
 
 Bind one of the operator's registered config profiles to this session.
 
+<!-- doctest: options of=mcp.select_profile -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `profile_name` | string | *required* | Name the operator registered the profile under. |
-| `patch_ops` | array \| null | `null` | JSON-Patch operations to apply to the profile's config. |
-| `override_yaml` | string \| null | `null` | Complete ASH config YAML replacing the profile's. |
+| `patch_ops` | array \| null | not set | JSON-Patch operations to apply to the profile's config. |
+| `override_yaml` | string \| null | not set | Complete ASH config YAML replacing the profile's. |
+
+Refused with `success: false` and `error_type: session_workspace_busy` while the server removes this session's workspace for being unused longer than its time to live. Select the profile again; any upload in progress is gone with the workspace and is sent again from chunk 0.
+
+On failure, `error_type` is one of `invalid_session_id`, `session_identity_required` and `session_workspace_busy`, or the class name of an exception.
 
 ## set_source_git
 
 Clone a repository into this session's workspace and make it the scan target.
 
+<!-- doctest: options of=mcp.set_source_git -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `url` | string | *required* | Repository URL: `https://`, `ssh://` or `user@host:path`, on a host the operator listed in `ASH_MCP_GIT_ALLOWED_HOSTS` |
@@ -268,7 +305,9 @@ Clone a repository into this session's workspace and make it the scan target.
 | `ssh_key_id` | string \| null | none | Must be omitted: the server registers no ssh keys |
 | `depth` | integer | `1` | Clone depth, a whole number of commits from 1 to 1000 |
 
-Refused while a scan of this session is running, because the clone would replace the tree and config files that scan is reading. The response is `success: false`, `error_type: source_delivery_busy`, and `error` set to `a scan of this session is running; change the delivered source after it finishes`. Deliver the source again once `get_scan_progress` reports a terminal status.
+A refusal returns `success: false` with an `error_type`: `clone_url_not_permitted` (a URL with a scheme other than `https` or `ssh`, or whose host or port the server cannot read), `local_clone_source_refused` (a local path or `file://` URL), `clone_host_not_permitted` (a host the server's `ASH_MCP_GIT_ALLOWED_HOSTS` does not list), `ssh_key_not_registered`, `invalid_session_id`, `source_delivery_busy` (a scan of the session runs), `clone_timed_out` (a git command ran past 10 minutes and was stopped), `clone_too_large` (the clone passed the archive size or entry limits; shrink the request), or `clone_tree_unreadable` (the tree git wrote could not be read, which is a server-side fault and not a size to reduce). A URL that begins with `-` or uses the `ext::` transport, a ref that begins with `-`, a `depth` that is not a positive whole number, and a git failure return `success: false` and an `error` message, with no `error_type`.
+
+On failure, `error_type` is one of `clone_host_not_permitted`, `clone_timed_out`, `clone_too_large`, `clone_tree_unreadable`, `clone_url_not_permitted`, `invalid_session_id`, `local_clone_source_refused`, `session_identity_required`, `source_delivery_busy` and `ssh_key_not_registered`, or the class name of an exception.
 
 A refusal or a git failure returns `success: false` with an `error_type`: `clone_url_not_permitted` (a url beginning with `-` or using the `ext::` transport, a url holding a control character or a lone surrogate, or a url whose host cannot be read), `clone_ref_not_permitted` (a ref beginning with `-` or holding a control character or a lone surrogate), `invalid_clone_depth` (below 1 or above 1000; the limit is on how much history is fetched), `invalid_session_id`, `local_clone_source_refused` (a local path or `file://` url, which would read the server's own filesystem), `clone_host_not_permitted` (the host is not in `ASH_MCP_GIT_ALLOWED_HOSTS`), `ssh_key_not_registered` (an `ssh_key_id` was named), `clone_timed_out` (git ran past its time limit and was stopped), `git_clone_failed` or `git_checkout_failed` (git's own message is in `error`; `git_clone_failed` also covers a git that is not on `PATH` or cannot be started), or `session_workspace_unavailable` (the session's workspace could not take the clone: a directory of it could not be created, the previously delivered source could not be moved aside for it, or the clone could not be moved into place; each move is tried a few times before it fails). The clone is made beside the delivered source and replaces it only once it has worked, so a delivery that fails for any of these reasons, or is refused, leaves the previously delivered source in place, and `run_ash_scan` with no `source_dir` scans it. A partial clone that cannot be fully deleted stays beside the source, logged, for the next delivery to delete, and the error returned is still git's own. The one exception is a clone that could not be moved into place after the previous source had been moved aside and could not be put back: the recorded source then names a path that is gone, and `run_ash_scan` with no `source_dir` answers `delivered_source_missing` until a source is delivered again; that next delivery puts the previous source back first. A `session_workspace_unavailable` that names a refused rename can be retried with the same call: the refusal is usually a program holding a handle inside a tree (a virus scanner, a file indexer), and it passes.
 
@@ -278,6 +317,7 @@ A re-delivery needs room for both trees at once, because the new clone is made b
 
 Upload one base64 chunk of a zipped source tree.
 
+<!-- doctest: options of=mcp.set_source_zip_chunk -->
 | Param | Type | Notes |
 |-------|------|-------|
 | `upload_id` | string | Caller-chosen id tying the chunks of one upload together |
@@ -295,6 +335,7 @@ While the server removes the session's workspace for being unused longer than it
 
 Verify an uploaded zip and extract it as this session's scan target.
 
+<!-- doctest: options of=mcp.set_source_zip_finalize -->
 | Param | Type | Notes |
 |-------|------|-------|
 | `upload_id` | string | The identifier used for the preceding chunk calls. |
@@ -308,23 +349,29 @@ A finalize that cannot deliver returns `success: false` with an `error`. Its `er
 
 Build a paste-ready AshSuppression entry for a specific finding.
 
+<!-- doctest: options of=mcp.suggest_suppression -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `finding_id` | string | *required* | Stable hash ID of the finding (from get_scan_results or explain_finding). |
-| `results_path` | string \| null | `null` | Path to ash_aggregated_results.json. Defaults to .ash/ash_output/ash_aggregated_results.json in cwd. |
-| `expiration` | string \| null | `null` | Expiration date in YYYY-MM-DD format. Defaults to 90 days from today. |
-| `justification` | string \| null | `null` | Human-readable reason for the suppression. |
+| `results_path` | string \| null | not set | Path to ash_aggregated_results.json. Defaults to .ash/ash_output/ash_aggregated_results.json in cwd. |
+| `expiration` | string \| null | not set | Expiration date in YYYY-MM-DD format. Defaults to 90 days from today. |
+| `justification` | string \| null | not set | Human-readable reason for the suppression. |
+
+On failure, `error_type` is `invalid_session_id`, or the class name of an exception.
 
 ## validate_config
 
 Validate an ASH configuration file or content string.
 
+<!-- doctest: options of=mcp.validate_config -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
-| `config_content` | string \| null | `null` | YAML/JSON string to validate. |
-| `config_path` | string \| null | `null` | Path to the config file to validate. |
+| `config_content` | string \| null | not set | YAML/JSON string to validate. |
+| `config_path` | string \| null | not set | Path to the config file to validate. |
 
-Each error is `{field, message, type}`. A remote caller's `config_content` counts as the client's config, and so does a `config_path` that a client delivered or that is outside the directories `ASH_MCP_ALLOWED_CONFIG_ROOTS` names, unless it is a profile file the server wrote in the calling session's `config/` directory. On stdio, `config_content` is the caller's own, because the caller started the server. Besides schema and parse errors, `type` can be `config_input_not_permitted` (a `config_path` this session may not read), `config_policy_unreadable` (the session's runtime-override policy cannot be established for the client's config), `denied_by_runtime_policy` (a field of the client's config that policy denies, named in `field`, with the message `<field> may not be set by a config an MCP client delivers: <reason>`), or `config_env_not_resolved`. A `${VAR}` or `${VAR:default}` reference at the start of a plain value, or an `!ENV` tag, is an error of type `config_env_not_resolved` anywhere in a remote caller's client config, and for a stdio caller only in a file a client delivered. A policy check that cannot finish on the client's config makes it invalid, with an error of type `validation_error` that starts `The config could not be checked against this session's runtime-override policy`.
+`config_content` counts as the client's config, and so does a `config_path` that a client delivered or that is outside the directories `ASH_MCP_ALLOWED_CONFIG_ROOTS` names and its session's `config/` directory. Each field such a config may not set under the server's runtime-override policy is an error of type `denied_by_runtime_policy`, and a policy the server cannot read is one error of type `config_policy_unreadable`; for `config_content`, both only when a remote client calls. A `${VAR}` or `${VAR:default}` reference at the start of a plain value, or an `!ENV` tag, in such a config is an error of type `config_env_not_resolved`.
+
+Each entry of `errors` has a `type` that is one of `config_env_not_resolved`, `config_input_not_permitted`, `config_policy_unreadable`, `denied_by_runtime_policy`, `duplicate_field`, `file_not_found`, `internal_field`, `invalid_field`, `invalid_session_id`, `json_parse_error`, `missing_input`, `missing_required_field`, `unknown_field`, `validation_error` and `yaml_parse_error`, or the class name of an exception.
 
 ## Resources
 

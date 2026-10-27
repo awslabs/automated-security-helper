@@ -503,8 +503,8 @@ global_settings:
     # look like high-entropy secrets because a SHA256 is high-entropy.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 333
-      line_end: 438
+      line_start: 353
+      line_end: 464
       reason: >-
         False positive — every string in this range is a published SHA256 release
         checksum or the SHA256 of what one of those verified archives extracts to.
@@ -527,8 +527,8 @@ global_settings:
         would silently swallow a real secret added here later.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 862
-      line_end: 888
+      line_start: 935
+      line_end: 979
       reason: >-
         False positive, the same shape as the entry above, over _THIRD_PARTY_HASHES:
         the commit SHA each bundled tool's release tag points to, and the SHA256 of
@@ -1531,6 +1531,100 @@ global_settings:
     - rule_id: API_KEY_OR_SECRET
       path: tests/unit/utils/test_secret_masking.py
       reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
+    # === ferret-scan API_KEY_OR_SECRET, continued: names and generated templates ===
+    #
+    # The same unquoted-assignment and name-matching dispositions as the block
+    # above. Per-file entries naming the flagged value, as the existing ferret
+    # entries do.
+    - path: tests/unit/test_docs_ci_runner_judgments.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        The flagged line assigns the TOKEN constant a pattern-built 32-hex
+        fixture value that the judgment tests use as the thing that must be
+        redacted from runner output. The fixture exists to prove redaction. The
+        reason does not repeat the assignment, so this file does not flag itself.
+    # === gitleaks: fixture tokens in tests (kept in step with .ash/.ash.yaml) ===
+    - rule_id: "generic-api-key"
+      path: "tests/unit/docs/test_page_claims.py"
+      reason: >-
+        The match is the docs' illustrative example DATABASE_PASSWORD =
+        "correct-horse-battery-staple-1234", embedded here because this test
+        executes the documentation's own snippets verbatim. A published doc
+        example, not a credential.
+    - rule_id: "generic-api-key"
+      path: "tests/unit/test_docs_ci_runner_judgments.py"
+      reason: >-
+        The flagged line assigns the TOKEN constant a pattern-built 32-hex
+        fixture value (it starts 0a1b2c3d) that the judgment tests use as the
+        thing that must be redacted from runner output. The fixture exists to
+        prove redaction. The reason does not repeat the assignment, so this file
+        does not flag itself.
+    # === bandit in tests and one log line (kept in step with .ash/.ash.yaml) ===
+    - rule_id: B103
+      path: tests/unit/assets/test_install_pinned_tool.py
+      reason: >-
+        os.lchmod(link, 0o777) builds the hazard under test: a group/world-writable
+        SYMLINK inside a tool bundle, which the installer must refuse. The test
+        skips itself when the platform cannot produce that mode. The permissive
+        mask is the fixture, not a default.
+    - rule_id: B103
+      path: tests/unit/utils/test_tool_config_dir.py
+      reason: >-
+        os.chmod(tree.outside, 0o777) makes the shared directory world-writable so
+        the test can assert write_tool_config REFUSES to write there (pytest.raises
+        OSError matching TMPDIR). The unsafe mode is the input of a refusal test.
+    - rule_id: B104
+      path: automated_security_helper/cli/mcp/__init__.py
+      reason: >-
+        Not a bind. The flagged line is the startup LOG helper that reproduces
+        uvicorn's "running on" message: host = "0.0.0.0" if config.host is None
+        mirrors the display default uvicorn itself logs; the socket was bound
+        elsewhere, where tests/unit/cli/test_mcp_non_loopback_bind_is_refused.py
+        asserts a non-loopback bind is refused without the explicit opt-in.
+    - rule_id: B104
+      path: tests/unit/cli/test_mcp_loopback_accepts_only_its_own_origin.py
+      reason: >-
+        Tests OF host binding: "0.0.0.0" is the value under test in origin-check
+        assertions, not a careless default.
+    - rule_id: B104
+      path: tests/unit/cli/test_mcp_non_loopback_bind_is_refused.py
+      reason: >-
+        The file exists to assert a non-loopback bind is REFUSED;
+        NON_LOOPBACK_HOSTS lists "0.0.0.0" and friends as the refused inputs. A
+        refusal test cannot avoid naming the address it refuses.
+    - rule_id: B104
+      path: tests/unit/cli/test_mcp_upstream_host_check.py
+      reason: >-
+        The same disposition: "0.0.0.0" is the fixture host in assertions about
+        the upstream Host-header check. The address is the value under test.
+    - rule_id: B301
+      path: tests/unit/utils/test_link_refusal_family.py
+      reason: >-
+        pickle.loads(pickle.dumps(refusal)) round-trips an exception THIS test
+        just built, asserting the refusal family survives the worker-to-parent
+        handoff whole. The bytes never leave the process; nothing untrusted is
+        loaded.
+    - rule_id: B314
+      path: tests/integration/docs/ci_runners/reports.py
+      reason: >-
+        ET.parse reads the JUnit XML the harness's own pinned CI runners just
+        wrote inside the test sandbox, counting testcases; a parse failure is
+        skipped. Input produced by the fixture run itself, not attacker XML.
+    - rule_id: B314
+      path: tests/integration/docs/ci_runners/verdict.py
+      reason: >-
+        ET.fromstring parses the JUnit file Jenkins wrote inside the leg's own
+        container, after stripping the XML 1.1 declaration Jenkins emits. The
+        harness consumes its own run's output.
+    # === trivy-repo misconfiguration: the gitlab-ci-local helper fixture ===
+    - rule_id: "DS-0002"
+      path: "tests/integration/docs/ci_runners/gitlab-helper/Dockerfile"
+      reason: >-
+        The helper image gitlab-ci-local uses around a job must run as root: it
+        sets build-directory ownership and copies artifacts under /artifacts at
+        the filesystem root, as gitlab-ci-local's own helper image does. The
+        file's checkov:skip=CKV_DOCKER_3 header records the same decision for
+        checkov; this entry is trivy's spelling of it.
   ignore_paths:
     - path: "**/.venv/**"
       reason: Virtual environment, not committed, only 3p content
@@ -1605,6 +1699,13 @@ global_settings:
       reason: This file is generated by a corresponding Pydantic model and does not contain any secrets or sensitive information. Findings on this file are false positives and should be addressed on the related Pydantic models, not on this JSON file.
     - path: "**/automated_security_helper/schemas/AshConfig.json"
       reason: This file is generated by a corresponding Pydantic model and does not contain any secrets or sensitive information. Findings on this file are false positives and should be addressed on the related Pydantic models, not on this JSON file.
+    # The same entry as in .ash/.ash.yaml, where the default mode already made
+    # this call. Without it here, the community scanners report the docs'
+    # illustrative DATABASE_PASSWORD example (gitleaks and ferret-scan, on
+    # platform-teams.md, its .template and reference/coverage.md), which is not
+    # shipped code or a real credential.
+    - path: "docs/**"
+      reason: Documentation content with example code snippets — secrets/keywords in examples are illustrative, not real credentials.
 reporters:
   security-hub:
     enabled: false

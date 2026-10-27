@@ -1,0 +1,624 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""What a CI-runner run leaves behind, and how the runner tests read it.
+
+WHY THIS EXISTS
+---------------
+After a pipeline runs under its runner, the runner tests in
+tests/integration/docs/test_docs_ci_runners.py check what the run left behind: the
+findings in ASH's aggregated results, by file; the reports where the page says the
+pipeline keeps them; the result each job should have; when the merge step of the
+sharded example started; what the stub actions recorded; and, for the reusable
+workflow, that the install named the head commit. Those readers live in
+tests/integration/docs/ci_runners/reports.py, verdict.py and the stub actions under
+stubs/, and are checked here on files written in tmp_path, since the runs themselves
+happen only on a GitHub-hosted runner.
+
+The stubs stand in for the actions that write to GitHub (code scanning uploads, pull
+request comments, check runs). They call no API, keep the real actions' failure
+preconditions, such as a SARIF path that does not exist, and record their inputs under
+the directory named by DOCTEST_STUB_RECORDS, which only the runner tests set.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import importlib
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+import zipfile
+from pathlib import Path
+
+import pytest
+import yaml
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+CI_RUNNERS = REPO_ROOT / "tests" / "integration" / "docs" / "ci_runners"
+PACKAGE = "_ash_ci_runners"
+HEAD = "0123456789abcdef0123456789abcdef01234567"
+REPOSITORY = "awslabs/automated-security-helper"
+POSIX_ONLY = pytest.mark.skipif(
+    sys.platform == "win32", reason="the runners run on Linux; the stubs are bash"
+)
+
+
+def _module(stem: str):
+    if PACKAGE not in sys.modules:
+        init = CI_RUNNERS / "__init__.py"
+        if not init.is_file():
+            pytest.fail("missing tests/integration/docs/ci_runners/__init__.py")
+        spec = importlib.util.spec_from_file_location(
+            PACKAGE, init, submodule_search_locations=[str(CI_RUNNERS)]
+        )
+        assert spec and spec.loader
+        package = importlib.util.module_from_spec(spec)
+        sys.modules[PACKAGE] = package
+        spec.loader.exec_module(package)
+    if not (CI_RUNNERS / f"{stem}.py").is_file():
+        pytest.fail(f"missing tests/integration/docs/ci_runners/{stem}.py")
+    return importlib.import_module(f"{PACKAGE}.{stem}")
+
+
+def _api(stem: str, name: str):
+    module = _module(stem)
+    if not hasattr(module, name):
+        pytest.fail(f"tests/integration/docs/ci_runners/{stem}.py defines no {name}")
+    return getattr(module, name)
+
+
+# ---------------------------------------------------------------------------
+# Findings by file, from ASH's aggregated results
+# ---------------------------------------------------------------------------
+
+
+def _result(uri: str, severity: str, **extra) -> dict:
+    return {
+        "ruleId": "R",
+        "level": "error" if severity in ("CRITICAL", "HIGH") else "warning",
+        "properties": {"issue_severity": severity},
+        "locations": [{"physicalLocation": {"artifactLocation": {"uri": uri}}}],
+        **extra,
+    }
+
+
+def _aggregated(threshold: str | None = None) -> dict:
+    results = [
+        _result("app.py", "HIGH"),
+        _result("./app.py", "MEDIUM"),
+        _result("app.py", "LOW"),
+        _result("changed.py", "HIGH", suppressions=[{"kind": "external"}]),
+        _result("file:///builds/fallback.group/fallback.project/changed.py", "HIGH"),
+    ]
+    data = {"sarif": {"runs": [{"results": results[:3]}, {"results": results[3:]}]}}
+    if threshold:
+        data["ash_config"] = {"global_settings": {"severity_threshold": threshold}}
+    return data
+
+
+def test_findings_are_counted_by_file_at_the_scan_s_threshold():
+    by_file = _api("reports", "findings_by_file")
+    assert by_file(_aggregated()) == {"app.py": 2, "changed.py": 1}, (
+        "MEDIUM by default: the LOW finding and the suppressed one do not count"
+    )
+    assert by_file(_aggregated("LOW")) == {"app.py": 3, "changed.py": 1}
+
+
+def test_findings_that_differ_from_the_expected_are_named(tmp_path):
+    problems = _api("reports", "findings_problems")(
+        [("ash_aggregated_results.json", _aggregated())],
+        {"app.py": 2},
+    )
+    assert problems and any("changed.py" in p for p in problems), problems
+    assert (
+        _api("reports", "findings_problems")(
+            [("x", _aggregated())], {"app.py": 2, "changed.py": 1}
+        )
+        == []
+    )
+    assert _api("reports", "findings_problems")([], {"app.py": 2})
+    two = [("a", _aggregated()), ("b", _aggregated())]
+    assert _api("reports", "findings_problems")(two, {"app.py": 2, "changed.py": 1})
+
+
+def test_aggregated_results_are_found_in_a_tree_and_inside_a_zip(tmp_path):
+    find = _api("reports", "aggregated_results_in")
+    assert find(tmp_path) == []
+    nested = tmp_path / "artifacts" / "ash-scan" / ".ash" / "ash_output"
+    nested.mkdir(parents=True)
+    (nested / "ash_aggregated_results.json").write_text(
+        json.dumps(_aggregated()), encoding="utf-8"
+    )
+    found = find(tmp_path)
+    assert [data for _, data in found] == [_aggregated()]
+    archive = tmp_path / "zipped" / "artifacts.zip"
+    archive.parent.mkdir()
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("ash_aggregated_results.json", json.dumps(_aggregated("LOW")))
+    assert [data for _, data in find(tmp_path / "zipped")] == [_aggregated("LOW")]
+    (tmp_path / "zipped" / "bad.zip").write_bytes(b"not a zip")
+    assert len(find(tmp_path / "zipped")) == 1
+
+
+@POSIX_ONLY
+def test_copies_of_reports_leave_symbolic_links_behind(tmp_path):
+    source = tmp_path / "source"
+    (source / "reports").mkdir(parents=True)
+    (source / "reports" / "ash.sarif").write_text("{}", encoding="utf-8")
+    (source / "reports" / "elsewhere").symlink_to("/etc/hostname")
+    (source / "linked-dir").symlink_to(tmp_path, target_is_directory=True)
+    _api("reports", "copy_without_links")(source, tmp_path / "kept")
+    kept = sorted(
+        p.relative_to(tmp_path / "kept").as_posix()
+        for p in (tmp_path / "kept").rglob("*")
+    )
+    assert kept == ["reports", "reports/ash.sarif"]
+
+
+# ---------------------------------------------------------------------------
+# The result each job of a GitHub workflow should have
+# ---------------------------------------------------------------------------
+
+STEPS_JOB = """\
+on:
+  pull_request:
+jobs:
+  ash:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install ASH
+        run: uv tool install x
+      - name: Install scanner tools
+        run: ash dependencies install --tool grype
+      - name: Run ASH
+        run: ash scan --mode local --no-progress --fail-on-findings
+"""
+
+SHARDED = """\
+on:
+  pull_request:
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - name: Scan one shard
+        run: >-
+          ash scan --mode local --no-progress --no-fail-on-findings
+          --shard-index "${SHARD}" --shard-count 4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ash-shard-${{ matrix.shard }}
+          path: .ash/ash_output
+  merge:
+    needs: shard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge the shards
+        run: >-
+          ash merge --fail-on-findings --output-dir .ash/ash_output
+          --results shards/ash-shard-0
+"""
+
+REUSABLE = """\
+on:
+  pull_request:
+jobs:
+  ash:
+    uses: ./.github/workflows/run-ash-security-scan.yml
+    with:
+      ash-version: 0123456789abcdef0123456789abcdef01234567
+  sarif:
+    needs: ash
+    uses: ./.github/workflows/upload-ash-sarif.yml
+"""
+QUIET = """\
+on:
+  pull_request:
+jobs:
+  quiet:
+    uses: ./.github/workflows/run-ash-security-scan.yml
+    with:
+      fail-on-findings: false
+"""
+
+
+def _called_workflows() -> dict:
+    load = _api("reports", "load_workflow")
+    return {
+        name: load((REPO_ROOT / ".github" / "workflows" / name).read_text("utf-8"))
+        for name in ("run-ash-security-scan.yml", "upload-ash-sarif.yml")
+    }
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        (STEPS_JOB, {"ash": "failure"}),
+        (SHARDED, {"shard": "success", "merge": "failure"}),
+        (REUSABLE, {"ash": "failure", "upload-sarif": "success"}),
+        (QUIET, {"ash": "success"}),
+    ],
+    ids=["steps", "sharded", "reusable", "reusable without the gate"],
+)
+def test_a_job_that_gates_on_findings_fails_and_the_others_pass(text, expected):
+    """A reusable call's jobs are expected under the called workflow's job ids."""
+    load = _api("reports", "load_workflow")
+    results = _api("reports", "expected_act_results")(load(text), _called_workflows())
+    assert results == expected
+
+
+def test_load_workflow_keeps_the_on_key():
+    document = _api("reports", "load_workflow")(STEPS_JOB)
+    assert "on" in document and True not in document
+
+
+def test_the_artifacts_a_workflow_uploads_are_named_per_matrix_run():
+    load = _api("reports", "load_workflow")
+    names = _api("reports", "uploaded_artifact_names")
+    assert names([load(SHARDED)]) == [f"ash-shard-{n}" for n in range(4)]
+    scan = (
+        REPO_ROOT / ".github" / "workflows" / "run-ash-security-scan.yml"
+    ).read_text(encoding="utf-8")
+    assert names([load(STEPS_JOB), load(scan)]) == ["ash_output"]
+
+
+def test_an_artifact_the_run_did_not_keep_is_reported(tmp_path):
+    check = _api("reports", "artifact_problems")
+    store = tmp_path / "artifacts" / "1"
+    (store / "ash-output").mkdir(parents=True)
+    (store / "ash-output" / "ash-output.zip").write_bytes(b"PK")
+    assert check(tmp_path / "artifacts", ["ash-output"]) == []
+    problems = check(tmp_path / "artifacts", ["ash-output", "ash_output"])
+    assert problems and "ash_output" in problems[0]
+    (store / "empty").mkdir()
+    assert check(tmp_path / "artifacts", ["empty"]), "an empty artifact is not kept"
+    assert check(tmp_path / "absent", ["ash-output"])
+
+
+# ---------------------------------------------------------------------------
+# When a step started, from act's --json log
+# ---------------------------------------------------------------------------
+
+
+def _act(job: str, msg: str, time: str, **fields) -> str:
+    return json.dumps(
+        {"job": job, "jobID": job, "level": "info", "msg": msg, "time": time, **fields}
+    )
+
+
+def test_a_step_s_start_is_read_from_act_s_log():
+    start = _api("verdict", "act_step_start")
+    log = "\n".join(
+        [
+            _act("shard", "⭐ Run Main Merge the shards", "2026-10-12T21:00:00Z"),
+            "not json",
+            _act("merge", "⭐ Run Main Install ASH", "2026-10-12T21:05:00Z"),
+            _act("merge", "⭐ Run Main Merge the shards", "2026-10-12T21:06:07+00:00"),
+            _act("merge", "  | merged", "2026-10-12T21:06:30Z"),
+        ]
+    )
+    assert start(log, job="merge", step="Merge the shards") == pytest.approx(
+        1791839167.0  # 2026-10-12T21:06:07Z
+    )
+    assert start(log, job="merge", step="Upload") is None
+
+
+def test_every_phase_of_a_codebuild_log_is_read():
+    phases = _api("verdict", "codebuild_phase_states")
+    log = (
+        "\x1b[36mbuild_1  |\x1b[0m [Container] 2026/10/12 21:04:05 Phase complete: "
+        "INSTALL State: FAILED\r\n"
+        "agent-1  | [Container] 2026/10/12 21:04:06 Phase complete: UPLOAD_ARTIFACTS "
+        "State: SUCCEEDED\n"
+    )
+    assert phases(log) == {"INSTALL": "FAILED", "UPLOAD_ARTIFACTS": "SUCCEEDED"}
+
+
+def test_an_upload_of_the_scan_s_own_sarif_passes_and_another_fails(tmp_path):
+    check = _api("verdict", "stub_sarif_problems")
+    sarif = tmp_path / "ash.ghas.sarif"
+    sarif.write_text('{"runs": []}', encoding="utf-8")
+    record = tmp_path / "upload-sarif-1.json"
+    digest = hashlib.sha256(sarif.read_bytes()).hexdigest()
+    record.write_text(json.dumps({"sha256": digest}), encoding="utf-8")
+    assert check(sarif, record) == []
+    record.write_text(json.dumps({"sha256": "0" * 64}), encoding="utf-8")
+    assert check(sarif, record)
+    assert check(tmp_path / "absent.sarif", record)
+
+
+# ---------------------------------------------------------------------------
+# The stub actions
+# ---------------------------------------------------------------------------
+
+STUBS = {
+    "upload-sarif": CI_RUNNERS
+    / "stubs"
+    / "codeql-action"
+    / "upload-sarif"
+    / "action.yml",
+    "add-pr-comment": CI_RUNNERS / "stubs" / "add-pr-comment" / "action.yml",
+    "action-junit-report": CI_RUNNERS / "stubs" / "action-junit-report" / "action.yml",
+}
+
+
+def _stub(name: str) -> dict:
+    path = STUBS[name]
+    if not path.is_file():
+        pytest.fail(f"missing {path.relative_to(REPO_ROOT).as_posix()}")
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("name", sorted(STUBS))
+def test_each_stub_is_a_composite_action_that_calls_nothing_else(name):
+    action = _stub(name)
+    assert action["runs"]["using"] == "composite"
+    steps = action["runs"]["steps"]
+    assert steps and all("uses" not in step for step in steps)
+    for step in steps:
+        assert "${{" not in step.get("run", ""), "inputs reach the script through env"
+        assert step.get("shell") == "bash"
+
+
+def _run_stub(name: str, tmp_path: Path, inputs: dict, records: Path | None):
+    """Run a stub's steps with bash, as act's composite action runner would."""
+    action = _stub(name)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(exist_ok=True)
+    output = tmp_path / "github-output"
+    output.touch()
+    defaults = {
+        key: str(spec.get("default", "")) for key, spec in action["inputs"].items()
+    }
+    values = {**defaults, **inputs}
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"pull_request": {"number": 7}}), encoding="utf-8")
+    codes = []
+    for step in action["runs"]["steps"]:
+        env = {
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "GITHUB_WORKSPACE": str(workspace),
+            "GITHUB_JOB": "ash",
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_EVENT_PATH": str(event),
+            "GITHUB_EVENT_NAME": "pull_request",
+        }
+        if records is not None:
+            env["DOCTEST_STUB_RECORDS"] = str(records)
+        for key, value in (step.get("env") or {}).items():
+            expression = str(value).strip()
+            assert expression.startswith("${{ inputs.") and expression.endswith("}}")
+            env[key] = values[expression[len("${{ inputs.") : -2].strip()]
+        result = subprocess.run(
+            ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
+            cwd=workspace,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        codes.append(result.returncode)
+        if result.returncode:
+            break
+    return codes[-1], workspace
+
+
+def _records(directory: Path, prefix: str) -> list[dict]:
+    return [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted(directory.glob(f"{prefix}-*.json"))
+    ]
+
+
+@POSIX_ONLY
+def test_the_sarif_stub_records_the_file_it_was_given(tmp_path):
+    workspace = tmp_path / "workspace"
+    (workspace / "reports").mkdir(parents=True)
+    sarif = workspace / "reports" / "ash.ghas.sarif"
+    sarif.write_text('{"version": "2.1.0", "runs": []}', encoding="utf-8")
+    code, _ = _run_stub(
+        "upload-sarif",
+        tmp_path,
+        {"sarif_file": "reports/ash.ghas.sarif", "category": "ash"},
+        tmp_path / "records",
+    )
+    assert code == 0
+    (record,) = _records(tmp_path / "records", "upload-sarif")
+    assert record["sarif_file"] == "reports/ash.ghas.sarif"
+    assert record["category"] == "ash"
+    assert record["sha256"] == hashlib.sha256(sarif.read_bytes()).hexdigest()
+
+
+@POSIX_ONLY
+@pytest.mark.parametrize(
+    "content,path",
+    [(None, "reports/absent.sarif"), ("not json", "reports/ash.sarif")],
+    ids=["missing", "not sarif"],
+)
+def test_the_sarif_stub_fails_where_the_real_upload_fails(tmp_path, content, path):
+    workspace = tmp_path / "workspace"
+    (workspace / "reports").mkdir(parents=True)
+    if content is not None:
+        (workspace / path).write_text(content, encoding="utf-8")
+    code, _ = _run_stub(
+        "upload-sarif", tmp_path, {"sarif_file": path}, tmp_path / "records"
+    )
+    assert code != 0
+    assert _records(tmp_path / "records", "upload-sarif") == []
+
+
+@POSIX_ONLY
+def test_a_stub_run_outside_the_runner_tests_fails(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "ash.sarif").write_text('{"runs": []}', encoding="utf-8")
+    code, _ = _run_stub("upload-sarif", tmp_path, {"sarif_file": "ash.sarif"}, None)
+    assert code != 0
+
+
+@POSIX_ONLY
+def test_the_comment_stub_needs_its_message_file(tmp_path):
+    code, _ = _run_stub(
+        "add-pr-comment",
+        tmp_path,
+        {"message-path": "reports/ash.summary.md"},
+        tmp_path / "records",
+    )
+    assert code != 0 and _records(tmp_path / "records", "add-pr-comment") == []
+    summary = tmp_path / "workspace" / "reports" / "ash.summary.md"
+    summary.parent.mkdir(parents=True)
+    summary.write_text("# ASH\n", encoding="utf-8")
+    code, _ = _run_stub(
+        "add-pr-comment",
+        tmp_path,
+        {"message-path": "reports/ash.summary.md"},
+        tmp_path / "records",
+    )
+    assert code == 0
+    (record,) = _records(tmp_path / "records", "add-pr-comment")
+    assert record["issue"] == 7
+    assert record["files"] == {
+        "reports/ash.summary.md": hashlib.sha256(b"# ASH\n").hexdigest()
+    }
+
+
+def _junit(path: Path, failures: int, passed: int) -> None:
+    cases = "".join(
+        f'<testcase name="f{n}"><failure message="x"/></testcase>'
+        for n in range(failures)
+    ) + "".join(f'<testcase name="p{n}"/>' for n in range(passed))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"<testsuites><testsuite>{cases}</testsuite></testsuites>", "utf-8")
+
+
+@POSIX_ONLY
+def test_the_check_run_stub_counts_the_tests_it_would_publish(tmp_path):
+    _junit(tmp_path / "workspace" / ".ash" / "reports" / "ash.junit.xml", 2, 1)
+    code, _ = _run_stub(
+        "action-junit-report",
+        tmp_path,
+        {"report_paths": ".ash/reports/ash.junit.xml", "include_passed": "true"},
+        tmp_path / "records",
+    )
+    assert code == 0
+    (record,) = _records(tmp_path / "records", "action-junit-report")
+    assert (record["tests"], record["failures"]) == (3, 2)
+
+
+@POSIX_ONLY
+@pytest.mark.parametrize(
+    "inputs",
+    [
+        {"report_paths": "absent/*.xml", "require_tests": "true"},
+        {"report_paths": ".ash/reports/ash.junit.xml", "fail_on_failure": "true"},
+    ],
+    ids=["no tests where required", "failures where they fail the step"],
+)
+def test_the_check_run_stub_fails_where_the_real_action_fails(tmp_path, inputs):
+    _junit(tmp_path / "workspace" / ".ash" / "reports" / "ash.junit.xml", 2, 1)
+    code, _ = _run_stub("action-junit-report", tmp_path, inputs, tmp_path / "records")
+    assert code != 0
+
+
+# ---------------------------------------------------------------------------
+# The junit census check, against a given census
+# ---------------------------------------------------------------------------
+
+
+def test_the_junit_check_compares_the_run_with_the_leg_s_census(tmp_path):
+    problems = _api("check_junit", "census_problems")
+    junit = tmp_path / "junit.xml"
+    junit.write_text(
+        '<testsuites><testsuite tests="2"><testcase name="a"/><testcase name="b"/>'
+        "</testsuite></testsuites>",
+        encoding="utf-8",
+    )
+    assert problems(junit, expected=2) == []
+    assert problems(junit, expected=3)
+    assert problems(junit, expected=0), "a leg with no census block is a problem too"
+
+
+# ---------------------------------------------------------------------------
+# What a block installs ASH with
+# ---------------------------------------------------------------------------
+
+#: A release's install line, built in parts so this file holds no install reference.
+RELEASE = (
+    "automated-security-helper[cdk] @ git+https://github.com/awslabs/"
+    "automated-security-helper"
+    ".git@v1.2.3"
+)
+
+
+@pytest.mark.parametrize(
+    "runner,text,expected",
+    [
+        ("act", f'env:\n  INSTALL_SPEC: "{RELEASE}"\n', "wheel"),
+        ("gitlab-ci-local", f'variables:\n  INSTALL_SPEC: "{RELEASE}"\n', "wheel"),
+        ("codebuild-agent", f'variables:\n  INSTALL_SPEC: "{RELEASE}"\n', "git"),
+        (
+            "act",
+            (
+                "jobs:\n  ash:\n    uses: awslabs/automated-security-helper/.github/"
+                "workflows/run-ash-security-scan.yml@v3.7.0\n"
+            ),
+            "git",
+        ),
+        (
+            "gitlab-ci-local",
+            (
+                "ash-scan:\n  image: registry.example.com/security/"
+                "automated-security-helper:ci\n"
+            ),
+            "built",
+        ),
+        ("act", "jobs: {}\n", None),
+    ],
+    ids=["act wheel", "gitlab wheel", "codebuild git", "reusable", "built", "none"],
+)
+def test_the_install_mechanism_is_read_from_the_block(runner, text, expected):
+    assert _api("pipelines", "install_mechanism")(runner, text) == expected
+
+
+@pytest.mark.parametrize(
+    "kind,save_as,extends,expected",
+    [
+        ("github-actions", None, None, ".github/workflows/ash.yml"),
+        (
+            "github-actions",
+            ".github/workflows/ci.yml",
+            None,
+            ".github/workflows/ci.yml",
+        ),
+        ("github-actions", None, ".github/workflows/x.yml", ".github/workflows/x.yml"),
+        ("gitlab-ci", None, None, ".gitlab-ci.yml"),
+        ("jenkinsfile", None, None, "Jenkinsfile"),
+        ("buildspec", None, None, "buildspec.yml"),
+        ("circleci", None, None, ".circleci/config.yml"),
+    ],
+)
+def test_each_block_is_saved_where_its_runner_reads_it(
+    kind, save_as, extends, expected
+):
+    assert _api("pipelines", "pipeline_path")(
+        kind, save_as=save_as, extends=extends
+    ) == (expected)
+
+
+# ---------------------------------------------------------------------------
+# A fresh HOME for every launch
+# ---------------------------------------------------------------------------
+
+
+def test_every_launch_gets_a_new_empty_home(tmp_path):
+    fresh_home = _api("env", "fresh_home")
+    first = fresh_home(tmp_path, "lint")
+    assert first.is_dir() and not any(first.iterdir())
+    with pytest.raises(FileExistsError):
+        fresh_home(tmp_path, "lint")
