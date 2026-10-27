@@ -125,7 +125,11 @@ def test_both_delivery_tools_give_the_same_error_type(_server) -> None:
 
 
 def test_a_clone_failure_still_has_no_busy_error_type(_server) -> None:
-    """The busy refusal is named for itself, not every failure of the tool."""
+    """The busy refusal is named for itself, not every failure of the tool.
+
+    A RuntimeError from set_source_git is how it reported a failed clone before
+    GitCommandError, and the tool still answers one as a failed clone
+    (``git_clone_failed``), never as the busy refusal."""
     from automated_security_helper.cli import mcp_tools
     from automated_security_helper.cli.mcp import source_delivery
 
@@ -137,5 +141,6 @@ def test_a_clone_failure_still_has_no_busy_error_type(_server) -> None:
         )
 
     assert result["success"] is False, result
-    assert "error_type" not in result, result
+    assert result.get("error_type") == "git_clone_failed", result
+    assert result["error_type"] != BUSY_ERROR_TYPE, result
     assert "clone failed" in result["error"], result

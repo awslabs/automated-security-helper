@@ -115,11 +115,25 @@ def test_plain_git_runs_the_configured_hook_and_fsmonitor(delivery, tmp_path):
 
 @pytest.mark.skipif(os.name == "nt", reason="the marker hook is a shell script")
 @pytest.mark.parametrize("ref", [None, "v1"], ids=["default-branch", "at-a-ref"])
-def test_set_source_git_runs_no_configured_program(delivery, ref):
+def test_set_source_git_runs_no_configured_program(delivery, ref, monkeypatch):
     source, workspace, marker = delivery
+    # set_source_git clones from a remote https or ssh url only (it refuses a
+    # local path or file:// url before anything runs), so the delivery is given
+    # a remote url and the fixture repository is swapped in for it in the argv
+    # git is started with, below the refusal, where git is also let read the
+    # file protocol the delivery's own ``-c protocol.allow=never`` refuses.
+    remote = "https://git.example.invalid/source-repo.git"
+    real_run = sd._run_git
+
+    def run(cmd, *args, **kwargs):
+        argv = [source.as_uri() if part == remote else part for part in cmd]
+        argv[1:1] = ["-c", "protocol.file.allow=always"]
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(sd, "_run_git", run)
 
     target = sd.set_source_git(
-        url=str(source), ref=ref, workspace_root=workspace, session_id=_SESSION
+        url=remote, ref=ref, workspace_root=workspace, session_id=_SESSION
     )
     try:
         assert (target / "README.md").is_file()
