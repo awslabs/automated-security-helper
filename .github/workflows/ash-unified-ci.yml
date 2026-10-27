@@ -478,11 +478,13 @@ jobs:
   #
   # Raising the timeout was rejected as the cure: it would make every leg a 78-minute job
   # on the slowest runners and still leave a result only after all of it. The cure is to
-  # split each combination into eight shards that run in parallel. A shard owns every
-  # eighth test file of the sorted list (see .github/scripts/select-test-shard.py). At the
-  # measured rate that is an estimated ten minutes of tests per shard on a 4-core runner,
-  # plus a few minutes of setup, and the 30-minute timeout below is the guard for the
-  # slower macOS and Windows runners. That estimate is arithmetic, not a measurement.
+  # split each combination into eight shards that run in parallel. A shard owns the test
+  # modules whose path hashes to its number, and ignores the others at collection time
+  # (tests/utils/sharding.py, through the ASH_TEST_SHARD variable the action sets), so
+  # pytest still applies its own testpaths, python_files and ignore rules. At the measured
+  # rate that is an estimated ten minutes of tests per shard on a 4-core runner, plus a
+  # few minutes of setup, and the 30-minute timeout below is the guard for the slower
+  # macOS and Windows runners. That estimate is arithmetic, not a measurement.
   #
   # The 80% total-coverage gate cannot run per shard, since a shard covers part of the
   # package. Each shard uploads its coverage data, and the `unit-coverage` job below
@@ -492,7 +494,9 @@ jobs:
   # Each entry of the shard axis is its own literal and carries the total it was cut for
   # (`3of8`), so no second number has to agree with the list. A shard dropped from the
   # list is caught by unit-coverage for the OS families it gates, and by
-  # tests/unit/test_unit_test_shards.py for all of the combinations.
+  # tests/unit/test_unit_test_shards.py for all of the combinations. GitHub rejects a
+  # matrix of more than 256 jobs, and this one is 200; test_unified_ci_job_counts.py
+  # fails before the workflow does.
   unit-test:
     name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})"
     runs-on: ${{ matrix.os }}
