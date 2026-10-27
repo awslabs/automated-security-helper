@@ -61,6 +61,7 @@ from automated_security_helper.config.config_sources import (
     identity_to_hold,
     is_config_parse_error,
     is_json_file,
+    is_symlink_loop,
     is_toml_file,
     log_config_discovery,
     original_of_scan_copy,
