@@ -80,21 +80,36 @@ REAL_HOME_MODULES = frozenset({"home_isolation_probe.py", "test_home_isolation.p
 #: a stand-in is recorded as before.
 PROBE_SUBJECT_MODULES = frozenset(
     {
+        "base/test_failure_lines_carry_no_environment_value.py",
+        "base/test_inject_invocation_resolves_the_deferred_version.py",
+        "base/test_install_command_dispatch_is_exhaustive.py",
+        "base/test_scanner_spawn_failure.py",
+        "base/test_the_install_debug_line_hides_an_env_read_pin.py",
         "cli/mcp/test_list_scanners.py",
         "config/test_tool_version_is_a_version_specifier.py",
         "core/phases/test_scanner_threads_keep_the_tree_scope.py",
         "core/test_inventory_installs_nothing.py",
+        "core/test_unselected_scanners_are_not_resolved.py",
+        "plugin_modules/ash_builtin/converters/test_jupyter_converter_sandbox.py",
+        "plugin_modules/ash_builtin/converters/test_notebook_conversion_launches_one_tool.py",
+        "plugin_modules/ash_builtin/scanners/test_pre_installed_tool_offline.py",
+        "plugin_modules/ash_builtin/test_cdk_nag_partial_install.py",
         "plugin_modules/ash_builtin/test_opengrep_scanner.py",
         "plugin_modules/ash_builtin/test_trivy_probe_isolation.py",
         "plugin_modules/ash_builtin/test_trivy_scanner.py",
+        "plugin_modules/ash_ferret_plugins/test_ferret_scanner.py",
         "plugin_modules/test_offline_trivy_terraform_modules.py",
         "plugin_modules/test_trivy_misconfig_list_cache.py",
+        "utils/test_a_bare_value_string_is_one_value.py",
         "utils/test_a_cache_reset_during_a_version_probe_drops_its_answer.py",
         "utils/test_a_parked_probe_waiter_stops_when_its_scan_is_cancelled.py",
         "utils/test_a_probe_failure_text_belongs_to_its_own_call.py",
         "utils/test_a_probe_runs_in_the_directory_its_context_declares.py",
+        "utils/test_a_refused_stops_pid_rides_every_producer.py",
         "utils/test_a_shared_probe_answer_stays_in_its_own_scope.py",
+        "utils/test_a_signaled_post_run_failure_keeps_both_flags.py",
         "utils/test_a_stopped_install_drops_its_memos.py",
+        "utils/test_a_timeout_limit_is_its_own_quoted_token.py",
         "utils/test_a_version_probe_crossing_an_invalidation_is_not_remembered.py",
         "utils/test_concurrent_checks_of_one_copy_start_one_probe.py",
         "utils/test_content_db_refresh.py",
@@ -102,6 +117,7 @@ PROBE_SUBJECT_MODULES = frozenset(
         "utils/test_parsed_child_output_ignores_the_callers_terminal.py",
         "utils/test_pre_installed_tool.py",
         "utils/test_pre_installed_tool_sandbox_grant.py",
+        "utils/test_the_uv_runner_keeps_the_stop_state.py",
         "utils/test_the_uv_tool_version_carries_no_piece_of_a_value.py",
         "utils/test_tool_lookups_follow_path_and_bin_path.py",
         "utils/test_uv_availability_probe_errors_are_retried.py",
@@ -149,7 +165,7 @@ class UnitTestGuard(NamedTuple):
 
 
 @pytest.fixture(autouse=True)
-def _unit_tool_guard(request, tmp_path_factory, _isolated_home):
+def _unit_tool_guard(request, tmp_path_factory, _isolated_home, monkeypatch):
     """Every unit test starts no real tool and leaves no tool's file in its HOME.
 
     A unit test that reaches a real scanner tool depends on the host it runs on, and
@@ -242,7 +258,15 @@ def _unit_tool_guard(request, tmp_path_factory, _isolated_home):
                 basetemp=tmp_path_factory.getbasetemp(),
             )
             if module not in PROBE_SUBJECT_MODULES:
-                stub_tool_probes(patch)
+                # On the test's own ``monkeypatch``, not this fixture's private one.
+                # The test's monkeypatch is still live when this fixture is torn
+                # down (its sys.platform patch was, in a teardown traceback), so a
+                # test that patches one of these attributes itself (the
+                # ``no_tool_probes`` fixture does three of them) records the stub
+                # as the original and, undone after this fixture, would put the
+                # stub back for every later test in the process. One instance
+                # undoes every patch of one attribute last-in first-out.
+                stub_tool_probes(monkeypatch)
         yield UnitTestGuard(guard, home)
         started = guard.tool_starts if guard is not None else []
         refused = guard.home_refusals if guard is not None else []

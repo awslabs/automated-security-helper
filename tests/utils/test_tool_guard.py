@@ -1131,7 +1131,8 @@ def _probe_answers() -> list:
         try:
             content_db_staleness.MEASURERS["trivy-db"](None)
         except ValueError as error:
-            return str(error)[:40]
+            # The error's first clause; the rest names the stub or trivy's stderr.
+            return str(error).split(":", 1)[0]
         return "a trivy database was dated"
 
     return [
@@ -1180,7 +1181,7 @@ def test_the_child_probe_stubs_answer_as_stub_tool_probes_does(monkeypatch, tmp_
         None,
         None,
         None,
-        "`trivy version --format json` printed",
+        "`trivy version --format json` printed nothing (exit 1)",
     ]
 
 
