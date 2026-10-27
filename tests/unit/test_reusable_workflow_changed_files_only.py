@@ -587,20 +587,24 @@ def test_a_base_missing_from_the_checkout_fails_the_step(upstream, tmp_path):
 def test_a_base_ash_would_refuse_fails_the_step(upstream, tmp_path):
     """ASH's own check (utils/get_scan_set.py) refuses some refs git resolves.
 
-    get_changed_files holds base_ref to letters, digits and `. _ / ~ ^ @ { } -`, and
-    for anything else logs a warning and reports every file's findings. A base the
-    checkout has but ASH refuses would pass a resolve-only step and still give a full
-    report.
+    get_changed_files holds base_ref to letters, digits and `. _ / ~ ^ @ { } -`
+    (validate_base_ref) and raises InvalidBaseRefError for anything else, so the
+    scan would end on it. A base the checkout has but ASH refuses would pass a
+    resolve-only step and fail later, in the scan, with a message that names no
+    input.
     """
-    from automated_security_helper.utils.get_scan_set import get_changed_files
+    from automated_security_helper.utils.get_scan_set import (
+        InvalidBaseRefError,
+        get_changed_files,
+    )
 
     repo, base = upstream
     _git("branch", "base+mirror", base, cwd=repo)
     checkout = _clone(repo, tmp_path / "checkout", "--no-single-branch")
     assert _git("rev-parse", "--verify", "origin/base+mirror", cwd=checkout)
-    assert get_changed_files("origin/base+mirror", cwd=checkout) is None, (
-        "control: ASH refuses this ref and falls back to a full report"
-    )
+    # Control: git resolves this ref, ASH refuses it.
+    with pytest.raises(InvalidBaseRefError):
+        get_changed_files("origin/base+mirror", cwd=checkout)
 
     result, output = _run_step(
         checkout, tmp_path, CONFIGURED_BASE_REF="origin/base+mirror"
