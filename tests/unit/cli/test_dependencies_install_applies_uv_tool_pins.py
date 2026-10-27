@@ -141,8 +141,6 @@ def recorded_install(tmp_path, monkeypatch):
                 "--bin-path",
                 str(tmp_path / "bin"),
                 *tool_args,
-                "--config-overrides",
-                f"ash_plugin_modules+=[{_dockerfile_community_modules()}]",
                 *extra_args,
             ],
         )
