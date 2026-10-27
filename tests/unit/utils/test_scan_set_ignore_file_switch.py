@@ -561,6 +561,10 @@ class TestAshsOwnExclusionsByName:
         forced = gss._forced_inclusion_spec(root)
         disagree = []
         for path in self.PATHS:
+            if sys.platform == "win32" and path.endswith("."):
+                # Windows drops a trailing dot from a name, so "cdk.out/asset."
+                # is the file "cdk.out/asset" there and the case cannot exist.
+                continue
             full = root / path
             by_parser = gss._is_bundled_cdk_path(str(full)) or (
                 own_spec.match(full) and not forced.match(full)
