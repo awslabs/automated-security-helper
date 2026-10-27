@@ -76,7 +76,7 @@ for directory, _subdirectories, names in os.walk(target):
     for name in names:
         path = os.path.join(directory, name)
         with open(path, encoding="utf-8", errors="replace") as handle:
-            files[os.path.relpath(path, target)] = handle.read()
+            files[os.path.relpath(path, target).replace(os.sep, "/")] = handle.read()
 os.makedirs({record!r}, exist_ok=True)
 with open(os.path.join({record!r}, "received.json"), "w", encoding="utf-8") as handle:
     json.dump({{"argv": args, "files": files}}, handle)
@@ -98,10 +98,19 @@ def record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     record = tmp_path / "snyk-record"
     binary = tmp_path / "bin" / "snyk"
     binary.parent.mkdir()
-    binary.write_text(
-        _STAND_IN.format(python=sys.executable, record=str(record)), encoding="utf-8"
-    )
-    binary.chmod(0o755)
+    stand_in = _STAND_IN.format(python=sys.executable, record=str(record))
+    if sys.platform == "win32":
+        # CreateProcess starts no shebang script. ASH looks for snyk.exe, snyk.bat
+        # and snyk.cmd before the bare name, so the program is a .cmd that runs the
+        # same script (its shebang line is only a comment to Python).
+        script = binary.parent / "snyk_stand_in.py"
+        script.write_text(stand_in, encoding="utf-8")
+        binary.parent.joinpath("snyk.cmd").write_text(
+            f'@"{sys.executable}" -I "{script}" %*\r\n', encoding="utf-8"
+        )
+    else:
+        binary.write_text(stand_in, encoding="utf-8")
+        binary.chmod(0o755)
     monkeypatch.setenv("PATH", f"{binary.parent}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("SNYK_TOKEN", "placeholder-token")
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
