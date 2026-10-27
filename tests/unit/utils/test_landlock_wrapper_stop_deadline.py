@@ -101,6 +101,28 @@ def _killed(process: subprocess.Popen) -> set:
     return {int(line.split()[1]) for line in lines if line.startswith(b"kill ")}
 
 
+def _wait_until_asleep(process: subprocess.Popen) -> None:
+    """Return once the wrapper is asleep in the wait for its scanner.
+
+    "ready" comes from the forked scanner, which can write it before the wrapper
+    has installed its handlers and entered that wait. Python runs a signal handler
+    only between bytecodes or when a blocking call is interrupted, so a SIGTERM
+    that lands in the few instructions between the unblock and the blocking
+    waitid() is not seen until waitid() returns, here 30 s later when the
+    scanner's sleep ends. What this file measures is how long the wrapper takes
+    once it has been told to end the scanner, so the signal is sent only while
+    the wrapper is in that wait, where it interrupts the call.
+    """
+    deadline = time.monotonic() + CHILD_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        with open(f"/proc/{process.pid}/stat", "rb") as stat:
+            state = stat.read().rsplit(b")", 1)[1].split()[0]
+        if state == b"S":
+            return
+        time.sleep(0.005)
+    raise AssertionError("the wrapper never went to sleep in its wait for the scanner")
+
+
 def _stop_and_time(process: subprocess.Popen) -> float:
     started = time.monotonic()
     process.send_signal(signal.SIGTERM)
@@ -119,6 +141,7 @@ def test_a_wrapper_stopped_while_its_scanner_runs_finishes_inside_the_grace():
     process, scanner = _driver("stop")
     try:
         with KillAfter(process, "the wrapper's driver"):
+            _wait_until_asleep(process)
             elapsed = _stop_and_time(process)
             killed = _killed(process)
     finally:
@@ -156,6 +179,7 @@ def test_a_stop_whose_deadline_passed_before_the_scanner_exited_still_reaps_once
     """
     process, scanner = _driver("late")
     try:
+        _wait_until_asleep(process)
         process.send_signal(signal.SIGTERM)
         process.wait(timeout=30)
         lines = process.stdout.read().split(b"\n")
