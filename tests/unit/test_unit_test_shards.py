@@ -331,7 +331,14 @@ class TestTheActionRunsAShard:
         """A shard covers part of the package; the gate is the unit-coverage job's."""
         step = _action_step("Run PyTest shard")
         run = str(step["run"])
-        assert "--cov-fail-under" not in run
+        # pytest.ini's addopts carry --cov, and .coveragerc's fail_under=80 becomes
+        # pytest-cov's threshold when none is given, so the shard sets it to zero itself.
+        assert "--cov-fail-under=0" in run
+        assert "--cov-fail-under=80" not in run
+        assert "-o addopts=" in run, (
+            "addopts would add the XML and HTML coverage reports and a junit path to "
+            "every shard"
+        )
         assert "--cov=automated_security_helper" in run
         assert "COVERAGE_FILE" not in step["env"], (
             "COVERAGE_FILE reaches every process a test starts, and a nested run could "
@@ -346,6 +353,23 @@ class TestTheActionRunsAShard:
         assert not COMBINE.DATA_FILE.startswith("."), (
             "upload-artifact leaves out hidden files, so the data would never arrive"
         )
+
+    def test_the_report_step_publishes_a_shards_junit_file(self):
+        """The shard writes its own junit path, and the report glob must reach it."""
+        report = _action_step("Publish PyTest JUnit Test Report")
+        pattern = str(report["with"]["report_paths"])
+        for written in (
+            "test-results/pytest.junit.xml",
+            "test-results/pytest-shard.junit.xml",
+        ):
+            assert fnmatch.fnmatchcase(written, pattern), (pattern, written)
+        assert "matrix.shard" not in pattern
+        assert "inputs.shard" in str(report["with"]["check_name"])
+
+    def test_the_cdk_nag_step_runs_in_the_first_shard_only(self):
+        """Eleven tests once per OS and Python version, not once per shard."""
+        step = _action_step("Run cdk-nag integration tests")
+        assert "startsWith(inputs.shard, '1of')" in str(step["if"])
 
     def test_the_artifact_name_ends_with_the_shard(self):
         upload = _action_step("Upload test results")
