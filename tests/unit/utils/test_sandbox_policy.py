@@ -1111,8 +1111,18 @@ class TestTheBackendsHideADirectoryAHomeLinksTo:
     path. A link to a system directory is not hidden.
     """
 
+    @pytest.fixture
+    def fake_tmp(self, tmp_path, monkeypatch):
+        """Stand in for /tmp: firejail skips a link target under the real one by
+        design (its private tmp hides it already), and tmp_path is under /tmp on
+        Linux."""
+        root = tmp_path / "fake-tmp"
+        root.mkdir()
+        monkeypatch.setattr(backends_module, "_TMP_ROOT", root, raising=False)
+        return root
+
     @pytest.fixture(params=["HOME", "passwd home"])
-    def linked(self, request, layout, tmp_path, monkeypatch):
+    def linked(self, request, layout, tmp_path, monkeypatch, fake_tmp):
         if request.param == "HOME":
             home = layout.home
             # The layout's own ~/.local makes way for the link.
@@ -1185,7 +1195,7 @@ class TestTheBackendsHideADirectoryAHomeLinksTo:
         assert f"--blacklist={_as_argv(linked.elsewhere)}" not in argv
 
     def test_firejail_keeps_a_scanned_tree_kept_in_a_linked_directory(
-        self, layout, tmp_path
+        self, layout, tmp_path, fake_tmp
     ):
         """~/code -> /data/code with the scanned repository in it: the repository is
         the policy's own path there, so only what is beside it is blacklisted."""
@@ -1838,7 +1848,14 @@ class TestBwrapAndLandlockGrantNothingInThePasswdHome:
                 # bwrap's own options end at its first "--"; what follows is the
                 # command it runs, not a mount.
                 options = plan.argv[1 : plan.argv.index("--")]
-                paths = [a for a in options if a.startswith("/")]
+                # A --tmpfs or --tmp-overlay target is a fresh empty mount over the
+                # host path and hides it; only bind and overlay sources are grants.
+                hiding = ("--tmpfs", "--tmp-overlay")
+                paths = [
+                    a
+                    for before, a in zip([""] + options, options)
+                    if a.startswith("/") and before not in hiding
+                ]
         finally:
             plan.run_cleanup()
         return {Path(p) for p in paths}
