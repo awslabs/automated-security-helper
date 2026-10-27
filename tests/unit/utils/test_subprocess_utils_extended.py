@@ -18,6 +18,7 @@ from automated_security_helper.utils.subprocess_utils import (
     raise_called_process_error,
     create_process_with_pipes,
     SPAWN_FAILURE_RETURNCODE,
+    UNRECORDED_RUN_RETURNCODE,
 )
 from tests.utils.fake_tool_paths import fake_tool_path
 
@@ -389,7 +390,8 @@ def test_run_command_stream_output_failing_to_read_is_not_exit_1(
 
     returncode = run_command_stream_output(["test_cmd", "arg1"])
 
-    assert returncode == SPAWN_FAILURE_RETURNCODE
+    # The tool started, so this is not the never-started 127 either.
+    assert returncode == UNRECORDED_RUN_RETURNCODE
     mock_process.kill.assert_called_once()
 
 
