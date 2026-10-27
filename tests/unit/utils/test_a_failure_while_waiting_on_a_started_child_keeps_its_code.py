@@ -1391,8 +1391,9 @@ def link_layout(tmp_path, monkeypatch):
     outside = tmp_path / "outside.txt"
     outside.write_text("untouched", encoding="utf-8")
     # A fresh registry: prepare_spawn registers the results dir, and this
-    # cell's root must not reach other tests; monkeypatch restores the set.
-    monkeypatch.setattr(fs_guard, "_writable_roots", set())
+    # test's root must not reach other tests; monkeypatch restores the
+    # module's own counted registry (a dict of root to holder count).
+    monkeypatch.setattr(fs_guard, "_writable_roots", {})
     return source, output, results, outside
 
 
@@ -1650,11 +1651,11 @@ def test_a_failed_waits_write_replaces_a_link_a_scanner_planted(
     outside.write_text("untouched", encoding="utf-8")
     (results / "stderr.log").symlink_to(outside)
     # A fresh registry so this cell's root does not leak into other tests;
-    # monkeypatch restores the module's own set afterwards. The assert below
-    # proves fs_guard reads the module-level set at CALL time: were the
-    # registry rebound at import or moved elsewhere, this patch would stop
-    # reaching it and the cell would measure a plain open.
-    monkeypatch.setattr(fs_guard, "_writable_roots", set())
+    # monkeypatch restores the module's own registry afterwards. The assert
+    # below proves fs_guard reads the module-level registry at CALL time: were
+    # it rebound at import or moved elsewhere, this patch would no longer reach
+    # it and the test would measure a plain open.
+    monkeypatch.setattr(fs_guard, "_writable_roots", {})
     fs_guard.register_writable_root(results)
     assert fs_guard._writable_root_for(results / "stderr.log") is not None, (
         "the fresh registry is not the one fs_guard reads at call time"
