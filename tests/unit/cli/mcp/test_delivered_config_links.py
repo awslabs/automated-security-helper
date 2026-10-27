@@ -32,6 +32,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from unittest.mock import AsyncMock, patch
@@ -46,6 +47,16 @@ from automated_security_helper.cli.mcp.profile_registry import (
 from automated_security_helper.config.ash_config import AshConfig
 
 SESSION = "client-1"
+
+#: On Windows an MCP scan refuses any linked config source before it opens it
+#: (``config_sources._permitted``: resolving a link there can open a connection
+#: to the host a UNC target names), so a test that needs the link followed to
+#: the host file cannot reach what it asserts. The refusal itself is pinned by
+#: ``test_on_windows_a_linked_config_is_refused_even_in_an_allowed_root`` below.
+follows_a_link = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="an MCP scan refuses a linked config source on Windows before reading it",
+)
 
 DENIED = "project_name: linked\nfail_on_findings: false\n"
 SUPPRESSIONS = (
@@ -238,6 +249,7 @@ def _start_scan(target: Path, session_id: Optional[str] = SESSION) -> Dict[str, 
 
 
 @pytest.mark.usefixtures("host_set_aside")
+@follows_a_link
 def test_a_linked_config_setting_a_denied_field_is_refused(_server) -> None:
     from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
 
@@ -250,6 +262,7 @@ def test_a_linked_config_setting_a_denied_field_is_refused(_server) -> None:
 
 
 @pytest.mark.usefixtures("host_set_aside")
+@follows_a_link
 def test_the_scan_tool_refuses_a_linked_config_up_front(_server) -> None:
     source = _linked_tree(_server, DENIED)
 
@@ -261,6 +274,7 @@ def test_the_scan_tool_refuses_a_linked_config_up_front(_server) -> None:
 
 
 @pytest.mark.usefixtures("host_set_aside")
+@follows_a_link
 def test_a_linked_config_widening_the_sandbox_is_refused(_server) -> None:
     from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
 
@@ -278,6 +292,27 @@ def test_a_linked_config_widening_the_sandbox_is_refused(_server) -> None:
 
     assert isinstance(outcome, ASHConfigFieldDeniedError), outcome
     assert "sandbox.extra_read_paths" in str(outcome)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the Windows rule for links")
+@pytest.mark.usefixtures("host_set_aside")
+def test_on_windows_a_linked_config_is_refused_even_in_an_allowed_root(
+    _server,
+) -> None:
+    """What the skipped follow-the-link tests above cannot show on Windows.
+
+    The host directory is set aside, so on a POSIX host the scan reads the link
+    (``test_a_linked_config_setting_a_denied_field_is_refused``). On Windows the
+    link itself is the reason for the refusal, whatever it points at.
+    """
+    source = _linked_tree(_server, DENIED)
+
+    result = _start_scan(source)
+
+    assert result.get("success") is False, result
+    assert result.get("error_type") == "config_input_not_permitted", result
+    # Refused unread: the denied field in the file is not what the answer names.
+    assert "fail_on_findings" not in repr(result)
 
 
 def test_positive_control_the_same_file_named_by_the_operator_is_not_refused(
@@ -301,6 +336,7 @@ def test_positive_control_the_same_file_named_by_the_operator_is_not_refused(
 
 
 @pytest.mark.usefixtures("host_set_aside")
+@follows_a_link
 def test_a_linked_configs_suppressions_and_ignore_paths_are_marked(_server) -> None:
     source = _linked_tree(_server, SUPPRESSIONS)
 
@@ -316,6 +352,7 @@ def test_a_linked_configs_suppressions_and_ignore_paths_are_marked(_server) -> N
 
 
 @pytest.mark.usefixtures("host_set_aside")
+@follows_a_link
 def test_a_linked_configs_scanner_exclusion_is_moved_out_of_the_options(
     _server,
 ) -> None:
@@ -396,6 +433,7 @@ def test_a_file_reached_through_a_delivered_link_is_the_clients(
 
 
 @pytest.mark.usefixtures("host_set_aside")
+@follows_a_link
 def test_a_linked_file_that_is_not_a_config_is_not_quoted(_server) -> None:
     from automated_security_helper.core.exceptions import ASHConfigValidationError
 
@@ -410,6 +448,7 @@ def test_a_linked_file_that_is_not_a_config_is_not_quoted(_server) -> None:
 
 
 @pytest.mark.usefixtures("host_set_aside")
+@follows_a_link
 def test_a_linked_file_that_does_not_parse_is_not_quoted(_server) -> None:
     """The parser's message quotes the line it stopped at; the refusal does not."""
     from automated_security_helper.core.exceptions import ASHConfigSourceError
@@ -472,6 +511,7 @@ BAD_EXPIRY = (
 
 
 @pytest.mark.usefixtures("host_set_aside")
+@follows_a_link
 def test_a_validators_own_message_is_reported_by_its_type(_server) -> None:
     from automated_security_helper.core.exceptions import ASHConfigValidationError
 
@@ -489,6 +529,7 @@ KEY_CANARY = "canary-key-9d1e"
 
 
 @pytest.mark.usefixtures("host_set_aside")
+@follows_a_link
 def test_a_key_the_schema_does_not_have_is_not_named(_server) -> None:
     from automated_security_helper.core.exceptions import ASHConfigValidationError
 
@@ -727,6 +768,7 @@ def test_get_config_refuses_the_same_layout_as_before(_server) -> None:
     assert CANARY not in repr(result)
 
 
+@follows_a_link
 def test_stdio_keeps_a_local_repositorys_linked_config(_server) -> None:
     """Over stdio only the system-directory net applies, as before."""
     host_file = _write(_server["host"] / "ash.yaml", LINK_OUT)
@@ -743,6 +785,7 @@ def test_stdio_keeps_a_local_repositorys_linked_config(_server) -> None:
 
 
 @pytest.mark.parametrize("where", ["in the delivered tree", "in a config root"])
+@follows_a_link
 def test_a_link_that_stays_inside_the_allowed_roots_is_followed(
     _server, monkeypatch: pytest.MonkeyPatch, where: str
 ) -> None:
