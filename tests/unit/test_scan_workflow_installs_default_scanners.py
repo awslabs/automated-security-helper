@@ -167,6 +167,13 @@ def test_every_install_input_names_a_scanner_on_by_default() -> None:
         if getattr(getattr(scanners, name), "enabled", False)
     }
     named = {name.removeprefix("install-") for name in _install_inputs()}
+    if os.name == "nt":
+        # The workflow installs for ubuntu-latest, where opengrep is on by default.
+        # OpengrepScannerConfig.enabled is False when platform.system() is Windows, so
+        # on a Windows host the default config leaves it off. Pin that, so this
+        # exception goes stale loudly rather than hiding a scanner that is off.
+        assert "opengrep" not in enabled, enabled
+        named -= {"opengrep"}
     assert named <= enabled, named - enabled
 
 
