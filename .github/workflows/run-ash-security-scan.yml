@@ -1454,20 +1454,20 @@ jobs:
           help=""
           uvx_ran="${RUNNER_TEMP}/ash-install-preflight-uvx.ran"
           rm -f -- "${uvx_ran}"
-          # The inner bash changes to RUNNER_TEMP before uvx starts: `ash dependencies
+          # The step changes to RUNNER_TEMP before uvx starts: `ash dependencies
           # install` takes its source directory from the working directory, resolves
           # its config there and imports the plugin modules that config names before
           # click reads --help, so run from the checkout the scanned repository would
           # choose what code this preflight runs (the install steps below run from
-          # RUNNER_TEMP for the same reason). with_commands_stopped itself stays in
-          # the step's own shell, as it requires. The directory is named through the
-          # exported RUNNER_TEMP, not passed as an operand and shifted away: the test
-          # guard that reads where a tool-installing command runs follows an exported
-          # name but not a script that shifts its positional parameters.
-          # The single quotes are deliberate: the inner bash expands $0, RUNNER_TEMP
-          # and $@.
+          # RUNNER_TEMP for the same reason). The cd is at the step's top level, not
+          # inside the inner bash and not a subshell: with_commands_stopped must run
+          # in the step's own shell, and the test guard that reads where a
+          # tool-installing command runs follows a top-level cd. Nothing after this
+          # line reads a relative path.
+          cd "${RUNNER_TEMP}"
+          # The single quotes are deliberate: the inner bash expands $0 and $@.
           # shellcheck disable=SC2016
-          with_commands_stopped --capture help bash -c ': > "$0" && cd "${RUNNER_TEMP}" && exec "$@" 2>&1' "${uvx_ran}" \
+          with_commands_stopped --capture help bash -c ': > "$0" && exec "$@" 2>&1' "${uvx_ran}" \
             uvx --from "${ASH_UVX_SOURCE}" ash dependencies install --help || status=$?
           [ -e "${uvx_ran}" ] || exit 1
           plain="${help//$'\e'\[*([0-9;])m/}"
