@@ -147,6 +147,8 @@ def _git(cwd: Path, *args: str) -> None:
             "-c",
             "core.hooksPath=/dev/null",
             "-c",
+            "core.symlinks=true",
+            "-c",
             "user.name=test",
             "-c",
             "user.email=test@example.com",
