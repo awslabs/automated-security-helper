@@ -13,6 +13,7 @@ PluginContext the scan engine receives, which is what the scanners consult.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -603,6 +604,11 @@ def test_a_path_that_leaves_by_dot_dot_with_no_link_is_the_operators(tmp_path):
         assert leaves_the_tree_through_a_link(value, repo, repo) is False, value
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows resolves '..' in a path's text before it follows any link, so "
+    "'sub/..' is never a step out of the directory 'sub' links to",
+)
 def test_a_dot_dot_that_a_link_in_the_tree_moved_out_of_it_is_found(tmp_path):
     """As written, ``a/b/sub/../creds`` is ``a/b/creds``, in the tree. With ``sub``
     a link to the tree's root, the ``..`` lands next to the tree instead."""
