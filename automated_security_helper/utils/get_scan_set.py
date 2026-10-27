@@ -954,13 +954,15 @@ def get_ash_ignorespec_lines(
                 content = ignore_file_lines(f)
         debug_echo(f"Found .ignore file: {clean}", debug=debug)
         lines.append(f"{START_MARKER_PREFIX}{clean}{MARKER_SUFFIX}")
-        # Comment lines are left out. They hold no rule (git reads a line starting
-        # with "#" as a comment, and the compiler below skips every such line), and
-        # a comment shaped like this function's own START CONTENTS marker would be
-        # read back as one: the rules after it would be credited to another file
-        # and compiled against that file's directory. Compared stripped, because
-        # every line is stripped below before the compiler sees it.
-        lines.extend(line for line in content if not line.strip().startswith("#"))
+        # Comment lines are left out. They hold no rule (git reads a line as a
+        # comment only when "#" is its first character, and the compiler below
+        # skips every such line). A line shaped like this function's own markers
+        # is left out too, indented or not: the marker reader strips each line,
+        # so it would be read back as one, and the rules after it would be
+        # credited to another file and compiled against that file's directory.
+        # Any other indented "#" line is a pattern to git (" #y.py" ignores the
+        # file " #y.py") and is kept.
+        lines.extend(line for line in content if not _comment_or_marker_shaped(line))
         lines.append(f"{END_MARKER_PREFIX}{clean}{MARKER_SUFFIX}")
         lines.append("")
     # Only the line ending comes off: a pattern's leading whitespace and an
@@ -1032,6 +1034,20 @@ def ignore_file_lines(handle: Iterable[str]) -> List[str]:
                 lines[0] = lines[0][len(mark) :]
                 break
     return lines
+
+
+#: What every marker line ASH writes into the ignore report starts with: START
+#: CONTENTS, END CONTENTS and SKIPPED.
+_MARKER_LEAD = "#########"
+
+
+def _comment_or_marker_shaped(line: str) -> bool:
+    """Whether an ignore-file *line* is left out of the report's copy of the file.
+
+    A git comment ("#" in the first column), or a line that reads as one of the
+    report's own marker lines once stripped, as the marker reader strips it.
+    """
+    return line.startswith("#") or line.strip().startswith(_MARKER_LEAD)
 
 
 def ignore_file_line(line: str) -> str:
