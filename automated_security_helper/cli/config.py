@@ -1568,7 +1568,10 @@ def _apply_unused_fixes(
             secho("Aborted.", fg=typer.colors.YELLOW)
             raise typer.Exit(0)
 
-    config_path.write_text(fixed_content, encoding="utf-8")
+    # Bytes: fixed_content is the file's own text with its line endings (read as
+    # bytes by fix_unused_suppressions), and text mode would turn the "\n" of a
+    # CRLF file into "\r\n" a second time on Windows.
+    config_path.write_bytes(fixed_content.encode("utf-8"))
     secho(
         f"\n✅ Commented out {len(fixed_issues)} unused suppression(s) in {config_path}",
         fg=typer.colors.GREEN,
