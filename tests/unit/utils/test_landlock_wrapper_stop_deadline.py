@@ -30,9 +30,8 @@ if sys.platform != "linux":
 from automated_security_helper.utils.sandbox import landlock_exec  # noqa: E402
 from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, KillAfter  # noqa: E402
 
-pytestmark = pytest.mark.skipif(
-    sys.platform != "linux", reason="the wrapper uses prctl and /proc, Linux only"
-)
+from automated_security_helper.utils.sandbox import landlock_exec  # noqa: E402
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, KillAfter  # noqa: E402
 
 #: The shortest grace after SIGTERM the wrapper is to fit inside.
 GRACE_SECONDS = 0.5
