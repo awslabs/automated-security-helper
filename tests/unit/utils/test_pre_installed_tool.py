@@ -610,6 +610,7 @@ def test_a_venv_tool_is_not_mistaken_for_a_nix_program(tool_env):
     assert pre_installed_tool.find_nix_python_environment(str(script)) is None
 
 
+@real_uv
 class TestACheckTheSandboxRefusedIsNotRemembered:
     """A check the scanner sandbox refused never ran, so it has no verdict to keep.
 

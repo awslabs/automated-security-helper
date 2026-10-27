@@ -612,7 +612,11 @@ class TestTheSymbolsHint:
             f"automated-security-helper[symbols] @ git+{GIT_INSTALL['url']}@{COMMIT}",
         ]
 
-    def test_the_printed_command_reaches_this_environment(self):
+    @pytest.mark.runs_real_tools(
+        reason="a dry run of the printed command through the real uv, against "
+        "this environment, is what this test checks"
+    )
+    def test_the_printed_command_reaches_this_environment(self, tmp_path):
         """The command installs into the environment ASH runs in, wherever that is.
 
         uv environments have no pip, so a bare ``pip`` runs whatever pip comes next
@@ -630,7 +634,13 @@ class TestTheSymbolsHint:
             dry_run,
             capture_output=True,
             text=True,
-            env={**os.environ, "UV_OFFLINE": "1"},
+            # uv's cache outside the test's HOME, which the unit tests' tool
+            # guard reads after the test.
+            env={
+                **os.environ,
+                "UV_OFFLINE": "1",
+                "UV_CACHE_DIR": str(tmp_path / "uv-cache"),
+            },
             check=False,
             timeout=CHILD_TIMEOUT_SECONDS,
         )

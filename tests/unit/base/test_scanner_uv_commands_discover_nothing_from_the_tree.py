@@ -43,9 +43,17 @@ from tests.utils.planted_uv import (
     uv_binary,
 )
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="the planted .venv python is a shell script"
-)
+pytestmark = [
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="the planted .venv python is a shell script"
+    ),
+    # The unit tests' tool guard (tests/unit/conftest.py) would record the uv these
+    # run by its path; whether the real uv reads the planted tree is the subject.
+    pytest.mark.runs_real_tools(
+        reason="the real uv's discovery of a planted .venv or project is what "
+        "these tests measure"
+    ),
+]
 
 
 class UvStubConfig(ScannerPluginConfigBase):
@@ -100,6 +108,9 @@ CASES = [
 @pytest.fixture
 def repo(tmp_path, monkeypatch):
     clear_uv_environment(monkeypatch)
+    # The real uv records the interpreter it ran in its cache; outside the test's
+    # HOME, which the guard's HOME check reads after the test.
+    monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "uv-cache"))
     path = tmp_path / "repo"
     path.mkdir()
     return path

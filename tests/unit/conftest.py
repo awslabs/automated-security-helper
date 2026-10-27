@@ -38,6 +38,10 @@ _GUARD_COUNTER = itertools.count()
 REAL_TOOL_MODULES = frozenset(
     {
         "assets/test_install_pinned_tool.py",
+        # The real uv, run from a tree holding a planted .venv and project: which of
+        # the two uv looks at is what these measure (tests/utils/planted_uv.py).
+        "base/test_scanner_uv_commands_discover_nothing_from_the_tree.py",
+        "cli/test_dependencies_uv_commands_discover_nothing_from_the_tree.py",
         "cli/test_genai_guide_ships_with_install.py",
         # Starts no tool: its two cells are unguarded on purpose, so the
         # autouse teardown cache reset is the only clearer between them and
@@ -50,6 +54,9 @@ REAL_TOOL_MODULES = frozenset(
         # installs every scanner; the stand-in would answer for the tool and exit 1.
         "plugin_modules/test_offline_go_toolchain.py",
         "plugin_modules/test_offline_trivy_terraform_modules.py",
+        # One test dry-runs the printed `python -m uv pip install` command through
+        # the real uv, against this environment.
+        "utils/test_ash_install.py",
         "utils/test_pre_installed_tool.py",
         "utils/test_uv_ignores_repository_config.py",
     }
