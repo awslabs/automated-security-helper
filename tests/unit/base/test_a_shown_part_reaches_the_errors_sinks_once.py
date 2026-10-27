@@ -129,7 +129,10 @@ def test_the_empty_results_warning_shows_the_part_once(tmp_path):
     logger = logging.getLogger("ash")
     logger.addHandler(handler)
     try:
-        _run(_make_scanner(tmp_path, exit_code=0, writes_results=""), tmp_path)
+        # An empty results file after an accepted exit code is nothing to grade:
+        # the warning is logged, then the scan is refused.
+        with pytest.raises(ScannerError, match="nothing to grade"):
+            _run(_make_scanner(tmp_path, exit_code=0, writes_results=""), tmp_path)
     finally:
         logger.removeHandler(handler)
 

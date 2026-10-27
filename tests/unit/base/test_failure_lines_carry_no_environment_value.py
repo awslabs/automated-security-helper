@@ -1112,9 +1112,9 @@ def test_empty_results_warning_carries_no_environment_value(tmp_path, logged, wh
     A failure message carries what the run logged, so the outcome can be read
     from it: the warning was never logged (the run ended before it), it was
     logged without the tool's stderr, or the planted value is in a logged line
-    (any line of the run, not only the warning). An exception from scan() is
-    not caught: it fails the test with its own text, so it cannot pass by
-    quoting the value."""
+    (any line of the run, not only the warning). The empty results file is then
+    refused as nothing to grade (ScannerError), and the refusal's own text
+    carries no value either."""
     from pathlib import Path
 
     if where == "elsewhere":
@@ -1127,7 +1127,10 @@ def test_empty_results_warning_carries_no_environment_value(tmp_path, logged, wh
     target = _populated_target(tmp_path)
     scanner.errors = [f"cannot read {value}"]
 
-    with patch.object(type(scanner), "_run_subprocess", return_value={}):
+    with (
+        patch.object(type(scanner), "_run_subprocess", return_value={}),
+        pytest.raises(ScannerError, match="nothing to grade") as refused,
+    ):
         scanner.scan(target=target, target_type="source")
 
     warning_lines = [line for line in logged if "results file is empty" in line]
@@ -1137,6 +1140,7 @@ def test_empty_results_warning_carries_no_environment_value(tmp_path, logged, wh
     assert "cannot read" in warning_lines[0], record
     leaked = [line for line in logged if "ENVCANARY-" in line]
     assert not leaked, f"{record}; leaked lines: {leaked!r}"
+    assert "results file is empty" in str(refused.value), str(refused.value)
 
 
 # ---------------------------------------------------------------------------
