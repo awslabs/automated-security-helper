@@ -171,7 +171,7 @@ def test_an_archive_that_fails_to_extract_leaves_nothing_and_is_refused(
     """Extraction fails partway: the second member's bytes no longer match its CRC.
     What was written before the error is removed, the corrupt member included, so no
     scanner reads part of an archive as if it were all of it, and the archive is
-    recorded as refused, so its results row names it."""
+    recorded as one failed input, which the completeness gate counts."""
     source = Path(test_plugin_context.source_dir)
     source.mkdir(parents=True, exist_ok=True)
     zipped = io.BytesIO()
@@ -192,6 +192,7 @@ def test_an_archive_that_fails_to_extract_leaves_nothing_and_is_refused(
     assert converter.convert() == []
 
     assert not [p for p in Path(converter.results_dir).rglob("*") if p.is_file()]
-    assert [(r.path, r.member) for r in converter.refused_inputs] == [("c.zip", None)]
-    assert "could not be extracted" in converter.refused_inputs[0].reason
+    assert converter.refused_inputs == []
+    assert [r.path for r in converter.failed_inputs] == ["c.zip"]
+    assert converter.failed_inputs[0].reason
     assert archive_converter.archives_extracted_whole(test_plugin_context) == set()
