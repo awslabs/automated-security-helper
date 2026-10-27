@@ -606,8 +606,8 @@ global_settings:
     # look like high-entropy secrets because a SHA256 is high-entropy.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 353
-      line_end: 464
+      line_start: 334
+      line_end: 439
       reason: >-
         False positive — every string in this range is a published SHA256 release
         checksum or the SHA256 of what one of those verified archives extracts to.
@@ -630,8 +630,8 @@ global_settings:
         would silently swallow a real secret added here later.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 935
-      line_end: 979
+      line_start: 907
+      line_end: 933
       reason: >-
         False positive, the same shape as the entry above, over _THIRD_PARTY_HASHES:
         the commit SHA each bundled tool's release tag points to, and the SHA256 of
