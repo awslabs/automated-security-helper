@@ -1512,6 +1512,10 @@ def _client_config_denial(
             "The config could not be checked against this session's "
             f"runtime-override policy: {exc}"
         )
+        # A documented type, not the exception's class name: a client branches
+        # on error_type (mcp_server.run_ash_scan answers scan_start_failure for
+        # a start that gives no scan id).
+        response["error_type"] = "scan_start_failure"
         return response
     return None
 
@@ -4891,6 +4895,11 @@ def _answer_get_config(
     except (ASHConfigValidationError, yaml.YAMLError, ValueError, OSError) as exc:
         # The errors `ash config get` exits 3 for (cli/config.py).
         return _config_load_failure(exc, path)
+    if resolved is None:
+        # No file resolved and no default taken (fallback_to_default=False): a
+        # discovered config whose path is a dangling link. Answered as not
+        # found, never raised out of the tool.
+        return _config_load_failure(FileNotFoundError(str(path)), path)
     try:
         # The ash_plugin_modules list a scan would import -- the resolved
         # entries after trust confinement (a client-delivered or in-tree
