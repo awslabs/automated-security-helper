@@ -194,11 +194,17 @@ def _is_an_ash_worker(args: Sequence[str]) -> bool:
     """*args*, the arguments after this interpreter, start one of ASH's worker children.
 
     The detect-secrets scan (``python -m`` ``DETECT_SECRETS_WORKER``) and the cdk-nag
-    evaluation, whose ``-c`` code has to be cdk_nag_worker's own bootstrap.
+    evaluation, whose ``-c`` code has to be cdk_nag_worker's own bootstrap. Both are
+    started through ``python_child``, which puts ``-P`` right after the interpreter on
+    Python 3.11 and later (``_SAFE_PATH_FLAGS``), so a leading ``-P`` is not part of
+    what the child runs.
     """
     from automated_security_helper.utils.cdk_nag_worker import _CHILD_BOOTSTRAP
 
-    return list(args[:2]) in (["-m", DETECT_SECRETS_WORKER], ["-c", _CHILD_BOOTSTRAP])
+    args = list(args)
+    if args[:1] == ["-P"]:
+        args = args[1:]
+    return args[:2] in (["-m", DETECT_SECRETS_WORKER], ["-c", _CHILD_BOOTSTRAP])
 
 
 def _inside_the_landlock_wrapper(args: Sequence[str]) -> list[str] | None:
