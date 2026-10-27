@@ -18,11 +18,13 @@ import pytest
 def test_a_write_outside_a_writable_root_opens_in_binary_mode(
     tmp_path, monkeypatch, opener
 ):
-    """Outside a writable root both writers fall back to os.open, which unlike
-    open() adds no O_BINARY: on Windows the CRT would then translate newlines
-    under the text wrapper (text gets \\r\\r\\n) and in the bytes copies (LF to
-    CRLF). O_BINARY is 0 on Linux, so a spare bit stands in for it here and is
-    taken off again before the real call."""
+    """Outside a writable root, a writer given its own ``mode`` falls back to
+    os.open, which unlike open() adds no O_BINARY: on Windows the CRT would then
+    translate newlines under the text wrapper (text gets \\r\\r\\n) and in the
+    bytes copies (LF to CRLF). With the default mode the writer is exactly
+    open(), which opens in binary mode itself; the round-trip test below measures
+    that path. O_BINARY is 0 on Linux, so a spare bit stands in for it here and
+    is taken off again before the real call."""
     from automated_security_helper.utils.sandbox import fs_guard
 
     stand_in = 1 << 30
@@ -36,7 +38,7 @@ def test_a_write_outside_a_writable_root_opens_in_binary_mode(
         return real_open(path, flags & ~stand_in, *args, **kwargs)
 
     monkeypatch.setattr(os, "open", recording_open)
-    with getattr(fs_guard, opener)(target):
+    with getattr(fs_guard, opener)(target, mode=0o600):
         pass
 
     fallback = [flags for path, flags in seen if path == os.fspath(target)]
