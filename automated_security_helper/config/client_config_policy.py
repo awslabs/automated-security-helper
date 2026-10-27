@@ -1231,7 +1231,13 @@ def _mark_client_supplied(
             for raw in entries if present and isinstance(entries, list) else []:
                 try:
                     entry = model.model_validate(raw)
-                except Exception:  # noqa: BLE001 -- validation is reported elsewhere
+                except Exception as exc:  # noqa: BLE001 -- reported elsewhere
+                    ASH_LOGGER.debug(
+                        "Skipping a %s entry that does not validate (%s): %r",
+                        field,
+                        type(exc).__name__,
+                        raw,
+                    )
                     continue
                 operators[field].append(entry.model_dump(exclude={"client_supplied"}))
     for field in models:
