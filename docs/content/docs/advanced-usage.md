@@ -343,15 +343,16 @@ rules directory itself. If semgrep or opengrep still cannot read its rules, it e
 
 ASH v3 executes scans in phases:
 
+<!-- doctest: illustrative reason="runs full scans of the current directory with every enabled scanner, which need their tools and network access" -->
 ```bash
-# Run only specific phases
-ash --phases convert,scan
+# Run only specific phases (give --phases once for each phase)
+ash --phases convert --phases scan
 
 # Skip report generation
-ash --phases convert,scan
+ash --phases convert --phases scan
 
 # Include inspection phase
-ash --phases convert,scan,report,inspect
+ash --phases convert --phases scan --phases report --phases inspect
 ```
 
 ## Using Existing Results

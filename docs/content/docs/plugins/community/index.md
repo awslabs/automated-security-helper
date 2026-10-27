@@ -93,9 +93,10 @@ plugins:
 
 ### Example Usage
 
+<!-- doctest: illustrative reason="my_plugin is a placeholder for the module of a plugin you installed" -->
 ```bash
 # Example command line usage
-ash --plugins my-plugin
+ash scan --ash-plugin-modules my_plugin
 ```
 
 > [!CAUTION] > **Community Plugin Security**: The community plugins listed above ship with ASH, in `automated_security_helper/plugin_modules`, and need no separate package. `ash scan` loads one only when its module is listed in `ash_plugin_modules` or passed with `--ash-plugin-modules`. Each runs an external tool: the container image includes trivy, and you install the Snyk CLI and ferret-scan yourself, so check where each tool comes from. A plugin published outside ASH is a third-party package you install separately (for example with `pip install`), and ASH imports it into its own process, so verify its source and trustworthiness before installing it.
