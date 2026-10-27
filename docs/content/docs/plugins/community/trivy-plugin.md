@@ -125,7 +125,7 @@ scanners:
 | `offline`            | bool      | `false`                                      | Run offline even when ASH does not; ASH's offline mode applies regardless |
 | `scan_timeout`       | int       | `1800`                                       | Seconds ASH lets trivy run; ASH does not pass `trivy --timeout`, so trivy's own 5-minute default still applies |
 
-trivy-repo always passes `trivy --config` and `trivy --module-dir`, so trivy does not load a `trivy.yaml` from the directory it runs in. `config_file` and `module_dir` are honored only when set through `--config-overrides` or a config file outside every git checkout and the scanned directory (one that is not [repository-written](../../../concepts/trust-model.md#how-the-tier-is-decided)), and only for paths outside the scanned tree, which a path written inside the tree and led out of it by a symbolic link there is not; otherwise they are ignored with a warning. A relative path is taken from the directory of the ASH config file that sets it, or from the working directory for `--config-overrides`, not from the source directory (see [Relative paths in the operator's settings](../../../how-to/configure.md#relative-paths)). A configured path that does not exist fails the scan. Unset or ignored, `--config` names `TRIVY_CONFIG` when that is a file outside the scanned tree (a relative path in it is taken from the working directory ASH runs in), and otherwise an empty config ASH ships; `--module-dir` names an empty directory ASH creates outside the scanned tree for each scanner run and removes when the run ends.
+trivy-repo always passes `trivy --config` and `trivy --module-dir`, so trivy does not load a `trivy.yaml` from the directory it runs in. `config_file` and `module_dir` are honored only when set through `--config-overrides` or a config file outside every git checkout and the scanned directory (one that is not [repository-written](../../../concepts/trust-model.md#how-the-tier-is-decided)), and only for paths outside the scanned tree, which a path written inside the tree and led out of it by a symbolic link there is not; otherwise they are ignored with a warning. A relative path is taken from the directory of the ASH config file that sets it, or from the working directory for `--config-overrides`, not from the source directory (see [Relative paths in the operator's settings](../../../how-to/configure.md#relative-paths)). A configured path that does not exist fails the scan. Unset or ignored, `--config` names `TRIVY_CONFIG` when that is a file outside the scanned tree (a relative path in it is taken from the working directory ASH runs in), and otherwise an empty config ASH ships; `trivy --module-dir` names an empty directory ASH creates outside the scanned tree for each scanner run and removes when the run ends.
 
 `ignore_file` and `secret_config_file` follow the same rule, a relative path included. Unset or refused, trivy-repo uses `TRIVY_IGNOREFILE` or `TRIVY_SECRET_CONFIG` from the environment for a file outside the scanned tree (a relative path in either is taken from the working directory ASH runs in), and otherwise an empty file ASH writes outside the scanned tree, so a `.trivyignore` or `trivy-secret.yaml` in the scanned repository does not remove findings or disable secret rules.
 
@@ -157,7 +157,7 @@ Trivy supports the following severity levels (from lowest to highest):
 ash --scanners trivy-repo
 
 # Scan specific directory
-ash --target /path/to/project --scanners trivy-repo
+ash --source-dir /path/to/project --scanners trivy-repo
 ```
 
 ### Vulnerability-Only Scan
@@ -220,7 +220,7 @@ The Trivy plugin integrates with ASH's unified reporting system, producing resul
 
 trivy-repo accepts only exit code 0 as a completed run. trivy exits 0 whether or not
 it found anything and 1 on an error, so a run that exits 1 is recorded `ERROR` and its
-results file is not graded. ASH passes `--exit-code=0`, which outranks an `exit-code`
+results file is not graded. ASH passes `trivy --exit-code=0`, which outranks an `exit-code`
 setting in your trivy config or in `TRIVY_EXIT_CODE`, so a run with findings still
 exits 0 and is reported; a `trivy.yaml` in the scanned directory is not read at all.
 ASH decides the scan's exit code from the findings. See
@@ -314,8 +314,8 @@ scanners:
 <!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
 # Scan critical paths first
-ash --target src/ --scanners trivy-repo  # Core application code
-ash --target config/ --scanners trivy-repo  # Configuration files
+ash --source-dir src/ --scanners trivy-repo  # Core application code
+ash --source-dir config/ --scanners trivy-repo  # Configuration files
 
 # Skip non-critical directories
 ```
@@ -362,7 +362,7 @@ TARGETS=("src/" "lib/" "config/" "scripts/")
 
 # Run parallel scans
 for target in "${TARGETS[@]}"; do
-  ash --target "$target" --scanners trivy-repo --config-file ".ash/${target%/}.yaml" &
+  ash --source-dir "$target" --scanners trivy-repo --config ".ash/${target%/}.yaml" &
 done
 
 # Wait for all scans to complete
@@ -386,7 +386,7 @@ if [ -f .last_trivy_scan ]; then
   if [ -n "$CHANGED_FILES" ]; then
     echo "Scanning changed files: $CHANGED_FILES"
     echo "$CHANGED_FILES" | xargs -I {} dirname {} | sort -u | while read dir; do
-      ash --target "$dir" --scanners trivy-repo
+      ash --source-dir "$dir" --scanners trivy-repo
     done
   else
     echo "No changes detected, skipping scan"
@@ -412,7 +412,7 @@ echo "Starting Trivy performance benchmark..."
 
 # Measure scan time
 start_time=$(date +%s)
-ash --scanners trivy-repo --reporters json
+ash --scanners trivy-repo --formats flat-json
 end_time=$(date +%s)
 
 scan_duration=$((end_time - start_time))
@@ -454,7 +454,7 @@ class TrivyPerformanceMonitor:
 
         # Run ASH with Trivy
         process = subprocess.Popen(
-            ["ash", "--scanners", "trivy-repo", "--reporters", "json"],
+            ["ash", "--scanners", "trivy-repo", "--formats", "flat-json"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -524,9 +524,9 @@ find . -name "*.js" | head -1000 | xargs dirname | sort -u > javascript_dirs.txt
 find . -name "*.yaml" -o -name "*.yml" | head -1000 | xargs dirname | sort -u > yaml_dirs.txt
 
 # Distribute across multiple workers
-cat python_dirs.txt | xargs -P 4 -I {} ash --target {} --scanners trivy-repo &
-cat javascript_dirs.txt | xargs -P 4 -I {} ash --target {} --scanners trivy-repo &
-cat yaml_dirs.txt | xargs -P 4 -I {} ash --target {} --scanners trivy-repo &
+cat python_dirs.txt | xargs -P 4 -I {} ash --source-dir {} --scanners trivy-repo &
+cat javascript_dirs.txt | xargs -P 4 -I {} ash --source-dir {} --scanners trivy-repo &
+cat yaml_dirs.txt | xargs -P 4 -I {} ash --source-dir {} --scanners trivy-repo &
 
 wait
 ```
@@ -542,21 +542,21 @@ services:
     volumes:
       - ./src:/workspace/src
       - ./trivy-cache:/root/.cache/trivy
-    command: ash --target /workspace/src --scanners trivy-repo
+    command: ash --source-dir /workspace/src --scanners trivy-repo
   
   trivy-scanner-2:
     image: ash:latest
     volumes:
       - ./lib:/workspace/lib
       - ./trivy-cache:/root/.cache/trivy
-    command: ash --target /workspace/lib --scanners trivy-repo
+    command: ash --source-dir /workspace/lib --scanners trivy-repo
   
   trivy-scanner-3:
     image: ash:latest
     volumes:
       - ./config:/workspace/config
       - ./trivy-cache:/root/.cache/trivy
-    command: ash --target /workspace/config --scanners trivy-repo
+    command: ash --source-dir /workspace/config --scanners trivy-repo
 ```
 
 ### Resource Limits and Constraints
@@ -566,7 +566,7 @@ services:
 <!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Set memory limits for container mode
-ash --mode container --memory 2g --scanners trivy-repo
+docker run --memory=2g ash --scanners trivy-repo
 
 # Monitor memory usage
 ulimit -v 2097152  # 2GB virtual memory limit
@@ -634,7 +634,7 @@ if [ -n "$STAGED_FILES" ]; then
   done
   
   # Scan staged files
-  ash --target "$TEMP_DIR" --scanners trivy-repo --config-file .ash/precommit.yaml
+  ash --source-dir "$TEMP_DIR" --scanners trivy-repo --config .ash/precommit.yaml
   SCAN_RESULT=$?
   
   # Cleanup
@@ -681,7 +681,7 @@ jobs:
           done < changed_files.txt
           
           # Run security scan
-          ash --target scan_target --scanners trivy-repo --reporters sarif,markdown
+          ash --source-dir scan_target --scanners trivy-repo --formats sarif,markdown
       
       - name: Comment PR
         uses: actions/github-script@v6
@@ -740,22 +740,22 @@ RUST_DIRS=$(find . -name "Cargo.toml" | xargs dirname)
 # Scan each language ecosystem
 echo "Scanning Python projects..."
 echo "$PYTHON_DIRS" | while read dir; do
-  [ -n "$dir" ] && ash --target "$dir" --scanners trivy-repo --config-file .ash/python.yaml
+  [ -n "$dir" ] && ash --source-dir "$dir" --scanners trivy-repo --config .ash/python.yaml
 done
 
 echo "Scanning Node.js projects..."
 echo "$NODE_DIRS" | while read dir; do
-  [ -n "$dir" ] && ash --target "$dir" --scanners trivy-repo --config-file .ash/nodejs.yaml
+  [ -n "$dir" ] && ash --source-dir "$dir" --scanners trivy-repo --config .ash/nodejs.yaml
 done
 
 echo "Scanning Go projects..."
 echo "$GO_DIRS" | while read dir; do
-  [ -n "$dir" ] && ash --target "$dir" --scanners trivy-repo --config-file .ash/golang.yaml
+  [ -n "$dir" ] && ash --source-dir "$dir" --scanners trivy-repo --config .ash/golang.yaml
 done
 
 echo "Scanning Rust projects..."
 echo "$RUST_DIRS" | while read dir; do
-  [ -n "$dir" ] && ash --target "$dir" --scanners trivy-repo --config-file .ash/rust.yaml
+  [ -n "$dir" ] && ash --source-dir "$dir" --scanners trivy-repo --config .ash/rust.yaml
 done
 ```
 
@@ -784,7 +784,7 @@ global_settings:
 # Scan Terraform modules
 find . -name "*.tf" | xargs dirname | sort -u | while read tf_dir; do
   echo "Scanning Terraform directory: $tf_dir"
-  ash --target "$tf_dir" --scanners trivy-repo --config-file .ash/terraform.yaml
+  ash --source-dir "$tf_dir" --scanners trivy-repo --config .ash/terraform.yaml
 done
 ```
 
@@ -804,7 +804,7 @@ scanners:
 # Scan Kubernetes manifests
 find . -name "*.yaml" -o -name "*.yml" | grep -E "(k8s|kubernetes|manifests)" | xargs dirname | sort -u | while read k8s_dir; do
   echo "Scanning Kubernetes directory: $k8s_dir"
-  ash --target "$k8s_dir" --scanners trivy-repo --config-file .ash/kubernetes.yaml
+  ash --source-dir "$k8s_dir" --scanners trivy-repo --config .ash/kubernetes.yaml
 done
 ```
 
@@ -822,7 +822,7 @@ find . -name "Dockerfile*" -o -name "*.dockerfile" | while read dockerfile; do
   echo "Scanning Docker context: $dir"
   
   # Scan the directory containing Dockerfile
-  ash --target "$dir" --scanners trivy-repo --config-file .ash/docker.yaml
+  ash --source-dir "$dir" --scanners trivy-repo --config .ash/docker.yaml
   
   # Also scan the built image if available
   image_name=$(grep -E "^FROM" "$dockerfile" | tail -1 | awk '{print $2}')
@@ -844,7 +844,7 @@ find . -name "docker-compose*.yml" -o -name "docker-compose*.yaml" | while read 
   echo "Scanning Docker Compose project: $dir"
   
   # Scan the compose directory
-  ash --target "$dir" --scanners trivy-repo --config-file .ash/docker-compose.yaml
+  ash --source-dir "$dir" --scanners trivy-repo --config .ash/docker-compose.yaml
   
   # Extract and scan referenced images
   grep -E "^\s*image:" "$compose_file" | awk '{print $2}' | tr -d '"' | while read image; do
@@ -884,7 +884,7 @@ reporters:
 # license-compliance-check.sh
 
 echo "Running comprehensive license scan..."
-ash --scanners trivy-repo --config-file .ash/license-audit.yaml
+ash --scanners trivy-repo --config .ash/license-audit.yaml
 
 # Process license results
 python3 << 'EOF'
@@ -943,7 +943,7 @@ EOF
 echo "Establishing security baseline..."
 
 # Run comprehensive scan
-ash --scanners trivy-repo --reporters json --config-file .ash/baseline.yaml
+ash --scanners trivy-repo --formats flat-json --config .ash/baseline.yaml
 
 # Store baseline
 mkdir -p .security-baseline
@@ -993,7 +993,7 @@ EOF
 echo "Checking for security regressions..."
 
 # Run current scan
-ash --scanners trivy-repo --reporters json
+ash --scanners trivy-repo --formats flat-json
 
 # Compare with baseline
 python3 << 'EOF'
@@ -1169,13 +1169,13 @@ EOF
 3. **Run with Sudo**: Use elevated permissions (not recommended)
    <!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
    ```bash
-   sudo ash --scanners trivy-repo --target /path/to/target
+   sudo ash --scanners trivy-repo --source-dir /path/to/target
    ```
 
 4. **Container Mode**: Use container with proper volume mounts
    <!-- doctest: illustrative reason="needs a container runtime" -->
    ```bash
-   ash --mode container --target /path/to/target --scanners trivy-repo
+   ash --mode container --source-dir /path/to/target --scanners trivy-repo
    ```
 
 #### Large Repository Performance
@@ -1202,8 +1202,8 @@ EOF
    <!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
    ```bash
    # Scan only source code directories
-   ash --target src/ --scanners trivy-repo
-   ash --target lib/ --scanners trivy-repo
+   ash --source-dir src/ --scanners trivy-repo
+   ash --source-dir lib/ --scanners trivy-repo
    ```
 
 3. **Ignore Patterns**: Use ASH ignore patterns
@@ -1222,8 +1222,8 @@ EOF
    <!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
    ```bash
    # Process in parallel
-   ash --target frontend/ --scanners trivy-repo &
-   ash --target backend/ --scanners trivy-repo &
+   ash --source-dir frontend/ --scanners trivy-repo &
+   ash --source-dir backend/ --scanners trivy-repo &
    wait
    ```
 
@@ -1241,7 +1241,7 @@ EOF
 2. **Process Smaller Chunks**: Break down large scans
    <!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
    ```bash
-   find . -maxdepth 1 -type d | xargs -I {} ash --target {} --scanners trivy-repo
+   find . -maxdepth 1 -type d | xargs -I {} ash --source-dir {} --scanners trivy-repo
    ```
 
 3. **Optimize Configuration**: Reduce memory usage
@@ -1355,7 +1355,7 @@ grep -i error .ash/ash_output/scanners/trivy-repo/*/ash.log
 <!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Ensure proper volume mounting
-ash --mode container --target $(pwd) --scanners trivy-repo
+ash --mode container --source-dir $(pwd) --scanners trivy-repo
 
 # Check container logs
 docker logs $(docker ps -q --filter ancestor=ash)
@@ -1368,8 +1368,8 @@ docker logs $(docker ps -q --filter ancestor=ash)
 **Solution**:
 <!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
-# Use host network
-ash --mode container --network host --scanners trivy-repo
+# Use the host network
+ash build-image --container-network host
 
 # Pre-download database
 trivy image --download-db-only
@@ -1399,7 +1399,7 @@ ash --mode container --scanners trivy-repo
   run: trivy image --download-db-only
 
 - name: Run ASH with Trivy
-  run: ash --scanners trivy-repo --reporters sarif
+  run: ash --scanners trivy-repo --formats sarif
   timeout-minutes: 10
 ```
 
@@ -1409,10 +1409,10 @@ ash --mode container --scanners trivy-repo
 <!-- doctest: illustrative reason="runs only on Windows" -->
 ```powershell
 # Use forward slashes or escape backslashes
-ash --target "C:/projects/myapp" --scanners trivy-repo
+ash --source-dir "C:/projects/myapp" --scanners trivy-repo
 
 # Or use PowerShell-style paths
-ash --target $PWD --scanners trivy-repo
+ash --source-dir $PWD --scanners trivy-repo
 ```
 
 ### Getting Additional Help
@@ -1467,7 +1467,7 @@ jobs:
       
       - name: Run Trivy Security Scan
         run: |
-          ash --scanners trivy-repo --reporters sarif,html
+          ash --scanners trivy-repo --formats sarif,html
       
       - name: Upload Results
         # Also when ASH exits non-zero on findings: without a status function
@@ -1491,7 +1491,7 @@ security-scan:
   image: python:3.10
   script:
     - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
-    - ash --scanners trivy-repo --reporters sarif,markdown
+    - ash --scanners trivy-repo --formats sarif,markdown
   artifacts:
     reports:
       sast: .ash/ash_output/reports/ash_aggregated_results.sarif
@@ -1577,9 +1577,9 @@ ash --scanners trivy-repo
 ```
 
 In offline mode (`--offline`, `ASH_OFFLINE`, or `options.offline: true`) ASH passes
-`--skip-db-update`, `--skip-java-db-update`, `--offline-scan` and `--skip-check-update`,
+`trivy --skip-db-update`, `trivy --skip-java-db-update`, `trivy --offline-scan` and `trivy --skip-check-update`,
 and sets `TRIVY_SKIP_VERSION_CHECK=true` and `TRIVY_DISABLE_TELEMETRY=true`: trivy's
-version check and telemetry contact check.trivy.dev, and `--skip-check-update` covers
+version check and telemetry contact check.trivy.dev, and `trivy --skip-check-update` covers
 only the checks bundle. Variables rather than flags, because a trivy too old to know
 the flags refuses the command, while it ignores the variables.
 
@@ -1594,7 +1594,7 @@ not from the source directory.
 Offline, trivy's Terraform checks do not run. trivy downloads the source of every
 `module` block it evaluates (a registry module from registry.terraform.io, a `git::`
 source with the host's `git`, an `https://` archive), whatever offline flags it is
-given, so ASH passes `--misconfig-scanners` with the installed trivy's default list
+given, so ASH passes `trivy --misconfig-scanners` with the installed trivy's default list
 minus `terraform`, read from `trivy repository --help`. When that list cannot be read,
 the `misconfig` scanner is left out of the offline scan, with a warning. checkov
 still checks Terraform offline.
@@ -1696,8 +1696,8 @@ scanners:
 <!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
 # Use environment-specific configs
-ash --config-file .ash/production.yaml --scanners trivy-repo
-ash --config-file .ash/development.yaml --scanners trivy-repo
+ash --config .ash/production.yaml --scanners trivy-repo
+ash --config .ash/development.yaml --scanners trivy-repo
 ```
 
 #### Multi-Target Scanning Strategies
@@ -1705,14 +1705,14 @@ ash --config-file .ash/development.yaml --scanners trivy-repo
 <!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
 # Parallel scanning of different components
-ash --target frontend/ --scanners trivy-repo --config-file .ash/frontend.yaml &
-ash --target backend/ --scanners trivy-repo --config-file .ash/backend.yaml &
-ash --target infrastructure/ --scanners trivy-repo --config-file .ash/infra.yaml &
+ash --source-dir frontend/ --scanners trivy-repo --config .ash/frontend.yaml &
+ash --source-dir backend/ --scanners trivy-repo --config .ash/backend.yaml &
+ash --source-dir infrastructure/ --scanners trivy-repo --config .ash/infra.yaml &
 wait
 
 # Sequential scanning with different thresholds
 for dir in src/ lib/ config/; do
-  ash --target "$dir" --scanners trivy-repo --config-file ".ash/${dir%/}.yaml"
+  ash --source-dir "$dir" --scanners trivy-repo --config ".ash/${dir%/}.yaml"
 done
 ```
 
@@ -1741,13 +1741,13 @@ ash --scanners trivy-repo
 # Scan only changed files (requires Git)
 git diff --name-only HEAD~1 | while read file; do
   if [[ -f "$file" ]]; then
-    ash --target "$(dirname "$file")" --scanners trivy-repo
+    ash --source-dir "$(dirname "$file")" --scanners trivy-repo
   fi
 done
 
 # Scan based on file types
 find . -name "*.py" -newer .last_scan | xargs -I {} dirname {} | sort -u | while read dir; do
-  ash --target "$dir" --scanners trivy-repo
+  ash --source-dir "$dir" --scanners trivy-repo
 done
 touch .last_scan
 ```
@@ -1787,7 +1787,7 @@ global_settings:
 # custom-trivy-scan.sh
 
 # Run Trivy scan with custom processing
-ash --scanners trivy-repo --reporters sarif,json
+ash --scanners trivy-repo --formats sarif,flat-json
 
 # Process results
 python scripts/process_trivy_results.py .ash/ash_output/reports/
@@ -1922,7 +1922,7 @@ scanners:
 # container-and-repo-scan.sh
 
 # Scan repository
-ash --config-file .ash/container-scan.yaml --scanners trivy-repo
+ash --config .ash/container-scan.yaml --scanners trivy-repo
 
 # Scan container images referenced in repo
 find . -name "Dockerfile*" -o -name "docker-compose*.yml" | while read file; do
@@ -1960,7 +1960,7 @@ reporters:
 <!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
 # Generate license compliance report
-ash --config-file .ash/license-compliance.yaml --scanners trivy-repo
+ash --config .ash/license-compliance.yaml --scanners trivy-repo
 
 # Process license data
 python scripts/license_compliance_check.py license-report.csv
@@ -1974,7 +1974,7 @@ python scripts/license_compliance_check.py license-report.csv
 # establish-baseline.sh
 
 # Initial comprehensive scan
-ash --scanners trivy-repo --reporters json --config-file .ash/baseline.yaml
+ash --scanners trivy-repo --formats flat-json --config .ash/baseline.yaml
 
 # Store baseline
 cp .ash/ash_output/reports/ash_aggregated_results.json security-baseline.json
@@ -2046,7 +2046,7 @@ if __name__ == "__main__":
 # security-alert.sh
 
 # Run scan
-ash --scanners trivy-repo --reporters json
+ash --scanners trivy-repo --formats flat-json
 
 # Check for critical issues
 CRITICAL_COUNT=$(jq '[.runs[].results[] | select(.level == "error")] | length' .ash/ash_output/reports/ash_aggregated_results.json)

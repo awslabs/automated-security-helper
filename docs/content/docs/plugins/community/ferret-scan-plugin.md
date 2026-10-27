@@ -216,16 +216,16 @@ scanners:
 | `config_file` | string | `null` | Path to custom Ferret YAML config file |
 | `use_default_config` | bool | `true` | Use the default config bundled with this plugin. Set by the operator only; see [Using profiles](#using-profiles) |
 | `profile` | string | `null` | Profile name from config file. Set by the operator only; see [Using profiles](#using-profiles) |
-| `exclude_patterns` | list | `[]` | Glob patterns to exclude. ASH also excludes its own output directories inside the scanned directory, except one whose path holds a comma, which ferret-scan's comma-separated `--exclude` cannot hold; ferret-scan then reads it, ASH logs a warning naming it, and the findings ferret-scan reports there are dropped. The files `global_settings.ignore_paths` ignores are excluded too, each by its full path, as ASH matches the ignore paths: an ignore path ASH matches to no file, such as a bare `api` (write `api/` for the directory), excludes nothing. |
+| `exclude_patterns` | list | `[]` | Glob patterns to exclude. ASH also excludes its own output directories inside the scanned directory, except one whose path holds a comma, which ferret-scan's comma-separated `ferret-scan --exclude` cannot hold; ferret-scan then reads it, ASH logs a warning naming it, and the findings ferret-scan reports there are dropped. The files `global_settings.ignore_paths` ignores are excluded too, each by its full path, as ASH matches the ignore paths: an ignore path ASH matches to no file, such as a bare `api` (write `api/` for the directory), excludes nothing. |
 | `show_match` | bool | `false` | Display matched text in ferret-scan's own output (see [show_match](#show_match) below) |
 | `enable_preprocessors` | bool | `true` | Enable text extraction from documents (PDF, Office) |
-| `finding_limit` | int | `0` | Max findings ferret-scan emits (`--limit`). `0` = unlimited. ASH defaults to `0` because ferret-scan's own default of `200` silently truncates large scans. |
-| `fail_on_incomplete` | bool | `false` | Pass `--fail-on-incomplete` so ferret-scan exits 3 when a file could not be fully scanned; ASH still reports the partial findings, counts the target as failed, and records the scanner `ERROR`, so the completeness gate fails the scan. |
-| `respect_gitignore` | bool | `false` | Pass `--respect-gitignore` to honor `.gitignore`. Off by default — `.gitignore` often hides high-value files (`.env`, `*.pem`) a sensitive-data scan should see. |
-| `disable_ip_types` | string | `null` | Comma-separated `INTELLECTUAL_PROPERTY` sub-types to skip (`--disable-ip-types`): `copyright,patent,trademark,trade_secret,internal_url`. |
-| `explain` | bool | `false` | Pass `--explain` for an offline per-finding rationale + verdict + drafted suppression reason. No data leaves the host. |
-| `validator_budget` | string | `null` | Per-validator time budget (`--validator-budget`), e.g. `SSN=500ms,all=2m`. Over-budget validators stop and mark the scan incomplete. |
-| `max_live_bytes` | string | `null` | Cap on extracted content held in memory (`--max-live-bytes`), e.g. `256MB`/`1GB`. Bounds peak memory on constrained hosts. |
+| `finding_limit` | int | `0` | Max findings ferret-scan emits (`ferret-scan --limit`). `0` = unlimited. ASH defaults to `0` because ferret-scan's own default of `200` silently truncates large scans. |
+| `fail_on_incomplete` | bool | `false` | Pass `ferret-scan --fail-on-incomplete` so ferret-scan exits 3 when a file could not be fully scanned; ASH still reports the partial findings, counts the target as failed, and records the scanner `ERROR`, so the completeness gate fails the scan. |
+| `respect_gitignore` | bool | `false` | Pass `ferret-scan --respect-gitignore` to honor `.gitignore`. Off by default — `.gitignore` often hides high-value files (`.env`, `*.pem`) a sensitive-data scan should see. |
+| `disable_ip_types` | string | `null` | Comma-separated `INTELLECTUAL_PROPERTY` sub-types to skip (`ferret-scan --disable-ip-types`): `copyright,patent,trademark,trade_secret,internal_url`. |
+| `explain` | bool | `false` | Pass `ferret-scan --explain` for an offline per-finding rationale + verdict + drafted suppression reason. No data leaves the host. |
+| `validator_budget` | string | `null` | Per-validator time budget (`ferret-scan --validator-budget`), e.g. `SSN=500ms,all=2m`. Over-budget validators stop and mark the scan incomplete. |
+| `max_live_bytes` | string | `null` | Cap on extracted content held in memory (`ferret-scan --max-live-bytes`), e.g. `256MB`/`1GB`. Bounds peak memory on constrained hosts. |
 | `ferret_debug` | bool | `false` | Enable ferret-scan's own debug logging (preprocessing/validation flow) |
 | `ferret_verbose` | bool | `false` | Enable ferret-scan's own verbose output (detailed finding info) |
 | `tool_version` | string | `null` | Version constraint for ferret-scan (e.g., `>=2.4.5,<2.6.0`, `==2.5.2`) |
