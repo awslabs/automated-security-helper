@@ -438,13 +438,17 @@ ALLOWLIST: tuple[Entry, ...] = (
         publishes=(
             "name=test-results-${{ inputs.os }}-"
             "${{ steps.runner-arch.outputs.label }}-"
-            "py${{ inputs.python-version }} path=test-results/"
+            "py${{ inputs.python-version }}-"
+            "shard${{ inputs.shard }} path=test-results/"
         ),
         reason=(
             "Test results and coverage data. No build output. The arch component "
             "of the name moved from an `arch` input to a label this action derives "
-            "from RUNNER_ARCH, so the same bytes from the same path are published "
-            "under the same names; only the source of the arch string changed."
+            "from RUNNER_ARCH. The shard component was added when the unit-test job "
+            "was split into shards: each shard uploads its own test-results "
+            "directory, and two uploads under one name fail, so the name carries "
+            "the shard (1of1 for a whole-suite run). The bytes and the path are "
+            "the same kind as before."
         ),
     ),
     Entry(

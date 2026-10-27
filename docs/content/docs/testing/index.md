@@ -338,6 +338,18 @@ pytest --cov=automated_security_helper --cov-report=html
 
 Coverage thresholds are enforced in CI pipelines. The minimum coverage threshold is 80% for the overall codebase, with higher thresholds for critical components.
 
+In the Unified CI workflow the unit suite is split into eight shards per operating system and
+Python version, because one job cannot finish it inside the job timeout. A shard runs every
+eighth test file (`.github/scripts/select-test-shard.py`), measures coverage without a
+threshold and uploads its coverage data. The `unit-coverage` job applies the 80% to the
+combined data of the Linux Python 3.12 shards and fails if any shard is missing. To run one
+shard locally:
+
+```bash
+uv run python .github/scripts/select-test-shard.py --shard 3of8 --output test-results/shard-files.txt
+uv run pytest @test-results/shard-files.txt --no-cov
+```
+
 ## Parallel Test Execution
 
 ### Configuration

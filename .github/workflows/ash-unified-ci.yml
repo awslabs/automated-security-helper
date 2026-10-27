@@ -37,7 +37,9 @@ on:
   # against ~175, before install-validation's five cheap install methods stopped being
   # 105 separate legs, which nearly halves what this deliberate duplication costs.
   # The 91 is derived from a census rather than being one -- see the note on the
-  # required-checks job for which link in that chain was actually measured.
+  # required-checks job for which link in that chain was actually measured. Every job
+  # figure in these notes predates the unit-test shards, which took that job from 25 legs
+  # to 200 (+175) and added the unit-coverage job (+1).
   #
   # Both counts are job counts, from
   # `gh api .../actions/runs/<run>/jobs --paginate --jq '.jobs[].name' | wc -l`
@@ -460,10 +462,35 @@ jobs:
         shell: bash
         run: python3 .github/scripts/check-snapshot-trailers.py --orphans
 
+  # WHY EACH OS AND PYTHON COMBINATION IS EIGHT JOBS
+  #
+  # The suite is about 23,900 items. Fourteen of the 25 legs were cancelled by the old
+  # 20-minute timeout on the last run of this branch that finished, at 61 to 99 percent of
+  # the tests; the legs that did finish took 10 to 17 minutes on macOS. So most legs sat
+  # within minutes of the wall, and a slower runner or a few more tests put them over it.
+  #
+  # Raising the timeout was rejected as the cure: every leg would become a 25-minute job
+  # on the slowest runners, with a result only after all of it, and the next growth of the
+  # suite would reach the new limit too. The cure is to split each combination into eight
+  # shards that run in parallel. A shard owns every eighth test file of the sorted list
+  # (see .github/scripts/select-test-shard.py), so a leg that took 20 to 25 minutes becomes
+  # eight that each take a few minutes of tests plus the setup every shard repeats. The
+  # 30-minute timeout below is the guard for the slower macOS and Windows runners. That
+  # estimate is arithmetic, not a measurement.
+  #
+  # The 80% total-coverage gate cannot run per shard, since a shard covers part of the
+  # package. Each shard uploads its coverage data, and the `unit-coverage` job below
+  # combines the data of one combination and applies the gate to it. A shard that did not
+  # upload makes that job fail instead of passing on a subset.
+  #
+  # Each entry of the shard axis is its own literal and carries the total it was cut for
+  # (`3of8`), so no second number has to agree with the list. A shard dropped from the
+  # list is caught by unit-coverage for the combination it gates, and by
+  # tests/unit/test_unit_test_shards.py for all of them.
   unit-test:
-    name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }})"
+    name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})"
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
       pull-requests: write
@@ -474,6 +501,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        shard: [1of8, 2of8, 3of8, 4of8, 5of8, 6of8, 7of8, 8of8]
         # No exclusions. macos-14 was excluded from 3.10 and 3.11 on the stated
         # grounds that arm64 macOS "only has 3.12 and 3.13". That is not true, and
         # this job disproves it itself: macos-latest resolves to an arm64 image
@@ -510,6 +538,7 @@ jobs:
         # the name on an artifact is a statement the runner made about itself. Removing the
         # include changes no leg count: every entry matched an existing `os` axis value and only
         # added a key, so the matrix was 25 cells with it and is 25 cells without it.
+        # The shard axis then multiplies each of those 25 by eight.
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -521,6 +550,58 @@ jobs:
         with:
           os: ${{ matrix.os }}
           python-version: ${{ matrix.python-version }}
+          shard: ${{ matrix.shard }}
+
+  # Applies the 80% total-coverage gate to the sharded unit-test run.
+  #
+  # One combination, ubuntu-latest on Python 3.12, the one that already rendered the
+  # coverage summary: it combines that combination's eight shards' data and fails below 80%.
+  # The unsharded run applied the gate in every one of the 25 combinations, so this narrows
+  # it to one. Combining needs the shards' data files to name the same source paths, which
+  # holds for one runner image and does not hold across operating systems, so the other
+  # combinations' coverage is measured and uploaded by their shards and gated nowhere.
+  # Extending the gate to them means normalizing paths before the combine, which was not
+  # done here.
+  #
+  # `!cancelled()` and not the default `success()`: when a shard fails on a test, its
+  # coverage data is still uploaded, and this job should still say whether the combination
+  # as a whole meets the threshold. It is not `always()` because a cancelled run has nothing
+  # to gate. tests/unit/test_required_checks_census.py requires every gated job with
+  # `needs` to carry one of the two.
+  unit-coverage:
+    name: unit-coverage
+    needs: unit-test
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "false"
+      # Plain `uv sync`: this job runs coverage.py and reads the package's source, and
+      # imports neither the extras nor the scanners.
+      - name: Install dependencies
+        shell: bash
+        run: uv sync
+      - name: Download the Linux Python 3.12 shard results
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: test-results-ubuntu-latest-x86_64-py3.12-shard*
+          path: shard-results
+      - name: Combine the shards' coverage and apply the threshold
+        shell: bash
+        run: |
+          uv run python .github/scripts/combine-unit-coverage.py --self-test
+          uv run python .github/scripts/combine-unit-coverage.py \
+            --results-dir shard-results \
+            --prefix test-results-ubuntu-latest-x86_64-py3.12 \
+            --fail-under 80 \
+            --summary "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------------
   # Warm the ASH image's layer cache before the scan legs build it
@@ -1343,7 +1424,7 @@ jobs:
   # any selector to mirror it.
   #
   # Its own job rather than a step in run-unit-tests, because these exercise scanner and MCP
-  # integration, not Python-version behavior; at 25 unit-test legs a step there buys 25
+  # integration, not Python-version behavior; at 200 unit-test legs a step there buys 200
   # copies of one signal. -n 0 rather than the inherited -n auto because every cdk-nag test
   # boots a real kernel and jsii extraction is billed per booting worker -- see the table in
   # tests/conftest.py.
@@ -1804,7 +1885,7 @@ jobs:
   # Most jobs above name themselves from their matrix, so this workflow contributes 116 check
   # runs to a pull request and few of their names are stable. A ruleset's
   # required_status_checks list holds literal context strings with no wildcard, so requiring
-  # `unit-test` means enumerating all 25 of its names -- and then any matrix edit either orphans
+  # `unit-test` means enumerating all 200 of its names -- and then any matrix edit either orphans
   # a required context that no longer runs, which leaves a pull request pending forever, or
   # quietly adds a leg that nothing requires. That maintenance cost is why the ruleset requires
   # two contexts today while every other check on the pull request is advisory -- a count that
@@ -1822,6 +1903,11 @@ jobs:
   # Those 25 are not jobs and land in a separate check suite, so a job census alone undercounts
   # what this file puts on a pull request -- that gap is most of why the old figure of 84 looked
   # defensible.
+  #
+  # The 116 and the 91 below predate the unit-test shards. The job went from 25 legs to 200
+  # (eight shards in each of the 25 combinations, +175), and each shard publishes its own
+  # `PyTest - ...` check run, so the check-run figure grows by the same 175; unit-coverage
+  # added one job.
   #
   # The 91 is arithmetic on a measured anchor, and the chain is worth keeping because each link
   # is a different kind of claim. Run 35370310502 reported `total_count` 168 with 168 rows
@@ -1961,6 +2047,7 @@ jobs:
       - actionlint
       - snapshot-trailers
       - unit-test
+      - unit-coverage
       - scan-validation
       - non-root-image-permissions
       - external-target-scan
