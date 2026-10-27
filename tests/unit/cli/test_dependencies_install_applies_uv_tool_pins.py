@@ -186,6 +186,27 @@ class TestTheDockerfileInstallsOnlyThroughThePins:
             assert 'pins="$(install-pinned-tool --uv-tool-pins)" &&' in run, run
             assert re.search(r"ash dependencies install [^;&|]*\$\{pins\}", run), run
 
+    def test_every_ash_dependencies_install_runs_online(self):
+        """The build downloads on purpose, so the install must not inherit ASH_OFFLINE.
+
+        ``ENV ASH_OFFLINE="${OFFLINE}"`` is YES in an ``OFFLINE=YES`` image, and under it
+        ``install_pinned_tool`` refuses every download. opengrep is a bare executable
+        that only ``ash dependencies install`` fetches, so the offline image failed to
+        build with ``opengrep ... is not installed and ASH is offline``. The ENV stays
+        (it is what the finished image runs with); each install clears it for its own
+        process only.
+        """
+        installs = [
+            run
+            for run in _dockerfile_run_instructions()
+            if "ash dependencies install" in run
+        ]
+        assert installs, "the Dockerfile no longer runs `ash dependencies install`"
+        for run in installs:
+            assert re.search(
+                r"\bASH_OFFLINE=NO\s+(?:\w+=\S+\s+)*ash dependencies install ", run
+            ), run
+
     def test_no_other_step_installs_a_python_tool(self):
         """A bare `uv tool install semgrep` or `pip install checkov` would float."""
         names = "|".join(
