@@ -2,9 +2,8 @@
 
 ASH is a Python command-line tool that you install from its GitHub repository. It is
 not published on PyPI. The PyPI project named `automated-security-helper` is not
-published by this project, so `pip install automated-security-helper` and
-`uvx automated-security-helper` install that project's package, not ASH. Always install
-from the GitHub URL, as on this page.
+published by this project, so installing or running ASH by that name from PyPI gets that
+project's package, not ASH. Always install from the GitHub URL, as on this page.
 
 Installing ASH gives you the `ash` command. The scanners it runs are separate tools:
 after installing, run `ash dependencies install`, described in
