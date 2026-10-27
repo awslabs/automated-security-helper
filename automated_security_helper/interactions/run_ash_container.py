@@ -3546,6 +3546,19 @@ CONTAINER_ENV_NOT_PASSED = frozenset(
         "ASH_THIRD_PARTY_DIR",
         "ASH_PINS_DIR",
         "ASH_LOG_TO_STDERR",
+        # The host's alone too: an opt-in for tools found inside the scanned tree
+        # (utils/subprocess_utils.py), the host's rules bundle root
+        # (utils/rules_bundles.py), the `ash dependencies` unknown-tools setting
+        # (cli/dependencies.py), the detect-secrets worker's own switch
+        # (utils/detect_secrets_worker.py), the MCP server's git host allowlist
+        # (cli/mcp/source_delivery.py), and a value the image's own build sets
+        # (utils/content_databases.py).
+        "ASH_ALLOW_IN_TREE_TOOLS",
+        "ASH_CFN_GUARD_RULES_DIR",
+        "ASH_DEPENDENCIES_UNKNOWN_TOOLS",
+        "ASH_DETECT_SECRETS_REFUSE_HTTP",
+        "ASH_MCP_GIT_ALLOWED_HOSTS",
+        "ASH_OFFLINE_AT_BUILD_TIME",
         # Named through the helper module's constant: utils/log.py is the one
         # reader of the variable, and this list only names it.
         SHOW_LOCALS_VARIABLE,
