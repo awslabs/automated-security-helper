@@ -83,11 +83,16 @@ def test_process_config_options_with_config_files(
 
     config_args_keys = [arg.key for arg in scanner.args.extra_args]
     if config_arg == "--ini":
-        # The INI file is passed for the scan only (BanditScanner._execute_scan),
-        # so it is recorded here rather than added to extra_args.
+        # A scan always passes one --ini (BanditScanner._process_config_options):
+        # the operator's .bandit here, so the empty file ASH writes otherwise is
+        # not added beside it. The file is recorded on the scanner as well.
         assert scanner._ini_file is not None
         assert Path(scanner._ini_file).resolve() == config_path.resolve()
-        assert "--ini" not in config_args_keys
+        ini_values = [
+            arg.value for arg in scanner.args.extra_args if arg.key == "--ini"
+        ]
+        assert len(ini_values) == 1, config_args_keys
+        assert Path(ini_values[0]).resolve() == config_path.resolve()
     else:
         assert any(arg.startswith(config_arg) for arg in config_args_keys)
 

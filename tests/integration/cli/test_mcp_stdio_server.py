@@ -405,6 +405,13 @@ def test_a_warning_before_logging_is_set_up_reaches_stderr_shown(tmp_path) -> No
     then went to logging's last resort, which wrote the file name's controls and
     its "::add-mask::" line to the client's stderr as given. Through the real
     entry point, it is shown.
+
+    The entry the base names is inside ASH's plugin namespace (a top-level
+    ``ash_plugins`` package) and not installed, so the trust confinement refuses
+    it and warns, naming the base. An entry outside the namespace is kept for the
+    scan's namespace refusal instead (config/plugin_module_trust.py,
+    confine_plugin_modules), which get_config answers as a structured
+    plugin_module_refused result, with no warning to show.
     """
     from mcp.types import LATEST_PROTOCOL_VERSION
 
@@ -415,7 +422,8 @@ def test_a_warning_before_logging_is_set_up_reaches_stderr_shown(tmp_path) -> No
         encoding="utf-8",
     )
     (repo / ".ash" / _HOSTILE_BASE).write_text(
-        "ash_plugin_modules:\n  - not_an_installed_module_for_ash\n", encoding="utf-8"
+        "ash_plugin_modules:\n  - ash_plugins.not_an_installed_module_for_ash\n",
+        encoding="utf-8",
     )
     hook = tmp_path / "hook"
     hook.mkdir()
@@ -470,7 +478,10 @@ def test_a_warning_before_logging_is_set_up_reaches_stderr_shown(tmp_path) -> No
     # The answered frames are in the message: a get_config that refused or
     # failed the load, instead of resolving it, warns about nothing, and the
     # answer to id 2 says which.
-    assert "not_an_installed_module_for_ash" in stderr, (lines, stderr[-2000:])
+    assert "ash_plugins.not_an_installed_module_for_ash" in stderr, (
+        lines,
+        stderr[-2000:],
+    )
     assert not re.search(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]", stderr), repr(stderr[-2000:])
     assert not re.search(r"^\s*::|##[A-Za-z]*\[", stderr, re.MULTILINE), repr(
         stderr[-2000:]

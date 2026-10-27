@@ -54,8 +54,11 @@ GIT_RECORD = {
     "vcs_info": {"vcs": "git", "commit_id": COMMIT, "requested_revision": COMMIT},
 }
 #: What ``automated_security_helper.utils.ash_install`` imports outside the
-#: standard library, installed at the versions this environment has.
-IMPORTED_DEPENDENCIES = ("rich", "importlib-metadata")
+#: standard library, its own imports (importlib_metadata) and those of the
+#: package modules it loads (utils/log.py: rich; utils/console.py: rich and
+#: typer), installed at the versions this environment has. Each is one of
+#: pyproject.toml's runtime dependencies; their own dependencies come with them.
+IMPORTED_DEPENDENCIES = ("rich", "typer", "importlib-metadata")
 #: What the package's import chain needs on 3.10 and this environment, on a newer
 #: Python, does not install: version_management reads pyproject.toml with tomli
 #: below 3.11 (tomllib from 3.11), and pyproject.toml declares tomli under a
