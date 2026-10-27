@@ -1090,6 +1090,7 @@ def test_a_failed_updates_excerpt_hides_a_value_straddling_its_cut(
             scan_id="s",
             executable="grype",
             values=[value],
+            **_where(tmp_path),
         )
 
     message = str(raised.value)
