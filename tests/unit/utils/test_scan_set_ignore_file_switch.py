@@ -646,7 +646,14 @@ class TestNotHonored:
     def test_the_ignore_report_says_so(self, tmp_path):
         root = _build(tmp_path / "src", self.TREE)
         output = tmp_path / "out"
-        scan_set(source=str(root), output=str(output), honor_ignore_files=False)
+        # Without a run ID the pair is written only on request, as the command
+        # line asks for it.
+        scan_set(
+            source=str(root),
+            output=str(output),
+            honor_ignore_files=False,
+            write_lists=True,
+        )
         report = (output / "ash-ignore-report.txt").read_text(encoding="utf-8")
         assert report.splitlines()[0] == NOT_HONORED_REPORT_LINE
         assert "START CONTENTS: ${SOURCE_DIR}/.gitignore" not in report
@@ -672,11 +679,16 @@ class TestNotHonored:
         }, record
 
     def test_a_reused_scan_set_records_nothing(self, tmp_path):
-        """Nothing was matched, so there is nothing to attribute."""
+        """Nothing was matched, so there is nothing to attribute.
+
+        A scan set is reused only by the run that wrote it, so both calls carry
+        the same run ID.
+        """
         root = _build(tmp_path / "src", self.TREE)
         output = tmp_path / "out"
-        scan_set(source=str(root), output=str(output))
-        assert _record(root, output=str(output)) == {}
+        run_id = gss.new_run_id()
+        scan_set(source=str(root), output=str(output), run_id=run_id)
+        assert _record(root, output=str(output), run_id=run_id) == {}
 
 
 class TestAshsOwnOutputDirectory:
