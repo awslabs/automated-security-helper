@@ -85,6 +85,7 @@ from automated_security_helper.utils.error_text import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.sandbox.fs_guard import (
+    OutputLinkRefused,
     open_for_write,
     read_bytes_at_most,
     unlink_beneath,
@@ -1222,11 +1223,20 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         # run's own removal refuses to clean them up.
         for name in (WORKER_OUTPUT_FILE_NAME, WORKER_REQUEST_FILE_NAME):
             if not unlink_beneath(work_dir.parent, (work_dir.name, name)):
+                # A link there is named the way every other write below the
+                # output directory names a link it refuses (OutputLinkRefused),
+                # with or without a sandbox.
+                link_refusal = (
+                    f" {OutputLinkRefused(request_file, work_dir).strerror}."
+                    if work_dir.is_symlink()
+                    else ""
+                )
                 raise ScannerError(
                     text_without_values(
                         f"The detect-secrets worker's directory {work_dir} is "
                         "a link or not a directory, so nothing was written "
-                        "through it. Replace it with a directory to scan.",
+                        "through it. Replace it with a directory to scan."
+                        f"{link_refusal}",
                         self._environment_values(),
                     )
                 )
