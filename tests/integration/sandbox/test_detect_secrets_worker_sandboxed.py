@@ -61,7 +61,11 @@ def _require(backend):
 
 
 @pytest.mark.parametrize(
-    "backend_class", [BwrapBackend, LandlockBackend], ids=["bwrap", "landlock"]
+    "backend_class",
+    [
+        pytest.param(BwrapBackend, id="bwrap", marks=pytest.mark.requires_userns),
+        pytest.param(LandlockBackend, id="landlock"),
+    ],
 )
 def test_the_worker_scans_from_its_own_start_directory_under_the_sandbox(
     tmp_path, monkeypatch, backend_class
@@ -123,7 +127,11 @@ VERIFICATION_FILTER = (
 
 
 @pytest.mark.parametrize(
-    "backend_class", [BwrapBackend, LandlockBackend], ids=["bwrap", "landlock"]
+    "backend_class",
+    [
+        pytest.param(BwrapBackend, id="bwrap", marks=pytest.mark.requires_userns),
+        pytest.param(LandlockBackend, id="landlock"),
+    ],
 )
 def test_operator_verification_under_the_sandbox_without_a_network_reports_unverified(
     tmp_path, monkeypatch, backend_class

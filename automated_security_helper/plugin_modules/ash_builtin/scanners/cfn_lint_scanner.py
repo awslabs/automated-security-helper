@@ -442,7 +442,9 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         self.tool_type = ScannerToolType.IAC
         self.use_uv_tool = True
         self._setup_uv_tool_install_commands()
-        self.tool_version = self._get_uv_tool_version("cfn-lint")
+        # Deferred until the dependency check asks
+        # (resolve_deferred_tool_version), so construction runs nothing.
+        self.defer_tool_version_probe("cfn-lint")
         super().model_post_init(context)
 
     def _options(self) -> CfnLintScannerConfigOptions:

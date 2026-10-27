@@ -8,6 +8,7 @@
   "ignore_suppressions": false,
   "fail_on_findings": null,
   "fail_on_incomplete_scanners": null,
+  "config": null,
   "log_level": "INFO",
   "verbose": false,
   "debug": false,

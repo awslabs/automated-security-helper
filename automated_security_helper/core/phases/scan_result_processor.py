@@ -37,6 +37,18 @@ def _declared_tool_version(sarif_report: Any) -> str | None:
     return None
 
 
+def _declared_tool_version(sarif_report: Any) -> str | None:
+    """The version a scanner's own SARIF run gives its driver, if any."""
+    for run in getattr(sarif_report, "runs", None) or []:
+        driver = getattr(getattr(run, "tool", None), "driver", None)
+        version = getattr(driver, "version", None) or getattr(
+            driver, "semanticVersion", None
+        )
+        if isinstance(version, str) and version.strip():
+            return version.strip()
+    return None
+
+
 class ScanResultProcessor:
     """Processes raw scanner containers into AshAggregatedResults.
 
