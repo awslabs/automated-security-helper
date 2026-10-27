@@ -98,13 +98,24 @@ def stops(monkeypatch) -> List[Dict[str, Any]]:
     return calls
 
 
+#: A loopback app accepts only its own address, port included, so it is built
+#: for the port it listens on (cli/mcp._transport_security). TestClient binds
+#: nothing, so any port names the app's own origin here.
+_PORT = 8000
+
+
 def _apps():
+    import functools
+
     from automated_security_helper.cli.mcp import (
         build_sse_app,
         build_streamable_http_app,
     )
 
-    return {"streamable-http": build_streamable_http_app, "sse": build_sse_app}
+    return {
+        "streamable-http": functools.partial(build_streamable_http_app, port=_PORT),
+        "sse": functools.partial(build_sse_app, port=_PORT),
+    }
 
 
 @pytest.mark.parametrize("transport", ["streamable-http", "sse"])
@@ -147,7 +158,7 @@ class _FakeServer:
         else:
             self.should_exit = True
 
-    def run(self) -> None:
+    def run(self, sockets=None) -> None:
         self.ran = True
         handler = signal.getsignal(signal.SIGHUP)
         if callable(handler):
@@ -156,15 +167,17 @@ class _FakeServer:
 
 @pytest.fixture
 def fake_uvicorn(monkeypatch):
-    """uvicorn.Server replaced by a function that makes a _FakeServer.
+    """uvicorn.Server replaced by a _FakeServer class that records its instances.
+
+    A class, not a factory function: _run_uvicorn subclasses the server class
+    _uvicorn_server_class returns (its ``startup`` logs where a socket ASH bound
+    listens), so a function in uvicorn.Server's place fails the subclass statement
+    with "function() argument 'code' must be code, not str".
 
     And SIGINT not ignored when ASH started, as for a server in the foreground:
     that is read from the process (cli.SIGINT_IGNORED_AT_START), and in a test run
-    started as ``cmd &`` it is ignored. _uvicorn_server_class then subclasses
-    uvicorn.Server, which here is no class, and every test of this fixture failed
-    with "function() argument 'code' must be code, not str". The server for an
-    ignored SIGINT is tested with uvicorn's own, by
-    test_an_http_server_leaves_a_sigint_ignored_at_start_ignored.
+    started as ``cmd &`` it is ignored. The server for an ignored SIGINT is tested
+    with uvicorn's own, by test_an_http_server_leaves_a_sigint_ignored_at_start_ignored.
     """
     import uvicorn
 
@@ -173,12 +186,12 @@ def fake_uvicorn(monkeypatch):
     monkeypatch.setattr(cli, "SIGINT_IGNORED_AT_START", False)
     servers: List[_FakeServer] = []
 
-    def make(config):
-        server = _FakeServer(config)
-        servers.append(server)
-        return server
+    class _RecordedFakeServer(_FakeServer):
+        def __init__(self, config) -> None:
+            super().__init__(config)
+            servers.append(self)
 
-    monkeypatch.setattr(uvicorn, "Server", make)
+    monkeypatch.setattr(uvicorn, "Server", _RecordedFakeServer)
     return servers
 
 
@@ -255,8 +268,8 @@ def test_the_signal_that_stops_the_http_server_is_noted_while_it_runs(
     noted: List[Optional[int]] = []
     run = _FakeServer.run
 
-    def run_and_note(self) -> None:
-        run(self)
+    def run_and_note(self, sockets=None) -> None:
+        run(self, sockets=sockets)
         noted.append(cli_mcp._stop_signal)
 
     monkeypatch.setattr(_FakeServer, "run", run_and_note)
@@ -437,7 +450,7 @@ def test_an_http_server_that_fails_kills_the_tools_groups(
     from automated_security_helper.cli.mcp import _run_uvicorn
     from automated_security_helper.core.enums import AshLogLevel
 
-    def crash(self) -> None:
+    def crash(self, sockets=None) -> None:
         raise RuntimeError("the server failed")
 
     monkeypatch.setattr(_FakeServer, "run", crash)
