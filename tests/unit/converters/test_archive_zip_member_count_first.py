@@ -96,6 +96,24 @@ def with_a_trailing_byte(raw: bytes) -> bytes:
     return raw + b"\x00"
 
 
+def zipfile_reads_zip64_extensible_data() -> bool:
+    """Whether this Python's zipfile opens a zip64 zip that has extensible data.
+
+    An older zipfile looks for the zip64 end record at a fixed distance before its
+    locator, so extensible data puts the record out of reach: it keeps the end
+    record's saturated counts and then fails on the directory ("Bad magic number
+    for central directory"). The converter takes what ``zipfile`` reads, so it
+    cannot extract an archive that this zipfile cannot open.
+    """
+    with pytest.MonkeyPatch.context() as patch:
+        raw = zip64_with_extensible_data(2, patch)
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            return len(archive.namelist()) == 2
+    except zipfile.BadZipFile:
+        return False
+
+
 @pytest.fixture
 def limited(test_plugin_context, monkeypatch):
     options = test_plugin_context.config.converters.archive.options
@@ -172,6 +190,10 @@ def test_a_zip_over_max_members_is_refused_before_zipfile_opens_it(
         pytest.param(
             lambda mp: zip64_with_extensible_data(LIMIT, mp),
             id="zip64-extensible-data-at-the-limit",
+            marks=pytest.mark.skipif(
+                not zipfile_reads_zip64_extensible_data(),
+                reason="this Python's zipfile cannot open a zip64 zip with extensible data",
+            ),
         ),
     ],
 )
