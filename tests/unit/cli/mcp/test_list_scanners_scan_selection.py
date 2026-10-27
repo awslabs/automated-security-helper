@@ -162,6 +162,9 @@ for step in json.loads(sys.argv[1])["steps"]:
             {
                 "started": bool(started.get("success")),
                 "scanners": _scanner_results([output / "ash_aggregated_results.json"]),
+                # Why a scan was refused, so a failed assertion names the cause.
+                "error": started.get("error"),
+                "error_type": started.get("error_type"),
             }
         )
     elif op == "workspace_scan":
