@@ -457,7 +457,16 @@ def test_each_stage_ends_by_clearing_what_installers_left_writable(stage, instru
     assert installs, f"the {stage} stage no longer installs anything"
     assert sweeps, f"the {stage} stage has no sweep"
     assert sweeps[-1] > installs[-1]
-    for path in ("/proc", "/sys", "/dev", "/tmp", "/var/tmp", "/run/lock"):
+    # The literals have to match the -path arguments the Dockerfile emits; no
+    # file is opened at any of them.
+    for path in (
+        "/proc",
+        "/sys",
+        "/dev",
+        "/tmp",  # nosec B108
+        "/var/tmp",  # nosec B108
+        "/run/lock",
+    ):
         assert f"-path {path} " in runs[sweeps[-1]]
 
 

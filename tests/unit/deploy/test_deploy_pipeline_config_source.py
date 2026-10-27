@@ -71,7 +71,7 @@ CONTAINER_INIT = (
 CONTAINER_INIT_PATH = "/usr/local/bin/ash-container-init"
 #: The value the CDK projects give ASH_CONFIG. Each test moves it into its own
 #: directory, as the helper path is moved, so parallel runs cannot share a file.
-CDK_CONFIG_PATH = "/tmp/ash-config/.ash.yaml"
+CDK_CONFIG_PATH = "/tmp/ash-config/.ash.yaml"  # nosec B108
 
 IN_TREE_PROJECT_NAME = "in-tree-config"
 #: Ignores only the file holding the finding. With every file ignored, detect-secrets
