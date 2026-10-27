@@ -96,6 +96,28 @@ def with_a_trailing_byte(raw: bytes) -> bytes:
     return raw + b"\x00"
 
 
+def zipfile_allows_for_extensible_data() -> bool:
+    """Whether this Python's zipfile opens ``zip64_with_extensible_data``.
+
+    Releases before the fix to ``_EndRecData64`` assume the zip64 end record sits
+    right before its locator. Given extensible data they read the saturated counts
+    of the plain end record (65535 entries) and locate the central directory from
+    that record, so they cannot open the zip and ASH has no directory to count.
+    ASH reads the end record with zipfile's own ``_EndRecData``, so the probe asks it
+    for the count as well as opening the zip.
+    """
+    with pytest.MonkeyPatch.context() as patch:
+        raw = zip64_with_extensible_data(LIMIT, patch)
+    try:
+        end_record = vars(zipfile)["_EndRecData"](io.BytesIO(raw))
+        if not end_record or end_record[vars(zipfile)["_ECD_ENTRIES_TOTAL"]] != LIMIT:
+            return False
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            return len(archive.namelist()) == LIMIT
+    except (zipfile.BadZipFile, OSError, ValueError, KeyError, struct.error):
+        return False
+
+
 @pytest.fixture
 def limited(test_plugin_context, monkeypatch):
     options = test_plugin_context.config.converters.archive.options
@@ -172,6 +194,14 @@ def test_a_zip_over_max_members_is_refused_before_zipfile_opens_it(
         pytest.param(
             lambda mp: zip64_with_extensible_data(LIMIT, mp),
             id="zip64-extensible-data-at-the-limit",
+            marks=pytest.mark.skipif(
+                not zipfile_allows_for_extensible_data(),
+                reason=(
+                    "this zipfile cannot open a zip64 zip with extensible data, so "
+                    "ASH refuses it for max_members as a zip it cannot count; "
+                    "newer releases of zipfile allow for the data"
+                ),
+            ),
         ),
     ],
 )
