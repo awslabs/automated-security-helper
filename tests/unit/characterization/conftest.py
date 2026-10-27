@@ -37,6 +37,15 @@ with _harness.watched_imports(
     import requests  # noqa: E402, F401
     import urllib3  # noqa: E402, F401
 
+# The harness models POSIX exec semantics, and test_harness_confinement.py imports
+# posix and pty and names POSIX-only functions of os and signal at module level, so on
+# Windows the package's test modules are kept out of collection: a module that fails
+# to import there is a collection error, which ends the whole run with exit 2 rather
+# than skipping anything. _launch_guards below skips every test that reaches it on
+# any other path.
+if sys.platform == "win32":
+    collect_ignore_glob = ["test_*.py"]
+
 
 @pytest.hookimpl(wrapper=True)
 def pytest_make_collect_report(collector: pytest.Collector) -> Iterator[Any]:

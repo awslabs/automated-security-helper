@@ -1742,9 +1742,16 @@ def _refuse_socket(api: str) -> Callable[..., Any]:
 # Signals and reaping: a fake pid is routed to its FakePopen, any other pid fails
 # ---------------------------------------------------------------------------
 
-#: The real functions, captured before any guard replaces them.
-_REAL_GETSID = os.getsid
-_REAL_GETPGRP = os.getpgrp
+#: The real functions, captured before any guard replaces them. Windows has neither
+#: sessions nor process groups, so its ``os`` has no ``getsid`` and no ``getpgrp``.
+#: The conftest imports this module at collection, before its Windows skip runs, so
+#: both are read with ``getattr``: a bare ``os.getsid`` there raised AttributeError
+#: while the conftest loaded and failed the collection of every file in the shard.
+#: The guards that fall back on them are installed only where ``os`` has the function
+#: they replace (``_SIGNAL_GUARDS`` is applied under ``hasattr``), and on POSIX both
+#: exist, so a None here is never called.
+_REAL_GETSID = getattr(os, "getsid", None)
+_REAL_GETPGRP = getattr(os, "getpgrp", None)
 
 
 def _fake(pid: int) -> Optional["FakePopen"]:
