@@ -243,36 +243,41 @@ def _unit_tool_guard(request, tmp_path_factory, _isolated_home, monkeypatch):
             "no check of what it leaves there, and is not one of the modules allowed "
             f"that: {sorted(REAL_HOME_MODULES)}"
         )
-    # A private MonkeyPatch, for the reason tests/conftest.py's _isolated_home gives:
-    # this is undone before _isolated_home's, and after every test's own.
-    with pytest.MonkeyPatch.context() as patch:
-        if home is not None:
-            patch.setenv("UV_TOOL_DIR", str(home / ".local" / "share" / "uv" / "tools"))
-            patch.setenv("UV_CACHE_DIR", str(home / ".cache" / "uv"))
-        guard = None
-        if marker is None:
-            # Named by a counter, not tmp_path_factory.mktemp, which lists the whole
-            # base directory to pick its next number: once per test, that listing
-            # grew with the run (tests/conftest.py names the homes the same way).
-            guard = install_tool_guard(
-                patch,
-                tmp_path_factory.getbasetemp() / "guards" / str(next(_GUARD_COUNTER)),
-                own_directories=run_own_directories(tmp_path_factory.getbasetemp()),
-                basetemp=tmp_path_factory.getbasetemp(),
-            )
-            if module not in PROBE_SUBJECT_MODULES:
-                # On the test's own ``monkeypatch``, not this fixture's private one.
-                # The test's monkeypatch is still live when this fixture is torn
-                # down (its sys.platform patch was, in a teardown traceback), so a
-                # test that patches one of these attributes itself (the
-                # ``no_tool_probes`` fixture does three of them) records the stub
-                # as the original and, undone after this fixture, would put the
-                # stub back for every later test in the process. One instance
-                # undoes every patch of one attribute last-in first-out.
-                stub_tool_probes(monkeypatch)
-        yield UnitTestGuard(guard, home)
-        started = guard.tool_starts if guard is not None else []
-        refused = guard.home_refusals if guard is not None else []
+    # Every patch this fixture makes goes on the test's own ``monkeypatch``, never
+    # on a private MonkeyPatch of its own. Autouse fixtures of tests/conftest.py
+    # take ``monkeypatch`` too, so it is set up before this fixture and torn down
+    # after it, whatever this fixture's signature says. A private patch here was
+    # undone first, and a test that then patched the same target (PATH,
+    # UV_CACHE_DIR, ``sys.platform``, the probe stubs) had recorded this
+    # fixture's value as the original and put it back AFTER the real one was
+    # restored: the stand-in directory, a finished test's uv cache or a stub
+    # lambda leaked into every later test of the worker. On one instance the
+    # undo is last-in first-out: the test's patch goes, then this fixture's.
+    if home is not None:
+        monkeypatch.setenv(
+            "UV_TOOL_DIR", str(home / ".local" / "share" / "uv" / "tools")
+        )
+        monkeypatch.setenv("UV_CACHE_DIR", str(home / ".cache" / "uv"))
+    guard = None
+    if marker is None:
+        # Named by a counter, not tmp_path_factory.mktemp, which lists the whole
+        # base directory to pick its next number: once per test, that listing
+        # grew with the run (tests/conftest.py names the homes the same way).
+        guard = install_tool_guard(
+            monkeypatch,
+            tmp_path_factory.getbasetemp() / "guards" / str(next(_GUARD_COUNTER)),
+            own_directories=run_own_directories(tmp_path_factory.getbasetemp()),
+            basetemp=tmp_path_factory.getbasetemp(),
+        )
+        if module not in PROBE_SUBJECT_MODULES:
+            stub_tool_probes(monkeypatch)
+    yield UnitTestGuard(guard, home)
+    # The checks below run at this fixture's finalization, before ``monkeypatch``
+    # unwinds, so a test's own patches are still in force here: a test that sets
+    # ``sys.platform`` scopes that patch to its call (see
+    # test_results_paths_compare_names_as_the_filesystem_does.py).
+    started = guard.tool_starts if guard is not None else []
+    refused = guard.home_refusals if guard is not None else []
     # Unconditional, not only when a guard was installed: a runs_real_tools
     # test has no guard, and the executable paths and probe answers it
     # resolved must not leak into the next test. The find_executable cache
