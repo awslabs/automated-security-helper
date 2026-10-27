@@ -49,6 +49,7 @@ from automated_security_helper.models.asharp_model import (
     ScannerStatusInfo,
 )
 from automated_security_helper.schemas.sarif_schema_model import Result
+from automated_security_helper.utils.inner_run_outcome import mark_run_completed
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 
 REFERENCE = "${ASH_PROBE_SEV:LOW}"
@@ -74,12 +75,16 @@ def value_where_merge_runs(monkeypatch: pytest.MonkeyPatch) -> None:
     assert resolve_env_references(REFERENCE) == CANARY
 
 
-def _record(scanner: str = "bandit") -> str:
+def _record(scanner: str = "bandit", run_id: "str | None" = None) -> str:
     """One shard's results, as a scan whose config read severity_threshold from
     the environment writes them.
 
     *scanner* is the one scanner the shard ran. bandit has a threshold of its
-    own (ALL), which the summary table shows in place of the global one."""
+    own (ALL), which the summary table shows in place of the global one.
+
+    *run_id* is the outer run's id for a file an inner (container or nix) run
+    writes: the host reads a file back only when it records that this run
+    completed (utils/inner_run_outcome.py). None writes no such record."""
     model = AshAggregatedResults()
     model.ash_config = AshConfig(project_name="demo")
     model.scanner_results[scanner] = ScannerStatusInfo(
@@ -89,6 +94,7 @@ def _record(scanner: str = "bandit") -> str:
         model,
         ShardAssignment(shard_index=0, shard_count=1, assigned_scanners=[scanner]),
     )
+    mark_run_completed(model, run_id)
     data = json.loads(model.model_dump_json(by_alias=True))
     data["ash_config"]["global_settings"]["severity_threshold"] = REFERENCE
     return json.dumps(data)
@@ -220,7 +226,9 @@ def test_an_outer_scan_reads_the_record_with_its_own_value(tmp_path, monkeypatch
 
     def inner(*args, **kwargs):
         opts.output_dir.mkdir(parents=True, exist_ok=True)
-        (opts.output_dir / RESULTS).write_text(_record(), encoding="utf-8")
+        (opts.output_dir / RESULTS).write_text(
+            _record(run_id=kwargs.get("outer_run_id")), encoding="utf-8"
+        )
         return create_completed_process(args=[], returncode=0, stdout="", stderr="")
 
     if mode == "container":
@@ -246,7 +254,9 @@ def test_an_outer_scan_records_its_own_value_as_the_reference(
 
     def inner(*args, **kwargs):
         opts.output_dir.mkdir(parents=True, exist_ok=True)
-        (opts.output_dir / RESULTS).write_text(_record(), encoding="utf-8")
+        (opts.output_dir / RESULTS).write_text(
+            _record(run_id=kwargs.get("outer_run_id")), encoding="utf-8"
+        )
         return create_completed_process(args=[], returncode=0, stdout="", stderr="")
 
     runner = _run_container_mode if mode == "container" else _run_nix_mode
@@ -314,12 +324,15 @@ def test_a_container_scan_exits_as_a_local_scan_does(tmp_path, monkeypatch):
     opts = _container_source(tmp_path)
     output = opts.output_dir
 
-    def write_the_inner_scan_s_files() -> None:
+    def write_the_inner_scan_s_files(run_id: "str | None" = None) -> None:
         (output / "reports").mkdir(parents=True, exist_ok=True)
         (output / "reports" / "ash.sarif").write_text(
             json.dumps(_SARIF), encoding="utf-8"
         )
-        data = json.loads(_scan_record("LOW").model_dump_json(by_alias=True))
+        model = _scan_record("LOW")
+        # The marker the in-container run writes when it completes.
+        mark_run_completed(model, run_id)
+        data = json.loads(model.model_dump_json(by_alias=True))
         data["ash_config"]["global_settings"]["severity_threshold"] = REFERENCE
         (output / RESULTS).write_text(json.dumps(data), encoding="utf-8")
 
@@ -337,7 +350,7 @@ def test_a_container_scan_exits_as_a_local_scan_does(tmp_path, monkeypatch):
     (output / RESULTS).unlink()
 
     def inner(**kwargs):
-        write_the_inner_scan_s_files()
+        write_the_inner_scan_s_files(kwargs.get("outer_run_id"))
         return create_completed_process(args=[], returncode=local, stdout="", stderr="")
 
     with patch.object(module, "run_ash_container", side_effect=inner):
