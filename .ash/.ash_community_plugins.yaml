@@ -1194,9 +1194,10 @@ global_settings:
     - path: tests/unit/test_docs_ci_runner_judgments.py
       rule_id: API_KEY_OR_SECRET
       reason: >-
-        TOKEN = "0a1b2c3d4e5f60718293a4b5c6d7e8f9" is a pattern-built fixture
-        value the judgment tests use as the thing that must be redacted from
-        runner output. The fixture exists to prove redaction.
+        The flagged line assigns the TOKEN constant a pattern-built 32-hex
+        fixture value that the judgment tests use as the thing that must be
+        redacted from runner output. The fixture exists to prove redaction. The
+        reason does not repeat the assignment, so this file does not flag itself.
     # === gitleaks: fixture tokens in tests (kept in step with .ash/.ash.yaml) ===
     - rule_id: "generic-api-key"
       path: "tests/unit/docs/test_page_claims.py"
@@ -1208,9 +1209,11 @@ global_settings:
     - rule_id: "generic-api-key"
       path: "tests/unit/test_docs_ci_runner_judgments.py"
       reason: >-
-        TOKEN = "0a1b2c3d4e5f60718293a4b5c6d7e8f9" is a pattern-built
-        (0a1b2c3d...) fixture value the judgment tests use as the thing that must
-        be redacted from runner output. The fixture exists to prove redaction.
+        The flagged line assigns the TOKEN constant a pattern-built 32-hex
+        fixture value (it starts 0a1b2c3d) that the judgment tests use as the
+        thing that must be redacted from runner output. The fixture exists to
+        prove redaction. The reason does not repeat the assignment, so this file
+        does not flag itself.
     # === bandit in tests and one log line (kept in step with .ash/.ash.yaml) ===
     - rule_id: B103
       path: tests/unit/assets/test_install_pinned_tool.py
