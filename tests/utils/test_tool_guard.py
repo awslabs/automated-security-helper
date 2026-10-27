@@ -1118,7 +1118,21 @@ def _probe_answers() -> list:
     from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
         OpengrepScanner,
     )
-    from automated_security_helper.utils import pre_installed_tool, uv_tool_runner
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        _trivy_scanner_base,
+    )
+    from automated_security_helper.utils import (
+        content_db_staleness,
+        pre_installed_tool,
+        uv_tool_runner,
+    )
+
+    def _trivy_db_age():
+        try:
+            content_db_staleness.MEASURERS["trivy-db"](None)
+        except ValueError as error:
+            return str(error)[:40]
+        return "a trivy database was dated"
 
     return [
         uv_tool_runner.UVToolRunner(uv_executable="uv").is_uv_available(),
@@ -1126,6 +1140,8 @@ def _probe_answers() -> list:
         uv_tool_runner.get_uv_tool_command("no-such-tool-anywhere"),
         pre_installed_tool._run(["uv", "--version"], 5),
         OpengrepScanner._get_opengrep_version(None),
+        _trivy_scanner_base.trivy_default_misconfig_scanners("trivy", ["repository"]),
+        _trivy_db_age(),
     ]
 
 
@@ -1157,7 +1173,15 @@ def test_the_child_probe_stubs_answer_as_stub_tool_probes_does(monkeypatch, tmp_
     reset_tool_lookup_caches()
 
     assert json.loads(child.stdout.strip().splitlines()[-1]) == _probe_answers()
-    assert _probe_answers() == [False, None, None, None, None]
+    assert _probe_answers() == [
+        False,
+        None,
+        None,
+        None,
+        None,
+        None,
+        "`trivy version --format json` printed",
+    ]
 
 
 # ---------------------------------------------------------------------------

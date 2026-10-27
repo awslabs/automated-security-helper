@@ -906,15 +906,26 @@ def stub_tool_probes(monkeypatch) -> None:
     Each one starts a tool to ask a question the tests in question do not ask:
     ``uv --version`` (``UVToolRunner.uv_availability``, from building a uv-run
     scanner), ``uv tool run <tool> --version`` (``get_uv_tool_command``), ``<tool>
-    --version`` for a pre-installed tool (``pre_installed_tool._run``) and
-    ``opengrep --version`` (``OpengrepScanner._get_opengrep_version``). Each answers
-    as it does on a host without the tool: uv absent, the pre-installed tool not
-    executable, no opengrep version.
+    --version`` for a pre-installed tool (``pre_installed_tool._run``),
+    ``opengrep --version`` (``OpengrepScanner._get_opengrep_version``), ``trivy
+    <subcommands> --help`` for trivy's default misconfiguration scanners
+    (``trivy_default_misconfig_scanners``, read when a trivy scanner builds its
+    arguments) and ``trivy version --format json`` for the age of trivy's database
+    (``content_db_staleness._built_from_trivy``). Each answers as it does on a host
+    without the tool: uv absent, the pre-installed tool not executable, no opengrep
+    version, no help text to read the list from, no database to date.
     """
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        _trivy_scanner_base,
+    )
     from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
         OpengrepScanner,
     )
-    from automated_security_helper.utils import pre_installed_tool, uv_tool_runner
+    from automated_security_helper.utils import (
+        content_db_staleness,
+        pre_installed_tool,
+        uv_tool_runner,
+    )
 
     monkeypatch.setattr(
         uv_tool_runner.UVToolRunner, "uv_availability", lambda self: (False, None)
@@ -922,6 +933,41 @@ def stub_tool_probes(monkeypatch) -> None:
     monkeypatch.setattr(uv_tool_runner, "find_uv_or_none", lambda: None)
     monkeypatch.setattr(pre_installed_tool, "_run", lambda command, timeout: None)
     monkeypatch.setattr(OpengrepScanner, "_get_opengrep_version", lambda self: None)
+    # The memo trivy_default_misconfig_scanners reads first, replaced by one that
+    # already holds "unknown" for every trivy, so no ``--help`` is run. The memo,
+    # not the function: trivy-repo calls the function through a binding its own
+    # module took at import (ash_trivy_plugins/trivy_repo_scanner.py), which a
+    # patch of the base module's name would not reach, and importing that module
+    # here would register the plugin (``ash_scanner_plugin``) in every test.
+    monkeypatch.setattr(
+        _trivy_scanner_base,
+        "_DEFAULT_MISCONFIG_SCANNERS",
+        _NoDefaultMisconfigScanners(),
+    )
+    monkeypatch.setitem(content_db_staleness.MEASURERS, "trivy-db", _no_trivy_database)
+
+
+class _NoDefaultMisconfigScanners(dict):
+    """``_trivy_scanner_base._DEFAULT_MISCONFIG_SCANNERS`` holding None for any key.
+
+    ``trivy_default_misconfig_scanners`` returns a remembered list without running
+    ``trivy <subcommands> --help``; None is what it returns when the help text could
+    not be read, which is what a stand-in's exit 1 gave it.
+    """
+
+    def __contains__(self, key) -> bool:
+        return True
+
+    def __getitem__(self, key):
+        return None
+
+
+def _no_trivy_database(ctx):
+    """What ``_built_from_trivy`` raises when ``trivy version`` printed nothing."""
+    raise ValueError(
+        "`trivy version --format json` printed nothing (exit 1): the unit tests' "
+        "tool guard answers the probe without starting trivy"
+    )
 
 
 #: Python source a child process that runs ASH executes first, to answer the probes
@@ -930,9 +976,13 @@ def stub_tool_probes(monkeypatch) -> None:
 #: ``ash scan`` ran that uv, and the tools it starts, for real. It has to be source
 #: rather than a call: a child started with ``-I`` cannot import the tests.
 CHILD_TOOL_PROBE_STUBS = """\
+from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+    _trivy_scanner_base as _stubbed_trivy_base,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
     OpengrepScanner as _StubbedOpengrepScanner,
 )
+from automated_security_helper.utils import content_db_staleness as _stubbed_staleness
 from automated_security_helper.utils import pre_installed_tool as _stubbed_pre_installed
 from automated_security_helper.utils import uv_tool_runner as _stubbed_uv_tool_runner
 
@@ -940,6 +990,27 @@ _stubbed_uv_tool_runner.UVToolRunner.uv_availability = lambda self: (False, None
 _stubbed_uv_tool_runner.find_uv_or_none = lambda: None
 _stubbed_pre_installed._run = lambda command, timeout: None
 _StubbedOpengrepScanner._get_opengrep_version = lambda self: None
+
+
+class _NoDefaultMisconfigScanners(dict):
+    def __contains__(self, key):
+        return True
+
+    def __getitem__(self, key):
+        return None
+
+
+_stubbed_trivy_base._DEFAULT_MISCONFIG_SCANNERS = _NoDefaultMisconfigScanners()
+
+
+def _no_trivy_database(ctx):
+    raise ValueError(
+        "`trivy version --format json` printed nothing (exit 1): the unit tests' "
+        "tool guard answers the probe without starting trivy"
+    )
+
+
+_stubbed_staleness.MEASURERS["trivy-db"] = _no_trivy_database
 """
 
 

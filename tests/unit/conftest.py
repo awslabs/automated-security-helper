@@ -25,6 +25,7 @@ from tests.utils.tool_guard import (
     real_tools_opt_out_refusal,
     reset_tool_lookup_caches,
     run_own_directories,
+    stub_tool_probes,
     tool_files_left_in,
 )
 
@@ -60,6 +61,51 @@ REAL_TOOL_MODULES = frozenset(
 #: the marker itself: test_home_isolation.py, and the probe it runs in a pytest of its
 #: own whose starting home is a sentinel directory.
 REAL_HOME_MODULES = frozenset({"home_isolation_probe.py", "test_home_isolation.py"})
+
+#: The modules, as paths under tests/unit, whose subject is a tool probe itself:
+#: ``UVToolRunner.uv_availability`` and ``get_tool_version``, ``get_uv_tool_command``,
+#: ``verify_pre_installed_tool``, trivy's ``--help`` and ``version`` reads, or
+#: opengrep's version. ``_unit_tool_guard`` answers those probes for every other
+#: guarded test (``stub_tool_probes``), because building a scanner runs them and
+#: the stand-in records ``uv tool run ... <tool> --version`` as a start; a test
+#: of a probe has to reach the real code under its own doubles, so these keep
+#: the probes as they are. Each still runs under the guard: a probe that reaches
+#: a stand-in is recorded as before.
+PROBE_SUBJECT_MODULES = frozenset(
+    {
+        "cli/mcp/test_list_scanners.py",
+        "config/test_tool_version_is_a_version_specifier.py",
+        "core/phases/test_scanner_threads_keep_the_tree_scope.py",
+        "core/test_inventory_installs_nothing.py",
+        "plugin_modules/ash_builtin/test_opengrep_scanner.py",
+        "plugin_modules/ash_builtin/test_trivy_probe_isolation.py",
+        "plugin_modules/ash_builtin/test_trivy_scanner.py",
+        "plugin_modules/test_offline_trivy_terraform_modules.py",
+        "plugin_modules/test_trivy_misconfig_list_cache.py",
+        "utils/test_a_cache_reset_during_a_version_probe_drops_its_answer.py",
+        "utils/test_a_parked_probe_waiter_stops_when_its_scan_is_cancelled.py",
+        "utils/test_a_probe_failure_text_belongs_to_its_own_call.py",
+        "utils/test_a_probe_runs_in_the_directory_its_context_declares.py",
+        "utils/test_a_shared_probe_answer_stays_in_its_own_scope.py",
+        "utils/test_a_stopped_install_drops_its_memos.py",
+        "utils/test_a_version_probe_crossing_an_invalidation_is_not_remembered.py",
+        "utils/test_concurrent_checks_of_one_copy_start_one_probe.py",
+        "utils/test_content_db_refresh.py",
+        "utils/test_content_db_staleness.py",
+        "utils/test_parsed_child_output_ignores_the_callers_terminal.py",
+        "utils/test_pre_installed_tool.py",
+        "utils/test_pre_installed_tool_sandbox_grant.py",
+        "utils/test_the_uv_tool_version_carries_no_piece_of_a_value.py",
+        "utils/test_tool_lookups_follow_path_and_bin_path.py",
+        "utils/test_uv_availability_probe_errors_are_retried.py",
+        "utils/test_uv_ignores_repository_config.py",
+        "utils/test_uv_installed_with_ash.py",
+        "utils/test_uv_memos_answer_for_the_probed_environment.py",
+        "utils/test_uv_tool_command_whose_file_is_gone.py",
+        "utils/test_uv_tool_runner.py",
+        "utils/test_uv_tool_runner_extended.py",
+    }
+)
 
 
 def pytest_configure(config):
@@ -134,6 +180,20 @@ def _unit_tool_guard(request, tmp_path_factory, _isolated_home):
     has the developer's HOME, so only the guard applies to it, and only a module in
     ``REAL_HOME_MODULES`` may have one.
 
+    A guarded test also gets the probes answered without a process
+    (``stub_tool_probes``): building a uv-run scanner asks uv for the tool's
+    version (``uv tool run --from <spec> <tool> --version``), detect-secrets'
+    dependency check runs ``uv tool run detect-secrets --version``, a trivy
+    scanner reads ``trivy repository --help`` and ``trivy version``, and the
+    stand-in records each of those as a start, by design: ``--version`` with
+    anything after it is a start. Before this, 85 unit modules that build a real
+    scanner class and never asked for the stub failed at teardown on exactly that
+    line, on every host. The answers are a host without the tools (uv absent, the
+    pre-installed tool not executable, no trivy help text or database, no
+    opengrep version); a test that needs a tool present says so with its own
+    double, which it applies after this fixture and so wins. A module whose
+    subject is a probe is in ``PROBE_SUBJECT_MODULES`` and keeps the real probes.
+
     Not covered: a module- or session-scoped fixture is set up before any test's
     guard is in, so one that starts a process puts in a guard of its own, as
     cli/mcp/test_list_scanners.py and test_session_plugins_stay_in_their_session.py
@@ -174,6 +234,8 @@ def _unit_tool_guard(request, tmp_path_factory, _isolated_home):
                 own_directories=run_own_directories(tmp_path_factory.getbasetemp()),
                 basetemp=tmp_path_factory.getbasetemp(),
             )
+            if module not in PROBE_SUBJECT_MODULES:
+                stub_tool_probes(patch)
         yield UnitTestGuard(guard, home)
         started = guard.tool_starts if guard is not None else []
         refused = guard.home_refusals if guard is not None else []
