@@ -126,18 +126,28 @@ def test_outside_a_registered_root_it_is_plain_open(tmp_path):
 
 
 def test_bytes_are_written_unchanged_and_a_link_at_the_name_is_not_followed(tree):
-    """open_for_write_bytes keeps open_for_write's rule and writes bytes as given."""
+    """open_for_write_bytes keeps open_for_write's rule and writes bytes as given.
+
+    The rule is the one test_a_link_at_the_file_name_is_refused_not_followed pins
+    for the text variant: below a registered root a link at the file name is
+    refused, not followed and not replaced, and nothing is written. The bytes
+    half writes a regular file and reads every byte back as given.
+    """
     root, elsewhere = tree
+    payload = bytes(range(256)) + b"\r\n\n"
+    regular = root / "source" / "copy.bin"
+    with fs_guard.open_for_write_bytes(regular) as f:
+        f.write(payload)
+    assert regular.read_bytes() == payload
+
     victim = elsewhere / "victim.bin"
     victim.write_bytes(b"original")
-    target = root / "source" / "copy.bin"
-    target.symlink_to(victim)
-    payload = bytes(range(256)) + b"\r\n\n"
-    with fs_guard.open_for_write_bytes(target) as f:
-        f.write(payload)
+    linked = root / "source" / "linked.bin"
+    linked.symlink_to(victim)
+    with pytest.raises(fs_guard.OutputLinkRefused):
+        fs_guard.open_for_write_bytes(linked)
     assert victim.read_bytes() == b"original"
-    assert not target.is_symlink()
-    assert target.read_bytes() == payload
+    assert linked.is_symlink(), "the refusal leaves the link where it was"
 
 
 def test_bytes_outside_a_registered_root_are_plain_open(tmp_path):
