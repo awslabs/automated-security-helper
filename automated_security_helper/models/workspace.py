@@ -160,7 +160,7 @@ from __future__ import annotations
 from enum import Enum, IntEnum
 from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional
 
-from pydantic import Field, computed_field
+from pydantic import Field, PrivateAttr, computed_field
 
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.utils.undecodable_text import RecordModel
@@ -291,6 +291,15 @@ class ProjectInputNotScanned(RecordModel):
         ),
     ]
     reason: Annotated[str, Field(..., description="Why the scanner did not scan it.")]
+
+
+#: The code a scanner's rolled-up entry reads when its project's row recorded none and
+#: the scanner did not complete: it produced no target report, so ``exit_code`` was
+#: never set on the row. ASH's own stand-in for a run that did not complete (the
+#: incomplete-run member of the judged codes), never the default 0 of an unset field
+#: and never a tool's own exit. A SKIPPED scanner is a complete outcome and does not
+#: read it.
+SCANNER_EXIT_CODE_UNRECORDED = 125
 
 
 class WorkspaceProjectResult(RecordModel):
