@@ -2102,6 +2102,14 @@ class AshConfig(RedactedSection):
     _environment_values: List[str] = PrivateAttr(
         default_factory=reporter_default_values
     )
+    # Each string an operator's ``--config-overrides`` value holds, set by
+    # resolve_config.apply_config_overrides. An override's value is the
+    # operator's, not the environment's, but it can be a credential, so what
+    # prints a section of this config (get_plugin_config's debug line, a
+    # section's repr) hides it as it hides a value the files read from the
+    # environment. Redaction state only: nothing records or serializes it, and
+    # the refusals built from _environment_values do not read it.
+    _override_values: Tuple[str, ...] = PrivateAttr(default=())
     # How the files wrote each of those values and keys
     # (config_validator.EnvironmentRewrite). The record of this config, in a
     # results file and anything sent from it, keeps the reference as the file
@@ -2153,7 +2161,7 @@ class AshConfig(RedactedSection):
         model built from a section's dump by other code carries none until it
         is put into a config, a section or a plugin.
         """
-        return environment_strings(self._environment_values)
+        return environment_strings((*self._environment_values, *self._override_values))
 
     def _carry_environment_values_into_sections(self) -> None:
         values = self._redaction_values()
@@ -2170,7 +2178,11 @@ class AshConfig(RedactedSection):
         # The values themselves, or all the private attributes at once (a
         # config rebuilt from another keeps what that one's load recorded,
         # resolve_config.apply_config_overrides): every section takes them.
-        if name in ("_environment_values", "__pydantic_private__"):
+        if name in (
+            "_environment_values",
+            "_override_values",
+            "__pydantic_private__",
+        ):
             self._carry_environment_values_into_sections()
 
     def model_copy(self, *, update: Any = None, deep: bool = False) -> "AshConfig":
@@ -2599,7 +2611,7 @@ class AshConfig(RedactedSection):
             item_dict,
             plugin_type,
             plugin_name,
-            self._environment_values,
+            self._redaction_values(),
             on_shared_name=lambda read, ignored: self._warn_of_a_shared_name(
                 plugin_type, read, ignored
             ),
