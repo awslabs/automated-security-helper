@@ -15,8 +15,10 @@ fail the bind.
 
 import uuid
 from pathlib import Path
+from unittest import mock
 
 from automated_security_helper.cli import mcp_tools
+from automated_security_helper.cli.mcp import profile_registry
 from automated_security_helper.config import config_sources
 from automated_security_helper.config.config_sources import describe_config_path
 from automated_security_helper.core.resource_management.scan_registry import (
@@ -34,10 +36,22 @@ def _session_config_dir(tmp_path):
 
 
 def _materialized(profile):
-    """Run the bind's write step with a stub that reports *profile* written."""
-    return mcp_tools._materialize_or_error(
-        lambda session_id, config: str(profile), None, None
-    )
+    """Run the bind's write step with a stand-in that reports *profile* written.
+
+    ``_materialize_or_error`` writes through ``profile_registry
+    .materialize_session_binding`` and returns ``(config_path,
+    trusted_config_path)``; the write is stood in for so what runs is the sweep
+    beside the written path, and the path a scan would be handed is returned.
+    """
+    with mock.patch.object(
+        profile_registry,
+        "materialize_session_binding",
+        lambda session_id, registered, patched: (str(profile), str(profile)),
+    ):
+        materialized = mcp_tools._materialize_or_error(None, None, None)
+    if isinstance(materialized, dict):
+        return materialized
+    return materialized[0]
 
 
 def test_the_copys_own_name_is_described_as_the_profiles(tmp_path):

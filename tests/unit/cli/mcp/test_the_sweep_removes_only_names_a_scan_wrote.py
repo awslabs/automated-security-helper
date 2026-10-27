@@ -15,10 +15,12 @@ operator's own file must name that file, not a sibling that may not exist.
 
 import uuid
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
 from automated_security_helper.cli import mcp_tools
+from automated_security_helper.cli.mcp import profile_registry
 from automated_security_helper.config import config_sources
 from automated_security_helper.config.config_sources import describe_config_path
 from automated_security_helper.config.resolve_config import lint_hint
@@ -36,9 +38,22 @@ def _profile_dir(tmp_path):
 
 
 def _bind(profile):
-    return mcp_tools._materialize_or_error(
-        lambda session_id, config: str(profile), None, None
-    )
+    """Run the bind's write step with a stand-in that reports *profile* written.
+
+    ``_materialize_or_error`` writes through ``profile_registry
+    .materialize_session_binding`` and returns ``(config_path,
+    trusted_config_path)``; the write is stood in for so what runs is the sweep
+    beside the written path, and the path a scan would be handed is returned.
+    """
+    with mock.patch.object(
+        profile_registry,
+        "materialize_session_binding",
+        lambda session_id, registered, patched: (str(profile), str(profile)),
+    ):
+        materialized = mcp_tools._materialize_or_error(None, None, None)
+    if isinstance(materialized, dict):
+        return materialized
+    return materialized[0]
 
 
 @pytest.fixture(autouse=True)
