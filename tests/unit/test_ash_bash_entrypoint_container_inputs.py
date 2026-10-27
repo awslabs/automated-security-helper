@@ -1271,9 +1271,9 @@ class TestALinkedOutputDirectoryIsRefused:
     would write wherever the link leads. Refused with exit 3 before the directory is
     created: the output directory when it is a link, wherever it is, and any link
     below the source directory on the way to it, with the source taken under its
-    name and its real path. ``--no-run`` too, because ``./ash`` creates the output
-    directory either way. A real directory, and a source reached through a link
-    above it, run."""
+    name and its real path. ``--no-run`` builds the image only, so it neither
+    checks nor creates the output directory and is not refused. A real directory,
+    and a source reached through a link above it, run."""
 
     @pytest.fixture
     def elsewhere(self, tmp_path):
@@ -1338,15 +1338,17 @@ class TestALinkedOutputDirectoryIsRefused:
         assert calls == []
         assert list(elsewhere.iterdir()) == []
 
-    def test_a_build_without_a_run_is_refused_too(
+    def test_a_build_without_a_run_creates_nothing_and_is_not_refused(
         self, fake_runner, project, elsewhere
     ):
+        """``--no-run`` neither checks nor creates the output directory, so a
+        linked ``.ash`` on the way to it is not written through, and not refused."""
         (project / ".ash").symlink_to(elsewhere, target_is_directory=True)
 
         rc, text, calls = _run_ash_status(fake_runner, project, ["--no-run"])
 
-        assert rc == 3, text
-        assert calls == []
+        assert rc == 0, text
+        assert [call[0] for call in calls] == ["build"]
         assert list(elsewhere.iterdir()) == []
 
     def test_a_real_default_output_directory_runs(self, fake_runner, project):
