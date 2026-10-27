@@ -34,7 +34,11 @@ from typer.testing import CliRunner
 
 import automated_security_helper.plugin_modules.ash_aws_plugins as aws_plugins
 from automated_security_helper.cli.main import app
-from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.models.asharp_model import (
+    AshAggregatedResults,
+    ScannerTargetStatusInfo,
+)
 
 AWS_MODULE = "automated_security_helper.plugin_modules.ash_aws_plugins"
 AWS_NAMES = ("aws-security-hub", "bedrock-summary-reporter", "cloudwatch-logs", "s3")
@@ -94,7 +98,15 @@ def _scan_report_phase(tmp_path: Path, extra: List[str]):
     source = tmp_path / "src"
     source.mkdir()
     output = tmp_path / "out"
-    AshAggregatedResults().save_model(output)
+    # --use-existing refuses results that hold no scanner results and no findings
+    # (utils/inner_run_outcome.existing_results_problem), as a run that stopped
+    # before its scan recorded anything leaves; these results record one scanner
+    # that ran, so the report phase runs over them.
+    results = AshAggregatedResults()
+    results.scanner_results["bandit"] = ScannerTargetStatusInfo(
+        status=ScannerStatus.PASSED
+    )
+    results.save_model(output)
     overrides: List[str] = []
     for override in DISABLE_ALL:
         overrides += ["--config-overrides", override]
