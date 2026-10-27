@@ -63,7 +63,10 @@ from automated_security_helper.core.sharding import (
 from automated_security_helper.core.unified_metrics import (
     populate_metrics_from_unified_source,
 )
-from automated_security_helper.interactions.run_ash_scan import incomplete_converters
+from automated_security_helper.interactions.run_ash_scan import (
+    IncompleteConverter,
+    incomplete_converters,
+)
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ConverterStatusInfo,
@@ -1368,6 +1371,19 @@ class TestSuppressionsAcrossShards:
     disagreeing.
     """
 
+    @pytest.fixture(autouse=True)
+    def _cwd_named_unlike_the_fixture_paths(self, tmp_path_factory, monkeypatch):
+        """Pin the cwd both sides read as ``source_dir`` to a pytest-made directory.
+
+        ``_scan_unsharded`` passes ``Path.cwd()`` and ``merge_command`` hardcodes it.
+        ``_OutputDirExclusion`` strips the source directory's basename from a
+        finding URI that starts with it (offline opengrep writes paths that way),
+        so a suite run from a directory named ``src`` reads every ``src/...``
+        fixture URI as its tail and no ``src/...`` suppression matches. A sibling
+        of ``tmp_path``, so the cwd is never the output directory a test passes.
+        """
+        monkeypatch.chdir(tmp_path_factory.mktemp("cwd"))
+
     def _merge_via_cli(self, tmp_path, suppressions, extra_args=()):
         """Run the real ``ash merge`` and return (exit code, reloaded results)."""
         shard_paths = write_shards(
@@ -1655,11 +1671,13 @@ class TestMergeCli:
         self, tmp_path, monkeypatch
     ):
         """A shard records the config its scan resolved, which a file in that
-        shard's scanned repository could have set. findings_scope and
-        archive_resolved_findings decide which findings in this host's account
-        are updated and archived, so the reporters do not get them from there;
-        the rest of the section, and the merged results file, keep what the
-        shards recorded."""
+        shard's scanned repository could have set, so ash merge holds it to the
+        rules for a repository's config (confine_recorded_config, SHARD_RECORDED):
+        the Security Hub section's destination options, aws_region among them
+        (REPORTER_DESTINATION_OPTIONS), and its enabled come from the operator's
+        trusted base, here the defaults, which set none. The reporters are built
+        from the confined section, and the merged results file records it as
+        confined, since the confinement runs before the file is written."""
         from automated_security_helper.cli import merge as merge_module
         from automated_security_helper.config.ash_config import AshConfig
 
@@ -1705,21 +1723,23 @@ class TestMergeCli:
 
         assert result.exit_code in (0, 2), result.output
         [section] = seen
-        assert section["options"] == {"aws_region": "us-east-1"}
-        assert section["enabled"] is True
+        assert section["options"] == {}
+        assert section["enabled"] is False
         written = json.loads((output_dir / RESULTS_FILE_NAME).read_text("utf-8"))
-        assert written["ash_config"]["reporters"]["aws-security-hub"]["options"][
-            "findings_scope"
-        ] == ("shard-scope")
+        recorded_section = written["ash_config"]["reporters"]["aws-security-hub"]
+        assert recorded_section["options"] == {}
+        assert recorded_section["enabled"] is False
 
     def test_the_operators_config_sends_the_merged_findings_with_its_scope(
         self, tmp_path
     ):
-        """The positive half of the test above: with the operator's own --config
-        turning Security Hub on, ash merge imports the merged findings under the
-        operator's findings_scope, and the shards' recorded scope and archiving
-        go unused. Security Hub and STS are stubbed, and GetFindings is never
-        answered, so archiving from the shards fails the stubber."""
+        """The positive half of the test above: with the operator's
+        --config-overrides turning Security Hub on and aiming it, ash merge
+        imports the merged findings under the operator's findings_scope, and the
+        shards' recorded scope and archiving are unused. The --config file sets
+        the same values, and decides nothing for an off-host reporter on its own
+        (MERGE_CONFIG_FILE). Security Hub and STS are stubbed, and GetFindings is
+        never answered, so archiving from the shards fails the stubber."""
         import json as json_module
         from unittest.mock import MagicMock, patch
 
@@ -1818,6 +1838,16 @@ class TestMergeCli:
         for path in shard_paths:
             args += ["--results", path]
         args += ["--output-dir", str(tmp_path / "merged"), "--config", str(operator)]
+        # ash merge cannot tell the --config file from the scanned repository's
+        # own, so an off-host reporter's enabled and destination options come
+        # from the defaults and --config-overrides alone; the file's are replaced
+        # (confine_off_host_reporters_to_overrides, MERGE_CONFIG_FILE).
+        for override in (
+            "reporters.aws-security-hub.enabled=true",
+            "reporters.aws-security-hub.options.aws_region=us-east-1",
+            "reporters.aws-security-hub.options.findings_scope=operator-scope",
+        ):
+            args += ["--config-overrides", override]
 
         with (
             securityhub_stub,
@@ -3480,14 +3510,18 @@ class TestPythonOnlyShardsNameTheFlagThatLeftScannersOut:
         ]
 
     NOT_PYTHON_ONLY = [
+        "actionlint",
         "cdk-nag",
+        "cfn-guard",
         "cfn-nag",
         "ferret-scan",
+        "gitleaks",
         "grype",
         "npm-audit",
         "opengrep",
         "snyk-code",
         "syft",
+        "trivy",
         "trivy-repo",
     ]
 
@@ -4307,7 +4341,9 @@ class TestConverterRowsAcrossShards:
             ("nb.ipynb", "nbconvert timed out")
         ]
         assert incomplete_converters(merged) == [
-            ("jupyter", "could not convert 1 input: nb.ipynb")
+            IncompleteConverter(
+                "jupyter", "could not convert 1 input: nb.ipynb", ("tool",)
+            )
         ]
         assert _merged_exit_code(merged, tmp_path, "low", None, True) == 1
 
@@ -4357,7 +4393,7 @@ class TestConverterRowsAcrossShards:
         merged = merge_shard_results(as_loaded(shards))
 
         assert incomplete_converters(merged) == [
-            ("jupyter", "RuntimeError: nbconvert crashed")
+            IncompleteConverter("jupyter", "RuntimeError: nbconvert crashed")
         ]
         assert _merged_exit_code(merged, tmp_path, "low", None, True) == 1
 
@@ -4375,7 +4411,7 @@ class TestConverterRowsAcrossShards:
         row = merged.converter_results["jupyter"]
         assert row.dependencies_satisfied is False
         assert row.candidate_inputs == 2
-        assert [name for name, _ in incomplete_converters(merged)] == ["jupyter"]
+        assert [row.name for row in incomplete_converters(merged)] == ["jupyter"]
 
     def test_a_tool_missing_with_nothing_to_convert_stays_exempt(self):
         """The candidate count is what exempts an absent tool, as in one scan."""
