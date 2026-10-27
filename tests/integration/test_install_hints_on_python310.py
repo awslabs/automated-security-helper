@@ -33,6 +33,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import zipfile
@@ -51,8 +52,14 @@ GIT_RECORD = {
     "vcs_info": {"vcs": "git", "commit_id": COMMIT, "requested_revision": COMMIT},
 }
 #: What ``automated_security_helper.utils.ash_install`` imports outside the
-#: standard library, plus ``toml``, which version_management needs on 3.10.
-IMPORTED_DEPENDENCIES = ("rich", "toml", "importlib-metadata")
+#: standard library, installed at the versions this environment has.
+IMPORTED_DEPENDENCIES = ("rich", "importlib-metadata")
+#: What the package's import chain needs on 3.10 and this environment, on a newer
+#: Python, does not install: version_management reads pyproject.toml with tomli
+#: below 3.11 (tomllib from 3.11), and pyproject.toml declares tomli under a
+#: python_full_version marker, so ``version("tomli")`` has no answer here.
+#: Installed at the requirement ASH's own metadata declares instead.
+DECLARED_DEPENDENCIES = ("tomli",)
 
 PROBE = """
 import json
@@ -106,6 +113,19 @@ def _build_wheel(dest: Path) -> Path:
     return wheel
 
 
+def _declared_requirement(name: str) -> str:
+    """The version constraint ASH's own metadata declares for ``name``.
+
+    The marker is dropped: the install below is for the 3.10 environment, where
+    the marker holds, and the requirement's own constraint is what pins it.
+    """
+    for requirement in distribution("automated-security-helper").requires or ():
+        declared = requirement.split(";", 1)[0].strip()
+        if re.match(rf"{re.escape(name)}\b", declared, re.IGNORECASE):
+            return declared
+    raise AssertionError(f"ASH's metadata declares no dependency named {name}")
+
+
 def _run(python: Path, *args: str, cwd: Path | None = None) -> str:
     result = subprocess.run(
         [str(python), *args], capture_output=True, text=True, cwd=cwd, check=False
@@ -126,6 +146,7 @@ def test_a_git_install_on_python_310_is_reinstalled_from_its_commit(tmp_path):
         "--python",
         str(python),
         *(f"{name}=={version(name)}" for name in IMPORTED_DEPENDENCIES),
+        *(_declared_requirement(name) for name in DECLARED_DEPENDENCIES),
     )
     assert _run(python, "-c", "import sys; print(sys.version_info[:2])") == "(3, 10)"
 
