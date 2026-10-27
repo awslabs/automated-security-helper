@@ -42,7 +42,7 @@ The source paths below identify the implementation reviewed. The corresponding s
 
 | Surface | Interactions and states reviewed | Result and evidence |
 | --- | --- | --- |
-| Homepage | Vector scan, file selection, scan steps, Play/Pause/Replay, install tabs, mode selection, copy, scanner filters, FAQs | `home.html`, `ash-scan.js`, `ash.css`, `ash.js`; responsive, theme, keyboard, reduced-motion, and fallback browser checks |
+| Homepage | Vector scan, file selection, scan steps, Play/Pause/Replay, install tabs, mode selection, copy, scanner filters, FAQs | `home.html`, `ash-scan.js`, and the site stylesheet and script under `docs/content/assets/`; responsive, theme, keyboard, reduced-motion, and fallback browser checks |
 | Documentation shell | Breadcrumbs, side navigation, mobile drawer, tables, code, copy controls, section navigation, previous/next, footer, and 404 | Custom header and pagination with the existing documentation engine; strict build and browser review |
 | Documentation search | Button, Ctrl/Command + K, typing, pasted queries, result links, scrolling code, Tab/Shift+Tab, Escape | Indexed Material search with progressive accessibility enhancements; browser interaction tests |
 | Installation and mode choice | pipx, uvx, pip, container/local/precommit requirements, release version, no-JavaScript content | Explicit prerequisites and selectable commands; version template tests and browser copy/tab tests |

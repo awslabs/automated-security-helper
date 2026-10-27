@@ -22,7 +22,7 @@ navigation architecture, and motion vocabulary.
 | Information | `#42b4ff` | `#006ce0` |
 | Success | `#2bb534` | `#00802f` |
 
-`automated_security_helper/utils/ui_theme.py` is the terminal palette and theme adapter. The site and offline report styles declare their corresponding CSS variables in `ash.css` and `ash-report.css`. Check all three surfaces when changing a semantic color.
+`automated_security_helper/utils/ui_theme.py` is the terminal palette and theme adapter. The site and offline report styles declare their corresponding CSS variables in the site stylesheet under `docs/content/assets/stylesheets/` and in `ash-report.css`. Check all three surfaces when changing a semantic color.
 
 Open Sans is hosted locally under the SIL Open Font License. Reports embed the
 font and its license. Terminals use the operator's font; GitHub uses native typography.
