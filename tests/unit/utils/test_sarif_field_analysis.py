@@ -1,5 +1,9 @@
 """Tests for utils/sarif_field_analysis.py — verify move from cli/inspect."""
 
+import sys
+
+import pytest
+
 
 class TestImportLocation:
     def test_import_from_utils(self):
@@ -202,3 +206,77 @@ class TestHtmlReportWithNoFindings:
         out = tmp_path / "report.html"
         generate_html_report(validation_results, str(out), {})
         assert "Matched Findings: 0 (0.00%)" in out.read_text(encoding="utf-8")
+
+
+class TestTheCsvFilesUnderAnAsciiLocale:
+    """The CSV files are UTF-8 whatever the locale, as the JSON files are."""
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="an ASCII locale cannot be chosen on Windows: open() takes its "
+        "encoding from the ANSI code page (cp1252 here), whatever LC_ALL says",
+    )
+    def test_a_non_ascii_field_name_is_written(self, tmp_path):
+        import json
+        import os
+        import subprocess
+        import sys
+
+        sarif_dir = tmp_path / "ash_output"
+        (sarif_dir / "reports").mkdir(parents=True)
+        (sarif_dir / "reports" / "ash.sarif").write_text(
+            json.dumps(
+                {
+                    "version": "2.1.0",
+                    "runs": [
+                        {
+                            "tool": {"driver": {"name": "example-tool"}},
+                            "results": [
+                                {
+                                    "ruleId": "R1",
+                                    "message": {"text": "x", "café": "1"},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        output_dir = tmp_path / "inspect"
+        # The C locale with coercion and UTF-8 mode off: the locale's encoding is
+        # ASCII, which open() with no encoding uses. The console streams stay UTF-8
+        # (PYTHONIOENCODING), so only the files are under test.
+        env = {
+            **os.environ,
+            "LC_ALL": "C",
+            "LANG": "C",
+            "PYTHONUTF8": "0",
+            "PYTHONCOERCECLOCALE": "0",
+            "PYTHONIOENCODING": "utf-8",
+        }
+        probe = (
+            "import locale, sys\n"
+            "print(locale.getpreferredencoding(False), file=sys.stderr)\n"
+            "from automated_security_helper.utils.sarif_field_analysis import "
+            "analyze_sarif_fields\n"
+            f"analyze_sarif_fields(sarif_dir={str(sarif_dir)!r}, "
+            f"output_dir={str(output_dir)!r})\n"
+        )
+
+        ran = subprocess.run(
+            [sys.executable, "-c", probe],
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+        )
+
+        assert "ANSI_X3.4-1968" in ran.stderr or "ascii" in ran.stderr.lower(), (
+            f"the probe did not run under an ASCII locale: {ran.stderr[:200]}"
+        )
+        assert ran.returncode == 0, ran.stderr[-2000:]
+        csv_text = (output_dir / "sarif_fields.csv").read_text(encoding="utf-8")
+        assert "café" in csv_text

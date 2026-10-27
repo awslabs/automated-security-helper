@@ -25,10 +25,10 @@ Why this is a hybrid rather than a pure derivation
 The file carries operational knowledge that exists in no docstring and no
 schema. The clearest example:
 
-    **`is_complete` does not flip to `True` for cancelled scans** ... Polling on
-    `is_complete` alone will loop forever on a cancelled scan.
+    **`incomplete` is terminal, with partial coverage.** ... `incomplete_scanners`
+    names each scanner and why.
 
-That is a correction TO the server's own docstring. A generator that rendered
+That is guidance the docstrings do not carry in this form. A generator that rendered
 only what the code says about itself would delete it, making the document
 cheaper to maintain and worse to read. So the split is:
 
@@ -123,11 +123,20 @@ TOOL_NOTES: dict[str, dict] = {
         "params": {
             "source_dir": {"default": "current dir", "notes": "Absolute path to scan"},
             "severity_threshold": {
-                "notes": "Findings below this are filtered out at scan time"
+                "default": "the config's",
+                "notes": (
+                    "Least severe finding that counts as actionable, any case; it can make "
+                    "the config's `global_settings.severity_threshold` stricter for this "
+                    "scan, never looser"
+                ),
             },
             "config_path": {
-                "default": "`<source>/.ash/.ash.yaml`",
-                "notes": "Custom config path",
+                "notes": (
+                    "Custom config path. When not set: the profile this session bound "
+                    "with `select_profile`, else the config ASH discovers in the source "
+                    "directory, else the file `ASH_CONFIG` names in the server's "
+                    "environment, else the built-in defaults"
+                ),
             },
             "clean_output": {"notes": "Wipe stale reports before starting"},
         },
@@ -155,10 +164,63 @@ TOOL_NOTES: dict[str, dict] = {
                 "(`<directory_path>/.ash/ash_output`) rather than constructing it independently."
             ),
             (
-                "**Heads-up:** the server's own docstring and the `important.next_steps` array "
-                "suggest polling `progress['is_complete']`. This is incomplete advice — "
-                "`is_complete` stays `False` for cancelled scans. Always check `status` "
-                "independently. (See `get_scan_progress` below.)"
+                "Poll `get_scan_progress` until `is_complete` is `true`, then read `status`. "
+                "`is_complete` is `true` for every ending, including `failed` and "
+                "`cancelled`. (See `get_scan_progress` below.)"
+            ),
+            (
+                "**A refused config keeps its own `error_type`.** The scan does not start, "
+                "and the response is `success: false` with one of these `error_type` values "
+                "and the reason in `error`:"
+            ),
+            (
+                "- `config_input_not_permitted`: `config_path`, or a base its `extends` "
+                "chain names, is outside the directories this session may read a config from.\n"
+                "- `config_field_denied`: a config file an MCP client delivered or named "
+                "sets a field the session's runtime-override policy denies. `error` names "
+                "each field and why.\n"
+                "- `config_policy_unreadable`: that policy cannot be established, for "
+                "example because the profile the session bound is no longer registered. "
+                "`error` starts with `A config an MCP client delivered cannot be checked:`.\n"
+                "- `config_env_not_resolved`: a file of the config uses an `!ENV` tag, or a "
+                "plain value that starts with a `${VAR}` or `${VAR:default}` reference, "
+                "where none is resolved. For a remote caller that is any file the "
+                "operator did not set aside (outside the directories "
+                "`ASH_MCP_ALLOWED_CONFIG_ROOTS` names, other than the profile files "
+                "the server writes in the calling session's `config/` directory), the "
+                "scan target's own config included, and every base "
+                "such a file extends; for a stdio caller, a file a client delivered. The "
+                "server's own config, the file `ASH_CONFIG` names outside the MCP "
+                "workspace root and each registered profile, is not refused. `error` "
+                "names the file and the line or key."
+            ),
+            (
+                "The target and source checks have their own `error_type` values too "
+                "(`scan_target_not_permitted`, `output_dir_not_permitted`, "
+                "`no_source_delivered`, `session_source_mismatch`, "
+                "`delivered_source_missing`, `invalid_session_id`). A directory that "
+                "already has a scan is refused with `error_type: MCPResourceError` and "
+                "`error_category: resource_exhausted`; `error` says the directory "
+                "`already has an active scan`, or, for a scan that was cancelled or "
+                "stopped at its timeout and has not finished stopping, "
+                "`has a scan that is still stopping`. That `error_type` is the "
+                "exception's class name, and an unexpected error while the scan is "
+                "being started arrives as `MCPResourceError` too, with `error_category: unexpected_error`, so "
+                "`MCPResourceError` alone does not prove a deliberate refusal: branch on "
+                "`error_category`. The server's `max_concurrent_scans` limit is refused "
+                "the same way (`resource_exhausted`); its `context` holds "
+                "`max_concurrent_scans`: wait for a running scan to finish, then retry. "
+                "The busy-directory refusal's `context` names the running scan's "
+                "`scan_id` only when the scan is this session's: poll `get_scan_progress` "
+                "with it, or `cancel_scan` it if it is no longer needed "
+                "(`list_active_scans` lists this session's scans). Without a `scan_id`, "
+                "another session's scan holds the directory and the server does not name "
+                "it: wait and retry, or scan another directory. After a `cancel_scan` of "
+                "that directory the refusal repeats until the scan has stopped (see "
+                "`cancel_scan`): retry after a few seconds. Any other reason the scan "
+                "could not be started returns `error_type: scan_start_failure`, and an "
+                "unexpected error returns the exception's class name. Branch on "
+                "`error_type` and `error_category`, never on the text of `error`."
             ),
         ],
     },
@@ -175,21 +237,25 @@ TOOL_NOTES: dict[str, dict] = {
   "start_time": "<iso8601>",
   "end_time": "<iso8601 | null>",
   "status": "pending | running | completed | incomplete | failed | cancelled",
-  "severity_threshold": "MEDIUM",
+  "severity_threshold": "<the threshold the scan was judged by; null until it finishes when none was named>",
   "config_path": "<path | null>",
   "warnings": [...],
   "error_message": "<str | null>",
   "is_complete": bool,
+  "results_available": bool,
+  "output_holds_previous_results": bool,
   "coverage_complete": "bool | null",
   "incomplete_scanners": [
     { "scanner": "grype", "status": "MISSING", "reason": "missing_dependencies", "detail": "MISSING" }
   ],
   "no_scanner_ran": bool,
-  "incomplete_converters": [{ "converter": "...", "reason": "..." }],
+  "incomplete_converters": [{ "converter": "...", "reason": "...", "failed_input_kinds": ["..."] }],
   "unevaluated_rules": ["..."],
   "stale_content_databases": [{ "name": "grype-db", "scanner": "grype", "built": "<iso8601 | null>", "age": "...", "max_age": "...", "refresh": "..." }],
   "completed_scanners": int,
+  "finished_scanners": int,
   "total_scanners": int,
+  "scanner_status_counts": { "passed": int, "failed": int, "skipped": int, "running": int, "pending": int },
   "total_findings": int,
   "severity_counts": { "critical": int, "high": int, "medium": int, "low": int, "info": int, "suppressed": int },
   "scanners": {
@@ -201,7 +267,8 @@ TOOL_NOTES: dict[str, dict] = {
         "caveats": [
             (
                 "There is no overall percentage field. To compute progress, use "
-                "`completed_scanners / total_scanners` — but **guard against "
+                "`finished_scanners / total_scanners`, which counts every scanner that "
+                "ended; `completed_scanners` counts those that PASSED only — but **guard against "
                 "`total_scanners == 0`** during the pre-flight phase (before any scanner has "
                 'registered). Show "initializing" or 0% when `total_scanners` is zero.'
             ),
@@ -210,16 +277,24 @@ TOOL_NOTES: dict[str, dict] = {
                 "`start_time` and `end_time` (or from current time while running)."
             ),
             (
-                "**`is_complete` does not flip to `True` for cancelled scans** — it returns "
-                "`True` for `completed` and `incomplete`, and for `failed` once a results file "
-                "exists. Always check `status` independently: stop polling when `status` is "
-                "`completed`, `incomplete`, `failed`, or `cancelled`. Polling on "
-                "`is_complete` alone will loop forever on a cancelled scan."
+                "**`is_complete` is `true` once the scan has ended**, whatever the ending: "
+                "`completed`, `incomplete`, `failed` or `cancelled`. It is decided by the "
+                "scan's state alone, never by a results file on disk, which can be a previous "
+                "scan's. `results_available` is `true` for `completed` and `incomplete`, the "
+                "scans whose results `get_scan_results` can read."
+            ),
+            (
+                "**A failed or cancelled scan leaves the previous scan's results in place.** "
+                "ASH puts them back in `output_directory`, and `output_holds_previous_results` "
+                "is then `true` and the scanner fields are empty, because those files are not "
+                "this scan's. `get_scan_results` on that directory reads the previous scan's "
+                "results."
             ),
             (
                 "**`incomplete` is terminal, with partial coverage.** The run finished and its "
                 "results are readable, but a selected scanner was `MISSING` or `ERROR` (or lost "
-                "targets), no scanner reached a verdict, a converter did not run, a rule "
+                "targets), no scanner reached a verdict, a converter did not run or could "
+                "not convert some of its inputs, a rule "
                 "could not be evaluated, or a content database was past its declared age "
                 "bound. `incomplete_scanners` names each scanner and why, and "
                 "`stale_content_databases` each stale database. The "
@@ -257,7 +332,15 @@ TOOL_NOTES: dict[str, dict] = {
                 "default": "all",
                 "notes": "`critical,high,medium,low,info`",
             },
-            "actionable_only": {"notes": "Drop suppressed findings"},
+            "actionable_only": {
+                "notes": (
+                    "Keep only the actionable findings, the ones behind exit code 2: "
+                    "unsuppressed and at or above the severity threshold the scan was "
+                    "judged by (a scanner's own where its config sets one). Drop the "
+                    "rest and add `findings`, a flat list of them that honors "
+                    "`scanners` and `severities` (`full` level only)"
+                )
+            },
         },
         "caveats": [
             "Returns full or filtered findings depending on `filter_level`.",
@@ -288,16 +371,39 @@ TOOL_NOTES: dict[str, dict] = {
         "no_params_sentence": "No parameters. Returns a list of scan summaries.",
     },
     "cancel_scan": {
-        "intro": "Stop a running scan and free resources.",
+        "intro": (
+            "Stop a running scan. The scanner running at the time is stopped, no further "
+            "scanner starts, and no reports or results file are written after the cancel."
+        ),
         "params": {"scan_id": {"notes": "The scan to stop"}},
-        "caveats": ["Returns confirmation."],
+        "caveats": [
+            (
+                "Returns `success: true` and `status: cancelled`. A scan that already "
+                "finished cannot be cancelled: `success` is `false` and `status` is the "
+                "status it finished with."
+            ),
+            (
+                "The status is `cancelled` at once, while the scan takes up to about 10 "
+                "seconds to stop and put the previous results back. Until then a new "
+                "`run_ash_scan` of the same directory is refused as still stopping, with "
+                "`error_type: MCPResourceError` and `error_category: resource_exhausted` "
+                "(see `run_ash_scan`); retry after a few seconds."
+            ),
+        ],
     },
     "check_installation": {
         "intro": (
-            "Verify ASH is installed and the MCP server can spawn it. Run before the first "
-            "scan in a session if you're unsure of the install state."
+            "Report whether ASH can scan: its version, and for each built-in scanner whether "
+            "its tool is available. Run before the first scan in a session if you're unsure "
+            "of the install state. Each scanner's check may run its tool, so the call takes "
+            "seconds."
         ),
-        "no_params_sentence": "No parameters. Returns version string and feature flags.",
+        "no_params_sentence": (
+            "No parameters. Returns `installed` (at least one enabled scanner can run), "
+            "`ready` (all of them can), `version`, `scanners` (name, enabled, "
+            "`dependencies_satisfied`, version) and the enabled scanners in "
+            "`missing_dependencies` and `undetermined_dependencies`."
+        ),
     },
     "set_source_zip_chunk": {
         "params": {
@@ -316,18 +422,151 @@ TOOL_NOTES: dict[str, dict] = {
                 "against `expected_sha256` before extracting it. A chunked upload that is never "
                 "finalized is not a scan target."
             ),
+            (
+                "When the session's workspace directory cannot be created, both upload tools "
+                "return `success: false` with `error_type` `session_workspace_unavailable`."
+            ),
+            (
+                "While the server removes the session's workspace for being unused longer "
+                "than its time to live, `set_source_zip_chunk` returns `success: false` with "
+                "`error_type` `session_workspace_busy`. Send the upload again from its first "
+                "chunk."
+            ),
         ],
     },
     "set_source_git": {
         "params": {
-            "url": {"notes": "Repository URL"},
+            "url": {
+                "notes": (
+                    "Repository URL: `https://`, `ssh://` or `user@host:path`, on a "
+                    "host the operator listed in `ASH_MCP_GIT_ALLOWED_HOSTS`"
+                )
+            },
             "ref": {"default": "default branch", "notes": "Branch, tag, or commit"},
             "ssh_key_id": {
                 "default": "none",
-                "notes": "Operator-registered key id for private repos",
+                "notes": "Must be omitted: the server registers no ssh keys",
             },
-            "depth": {"notes": "Clone depth; `0` for a full clone"},
+            "depth": {"notes": "Clone depth, a whole number of commits from 1 to 1000"},
         },
+        "caveats": [
+            (
+                "Refused while a scan of this session is running, because the clone "
+                "would replace the tree and config files that scan is reading. The "
+                "response is `success: false`, `error_type: source_delivery_busy`, "
+                "and `error` set to `a scan of this session is running; change the "
+                "delivered source after it finishes`. Deliver the source again once "
+                "`get_scan_progress` reports a terminal status."
+            ),
+            (
+                "A refusal or a git failure returns `success: false` with an `error_type`: "
+                "`clone_url_not_permitted` (a url beginning with `-` or using the `ext::` "
+                "transport, a url holding a control character or a lone surrogate, or a url "
+                "whose host cannot be read), `clone_ref_not_permitted` (a ref beginning with "
+                "`-` or holding a control character or a lone surrogate), "
+                "`invalid_clone_depth` (below 1 or above 1000; the limit is on how much "
+                "history is fetched), "
+                "`invalid_session_id`, "
+                "`local_clone_source_refused` (a local path or `file://` url, which would read "
+                "the server's own filesystem), `clone_host_not_permitted` (the host is not in "
+                "`ASH_MCP_GIT_ALLOWED_HOSTS`), `ssh_key_not_registered` (an `ssh_key_id` was "
+                "named), `clone_timed_out` (git ran past its time limit and was stopped), "
+                "`git_clone_failed` or `git_checkout_failed` (git's own message is in "
+                "`error`; `git_clone_failed` also covers a git that is not on `PATH` or "
+                "cannot be started), or `session_workspace_unavailable` (the session's "
+                "workspace could not take the clone: a directory of it could not be created, "
+                "the previously delivered source could not be moved aside for it, or the "
+                "clone could not be moved into place; each move is tried a few times before "
+                "it fails). The clone is made beside the delivered source "
+                "and replaces it only once it has worked, so a delivery that fails for any of "
+                "these reasons, or is refused, leaves the previously delivered source in "
+                "place, and `run_ash_scan` with no `source_dir` scans it. A partial clone "
+                "that cannot be fully deleted stays beside the source, logged, for the next "
+                "delivery to delete, and the error returned is still git's own. The one "
+                "exception is a clone that could not be moved into place after the previous "
+                "source had been moved aside and could not be put back: the recorded source "
+                "then names a path that is gone, and `run_ash_scan` with no `source_dir` "
+                "answers `delivered_source_missing` until a source is delivered again; that "
+                "next delivery puts the previous source back first. A "
+                "`session_workspace_unavailable` that names a refused rename can be retried "
+                "with the same call: the refusal is usually a program holding a handle "
+                "inside a tree (a virus scanner, a file indexer), and it passes."
+            ),
+            (
+                "A re-delivery needs room for both trees at once, because the new clone is "
+                "made beside the delivered source, which is deleted only after it. When the "
+                "disk is short, call `clear_source` first to free the delivered one. A clone, "
+                "fetch or checkout that fails for want of space returns `git_clone_failed` or "
+                "`git_checkout_failed` with git's own message, and that advice added when "
+                "the session has a delivered source to free."
+            ),
+        ],
+    },
+    "set_source_zip_finalize": {
+        "caveats": [
+            (
+                "Refused while a scan of this session is running, for the same reason as "
+                "`set_source_git`: `success: false`, `error_type: source_delivery_busy`, "
+                "and `error` set to `a scan of this session is running; change the "
+                "delivered source after it finishes`. "
+                "`set_source_zip_chunk` is not refused, so the chunks can be sent while the "
+                "scan runs and the upload finalized after it ends."
+            ),
+            (
+                "A finalize that cannot deliver returns `success: false` with an `error`. "
+                "Its `error_type` is `session_workspace_unavailable` when the session's "
+                "workspace could not take the tree: a directory of it could not be created, "
+                "the previous tree could not be renamed aside (nothing is deleted where it "
+                "stands), or the extracted one could not be moved into place, whatever the "
+                "operating system error was. The previous tree stays delivered and the "
+                "uploaded zip is kept, so the same call can be sent again; when the previous "
+                "tree could not be put back either, `run_ash_scan` with no `source_dir` "
+                "answers `delivered_source_missing`. A checksum mismatch, an "
+                "upload that never received its last chunk, or an archive the limits refuse "
+                "returns `error` with no `error_type`. An archive that is not a zip returns "
+                "`error_type` `BadZipFile`, and a failure on disk while the archive is "
+                "read or extracted (no space, no permission, a file that vanished) returns "
+                "the class name of the exception, `OSError` or one of its subclasses; both "
+                "carry an `error` that starts `Error finalizing source upload:`."
+            ),
+        ],
+    },
+    "get_config": {
+        "caveats": [
+            (
+                "A config this session may not read, or one a client delivered that the "
+                "server refuses, returns `success: false` with `error_type` "
+                "`config_input_not_permitted`, `config_field_denied`, "
+                "`config_policy_unreadable` or `config_env_not_resolved`, as `run_ash_scan` "
+                "does for the same file."
+            ),
+        ],
+    },
+    "validate_config": {
+        "caveats": [
+            (
+                "Each error is `{field, message, type}`. A remote caller's "
+                "`config_content` counts as the client's config, and so does a "
+                "`config_path` that a client delivered or that is outside the directories "
+                "`ASH_MCP_ALLOWED_CONFIG_ROOTS` names, unless it is a profile file the "
+                "server wrote in the calling session's `config/` directory. "
+                "On stdio, `config_content` is the caller's own, because the caller "
+                "started the server. Besides schema and parse errors, `type` can be "
+                "`config_input_not_permitted` (a `config_path` this session may not "
+                "read), `config_policy_unreadable` (the session's runtime-override policy "
+                "cannot be established for the client's config), "
+                "`denied_by_runtime_policy` (a field of the client's config that policy "
+                "denies, named in `field`, with the message `<field> may not be set by a "
+                "config an MCP client delivers: <reason>`), or `config_env_not_resolved`. "
+                "A `${VAR}` or `${VAR:default}` reference at the start of a plain value, "
+                "or an `!ENV` tag, is an error of type `config_env_not_resolved` "
+                "anywhere in a remote caller's client config, and for a stdio caller "
+                "only in a file a client delivered. A policy check that cannot finish on "
+                "the client's config makes it invalid, with an error of type "
+                "`validation_error` that starts `The config could not be checked against "
+                "this session's runtime-override policy`."
+            ),
+        ],
     },
     "list_scanners": {
         "no_params_sentence": (
@@ -338,13 +577,22 @@ TOOL_NOTES: dict[str, dict] = {
     "list_profiles": {
         "no_params_sentence": (
             "No parameters. Returns the config profiles the operator registered at server "
-            "startup."
+            "startup, each with `ash mcp --profile NAME=path/to/ash.yaml` (repeatable). A "
+            "client cannot register one; an empty list means the operator registered none."
         ),
     },
     "clear_source": {
         "no_params_sentence": (
             "No parameters. Deletes this session's delivered source tree and workspace."
         ),
+        "caveats": [
+            (
+                "Refused while a scan of this session is running: `success: false`, "
+                "`error_type: source_delivery_busy`. Clear again once the scan ends. Entries "
+                "the server cannot delete (files another account owns) stay on disk; the "
+                "session's delivered source is forgotten either way."
+            ),
+        ],
     },
 }
 
@@ -557,7 +805,11 @@ def render() -> str:
         "",
         "`CRITICAL` > `HIGH` > `MEDIUM` > `LOW` > `INFO` > `SUPPRESSED`",
         "",
-        "`actionable_only=True` drops `SUPPRESSED` findings (false positives, accepted risks).",
+        (
+            "`actionable_only=True` drops `SUPPRESSED` findings (false positives, accepted "
+            "risks) and findings below the scan's severity threshold, which are reported "
+            "but do not fail the scan."
+        ),
         "",
     ]
 

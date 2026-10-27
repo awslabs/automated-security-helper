@@ -81,7 +81,7 @@ class TestIgnoreFiles:
         (tree / ".gitignore").write_text("*.log\n")
         (tree / "noise.log").write_text("x\n")
 
-        files = scan_set(source=str(tree), output=str(out))
+        files = scan_set(source=str(tree), output=str(out), write_lists=True)
 
         report = (out / "ash-ignore-report.txt").read_text()
         assert MARKER not in report
@@ -98,11 +98,15 @@ class TestIgnoreFiles:
         ]
         assert not any(f.endswith("noise.log") for f in files)
         assert any(f.endswith("kept.tmp") for f in files)
+        # Two things are true of it: its target is outside the tree, so it is not in
+        # the scan set, and its rules were not applied.
+        assert not any(f.endswith(".gitignore") and "sub" in f for f in files)
         assert warnings_seen == [
+            "Not scanning 'sub/.gitignore': link leaves the scanned tree",
             (
                 "Skipped ignore file 'sub/.gitignore': it is a symbolic link, so its "
                 "rules were not applied"
-            )
+            ),
         ]
 
     def test_a_symlinked_root_gitignore_does_not_prune_the_walk(self, layout):
@@ -285,3 +289,31 @@ class TestInlineSuppressionsInConvertedFiles:
                 "it is a symbolic link that resolves outside the scanned tree"
             )
         ]
+
+
+class TestRootGitignorePruning:
+    def test_a_root_gitignore_that_fails_part_way_prunes_nothing(self, layout):
+        """Rules parsed before the failing line are not used for pruning either."""
+        from unittest.mock import patch
+
+        from igittigitt import IgnoreParser
+
+        from automated_security_helper.utils.get_scan_set import (
+            _collect_ignorefiles_and_all_files,
+        )
+
+        tree, _, _ = layout
+        (tree / ".gitignore").write_text("vendor/\nbroken\n")
+        (tree / "vendor").mkdir()
+        (tree / "vendor" / "lib.py").write_text("x = 1\n")
+        real_add_rule = IgnoreParser.add_rule
+
+        def add_rule(self, pattern, base_path):
+            if pattern == "broken":
+                raise ValueError("malformed pattern")
+            return real_add_rule(self, pattern, base_path)
+
+        with patch.object(IgnoreParser, "add_rule", add_rule):
+            _, all_files = _collect_ignorefiles_and_all_files(str(tree))
+
+        assert any(Path(p).name == "lib.py" for p in all_files)

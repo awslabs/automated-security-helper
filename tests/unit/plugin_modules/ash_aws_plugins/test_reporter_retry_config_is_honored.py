@@ -22,11 +22,10 @@ against the defect. Each case pins the attempt count, and one pins the interval,
 because a config that is read but ignored looks identical to one that is honored
 if only the call count is checked at the default.
 
-Not covered here, deliberately: BedrockSummaryReporter declares the same three
-options and imports ``retry_with_backoff``, but never applies it anywhere -- there
-is no decorated call site to correct. Wiring it up would mean introducing retry to
-Bedrock calls that have none today, which is new behavior rather than repairing an
-inert guard, so it is left alone and the import stays flagged as unused.
+BedrockSummaryReporter declares the same three options, and nothing read them: its
+model client called Bedrock once and returned a rate-limit error at the first
+refusal. Its client returns an error string rather than raising, so its cases
+check the result as well as the attempt count.
 """
 
 from unittest.mock import MagicMock, patch
@@ -34,6 +33,10 @@ from unittest.mock import MagicMock, patch
 import botocore.exceptions
 import pytest
 
+from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
+    BedrockSummaryReporter,
+    BedrockSummaryReporterConfig,
+)
 from automated_security_helper.plugin_modules.ash_aws_plugins.cloudwatch_logs_reporter import (
     CloudWatchLogsReporter,
 )
@@ -161,3 +164,85 @@ class TestCloudWatchReporterHonorsItsRetryConfig:
             f"{events_client.put_log_events.call_count}; both read the same option "
             f"and must agree"
         )
+
+
+def _bedrock_reporter(**options):
+    """A Bedrock reporter with real, validated options and no plugin context."""
+    reporter = BedrockSummaryReporter.model_construct()
+    reporter.config = BedrockSummaryReporterConfig(options=options)
+    return reporter
+
+
+def _bedrock_runtime(code="ThrottlingException"):
+    runtime = MagicMock()
+    runtime.converse.side_effect = botocore.exceptions.ClientError(
+        {"Error": {"Code": code, "Message": "refused"}}, "Converse"
+    )
+    return runtime
+
+
+def _with_sleep_recorded(call):
+    """Run ``call`` with sleep stubbed; return (its result, sleep intervals)."""
+    sleeps: list[float] = []
+    with patch(
+        "automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils.time.sleep",
+        side_effect=sleeps.append,
+    ):
+        result = call()
+    return result, sleeps
+
+
+class TestBedrockReporterHonorsItsRetryConfig:
+    @pytest.mark.parametrize("max_retries", [1, 4, 10])
+    def test_attempt_count_follows_configured_max_retries(self, max_retries):
+        reporter = _bedrock_reporter(max_retries=max_retries, base_delay=0.0)
+        runtime = _bedrock_runtime()
+
+        result, _ = _with_sleep_recorded(
+            lambda: reporter._make_model_client(runtime).try_call("prompt", "system")
+        )
+
+        assert runtime.converse.call_count == max_retries + 1, (
+            f"configured max_retries={max_retries} must give {max_retries + 1} "
+            f"calls to Bedrock; 1 means the option is inert"
+        )
+        assert "Rate limit" in result, result
+
+        # A refusal that is not throttling is not retried, as for the other two.
+        denied = _bedrock_runtime("AccessDeniedException")
+        result, _ = _with_sleep_recorded(
+            lambda: reporter._make_model_client(denied).try_call("prompt", "system")
+        )
+        assert denied.converse.call_count == 1
+        assert "Access denied" in result, result
+
+    def test_base_delay_and_max_delay_reach_the_backoff(self):
+        reporter = _bedrock_reporter(max_retries=3, base_delay=5.0, max_delay=12.0)
+        runtime = _bedrock_runtime()
+
+        _, sleeps = _with_sleep_recorded(
+            lambda: reporter._make_model_client(runtime).try_call("prompt", "system")
+        )
+
+        # Jitter adds under 1s; the third interval, 20s and more, is held to 12.
+        assert len(sleeps) == 3, sleeps
+        assert 5.0 <= sleeps[0] < 6.0, sleeps
+        assert 10.0 <= sleeps[1] < 11.0, sleeps
+        assert sleeps[2] == 12.0, sleeps
+
+    def test_a_fallback_model_call_follows_the_same_config(self):
+        reporter = _bedrock_reporter(max_retries=2, base_delay=0.0)
+        runtime = _bedrock_runtime()
+
+        result, _ = _with_sleep_recorded(
+            lambda: reporter._try_model_call(
+                runtime,
+                "fallback-model",
+                [{"role": "user", "content": [{"text": "prompt"}]}],
+                [{"text": "system"}],
+                {"temperature": 0.5, "maxTokens": 100, "topP": 0.9},
+            )
+        )
+
+        assert runtime.converse.call_count == 3
+        assert "Rate limit" in result, result

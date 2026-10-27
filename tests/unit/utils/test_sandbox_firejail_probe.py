@@ -37,7 +37,17 @@ from automated_security_helper.utils.sandbox.backends import (
     FirejailBackend,
     LandlockBackend,
 )
+from tests.utils.fake_tool_paths import fake_tool_path
 
+#: Where the fake programs "are". ASH's lookup of the sandbox's own programs answers a
+#: path only when the host counts it as anchored, which on Windows takes a drive, so a
+#: bare ``/usr/bin/firejail`` there is refused and the probe reports firejail as not
+#: installed before any faked layer is read. Nothing is created at these paths.
+FAKE_PROGRAMS = {
+    "firejail": fake_tool_path("/usr/bin/firejail"),
+    "readlink": fake_tool_path("/usr/bin/readlink"),
+}
+FIREJAIL = FAKE_PROGRAMS["firejail"]
 ASH_NAMESPACE = "mnt:[4026531841]"
 SANDBOX_NAMESPACE = "mnt:[4026532917]"
 #: What firejail 0.9.72 prints (src/firejail/no_sandbox.c) unless --quiet.
@@ -91,8 +101,8 @@ def linux_host(monkeypatch):
     real_which = shutil.which
 
     def which(name, *args, **kwargs):
-        if name in ("firejail", "readlink"):
-            return f"/usr/bin/{name}"
+        if name in FAKE_PROGRAMS:
+            return FAKE_PROGRAMS[name]
         return real_which(name, *args, **kwargs)
 
     monkeypatch.setattr(backends.shutil, "which", which)
@@ -190,10 +200,10 @@ class TestFirejailProbe:
         # The confinement check, then a run through the Unix-socket filter, which
         # has to happen without --private because ASH's interpreter may be in $HOME.
         argv, socket_filter = fake.calls
-        assert socket_filter[0] == "/usr/bin/firejail"
+        assert socket_filter[0] == FIREJAIL
         assert "--socket-filter" in socket_filter
         assert "--private" not in socket_filter
-        assert argv[0] == "/usr/bin/firejail"
+        assert argv[0] == FIREJAIL
         for flag in (
             "--noprofile",
             "--private-dev",

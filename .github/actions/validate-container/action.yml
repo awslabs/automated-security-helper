@@ -44,7 +44,7 @@ runs:
         case "${RUNTIME}" in
           podman | finch | nerdctl) ;;
           *)
-            echo "::error::validate-container has no scan leg for runtime '${RUNTIME}'. Add one rather than leaving this action build-only for it."
+            echo "::error::validate-container has a scan leg for runtime podman, finch or nerdctl only, and the runtime given is none of them (it is not printed). Add a leg rather than leaving this action build-only for a new runtime."
             exit 1
             ;;
         esac
@@ -172,7 +172,7 @@ runs:
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-podman.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-podman.outputs.base-image-override }}
-      run: ash build-image --oci-runner podman --force --no-run
+      run: ash build-image --oci-runner podman --build-target ci --force --no-run
 
     # === finch ===
     - name: "finch: install (macOS)"
@@ -204,7 +204,7 @@ runs:
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-finch.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-finch.outputs.base-image-override }}
-      run: ash build-image --oci-runner finch --force --no-run
+      run: ash build-image --oci-runner finch --build-target ci --force --no-run
 
     # === nerdctl ===
     #
@@ -296,10 +296,12 @@ runs:
     # that is the gate's actual job and it is not weakened. Dropping it on retry
     # means buildkit reuses the layers it just finished building, so the retry costs
     # about a minute instead of seven and spends that minute re-running precisely
-    # the operation that raced: export, then load. This works because
-    # BUILD_DATE_EPOCH -- the one build-arg that changes per invocation -- is
-    # consumed on the last line of the `core` stage rather than near its top, so the
-    # apt, node, ruby and pinned-binary layers above it all stay cacheable.
+    # the operation that raced: export, then load. This works because the one
+    # build-arg that changes over time, BUILD_DATE_EPOCH, is UTC midnight of the
+    # build day (run_ash_container.py), so it is the same for both attempts and
+    # every layer the first attempt finished stays cacheable. A retry that falls on
+    # a new UTC day re-runs the Dockerfile's core stage from its apt-get upgrade
+    # step down.
     #
     # The partially-imported image is removed before each retry. containerd's
     # `Import` can leave an image record behind whose snapshot chain is incomplete,
@@ -362,8 +364,10 @@ runs:
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-nerdctl.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-nerdctl.outputs.base-image-override }}
-        # The tag ash build-image applies: build_target is forced to "ci" whenever
-        # CI is set, so this is the image the load above would have created.
+        # The tag ash build-image applies for --build-target ci, which every build
+        # and scan in this action passes, so this is the image the load above would
+        # have created. CI variables do not choose the stage, so it is named
+        # explicitly rather than left to the default (non-root).
         IMAGE: automated-security-helper:ci
         ATTEMPTS: "3"
       run: |
@@ -383,8 +387,9 @@ runs:
           # the retry loop would re-run a scan whose exit 2 on findings is not the
           # race being matched below -- it would fail the first `grep` and abort,
           # reporting a build break that never happened. Flag order matches those
-          # two legs on attempt 1: --oci-runner nerdctl --force --no-run.
-          ash build-image --oci-runner nerdctl "${force_args[@]}" --no-run 2>&1 | tee "${log}"
+          # two legs on attempt 1: --oci-runner nerdctl --build-target ci --force
+          # --no-run.
+          ash build-image --oci-runner nerdctl --build-target ci "${force_args[@]}" --no-run 2>&1 | tee "${log}"
           rc="${PIPESTATUS[0]}"
           set -e
 
@@ -451,6 +456,138 @@ runs:
         done
         exit "${rc}"
 
+    # A value printed in a workflow command that this action does not set itself
+    # goes through one_line, the helper run-ash-security-scan.yml writes the same
+    # way: it turns every control character into a space, `::` into `: :` and `##[`
+    # into `# #[`, so the value cannot add a command of its own. Each step runs in
+    # its own shell, so this step writes the function to RUNNER_TEMP and a step that
+    # needs it loads the file.
+    - name: "Write the one_line helper"
+      shell: bash
+      run: |
+        cat > "${RUNNER_TEMP}/ash-one-line.sh" <<'EOF'
+        one_line() {
+          local LC_ALL=C
+          local text="${1//[[:cntrl:]]/ }"
+          text="${text//$'\xc2'[$'\x80'-$'\x9f']/ }"
+          text="${text//$'\xe2\x80'[$'\xa8\xa9']/ }"
+          while [[ "${text}" == *::* ]]; do text="${text//::/: :}"; done
+          while [[ "${text}" == *'##['* ]]; do text="${text//'##['/'# #['}"; done
+          printf '%s' "${text}"
+        }
+        __wcs_clock() {
+          __wcs_now="${EPOCHREALTIME:-}"
+          __wcs_now="${__wcs_now//[!0-9]/}"
+          if [ -z "${__wcs_now}" ]; then
+            __wcs_now=$((SECONDS * 1000000))
+          fi
+        }
+        __wcs_end_group() {
+          local __wcs_now="" __wcs_until=""
+          if [ -z "${__wcs_pid}" ]; then
+            return 0
+          fi
+          __wcs_clock
+          __wcs_until=$((__wcs_now + $1 * 100000))
+          while kill -0 -- "-${__wcs_pid}" 2>/dev/null && [ "${__wcs_now}" -lt "${__wcs_until}" ]; do
+            sleep 0.1
+            __wcs_clock
+          done
+          if ! kill -0 -- "-${__wcs_pid}" 2>/dev/null; then
+            return 0
+          fi
+          kill -s KILL -- "-${__wcs_pid}" 2>/dev/null || true
+          __wcs_until=$((__wcs_now + 500000))
+          while kill -0 -- "-${__wcs_pid}" 2>/dev/null && [ "${__wcs_now}" -lt "${__wcs_until}" ]; do
+            sleep 0.1
+            __wcs_clock
+          done
+          return 1
+        }
+        __wcs_on_signal() {
+          if [ -z "${__wcs_pid}" ] && [ "${!:-}" != "${__wcs_before}" ]; then
+            __wcs_pid="${!:-}"
+          fi
+          if [ -n "${__wcs_pid}" ]; then
+            kill -s "$1" -- "-${__wcs_pid}" 2>/dev/null || kill -s "$1" "${__wcs_pid}" 2>/dev/null || true
+          fi
+          if [ "$1" = TERM ]; then
+            __wcs_end_group 10 || __wcs_left=1
+            if [ -n "${__wcs_open}" ]; then
+              printf '\n::%s::\n' "${__wcs_token}"
+            fi
+            if [ -n "${__wcs_left}" ]; then
+              printf '%s\n' "::error::processes the command started did not end in time, so they were sent SIGKILL and the step fails"
+            fi
+            exit 143
+          fi
+          __wcs_interrupted="$2"
+        }
+        __wcs_exec() {
+          if command -v setsid >/dev/null 2>&1; then
+            exec setsid -w "$@"
+          fi
+          exec perl -MPOSIX -e 'my $s = POSIX::setsid(); exit 127 unless defined $s && $s >= 0; exec { $ARGV[0] } @ARGV; exit 127' -- "$@"
+        }
+        with_commands_stopped() {
+          if [ "${BASH_SUBSHELL:-0}" -gt 0 ]; then
+            printf '%s\n' "::error::with_commands_stopped must run in the step's own shell, the one process the runner signals on a cancel, not in a subshell, a pipeline, a command substitution or a background job. For ( cd DIR && ... ), use env -C DIR, or cd at the top level" >&2
+            kill -s TERM "$$" 2>/dev/null || true
+            return 1
+          fi
+          local __wcs_out="" __wcs_var="" __wcs_file="" __wcs_token __wcs_status=0
+          local __wcs_pid="" __wcs_interrupted="" __wcs_open="" __wcs_left="" __wcs_before="${!:-}"
+          case "${1:-}" in
+            --stdout) __wcs_out="$2"; shift 2 ;;
+            --capture) __wcs_var="$2"; shift 2 ;;
+          esac
+          __wcs_token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          if [ "${#__wcs_token}" -ne 32 ]; then
+            printf '%s\n' "::error::no random token could be read for stop-commands, so the command did not run"
+            return 1
+          fi
+          if [ -n "${__wcs_var}" ]; then
+            __wcs_file="$(mktemp "${RUNNER_TEMP:-/tmp}/ash-wcs.XXXXXX")" || return 1
+            __wcs_out="${__wcs_file}"
+          fi
+          trap '__wcs_on_signal INT 130' INT
+          trap '__wcs_on_signal QUIT 131' QUIT
+          trap '__wcs_on_signal TERM 143' TERM
+          __wcs_open=1
+          printf '::stop-commands::%s\n' "${__wcs_token}"
+          if [ -z "${__wcs_interrupted}" ]; then
+            if [ -n "${__wcs_out}" ]; then
+              (trap - INT QUIT TERM; __wcs_exec "$@") 2>&1 > "${__wcs_out}" <&0 &
+            else
+              (trap - INT QUIT TERM; __wcs_exec "$@") 2>&1 <&0 &
+            fi
+            __wcs_pid=$!
+            wait "${__wcs_pid}" || __wcs_status=$?
+          fi
+          if [ -n "${__wcs_interrupted}" ] && [ -n "${__wcs_pid}" ]; then
+            wait "${__wcs_pid}" 2>/dev/null || true
+          fi
+          __wcs_end_group 50 || __wcs_left=1
+          printf '\n::%s::\n' "${__wcs_token}"
+          __wcs_open=""
+          trap - INT QUIT TERM
+          if [ -n "${__wcs_left}" ]; then
+            printf '%s\n' "::error::processes the command started did not end in time, so they were sent SIGKILL and the step fails"
+            if [ "${__wcs_status}" -eq 0 ]; then
+              __wcs_status=1
+            fi
+          fi
+          if [ -n "${__wcs_interrupted}" ]; then
+            exit "${__wcs_interrupted}"
+          fi
+          if [ -n "${__wcs_file}" ]; then
+            printf -v "${__wcs_var}" '%s' "$(cat "${__wcs_file}")"
+            rm -f -- "${__wcs_file}"
+          fi
+          return "${__wcs_status}"
+        }
+        EOF
+
     # === the built image has to run ===
     #
     # Shared rather than per-runtime: the whole point is that every runtime with a
@@ -478,18 +615,22 @@ runs:
       #
       # So every 2 accepted here was an anomaly recorded as a pass. Two anomalies in
       # particular. A findings-producing 2 would mean a scanner flagged a one-line
-      # print statement, which is worth a red build. And click raises UsageError with
-      # exit_code 2, so renaming `--simple`, `--mode`, `--phases` or
+      # print statement, which is worth a red build. And if a click UsageError exited
+      # 2 as well, renaming `--simple`, `--mode`, `--phases` or
       # `--fail-on-incomplete-scanners`, or removing an `--oci-runner` value, would
       # exit 2 with the scan never having started -- and the old tolerance called
-      # that success.
+      # that success. A usage error exits 5, ASH's code for a refused command line.
       #
       # 1 stays rejected, and now has something to reject: see the flag below.
       run: |
+        # The stderr log paths below come from find, so they are printed through
+        # one_line.
+        . "${RUNNER_TEMP}/ash-one-line.sh"
         set +e
         ash scan \
           --mode container \
           --oci-runner "${RUNTIME}" \
+          --build-target ci \
           --source-dir /tmp/ash-selftest \
           --output-dir /tmp/ash-selftest/output \
           --simple \
@@ -502,8 +643,18 @@ runs:
           echo "::error::ash scan --mode container --oci-runner ${RUNTIME} exited $rc; this fixture and these flags exit 0 when the scan works."
           case "$rc" in
             1) echo "::error::1 is ASH's 'error during execution', which --fail-on-incomplete-scanners also uses for a scan where a selected scanner reported ERROR or MISSING. Read the per-scanner table below." ;;
-            2) echo "::error::2 means either actionable findings on a fixture that is one print statement, or a click UsageError -- a flag above was renamed or removed and the scan never ran." ;;
+            2) echo "::error::2 means actionable findings on a fixture that is one print statement." ;;
+            5) echo "::error::5 is a usage error: ASH refused the command line above, so a flag was renamed or removed and the scan never ran." ;;
           esac
+          # The end of each scanner's stderr log, where a tool says why it failed. This
+          # job uploads no artifacts, so without it the reason is only in the runner.
+          find /tmp/ash-selftest/output/scanners -name '*.stderr.log' -size +0 2>/dev/null |
+            sort | while read -r log; do
+              echo "::group::last 4000 bytes of $(one_line "${log}")"
+              tail -c 4000 "$log"
+              echo
+              echo "::endgroup::"
+            done
           exit "$rc"
         fi
         echo "scan exited $rc"
@@ -585,17 +736,27 @@ runs:
         # the flake, so its status says nothing about the flake. In container mode
         # ASH's own environment IS the image, so its status is exactly as much a
         # statement about the image as any other scanner's.
+        #
+        # actionlint, cfn-lint, cfn-guard, gitleaks, trivy and zizmor are builtin and on
+        # by default, so the scan above runs the image's copy of each, and each is listed
+        # here so a missing binary fails this check.
         image_supplied = [
+            "actionlint",
             "bandit",
             "cdk-nag",
+            "cfn-guard",
+            "cfn-lint",
             "cfn-nag",
             "checkov",
             "detect-secrets",
+            "gitleaks",
             "grype",
             "npm-audit",
             "opengrep",
             "semgrep",
             "syft",
+            "trivy",
+            "zizmor",
         ]
 
         for name in sorted(statuses):
@@ -637,3 +798,123 @@ runs:
 
         print(f"PASS: all {len(image_supplied)} image-supplied scanners participated")
         PY
+
+    # === zizmor, on its own ===
+    #
+    # zizmor also runs in the scan above, whose participation check says only that
+    # it was not MISSING. This runs it alone with --scanners against a workflow that
+    # has a known template injection, and requires a FAILED status with that finding: MISSING or ERROR would mean the
+    # image does not supply a working zizmor, and PASSED would mean it ran
+    # but its output was lost.
+    - name: "container: zizmor runs and reports"
+      shell: bash
+      env:
+        # `ash scan --mode container` rebuilds the image, so it gets the build's
+        # base-image hand-off, as "Scan with the built image" does.
+        ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-podman.outputs.oci-layout || steps.prepull-finch.outputs.oci-layout || steps.prepull-nerdctl.outputs.oci-layout }}
+        ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-podman.outputs.base-image-override || steps.prepull-finch.outputs.base-image-override || steps.prepull-nerdctl.outputs.base-image-override }}
+        RUNTIME: ${{ inputs.runtime }}
+      run: |
+        mkdir -p /tmp/ash-zizmor-selftest/.github/workflows
+        # The expression is assembled from two halves so this action file never
+        # contains a literal one: GitHub would expand it here, in this step.
+        open='$''{{'
+        printf '%s\n' \
+          'on: issues' \
+          'permissions: {}' \
+          'jobs:' \
+          '  greet:' \
+          '    runs-on: ubuntu-latest' \
+          '    steps:' \
+          "      - run: echo \"${open} github.event.issue.title }}\"" \
+          > /tmp/ash-zizmor-selftest/.github/workflows/selftest.yml
+        cat /tmp/ash-zizmor-selftest/.github/workflows/selftest.yml
+        set +e
+        ash scan \
+          --mode container \
+          --oci-runner "${RUNTIME}" \
+          --build-target ci \
+          --source-dir /tmp/ash-zizmor-selftest \
+          --output-dir /tmp/ash-zizmor-selftest/output \
+          --scanners zizmor \
+          --no-fail-on-findings \
+          --fail-on-incomplete-scanners \
+          --simple
+        rc=$?
+        set -e
+        if [ "$rc" -ne 0 ]; then
+          echo "::error::ash scan --scanners zizmor exited $rc; with --no-fail-on-findings only an incomplete or broken scan exits non-zero."
+          exit "$rc"
+        fi
+        python3 <<'PY'
+        import json
+        import pathlib
+        import sys
+
+        data = json.loads(pathlib.Path("/tmp/ash-zizmor-selftest/output/ash_aggregated_results.json").read_text())
+        status = str((data.get("scanner_results") or {}).get("zizmor", {}).get("status", "absent"))
+        rules = [
+            result.get("ruleId")
+            for run in (data.get("sarif") or {}).get("runs", [])
+            for result in run.get("results", [])
+        ]
+        print(f"zizmor status: {status}; rules: {sorted(set(r for r in rules if r))}")
+        if status.upper() != "FAILED" or "zizmor/template-injection" not in rules:
+            sys.exit("FAIL: zizmor did not report the fixture's template injection")
+        print("PASS: zizmor ran and reported the fixture's template injection")
+        PY
+
+    # cfn-lint and cfn-guard also run in the scan above, whose participation check
+    # says only that each was not MISSING. This scans one compliant template with
+    # both named and requires both PASSED, which shows that the image ships cfn-lint,
+    # the cfn-guard binary and the Guard Rules Registry bundle cfn-guard needs: a tool or
+    # the rules missing from the image is MISSING here, and
+    # --fail-on-incomplete-scanners turns that into exit 1. The template is the
+    # compliant fixture from tests/test_data/scanners/cfn_lint_guard, so both scanners
+    # must report PASSED and the scan must exit 0.
+    - name: "Scan with the image's CloudFormation scanners"
+      shell: bash
+      env:
+        # `ash scan --mode container` rebuilds the image, so it gets the build's
+        # base-image hand-off, as "Scan with the built image" does.
+        ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-podman.outputs.oci-layout || steps.prepull-finch.outputs.oci-layout || steps.prepull-nerdctl.outputs.oci-layout }}
+        ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-podman.outputs.base-image-override || steps.prepull-finch.outputs.base-image-override || steps.prepull-nerdctl.outputs.base-image-override }}
+        RUNTIME: ${{ inputs.runtime }}
+      run: |
+        rm -rf /tmp/ash-cfn-selftest
+        mkdir -p /tmp/ash-cfn-selftest
+        cp tests/test_data/scanners/cfn_lint_guard/repo/templates/compliant.yaml /tmp/ash-cfn-selftest/
+        set +e
+        ash scan \
+          --mode container \
+          --oci-runner "${RUNTIME}" \
+          --build-target ci \
+          --source-dir /tmp/ash-cfn-selftest \
+          --output-dir /tmp/ash-cfn-selftest/output \
+          --scanners cfn-lint,cfn-guard \
+          --simple \
+          --fail-on-incomplete-scanners \
+          --phases scan \
+          --phases report
+        rc=$?
+        set -e
+        python3 - <<'PY'
+        import json
+        import pathlib
+        import sys
+
+        results = pathlib.Path("/tmp/ash-cfn-selftest/output/ash_aggregated_results.json")
+        if not results.exists():
+            sys.exit(f"FAIL: no results at {results}")
+        rows = json.loads(results.read_text()).get("scanner_results") or {}
+        statuses = {name: str(row.get("status")) for name, row in rows.items()}
+        print(statuses)
+        bad = {n: statuses.get(n, "ABSENT") for n in ("cfn-guard", "cfn-lint") if statuses.get(n) != "PASSED"}
+        if bad:
+            sys.exit(f"FAIL: CloudFormation scanners did not pass on a compliant template: {bad}")
+        print("PASS: cfn-lint and cfn-guard ran from the image")
+        PY
+        if [ "$rc" -ne 0 ]; then
+          echo "::error::the CloudFormation scan exited $rc on a compliant template"
+          exit "$rc"
+        fi

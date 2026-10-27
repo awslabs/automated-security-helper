@@ -1,7 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import yaml
 from typing import Literal, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -13,6 +12,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
+from automated_security_helper.utils.report_yaml import report_yaml
 
 
 class YAMLReporterConfigOptions(ReporterOptionsBase):
@@ -65,6 +65,10 @@ class YamlReporter(ReporterPluginBase[YAMLReporterConfig]):
         Existing consumers are unaffected in the direction that matters: a status
         that was an unloadable tag becomes the plain string ``"FAILED"``, which a
         loader using ``yaml.load`` parses just as happily.
+
+        Written by utils/report_yaml.py, so a value from the scanned tree that holds
+        "::" or "##" first or after whitespace (a refused input's name) is written
+        double-quoted on one line, and no line of the file is a CI workflow command.
         """
 
-        return yaml.dump(model.model_dump(by_alias=True, mode="json"), indent=2)
+        return report_yaml(model.model_dump(by_alias=True, mode="json"), indent=2)

@@ -125,6 +125,7 @@ The template system automatically handles these files:
 - `docs/content/docs/advanced-usage.md`
 - `docs/content/tutorials/running-ash-in-ci.md`
 - `docs/content/tutorials/running-ash-locally.md`
+- `docs/content/tutorials/using-ash-with-pre-commit.md`
 - `examples/streamlit_ui/README.md`
 
 ### Version Patterns Detected

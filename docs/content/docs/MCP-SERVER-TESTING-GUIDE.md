@@ -23,10 +23,10 @@ Update your MCP configuration file to point to your local development directory 
 {
   "mcpServers": {
     "ash": {
-      "command": "uvx",
+      "command": "uv",
       "args": [
-        "--directory=/path/to/your/automated-security-helper",
-        "--with=.",
+        "run",
+        "--project=/path/to/your/automated-security-helper",
         "ash",
         "mcp"
       ],
@@ -47,9 +47,10 @@ Update your MCP configuration file to point to your local development directory 
 ```
 
 **Key Parameters:**
-- `--directory=/path/to/your/automated-security-helper` - Points to your local repo
-- `--with=.` - Installs the package from the current directory (editable mode)
+- `run --project=/path/to/your/automated-security-helper` - Runs the `ash` entry point from your checkout's project environment (its `.venv`), where uv installs ASH in editable mode, so code changes take effect when the server restarts. `uv run` syncs that environment to `uv.lock` first, and keeps any extras you installed there (for example with `uv sync --extra cdk --extra symbols`).
 - `FASTMCP_LOG_LEVEL: DEBUG` - Enables detailed logging for debugging
+
+Do not use `uvx ... ash mcp` without `--from` here. `uvx` installs the package named by its first argument from the package index (PyPI by default), and the PyPI project named `ash` is unrelated to ASH.
 
 **Note:** Replace `/path/to/your/automated-security-helper` with your actual path.
 
@@ -66,13 +67,13 @@ After configuration changes:
 
 ### 3. Verify Configuration
 
-You may see a warning like:
-```
-warning: An executable named `ash` is not provided by package `ash` 
-but is available via the dependency `automated-security-helper`.
+Check that the command the client runs starts ASH from your checkout:
+
+```bash
+uv run --project=/path/to/your/automated-security-helper ash mcp --help
 ```
 
-This is safe to ignore - the command will work correctly.
+It prints the `ash mcp` options. A warning that names a package called `ash` means the configuration is still running `uvx`, which resolved that unrelated PyPI project; switch it to the `uv run` form above.
 
 ## Testing Procedures
 
@@ -432,14 +433,12 @@ result = await mcp_ash_get_scan_results(output_dir="/non/existent/path")
 - Old behavior persists
 
 **Solutions:**
-1. Clear uvx cache:
-   ```bash
-   rm -rf ~/.cache/uv/
-   ```
+1. Check that the configuration runs `uv run --project=<your checkout>`. A `uvx` command installs a copy of ASH, which does not change when you edit the checkout.
 
-2. Force reinstall:
+2. Reinstall ASH into the checkout's environment (needed after `pyproject.toml` changes, for example a new entry point). `--inexact` keeps the extras you installed; a plain `uv sync` removes them:
    ```bash
-   uvx --force --directory=/path/to/ash --with=. ash mcp
+   cd /path/to/ash
+   uv sync --inexact --reinstall-package automated-security-helper
    ```
 
 3. Verify configuration path is correct
@@ -454,12 +453,11 @@ ModuleNotFoundError: No module named 'automated_security_helper'
 
 **Solutions:**
 1. Ensure you're in the correct directory
-2. Check `--directory` path in config
-3. Verify `--with=.` is present
-4. Install dependencies:
+2. Check the `--project` path in the config
+3. Install dependencies into the checkout's environment, keeping any extras already there:
    ```bash
    cd /path/to/ash
-   pip install -e .
+   uv sync --inexact
    ```
 
 ### Issue: Tools Not Found
@@ -520,10 +518,14 @@ INFO: Scan started with ID: 2e0cd8d2-132c-4eb1-a822-38dd237067f3
 INFO: Scanner bandit completed
 ```
 
-**Warnings (safe to ignore):**
+**Warnings (need attention):**
 ```
 warning: An executable named `ash` is not provided by package `ash`
 ```
+
+This one means the client ran `uvx` without `--from`, so uvx installed the
+unrelated PyPI project named `ash` instead of ASH. Switch the configuration to the
+`uv run` form in [Configure MCP Client to Use Local Code](#1-configure-mcp-client-to-use-local-code).
 
 **Errors (need attention):**
 ```

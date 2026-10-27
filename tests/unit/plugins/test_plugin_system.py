@@ -14,6 +14,48 @@ from automated_security_helper.base.plugin_context import PluginContext
 PluginContext.model_rebuild()
 
 
+@pytest.fixture(autouse=True)
+def _own_plugin_registry(monkeypatch):
+    """Each test clears and registers into a copy of the global registry, which
+    every later test in the worker shares: the built-in event handlers stay
+    subscribed and a converter registered here is not left behind
+    (test_plugin_system_leaves_the_registry.py)."""
+    library = ash_plugin_manager.plugin_library
+    monkeypatch.setattr(
+        library,
+        "event_handlers",
+        {event: list(callbacks) for event, callbacks in library.event_handlers.items()},
+    )
+    monkeypatch.setattr(library, "converters", dict(library.converters))
+
+
+def registry_changes_left_behind() -> list[str]:
+    """What this file's tests changed in the shared registry and did not undo.
+
+    Not a test. test_plugin_system_leaves_the_registry.py runs this file in a
+    pytest process of its own and calls this after it, so the registry is read
+    here, in the file whose tests change it. Empty when the built-in event
+    handlers are all still subscribed and the converter test_plugin_registration
+    registers is gone.
+    """
+    from automated_security_helper.plugin_modules.ash_builtin import (
+        ASH_EVENT_HANDLERS,
+    )
+
+    library = ash_plugin_manager.plugin_library
+    left = [
+        f"built-in handler no longer subscribed: {callback.__name__}"
+        for event, callbacks in ASH_EVENT_HANDLERS.items()
+        for callback in callbacks
+        if not any(
+            callback is present for present in library.event_handlers.get(event, [])
+        )
+    ]
+    if "test-plugin" in library.converters:
+        left.append("a converter registered by a test is still registered")
+    return left
+
+
 def test_event_subscription():
     """Test that events can be subscribed to and triggered."""
     # Clear any existing subscribers

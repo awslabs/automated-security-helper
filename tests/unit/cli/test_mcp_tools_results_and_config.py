@@ -17,7 +17,7 @@ not have, which is precisely the failure these tests exist to rule out.
 
 import importlib
 import json
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
 
@@ -30,6 +30,9 @@ from automated_security_helper.cli.mcp_tools import (
     mcp_set_source_zip_chunk,
     mcp_suggest_suppression,
     mcp_validate_config,
+)
+from automated_security_helper.core.scanner_inventory import (
+    _VENDORED_SCANNER_PLUGIN_PACKAGES,
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 
@@ -261,44 +264,68 @@ class TestValidateConfig:
         config = tmp_path / "ash.yaml"
         config.write_text("project_name: demo\n")
 
+        from automated_security_helper.config.config_validator import ConfigCheck
+
         with patch(
             "automated_security_helper.config.config_validator."
-            "ConfigValidator.validate_config_file",
-            return_value=(False, [raw_error]),
+            "ConfigValidator.check_config_file",
+            return_value=ConfigCheck(errors=[raw_error], warnings=[raw_error]),
         ):
             result = mcp_validate_config(config_path=str(config))
 
         assert result["valid"] is False
-        assert len(result["errors"]) == 1
-        assert result["errors"][0]["type"] == expected_type
-        assert result["errors"][0]["field"] == expected_field
-        assert result["errors"][0]["message"] == raw_error
+        # Errors and warnings are typed by the same rules.
+        for listed in (result["errors"], result["warnings"]):
+            assert len(listed) == 1
+            assert listed[0]["type"] == expected_type
+            assert listed[0]["field"] == expected_field
+            assert listed[0]["message"] == raw_error
 
     def test_a_valid_config_reports_no_errors(self, tmp_path):
         config = tmp_path / "ash.yaml"
         config.write_text("project_name: demo\n")
 
+        from automated_security_helper.config.config_validator import ConfigCheck
+
+        # What the validator returns for a config it accepted: the chain it
+        # read, with each file's document and text. A file reached only by its
+        # own resolved path has no entry in ``document_names``. An accepted
+        # check that holds no document is not a valid config (validate_config
+        # judges the documents the validator held).
+        held = config.resolve()
+        accepted = ConfigCheck(
+            chain=[held],
+            documents={held: {"project_name": "demo"}},
+            texts={held: "project_name: demo\n"},
+        )
+
         with patch(
             "automated_security_helper.config.config_validator."
-            "ConfigValidator.validate_config_file",
-            return_value=(True, []),
+            "ConfigValidator.check_config_file",
+            return_value=accepted,
         ):
             result = mcp_validate_config(config_path=str(config))
 
         assert result["valid"] is True
         assert result["errors"] == []
+        assert result["warnings"] == []
 
     def test_inline_content_is_validated_through_a_temporary_file(self):
         seen = {}
 
-        def _capture(path, source_dir=None, permit_base=None):
+        from automated_security_helper.config.config_validator import ConfigCheck
+
+        def _capture(
+            path, source_dir=None, permit_base=None, refuse_env=None, **kwargs
+        ):
             seen["suffix"] = path.suffix
             seen["text"] = path.read_text()
-            return (True, [])
+            seen["refuse_env"] = refuse_env
+            return ConfigCheck()
 
         with patch(
             "automated_security_helper.config.config_validator."
-            "ConfigValidator.validate_config_file",
+            "ConfigValidator.check_config_file",
             side_effect=_capture,
         ):
             result = mcp_validate_config(config_content="project_name: inline\n")
@@ -306,6 +333,9 @@ class TestValidateConfig:
         assert result["valid"] is True
         assert seen["suffix"] == ".yaml"
         assert seen["text"] == "project_name: inline\n"
+        # A local caller's content is its own; only a remote caller's is held to
+        # the rules for a delivered config.
+        assert seen["refuse_env"] is None
 
 
 class TestSuggestSuppression:
@@ -505,11 +535,11 @@ class TestListScanners:
             #
             # It used to reach ash_plugin_manager.plugin_modules("scanner"), and patching that
             # is why this helper returned an empty list: the tool no longer goes through it.
-            # The move was deliberate -- plugin_modules memoises its resolved classes into
-            # _resolved_plugins and never invalidates, so the first resolve in a process fixes
-            # the answer for every later caller, and a server was measured reporting 10
-            # scanners while the registry held 13. Patching the seam the tool actually uses
-            # keeps this suite testing the tool rather than a path it abandoned.
+            # The move was deliberate -- plugin_modules memoised its resolved classes keyed
+            # only on the plugin kind, so the first resolve in a process fixed the answer for
+            # every later caller, and a server was measured reporting 10 scanners while the
+            # registry held 13. Patching the seam the tool actually uses keeps this suite
+            # testing the tool rather than a path it abandoned.
             patch(
                 "automated_security_helper.cli.mcp_tools._loaded_scanner_classes",
                 return_value=scanner_classes,
@@ -591,14 +621,17 @@ class TestListScanners:
         # deliberate: metadata discovery and the vendored list find different packages, so
         # passing only the discovered one drops ferret, snyk and trivy from the answer the
         # moment any ash_*_plugins distribution is installed.
-        load_extra.assert_called_once_with(
-            [
+        #
+        # One call per package, because each is imported inside its own
+        # ash_plugin_manager.untrusted_import: a client's request loads them, so a
+        # later scan that does not load one is not offered its scanners.
+        assert load_extra.call_args_list == [
+            call([package])
+            for package in (
                 "automated_security_helper.plugin_modules.acme_scan",
-                "automated_security_helper.plugin_modules.ash_ferret_plugins",
-                "automated_security_helper.plugin_modules.ash_snyk_plugins",
-                "automated_security_helper.plugin_modules.ash_trivy_plugins",
-            ]
-        )
+                *_VENDORED_SCANNER_PLUGIN_PACKAGES,
+            )
+        ]
 
     def test_unavailable_distribution_metadata_does_not_break_the_listing(self):
         """packages_distributions raising falls back to the well-known modules."""

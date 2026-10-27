@@ -50,9 +50,13 @@ jobs:
             --source-dir "$(pwd)/repo" \
             --output-dir "${{ env.ASH_OUTPUT_PATH }}"
 
+      # reports/ and the aggregated results only. scanners/ and converted/ hold each
+      # tool's raw output, which is not masked.
       - name: Publish ${{ env.ASH_OUTPUT_PATH }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: success() || failure()
         with:
           name: ${{ env.ASH_OUTPUT_PATH }}
-          path: ${{ env.ASH_OUTPUT_PATH }}
+          path: |
+            ${{ env.ASH_OUTPUT_PATH }}/reports
+            ${{ env.ASH_OUTPUT_PATH }}/ash_aggregated_results.json

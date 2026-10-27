@@ -15,6 +15,8 @@ The CloudWatch Logs Reporter publishes security scan results directly to Amazon 
 
 ## Configuration
 
+This reporter is disabled by default: it sends findings to AWS with the host's credentials, so it runs only when your config sets `enabled: true` for it (see [Enabling the AWS reporters](index.md#enabling-the-aws-reporters)).
+
 ### Basic Configuration
 
 ```yaml
@@ -50,6 +52,25 @@ reporters:
       log_group_name: "/aws/ash/security-scans"
       log_stream_name: "production-scans"
 ```
+
+### Where these options can be set
+
+`aws_region`, `log_group_name` and `log_stream_name` choose where findings are sent,
+and `max_retries`, `base_delay` and `max_delay` how long the reporter keeps calling
+CloudWatch Logs when it is refused, so they are the operator's. They take effect only from the defaults (`AWS_REGION`,
+`AWS_DEFAULT_REGION` and `ASH_CLOUDWATCH_LOG_GROUP_NAME`), `--config-overrides`, or a
+config file outside the scanned tree. A config file inside the scanned tree cannot set
+them; each one it sets is ignored with a warning. Under the MCP server every
+`cloudwatch-logs` setting is a default `denied_paths` entry
+(`/reporters/cloudwatch-logs/**`), so a config an MCP client delivered that changes any
+of them is refused; `enabled: false` is not refused, but the server's `enabled`
+applies. A config file inside the scanned tree neither turns the reporter on nor
+turns it off (see
+[Settings only the operator can set](index.md#settings-only-the-operator-can-set)).
+
+The reporter is in the `ash_aws_plugins` package, which only the operator can load,
+with `--ash-plugin-modules`, `ASH_PLUGIN_MODULES` or the operator's own config, never
+a repository's. See [Loading the plugins](index.md#loading-the-plugins).
 
 ## Prerequisites
 
@@ -126,6 +147,10 @@ Results are published as structured JSON logs:
   }
 }
 ```
+
+The event's `ash_config` is the configuration the results record, as the settings
+that were set, and `null` when they record none. ASH's defaults, or the file
+`ASH_CONFIG` names where `ash report` runs, are never put in its place.
 
 ### Automatic Log Stream Management
 
@@ -261,7 +286,10 @@ ash /path/to/code --reporters cloudwatch-logs --log-level DEBUG
 
 ### Retry Configuration
 
-Configure retry behavior for API calls:
+The operator configures retry behavior for API calls, with `--config-overrides` or a
+config file outside the scanned tree (see
+[Where these options can be set](#where-these-options-can-be-set)). `max_retries` is
+at most 10, `max_delay` at most 60 seconds, and `base_delay` at most `max_delay`:
 
 ```yaml
 reporters:
@@ -272,9 +300,9 @@ reporters:
       log_group_name: "/aws/ash/scan-results"
       log_stream_name: "ASHScanResults"
       # Retry configuration
-      max_retries: 5      # Default: 3
-      base_delay: 2.0     # Default: 1.0 seconds
-      max_delay: 120.0    # Default: 60.0 seconds
+      max_retries: 5      # Default: 3, at most 10
+      base_delay: 2.0     # Default: 1.0 seconds, at most max_delay
+      max_delay: 30.0     # Default: 60.0 seconds, at most 60
 ``````
 
 ### Debug Mode

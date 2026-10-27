@@ -23,26 +23,38 @@ tests name credential-shaped *variables* -- the name, never a value -- because
 naming them is the point of the assertion.
 """
 
+import logging
 import re
 
 import pytest
+import yaml
 
 from automated_security_helper.config.ash_config import (
     AshConfig,
     config_env_var_is_interpolatable,
+    resolve_env_references,
 )
+from automated_security_helper.config.config_sources import (
+    read_config_file,
+    read_config_file_literally,
+)
+from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.constants import (
     ASH_CONFIG_ENV_VAR_ALLOWLIST,
     ASH_CONFIG_ENV_VAR_PREFIX,
+)
+from automated_security_helper.core.exceptions import (
+    ASHConfigSourceError,
+    ASHConfigValidationError,
 )
 
 PLACEHOLDER = "ash-test-placeholder-value"
 
 # The reference form the docs and ASH's own config use. The bare ``${VAR}``
-# spelling does not resolve at all -- ``constructor_env_variables`` rebuilds the
-# text to replace as ``":".join(group)``, which appends a colon the bare form
-# never wrote -- so a test written against it would pass for the wrong reason.
+# form has its own tests in TestBareReference below; the bound on names applies
+# to both forms, and the tests above that class use this one.
 REFERENCE = "${{{name}:None}}"
+BARE_REFERENCE = "${{{name}}}"
 
 
 def _load(tmp_path, body: str) -> AshConfig:
@@ -68,6 +80,47 @@ class TestUnlistedNamesAreNotResolved:
             "an unresolved reference must be left exactly as written, so that a "
             "typed field refuses it and an untyped one carries the literal"
         )
+
+    def test_an_aws_name_outside_the_shared_rule_is_not_resolved(
+        self, tmp_path, monkeypatch
+    ):
+        """The loader admits no AWS name beyond the shared rule's three. A
+        credential-bearing name that looks like the allowlisted ones is left
+        as written, so its value never reaches the configuration."""
+        monkeypatch.setenv("AWS_SESSION_TOKEN", PLACEHOLDER)
+        config = _load(
+            tmp_path,
+            f"project_name: {REFERENCE.format(name='AWS_SESSION_TOKEN')}\n",
+        )
+        assert PLACEHOLDER not in config.project_name, (
+            "a name outside the shared readable-name rule was resolved into "
+            "project_name"
+        )
+        assert config.project_name == "${AWS_SESSION_TOKEN:None}"
+
+    def test_the_loader_admits_exactly_the_shared_rules_names(self):
+        """The loader's predicate and the shared rule answer identically, and
+        the answers are pinned: the two cannot drift apart one name at a
+        time, in either direction."""
+        from automated_security_helper.core.constants import (
+            is_readable_environment_name,
+        )
+
+        admitted = ["ASH_ANY_NAME", *ASH_CONFIG_ENV_VAR_ALLOWLIST]
+        refused = [
+            "AWS_SESSION_TOKEN",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_ACCESS_KEY_ID",
+            "HOME",
+            "PATH",
+            "",
+        ]
+        for name in admitted:
+            assert config_env_var_is_interpolatable(name) is True, name
+            assert is_readable_environment_name(name) is True, name
+        for name in refused:
+            assert config_env_var_is_interpolatable(name) is False, name
+            assert is_readable_environment_name(name) is False, name
 
     def test_credential_named_variable_is_not_resolved(self, tmp_path, monkeypatch):
         # The variable NAME, with a placeholder value. Nothing here is a secret.
@@ -222,8 +275,469 @@ class TestAshOwnConfigStaysLoadable:
         Every entry names a region or a profile -- a *where*, not a *with what*.
         A reader adding an entry has to justify it against that sentence, and a
         name ending in KEY, TOKEN, SECRET or PASSWORD cannot be.
+
+        The prefix admits every ``ASH_`` name, including ones not written yet, so
+        the same guard applies to it: whatever ``ASH_`` name ends like a
+        credential's is not interpolated, and the allowlist holds none.
         """
         for name in ASH_CONFIG_ENV_VAR_ALLOWLIST:
-            assert not re.search(r"(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)", name), (
-                f"{name} does not belong in the config interpolation allowlist"
-            )
+            assert not re.search(
+                r"(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|HEADER_VALUE)", name
+            ), f"{name} does not belong in the config interpolation allowlist"
+            assert not _secret_shaped(name), name
+        for suffix in SECRET_SUFFIXES:
+            for name in (f"ASH_ANY_FUTURE{suffix}", f"ASH_ANY_FUTURE{suffix.lower()}"):
+                assert not config_env_var_is_interpolatable(name), name
+
+
+# Every suffix of a name a config may not read, and the name listed on its own.
+SECRET_SUFFIXES = (
+    "_KEY",
+    "_TOKEN",
+    "_SECRET",
+    "_PASSWORD",
+    "_CREDENTIAL",
+    "_CREDENTIALS",
+    "_HEADER_VALUE",
+)
+CANARY = "ash-test-canary-c8e2"
+
+
+def _secret_shaped(name: str) -> bool:
+    from automated_security_helper.config import ash_config
+
+    return ash_config.config_env_var_is_secret_shaped(name)
+
+
+@pytest.fixture
+def log_records(monkeypatch):
+    """Every record any logger is asked to log, at every level."""
+    seen = []
+    monkeypatch.setattr(logging.Logger, "isEnabledFor", lambda self, level: True)
+    monkeypatch.setattr(
+        logging.Logger, "handle", lambda self, record: seen.append(record)
+    )
+    return seen
+
+
+class TestSecretShapedNamesAreNotResolved:
+    """An ``ASH_`` name that ends like a credential's is not interpolated.
+
+    The prefix admits every ``ASH_`` variable in the process, and an operator or
+    a wrapper can export a secret under one: ``ASH_MCP_AUTH_HEADER_VALUE`` is the
+    documented case, which ash-mcp-serve and ash-container-init take out of the
+    environment before ASH starts because a config could read it. A name ending
+    in ``_KEY``, ``_TOKEN``, ``_SECRET``, ``_PASSWORD``, ``_CREDENTIAL``,
+    ``_CREDENTIALS`` or ``_HEADER_VALUE``, in any case, and that name itself, is
+    left as written, as an unlisted name is, and the warning names the variable
+    and why, never its value. Every other ``ASH_`` name resolves as before.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        [f"ASH_PROBE{suffix}" for suffix in SECRET_SUFFIXES]
+        + ["ASH_PROBE_api_token", "ASH_MCP_AUTH_HEADER_VALUE"],
+    )
+    @pytest.mark.parametrize(
+        "form", [REFERENCE, BARE_REFERENCE], ids=["default", "bare"]
+    )
+    def test_a_secret_shaped_name_is_left_as_written(
+        self, tmp_path, monkeypatch, log_records, name, form
+    ):
+        monkeypatch.setenv(name, CANARY)
+        reference = form.format(name=name)
+
+        config = _load(tmp_path, f"project_name: {reference}\n")
+
+        assert config.project_name == reference
+        assert CANARY not in config.model_dump_json()
+        messages = [record.getMessage() for record in log_records]
+        assert not [m for m in messages if CANARY in m], messages
+        named = [m for m in messages if name in m and "credential" in m]
+        assert named, messages
+
+    def test_an_operator_config_naming_the_auth_header_value_is_refused(
+        self, tmp_path, monkeypatch, log_records
+    ):
+        """The case the wrappers guard against, through resolution of a config
+        the operator named, the way a scan resolves it."""
+        monkeypatch.setenv("ASH_MCP_AUTH_HEADER_VALUE", CANARY)
+        config_file = tmp_path / "operator.yaml"
+        config_file.write_text(
+            "project_name: ${ASH_MCP_AUTH_HEADER_VALUE:None}\n", encoding="utf-8"
+        )
+
+        config = resolve_config(config_path=config_file, source_dir=tmp_path)
+
+        assert CANARY not in config.model_dump_json()
+        assert not [r for r in log_records if CANARY in r.getMessage()]
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "ASH_PROBE_CANARY",
+            # Like a suffix, but not one: the setting ASH reads for Bedrock.
+            "ASH_BEDROCK_MAX_TOKENS",
+            "ASH_KEYS_DIR",
+            "ASH_S3_BUCKET_NAME",
+            "AWS_REGION",
+        ],
+    )
+    def test_control_other_names_still_resolve(self, tmp_path, monkeypatch, name):
+        monkeypatch.setenv(name, CANARY)
+
+        config = _load(tmp_path, f"project_name: {REFERENCE.format(name=name)}\n")
+
+        assert config.project_name == CANARY
+        assert config_env_var_is_interpolatable(name)
+        assert not _secret_shaped(name)
+
+
+class TestBareReference:
+    """``${VAR}`` with no default resolves like ``${VAR:default}`` does.
+
+    It used to be left exactly as written whatever the environment held, because
+    the text to replace was rebuilt as ``":".join(groups)``, which appended a
+    colon the bare form never wrote. The bound on names is unchanged: a bare
+    reference reads only what the default form may read, and an unlisted name
+    is left as written before the environment is consulted at all.
+    """
+
+    PROBE = "ASH_TEST_INTERPOLATION_PROBE"
+
+    def test_bare_reference_resolves_when_set(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(self.PROBE, PLACEHOLDER)
+        config = _load(
+            tmp_path, f"project_name: {BARE_REFERENCE.format(name=self.PROBE)}\n"
+        )
+        assert config.project_name == PLACEHOLDER
+
+    def test_bare_reference_with_env_tag_resolves(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(self.PROBE, PLACEHOLDER)
+        config = _load(tmp_path, f"project_name: !ENV ${{{self.PROBE}}}\n")
+        assert config.project_name == PLACEHOLDER
+
+    def test_bare_reference_resolves_in_toml(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(self.PROBE, PLACEHOLDER)
+        config_file = tmp_path / "ash.toml"
+        config_file.write_text(f'project_name = "${{{self.PROBE}}}"\n')
+        assert AshConfig.from_file(config_file).project_name == PLACEHOLDER
+
+    def test_bare_reference_resolves_in_pyproject(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(self.PROBE, PLACEHOLDER)
+        config_file = tmp_path / "pyproject.toml"
+        config_file.write_text(f'[tool.ash]\nproject_name = "${{{self.PROBE}}}"\n')
+        assert AshConfig.from_file(config_file).project_name == PLACEHOLDER
+
+    @pytest.mark.parametrize(
+        "name", ["AWS_REGION", "AWS_DEFAULT_REGION", "AWS_PROFILE"]
+    )
+    def test_allowlisted_aws_names_resolve(self, tmp_path, monkeypatch, name):
+        monkeypatch.setenv(name, PLACEHOLDER)
+        config = _load(tmp_path, f"project_name: {BARE_REFERENCE.format(name=name)}\n")
+        assert config.project_name == PLACEHOLDER
+
+    def test_a_suffix_after_the_reference_is_kept(self, tmp_path, monkeypatch):
+        """The default form already allowed text after the reference; so does this."""
+        monkeypatch.setenv(self.PROBE, PLACEHOLDER)
+        config = _load(tmp_path, f"project_name: ${{{self.PROBE}}}-suffix\n")
+        assert config.project_name == f"{PLACEHOLDER}-suffix"
+
+    def test_unset_variable_is_an_error_naming_it(self, monkeypatch):
+        """No default was written, so there is nothing honest to substitute.
+
+        An empty string or ``None`` would read as "the variable was set to
+        nothing", and the literal ``${VAR}`` would reach a reporter as a bucket
+        or region name. Both hide the mistake; the error names it.
+        """
+        monkeypatch.delenv(self.PROBE, raising=False)
+        with pytest.raises(ASHConfigSourceError) as excinfo:
+            resolve_env_references(BARE_REFERENCE.format(name=self.PROBE))
+        message = str(excinfo.value)
+        assert self.PROBE in message
+        assert f"${{{self.PROBE}:" in message, (
+            "the error should show the default form that would accept an unset variable"
+        )
+
+    def test_unset_variable_refuses_the_config_instead_of_the_defaults(
+        self, tmp_path, monkeypatch
+    ):
+        """``resolve_config`` re-raises, so the scan exits 3 rather than running
+        with the default configuration and none of this file's suppressions."""
+        monkeypatch.delenv(self.PROBE, raising=False)
+        source = tmp_path / "src"
+        source.mkdir()
+        (source / ".ash.yaml").write_text(
+            f"project_name: {BARE_REFERENCE.format(name=self.PROBE)}\n"
+        )
+        with pytest.raises(ASHConfigValidationError) as excinfo:
+            resolve_config(source_dir=source)
+        assert self.PROBE in str(excinfo.value)
+        assert ".ash.yaml" in str(excinfo.value), "the error should name the file"
+
+    def test_unset_variable_behind_an_env_tag_refuses_the_config(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.delenv(self.PROBE, raising=False)
+        source = tmp_path / "src"
+        source.mkdir()
+        (source / ".ash.yaml").write_text(f"project_name: !ENV ${{{self.PROBE}}}\n")
+        with pytest.raises(ASHConfigValidationError) as excinfo:
+            resolve_config(source_dir=source)
+        assert self.PROBE in str(excinfo.value)
+        assert ".ash.yaml" in str(excinfo.value)
+
+    def test_unset_variable_in_a_base_names_the_variable_not_the_base(
+        self, tmp_path, monkeypatch
+    ):
+        """In a base, the error names the variable, and not the base's path.
+
+        A base can be named through an environment variable, so for a reference
+        in a base the error says a file in the chain holds it, and gives the
+        variable as written.
+        """
+        monkeypatch.delenv(self.PROBE, raising=False)
+        hidden = "hidden-base-dir-4242"
+        monkeypatch.setenv("ASH_TEST_INTERPOLATION_BASE", f"{hidden}/base.yaml")
+        source = tmp_path / "src"
+        (source / hidden).mkdir(parents=True)
+        (source / hidden / "base.yaml").write_text(
+            f"project_name: {BARE_REFERENCE.format(name=self.PROBE)}\n"
+        )
+        (source / ".ash.yaml").write_text(
+            "extends: ${ASH_TEST_INTERPOLATION_BASE:base.yaml}\n"
+        )
+        with pytest.raises(ASHConfigValidationError) as excinfo:
+            resolve_config(source_dir=source)
+        message = str(excinfo.value)
+        assert self.PROBE in message
+        assert f"${{{self.PROBE}:None}}" in message
+        assert hidden not in message, message
+
+    def test_unset_variable_with_a_default_still_falls_back(self, monkeypatch):
+        """Only the bare form is strict: ``${VAR:}`` and ``${VAR:None}`` are not."""
+        monkeypatch.delenv(self.PROBE, raising=False)
+        assert resolve_env_references(f"${{{self.PROBE}:}}") is None
+        assert resolve_env_references(f"${{{self.PROBE}:None}}") is None
+        assert resolve_env_references(f"${{{self.PROBE}:fallback}}") == "fallback"
+
+    def test_set_but_empty_variable_resolves_to_nothing(self, monkeypatch):
+        """Set to the empty string is set; it resolves the way ``${VAR:}`` does."""
+        monkeypatch.setenv(self.PROBE, "")
+        assert resolve_env_references(BARE_REFERENCE.format(name=self.PROBE)) is None
+
+    def test_unlisted_name_is_not_resolved_through_the_bare_form(
+        self, tmp_path, monkeypatch
+    ):
+        """The bare form must not widen what a config can read."""
+        monkeypatch.setenv("DEMO_UNLISTED_CONFIG_VAR", PLACEHOLDER)
+        reference = BARE_REFERENCE.format(name="DEMO_UNLISTED_CONFIG_VAR")
+        config = _load(tmp_path, f"project_name: {reference}\n")
+        assert PLACEHOLDER not in config.project_name
+        assert config.project_name == reference
+
+    def test_credential_name_is_not_resolved_through_the_bare_form(
+        self, tmp_path, monkeypatch
+    ):
+        # The variable NAME, with a placeholder value. Nothing here is a secret.
+        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", PLACEHOLDER)
+        reference = BARE_REFERENCE.format(name="AWS_SECRET_ACCESS_KEY")
+        config = _load(tmp_path, f"project_name: {reference}\n")
+        assert config.project_name == reference
+
+    def test_unset_unlisted_name_is_left_as_written_not_an_error(
+        self, tmp_path, monkeypatch
+    ):
+        """The name check comes first, so an unlisted name never reaches the
+        "is it set" question, and the error cannot be used to probe for it."""
+        monkeypatch.delenv("DEMO_UNLISTED_CONFIG_VAR", raising=False)
+        reference = BARE_REFERENCE.format(name="DEMO_UNLISTED_CONFIG_VAR")
+        config = _load(tmp_path, f"project_name: {reference}\n")
+        assert config.project_name == reference
+
+    def test_two_bare_references_in_one_value_are_left_as_written(
+        self, tmp_path, monkeypatch
+    ):
+        """The pattern's default group runs to the last ``}``, so ``${A}/${B}``
+        reads as ``A`` with trailing text inside the braces. Without the check for
+        that shape the value became A's value alone and B's half was dropped."""
+        monkeypatch.setenv("ASH_TEST_FIRST", "first")
+        monkeypatch.setenv("ASH_TEST_SECOND", "second")
+        value = "${ASH_TEST_FIRST}/${ASH_TEST_SECOND}"
+        assert resolve_env_references(value) == value
+        config = _load(tmp_path, f"project_name: {value}\n")
+        assert config.project_name == value
+
+    def test_unset_variable_in_toml_names_the_file(self, tmp_path, monkeypatch):
+        monkeypatch.delenv(self.PROBE, raising=False)
+        config_file = tmp_path / "ash.toml"
+        config_file.write_text(f'project_name = "${{{self.PROBE}}}"\n')
+        with pytest.raises(ASHConfigSourceError) as excinfo:
+            AshConfig.from_file(config_file)
+        message = str(excinfo.value)
+        assert "ash.toml" in message, message
+        assert self.PROBE in message
+
+    def test_unset_variable_in_pyproject_names_the_file(self, tmp_path, monkeypatch):
+        monkeypatch.delenv(self.PROBE, raising=False)
+        config_file = tmp_path / "pyproject.toml"
+        config_file.write_text(f'[tool.ash]\nproject_name = "${{{self.PROBE}}}"\n')
+        with pytest.raises(ASHConfigSourceError) as excinfo:
+            AshConfig.from_file(config_file)
+        message = str(excinfo.value)
+        assert "pyproject.toml" in message, message
+        assert self.PROBE in message
+
+    @pytest.mark.parametrize(
+        "written", ["${ash_test_lower_probe}", "${ash_test_lower_probe:None}"]
+    )
+    def test_lowercase_ash_prefix_is_not_read(self, tmp_path, monkeypatch, written):
+        """The prefix is matched as written. Both spellings are set, so folding
+        the name's case where it is checked (``var_name.upper()`` passed to
+        ``config_env_var_is_interpolatable``) lets the lowercase name through,
+        and the read that follows finds one of the two values and fails here."""
+        monkeypatch.setenv("ash_test_lower_probe", "lower-" + PLACEHOLDER)
+        monkeypatch.setenv("ASH_TEST_LOWER_PROBE", "upper-" + PLACEHOLDER)
+        config = _load(tmp_path, f"project_name: {written}\n")
+        assert config.project_name == written
+
+
+class TestOneReferencePerValueAtItsStart:
+    """A value holds one reference, at its start; anything else is the value's text.
+
+    The documented contract (docs/content/docs/config-overrides.md, "Write one
+    reference per value, at its start"): a reference runs to the last ``}`` in
+    the value, a reference after other text is not resolved, and neither is a
+    second reference. These cells pin each shape the contract names, so the
+    behavior stays a documented choice.
+    """
+
+    def test_two_adjacent_references_are_left_as_written(self, tmp_path, monkeypatch):
+        """``${A}${B}``, like ``${A}/${B}``: a second reference is not resolved,
+        and the first, with no colon and text before the last ``}``, is not a
+        reference this resolver reads. Nothing is read from the environment."""
+        monkeypatch.setenv("ASH_TEST_FIRST", "first")
+        monkeypatch.setenv("ASH_TEST_SECOND", "second")
+        value = "${ASH_TEST_FIRST}${ASH_TEST_SECOND}"
+        assert resolve_env_references(value) == value
+        config = _load(tmp_path, f"project_name: {value}\n")
+        assert config.project_name == value
+
+    def test_a_reference_after_other_text_is_left_as_written(
+        self, tmp_path, monkeypatch
+    ):
+        """``prefix${A}``: the pattern is anchored at the value's start, so text
+        before the reference leaves the whole value as written."""
+        monkeypatch.setenv("ASH_TEST_FIRST", "first")
+        value = "prefix${ASH_TEST_FIRST}"
+        assert resolve_env_references(value) == value
+        config = _load(tmp_path, f"project_name: {value}\n")
+        assert config.project_name == value
+
+    def test_a_second_reference_after_a_default_reads_as_the_default(self, monkeypatch):
+        """``${A:x}${B}``: the reference runs to the last ``}``, so the default
+        is ``x}${B``. Set, A replaces the whole value; unset, the default is the
+        value. The documented arms, pinned so a change to them is a decision."""
+        monkeypatch.setenv("ASH_TEST_FIRST", "first")
+        monkeypatch.delenv("ASH_TEST_UNSET", raising=False)
+        assert (
+            resolve_env_references("${ASH_TEST_FIRST:x}${ASH_TEST_SECOND}") == "first"
+        )
+        assert (
+            resolve_env_references("${ASH_TEST_UNSET:x}${ASH_TEST_SECOND}")
+            == "x}${ASH_TEST_SECOND"
+        )
+
+
+class TestAReferenceLeftAsItsOwnTextReadNothing:
+    """A reference that resolved to its own text read nothing from the environment.
+
+    An explicit ``!ENV ${A}${B}`` resolves to ``${A}${B}``, the value's own text
+    with the tag gone: nothing was read. The run's record listed that text as a
+    value read from the environment, and recorded a reference carrying A's value,
+    while ``ash config validate``'s check listed nothing for the same file. Both
+    views now agree with the check: no value, no reference. Hiding the text was
+    safe (it is the file's own), but it put the file's text in the redaction
+    list and disagreed with the check's.
+    """
+
+    @pytest.fixture
+    def environment(self, monkeypatch):
+        monkeypatch.setenv("ASH_TEST_FIRST", "first-value")
+        monkeypatch.setenv("ASH_TEST_SECOND", "second-value")
+        monkeypatch.delenv("ASH_CONFIG", raising=False)
+
+    @pytest.mark.parametrize(
+        "value",
+        ["!ENV ${ASH_TEST_FIRST}${ASH_TEST_SECOND}", "!ENV prefix${ASH_TEST_FIRST}"],
+        ids=["tagged-composite", "tagged-after-text"],
+    )
+    def test_the_run_s_record_lists_no_value_and_no_reference(
+        self, tmp_path, environment, value
+    ):
+        from automated_security_helper.config.resolve_config import (
+            load_config_file_for_run,
+        )
+
+        config_file = tmp_path / ".ash.yaml"
+        config_file.write_text(f"project_name: {value}\n", encoding="utf-8")
+
+        _document, config = load_config_file_for_run(config_file)
+
+        assert config.project_name == value.removeprefix("!ENV ")
+        assert config._environment_values == [], config._environment_values
+        assert config._environment_references == (), config._environment_references
+
+    def test_the_check_lists_no_value_for_the_same_file(self, tmp_path, environment):
+        """The side the record now agrees with, pinned."""
+        from automated_security_helper.config.config_validator import ConfigValidator
+
+        config_file = tmp_path / ".ash.yaml"
+        config_file.write_text(
+            "project_name: !ENV ${ASH_TEST_FIRST}${ASH_TEST_SECOND}\n",
+            encoding="utf-8",
+        )
+
+        check = ConfigValidator.check_config_file(config_file)
+
+        assert check.environment_values == [], check.environment_values
+
+    def test_a_resolved_reference_is_still_listed(self, tmp_path, environment):
+        """The control: a reference that did resolve keeps its value in both."""
+        from automated_security_helper.config.config_validator import ConfigValidator
+        from automated_security_helper.config.resolve_config import (
+            load_config_file_for_run,
+        )
+
+        config_file = tmp_path / ".ash.yaml"
+        config_file.write_text(
+            "project_name: !ENV ${ASH_TEST_FIRST}\n", encoding="utf-8"
+        )
+
+        _document, config = load_config_file_for_run(config_file)
+        check = ConfigValidator.check_config_file(config_file)
+
+        assert config.project_name == "first-value"
+        assert config._environment_values == ["first-value"]
+        assert [r.value for r in config._environment_references] == ["first-value"]
+        assert check.environment_values == ["first-value"]
+
+
+@pytest.mark.parametrize(
+    "written", ["!ENV [a, b]", "!ENV {a: 1}"], ids=["sequence", "mapping"]
+)
+def test_an_env_tag_on_a_collection_is_refused_by_both_readers(tmp_path, written):
+    """``!ENV`` tags one scalar. On a list or a mapping, the reader that resolves
+    references and the one that returns the file as written refuse it with the
+    same YAML error, so a check that reads the file literally fails where the
+    scan's reader fails. A literal constructor that built the collection
+    instead would return it, and differ here."""
+    config_file = tmp_path / ".ash.yaml"
+    config_file.write_text(f"project_name: {written}\n", encoding="utf-8")
+    refusals = []
+    for reader in (read_config_file, read_config_file_literally):
+        with pytest.raises(yaml.YAMLError) as excinfo:
+            reader(config_file)
+        refusals.append(str(excinfo.value).splitlines()[0])
+    assert refusals[0] == refusals[1]
+    assert refusals[0].startswith("expected a scalar node"), refusals[0]

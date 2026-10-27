@@ -1,15 +1,27 @@
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 import io
+import json
+import os
+import re
 
-from cfn_tools import load_yaml
+import yaml
+from cfn_tools.yaml_loader import TAG_MAP, CfnYamlLoader
+from cfn_tools.yaml_loader import construct_mapping as _cfn_construct_mapping
+from yaml import YAMLError
+from yaml.constructor import ConstructorError
+from yaml.error import Mark
+from yaml.scanner import ScannerError
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 
-from typing import Annotated, Dict
+from typing import TYPE_CHECKING, Annotated, Any, Dict
 
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.scanned_tree import open_in_scanned_tree
+
+if TYPE_CHECKING:
+    from automated_security_helper.base.plugin_context import PluginContext
 
 
 def describe_parse_error(exc: BaseException) -> str:
@@ -30,6 +42,180 @@ def describe_parse_error(exc: BaseException) -> str:
     if line is None:
         return type(exc).__name__
     return f"{type(exc).__name__} at line {line}"
+
+
+class TemplateDocumentError(YAMLError):
+    """Text the YAML loader read but could not build a document from.
+
+    The JSON parser could not read it either, or was not tried: a document nested
+    too deep for the loader is not read as JSON (``get_model_from_template_text``).
+    cfn_tools' loader raises
+    ``TypeError`` for a mapping used as a mapping key, which is how it reads a Helm
+    template's ``{{ include ... }}`` ("unhashable type: 'ODict'"), ``ValueError``
+    for a scalar it cannot construct, such as ``!!int forty-two``, and
+    ``RecursionError`` for a document nested past the recursion limit (a few
+    hundred levels). None is a ``YAMLError``, so cdk-nag, which treats only a
+    ``YAMLError`` as a file that does not parse, counted a Helm chart as a template
+    it failed on and the scan reported ERROR, while cfn-nag passed over the same
+    file. As a ``YAMLError`` it is the parse failure it is, for every caller, and it
+    crosses the cdk-nag worker boundary as one (``cdk_nag_worker`` keeps the base
+    class). A value that could not be built raises the subclass
+    :class:`TemplateConstructorError`. The message names the loader's error type
+    only: its text can quote the document, and these messages reach ash.log.
+    """
+
+
+class TemplateConstructorError(TemplateDocumentError):
+    """A document the YAML loader read but could not build one of the values of.
+
+    Every loader failure that is not a syntax error: a ``ConstructorError`` (an
+    explicit tag it refuses, such as ``!!python/name:``, or ``!!binary`` data it
+    cannot decode), a ``TypeError`` (a mapping used as a key), a ``ValueError``
+    (``!!int forty-two``) and anything else the constructors raise. The syntax was
+    fine, so a file whose structure is a template (a top-level Resources mapping) is
+    a template ASH failed on, not one it could not parse:
+    :func:`unevaluable_template_reason` decides that, and both scanners count such a
+    file as a failed target. The line of the value is kept where the loader knew it
+    (a ConstructorError carries it), for :func:`describe_parse_error`; the message
+    names the error type only.
+    """
+
+    problem_mark: Mark | None = None
+
+
+#: YAML 1.1's implicit timestamp type. CloudFormation reads ``2010-09-09`` and
+#: ``2024-13-01`` as strings; PyYAML read them as dates and raised ValueError on a
+#: date no calendar holds, so a real template with such a value did not load.
+_TIMESTAMP_TAG = "tag:yaml.org,2002:timestamp"
+
+
+_ImplicitResolvers = Dict[Any, list[tuple[str, Any]]]
+
+
+def _without_the_timestamp_resolver(
+    resolvers: _ImplicitResolvers,
+) -> _ImplicitResolvers:
+    """A copy of a loader's implicit resolvers with the timestamp type left out."""
+    return {
+        first: [(tag, regexp) for tag, regexp in entries if tag != _TIMESTAMP_TAG]
+        for first, entries in resolvers.items()
+    }
+
+
+class _TemplateLoader(CfnYamlLoader):
+    """cfn_tools' template loader, reading date-like scalars as the strings they are.
+
+    An ASH subclass, so no third-party code changes: the implicit resolvers are a
+    class attribute, and this class gets its own copy without the timestamp type.
+    An explicitly tagged ``!!timestamp`` is still built as a date.
+
+    Merge keys (``<<: *base``) are merged, as PyYAML's own loaders merge them:
+    cfn_tools' mapping constructor never did, so a valid merge raised a
+    ConstructorError. CloudFormation itself does not accept hash merges (its
+    template format specification lists them as unsupported), so such a template is
+    one a preprocessor flattens before it deploys, and ASH scans what the merged
+    document says. A merge of anything but a mapping (``<<: 5``) still raises.
+    """
+
+
+_TemplateLoader.yaml_implicit_resolvers = _without_the_timestamp_resolver(
+    CfnYamlLoader.yaml_implicit_resolvers
+)
+
+
+def _construct_merged_mapping(loader: _TemplateLoader, node: yaml.MappingNode) -> Any:
+    loader.flatten_mapping(node)
+    return _cfn_construct_mapping(loader, node)
+
+
+_TemplateLoader.add_constructor(TAG_MAP, _construct_merged_mapping)
+
+
+def _load_template_yaml(text: str) -> Any:
+    """``cfn_tools.load_yaml`` through :class:`_TemplateLoader`."""
+    loader = _TemplateLoader(text)
+    try:
+        return loader.get_single_data()
+    finally:
+        loader.dispose()
+
+
+def _as_parse_failure(load_error: Exception) -> YAMLError:
+    """The YAMLError a text that neither YAML nor JSON reads raises.
+
+    A syntax error is raised as the loader raised it, and every other loader
+    failure, a ConstructorError included, is a TemplateConstructorError.
+    """
+    if isinstance(load_error, ConstructorError) or not isinstance(
+        load_error, YAMLError
+    ):
+        error = TemplateConstructorError(
+            f"the YAML loader could not build a value: {type(load_error).__name__}"
+        )
+        error.problem_mark = getattr(load_error, "problem_mark", None)
+        return error
+    return load_error
+
+
+#: How deep a JSON document YAML refused may nest, when tabs were not why it refused:
+#: a tab-indented one is decided as the same text with spaces
+#: (:func:`get_model_from_template_text`), so the YAML loader's own limits apply to
+#: it. What is left is JSON that YAML refuses for another reason, such as a key
+#: longer than the 1,024 characters YAML allows a simple key. json.loads raises
+#: RecursionError at 994 levels on Python 3.10 and 3.11 and reads about 10,000 on
+#: 3.12 and 3.13 and more than 20,000 on 3.14, so a limit under all of them answers
+#: such a template the same on every version. Past the limit such a template is
+#: passed over as a file that could not be parsed, not counted as one ASH could not
+#: evaluate: :func:`_has_top_level_resources` reads structure through YAML, which
+#: refuses it, and reading it as JSON instead would make the answer past 994 levels
+#: depend on the Python version again. The exception is a file that nests past
+#: ``EVENT_DEPTH_BOUND`` levels before YAML reaches what it refuses, the long key
+#: coming after the deep part or inside it: the event read stops at the bound first,
+#: and that counts as a failed target, as any file nested that deep does.
+JSON_NESTING_LIMIT = 400
+
+_JSON_TOO_DEEP = f"it is nested past {JSON_NESTING_LIMIT} levels"
+
+
+def _root_is_a_sequence(text: str) -> bool:
+    """Whether the first node of *text*'s YAML event stream opens a sequence.
+
+    A CloudFormation template is a mapping, so a document whose root is a sequence
+    is not one, damaged or not: the damage would have to be its first node. Read
+    from the event stream, which stops at that node, where a composer parse of a
+    deeply nested sequence runs to the recursion limit first: for a JSON test-suite
+    file of 100,000 opening brackets, about 1.5 s a parse on Python 3.10, and a
+    cfn-nag decision made five of them. False when the stream cannot be read that
+    far, so the parsers decide such a text.
+    """
+    events = yaml.parse(text, Loader=yaml.BaseLoader)
+    try:
+        for event in events:
+            if isinstance(event, yaml.NodeEvent):
+                return isinstance(event, yaml.SequenceStartEvent)
+    except Exception:
+        return False
+    finally:
+        events.close()
+    return False
+
+
+def _nested_past(value: object, limit: int) -> bool:
+    """Whether *value*, read from JSON, nests lists and objects deeper than *limit*."""
+    pending = [(value, 1)]
+    while pending:
+        item, depth = pending.pop()
+        children: Iterable[object]
+        if isinstance(item, dict):
+            children = item.values()
+        elif isinstance(item, list):
+            children = item
+        else:
+            continue
+        if depth > limit:
+            return True
+        pending.extend((child, depth + 1) for child in children)
+    return False
 
 
 class CloudFormationTemplateModelError(Exception):
@@ -85,6 +271,9 @@ class CloudFormationTemplateModel(BaseModel):
         extra="allow",
         validate_assignment=True,
         validate_default=True,
+        # A template is scanned content, which an error does not quote
+        # (describe_parse_error).
+        hide_input_in_errors=True,
     )
 
     Resources: Dict[str, CloudFormationResource]
@@ -101,9 +290,10 @@ def get_model_from_template(
     loaded document carries no ``Resources`` mapping. Raises
     :class:`CloudFormationTemplateModelError` when the document does carry one but this
     model rejects it, so the caller can count a failed target instead of an unscanned
-    skip. Exceptions from ``load_yaml`` propagate unchanged -- a file that is not
-    parseable YAML or JSON never reached this model in the first place, and the two
-    callers already classify that case for themselves.
+    skip. A file that is not parseable YAML or JSON raises a ``YAMLError`` (the
+    loader's own, or :class:`TemplateDocumentError` for one it raised as another
+    type) -- it never reached this model in the first place, and the two callers
+    classify that case for themselves.
 
     With ``scan_root``, the template is read under the scanned-tree rule
     (``utils/scanned_tree.py``) and a file that breaks it raises
@@ -142,11 +332,55 @@ def read_template_text(template_path: Path | str, scan_root: Path | str) -> str:
 def get_model_from_template_text(
     text: str, template_path: Path | str
 ) -> CloudFormationTemplateModel | None:
-    """:func:`get_model_from_template` for text already read; ``template_path`` names it."""
-    template = load_yaml(text)
+    """:func:`get_model_from_template` for text already read; ``template_path`` names it.
+
+    Parsed as YAML, and as JSON when YAML rejects the text. Every JSON document is
+    meant to be YAML, but YAML forbids a tab where JSON allows one: a JSON template
+    indented with tabs is valid JSON and a valid template, and the YAML loader raises
+    on it. The YAML loader is cfn_tools' with date-like scalars read as strings
+    (:class:`_TemplateLoader`). When JSON rejects the text too, text that does not
+    parse always raises a ``YAMLError``: a syntax error as the loader raised it, and
+    any value the loader could not build as :class:`TemplateConstructorError`. A
+    document nested past the loader's recursion limit raises
+    :class:`TemplateDocumentError` without a JSON read, and so does JSON nested past
+    ``JSON_NESTING_LIMIT``: how deep ``json.loads`` goes depends on the Python
+    version and platform, so reading on would make the outcome depend on them too
+    (on 3.12 and later it would read such a template, and cdk-nag would spend
+    minutes synthesizing it before failing).
+
+    JSON that has a tab in it is decided as the same text with a space for each tab:
+    in valid JSON a raw tab can only be whitespace, so that is the same document, and
+    a template indented with tabs is answered as the one indented with spaces. So
+    indentation does not decide a template nested near the YAML loader's limits
+    (about 330 levels for mappings, about 490 for sequences), where YAML would
+    refuse the tabs before it reached the depth and leave JSON to decide. A
+    document whose root is a sequence is not a template, and is answered
+    None without a parse (:func:`_root_is_a_sequence`).
+    """
+    if _root_is_a_sequence(text):
+        return None
+    try:
+        template = _load_template_yaml(text)
+    except RecursionError:
+        raise TemplateDocumentError(
+            "it is nested past the YAML loader's recursion limit"
+        ) from None
+    except Exception as load_error:
+        # Broad on purpose, and not silent: every failure is raised again below as a
+        # typed YAMLError, and a constructor failure on a template is a failed target.
+        try:
+            template = json.loads(text)
+        except RecursionError:
+            raise TemplateDocumentError(_JSON_TOO_DEEP) from None
+        except ValueError:
+            raise _as_parse_failure(load_error) from None
+        if "\t" in text:
+            return get_model_from_template_text(text.replace("\t", " "), template_path)
+        if _nested_past(template, JSON_NESTING_LIMIT):
+            raise TemplateDocumentError(_JSON_TOO_DEEP) from None
 
     # The one question that separates "not CloudFormation" from "CloudFormation this
-    # model cannot represent". `cfn_tools.load_yaml` returns an ODict, which is a dict
+    # model cannot represent". cfn_tools' loader returns an ODict, which is a dict
     # and therefore a Mapping, so this admits every real template; a `Resources: {}`
     # template stays admitted, as it was before.
     if not isinstance(template, Mapping) or not isinstance(
@@ -171,3 +405,411 @@ def get_model_from_template_text(
             f"{describe_parse_error(e)}"
         )
         raise CloudFormationTemplateModelError(template_path, e) from e
+
+
+CFN_CANDIDATE_SUFFIXES = (".json", ".yaml", ".yml")
+
+
+def cloudformation_candidate_files(
+    context: "PluginContext", target_type: str
+) -> list[str]:
+    """The files cfn-nag and cdk-nag consider in one tree, as posix paths, sorted.
+
+    Every JSON and YAML file: the scan set for the source tree, without the files
+    the global ignore paths ignore, and every file under the work directory for the
+    converted tree. Whether a candidate is a template is the second question,
+    answered per file by :func:`get_model_from_template_text`. Shared by both
+    scanners and by their ``nothing_to_scan_reason``, so the answer "there is
+    nothing to scan" comes from the selection the scan makes.
+
+    The ignore paths are the configuration's entries that have not expired, the
+    list the scanners are given (``core/orchestrator.py``), matched as ASH matches
+    them when it drops findings (``link_exclusions.drop_ignored``).
+    """
+    if target_type == "converted":
+        files = [Path(p) for p in Path(context.work_dir).glob("**/*.*")]
+    else:
+        from automated_security_helper.utils.get_scan_set import (
+            honors_ignore_files,
+            scan_set,
+        )
+        from automated_security_helper.utils.link_exclusions import drop_ignored
+        from automated_security_helper.utils.suppression_matcher import (
+            active_ignore_paths,
+        )
+
+        global_settings = getattr(
+            getattr(context, "config", None), "global_settings", None
+        )
+        files = [
+            Path(p)
+            for p in drop_ignored(
+                scan_set(
+                    source=os.fspath(context.source_dir),
+                    output=os.fspath(context.output_dir),
+                    honor_ignore_files=honors_ignore_files(
+                        getattr(context, "config", None)
+                    ),
+                    run_id=getattr(context, "run_id", None),
+                ),
+                context.source_dir,
+                active_ignore_paths(
+                    getattr(global_settings, "ignore_paths", None) or []
+                ),
+            )
+        ]
+    return sorted(
+        path.as_posix() for path in files if path.name.endswith(CFN_CANDIDATE_SUFFIXES)
+    )
+
+
+class _TagTolerantLoader(yaml.SafeLoader):
+    """``SafeLoader`` that reads a tag it does not know as the plain node it tags.
+
+    For the one question :func:`_could_be_a_template` asks of a file the template
+    parser rejected: is it a mapping with ``Resources``? mkdocs.yml carries
+    ``!!python/name:`` tags, which ``SafeLoader`` refuses to construct and which this
+    reads as the string after them. Nothing is executed; the base loader is the safe
+    one. Date-like scalars are strings here too, as in :class:`_TemplateLoader`.
+    """
+
+
+def _construct_untagged(
+    loader: yaml.SafeLoader,
+    tag_suffix: str,
+    node: yaml.ScalarNode | yaml.SequenceNode | yaml.MappingNode,
+) -> Any:
+    if isinstance(node, yaml.MappingNode):
+        return loader.construct_mapping(node)
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node)
+    return loader.construct_scalar(node)
+
+
+_TagTolerantLoader.add_multi_constructor("", _construct_untagged)
+_TagTolerantLoader.yaml_implicit_resolvers = _without_the_timestamp_resolver(
+    yaml.SafeLoader.yaml_implicit_resolvers
+)
+
+
+def _without_jsonc_comments(text: str) -> str:
+    """*text* with ``//`` and ``/* */`` comments removed outside JSON strings."""
+    out: list[str] = []
+    i, n, in_string = 0, len(text), False
+    while i < n:
+        ch = text[i]
+        if in_string:
+            out.append(ch)
+            if ch == "\\" and i + 1 < n:
+                out.append(text[i + 1])
+                i += 2
+                continue
+            if ch == '"':
+                in_string = False
+            i += 1
+        elif ch == '"':
+            in_string = True
+            out.append(ch)
+            i += 1
+        elif text.startswith("//", i):
+            end = text.find("\n", i)
+            i = n if end == -1 else end
+        elif text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            i = n if end == -1 else end + 2
+            out.append(" ")
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
+#: What a CloudFormation template carries that other YAML and JSON files do not: the
+#: format version, or a resource type in either syntax (``Type: AWS::...`` or
+#: ``"Type": "AWS::...``).
+_CLOUDFORMATION_MARKER = re.compile(
+    r"AWSTemplateFormatVersion|[\"']?\bType[\"']?\s*:\s*[\"']?AWS::"
+)
+
+
+def _could_be_a_template(text: str) -> bool:
+    """For a file the template parser rejected: could it be a damaged template?
+
+    Parsed again, leniently: YAML with unknown tags read as plain nodes, then JSON with
+    comments removed. A document either reading yields is a template when it is a
+    mapping with a ``Resources`` mapping. A file neither reads is a template when its
+    text carries a CloudFormation marker, which a damaged template keeps and a Helm
+    chart or a tsconfig.json does not.
+
+    The marker answers only "could this be a damaged template": the reason a
+    SKIPPED target gives, and the tool-absent check's MISSING. It never makes a file
+    a failed target; that takes a structure read (:func:`_has_top_level_resources`).
+    A file whose root is a sequence could not be one, marker or not
+    (:func:`_root_is_a_sequence`).
+    """
+    if _root_is_a_sequence(text):
+        return False
+    loader = None
+    try:
+        # Built inside the try: the reader refuses a non-printable character as
+        # the loader is built, and that ReaderError escaping ended cfn-nag's and
+        # cdk-nag's whole scan(), the good templates beside the file included.
+        loader = _TagTolerantLoader(text)
+        document = loader.get_single_data()
+    except (YAMLError, TypeError, ValueError, RecursionError):
+        # ValueError: a scalar SafeLoader cannot construct, such as !!int
+        # forty-two. RecursionError: a document nested past the recursion limit.
+        # Either one escaping from here ended cfn-nag's whole scan(), since it asks
+        # this from inside the except arm that passes over a file it cannot parse.
+        document = None
+        parsed = False
+    else:
+        parsed = True
+    finally:
+        if loader is not None:
+            loader.dispose()
+    if not parsed:
+        try:
+            document = json.loads(_without_jsonc_comments(text))
+        except (ValueError, RecursionError):
+            return bool(_CLOUDFORMATION_MARKER.search(text))
+    return isinstance(document, Mapping) and isinstance(
+        document.get("Resources"), Mapping
+    )
+
+
+def holds_cloudformation_template(
+    files: Iterable[str | Path], scan_root: Path | str
+) -> bool:
+    """True when any of *files* is a CloudFormation template either scanner counts.
+
+    The answer decides between SKIPPED and MISSING when the scanner's tool is absent,
+    and only MISSING cannot hide a template, so every doubt counts as a template
+    except one. A candidate is not a template when it was read and parsed and carries
+    no ``Resources`` mapping, when its root is a sequence, when the scanned-tree rule
+    refuses it (the scanners skip that file too), or when the template parser rejects
+    it and it is not one by :func:`_could_be_a_template`. The last is how the scanners read it with their tool
+    installed: they pass over a file that does not parse, and a repository's
+    mkdocs.yml, Helm templates and tsconfig.json are such files.
+
+    A template: a document the model cannot represent (the scanners count it as a
+    failed target), a candidate that could not be read, and a rejected file that
+    parses leniently to a mapping with ``Resources`` or whose text carries a
+    CloudFormation marker, which is what a damaged template looks like.
+    """
+    from automated_security_helper.utils.scanned_tree import TreeInputRefused
+
+    for candidate in files:
+        try:
+            text = read_template_text(candidate, scan_root)
+        except TreeInputRefused:
+            continue
+        except Exception:
+            return True
+        try:
+            if get_model_from_template_text(text, Path(candidate)) is not None:
+                return True
+            continue
+        except CloudFormationTemplateModelError:
+            return True
+        except Exception:
+            pass
+        if _could_be_a_template(text):
+            return True
+    return False
+
+
+class _StructureLoader(yaml.BaseLoader):
+    """PyYAML's BaseLoader: every scalar a string, every tag read as the plain node.
+
+    For :func:`_has_top_level_resources`, which asks about the document's shape and
+    nothing else, so no value has to be built: ``!!int forty-two`` is the string it
+    says. A key that is a mapping or a sequence still cannot be built, since no
+    reading of the document can use one as a key.
+    """
+
+
+#: How deep the event read goes under a mapping root before it stops and counts the
+#: file. PyYAML's scanner does work proportional to the depth at every token, so a
+#: read to the end of a deep document took minutes; past this a mapping root is
+#: answered as a template nested too deep to evaluate, whatever it holds, and a
+#: syntax error further in is not seen. At 5,000 the read of a hostile file (one
+#: line of opening brackets) took 11 to 23.5 s per scanner per file, growing with
+#: about the square of the depth to 1,000 or 2,000 levels; at 1,000 it is about a
+#: second. A real template is nowhere near 1,000 levels deep.
+EVENT_DEPTH_BOUND = 1000
+
+
+def _top_level_resources_in_events(text: str) -> bool:
+    """:func:`_has_top_level_resources` from the YAML event stream.
+
+    PyYAML's parser keeps its own state stack, so it reads a document at any depth
+    (measured at 20,000 levels), where its composer and constructors recurse. Only
+    the top-level keys are looked at, and the whole stream has to parse. A root that
+    is not a mapping is answered at its first event; under a mapping root the read
+    stops past ``EVENT_DEPTH_BOUND`` levels and answers True.
+
+    A root ``Resources`` that comes from an alias (``Resources: *shared``) or from a
+    top-level merge key is not seen, so such a file stays a skip. CloudFormation
+    accepts neither aliases nor merges.
+    """
+    # One frame per open collection: [is a mapping, its next node is a key].
+    stack: list[list[bool]] = []
+    key: str | None = None
+    found = False
+    documents = 0
+    root_seen = False
+
+    def node_done() -> None:
+        if stack and stack[-1][0]:
+            stack[-1][1] = not stack[-1][1]
+
+    try:
+        for event in yaml.parse(text, Loader=yaml.BaseLoader):
+            if isinstance(event, yaml.DocumentStartEvent):
+                documents += 1
+                if documents > 1:
+                    return False
+            elif isinstance(event, (yaml.MappingEndEvent, yaml.SequenceEndEvent)):
+                stack.pop()
+                node_done()
+            elif isinstance(event, yaml.NodeEvent):
+                if not root_seen:
+                    root_seen = True
+                    if not isinstance(event, yaml.MappingStartEvent):
+                        return False
+                if len(stack) == 1 and stack[0][0]:
+                    if stack[0][1]:
+                        key = (
+                            event.value if isinstance(event, yaml.ScalarEvent) else None
+                        )
+                    elif key == "Resources" and isinstance(
+                        event, yaml.MappingStartEvent
+                    ):
+                        found = True
+                if isinstance(event, (yaml.MappingStartEvent, yaml.SequenceStartEvent)):
+                    stack.append([isinstance(event, yaml.MappingStartEvent), True])
+                    if len(stack) > EVENT_DEPTH_BOUND:
+                        return True
+                else:
+                    node_done()
+    except YAMLError:
+        return False
+    return found
+
+
+def _has_top_level_resources(text: str) -> bool:
+    """Whether the document's structure is a template: a top-level Resources mapping.
+
+    Read with :class:`_StructureLoader`, so a value no constructor can build does not
+    hide the structure, and from the event stream for a document nested past the
+    recursion limit. JSON indented with tabs, which YAML's scanner refuses, is read
+    from the event stream with each tab as a space: in valid JSON a raw tab can only
+    be whitespace. So is a document nested past the recursion limit, since its first
+    tab can come after the depth, where the loader never read it. Only a scanner
+    error takes the tab path. A Helm template's ``{{ .Values.name }}:`` key is a
+    mapping no reading can use as a key, so its structure cannot be read and the
+    file is not a template; when any YAMLError took the path, a tab anywhere in such
+    a file, even in a comment, made it a failed target. A root that is a sequence
+    is answered at its first node (:func:`_root_is_a_sequence`). Never decided from
+    the text: a Helm or Kubernetes file that carries a template as text has a
+    CloudFormation marker and no such structure.
+    """
+    if _root_is_a_sequence(text):
+        return False
+    loader = None
+    try:
+        loader = _StructureLoader(text)
+        document = loader.get_single_data()
+    except RecursionError:
+        return _top_level_resources_in_events(text.replace("\t", " "))
+    except ScannerError:
+        if "\t" in text:
+            return _top_level_resources_in_events(text.replace("\t", " "))
+        return False
+    except Exception:
+        return False
+    finally:
+        if loader is not None:
+            loader.dispose()
+    return isinstance(document, Mapping) and isinstance(
+        document.get("Resources"), Mapping
+    )
+
+
+def unevaluable_template_reason(
+    candidate: str | Path, scan_root: Path | str, text: str | None = None
+) -> str | None:
+    """Why *candidate* is a template ASH could not evaluate, or None when it is not one.
+
+    A template here is a file whose structure is one (a top-level Resources mapping,
+    :func:`_has_top_level_resources`), and ASH could not evaluate it when the parser
+    read its syntax and could not build a value, or when it is nested deeper than
+    ASH reads (the YAML loader's recursion limit, ``JSON_NESTING_LIMIT`` for JSON
+    YAML refused for a reason other than tabs, ``EVENT_DEPTH_BOUND`` for the
+    structural read). cfn-nag and cdk-nag count such a file as a failed
+    target, as they count a template the model rejects
+    (CloudFormationTemplateModelError), so the gate sees it.
+
+    None for a syntax error (a damaged template stays a file that could not be
+    parsed), for a file whose structure is not a template (a mkdocs.yml with
+    ``!!python/name:`` tags, a Helm or Kubernetes file that carries a template as
+    text), for one whose structure cannot be read (a sequence used as a key), and for
+    one that cannot be read at all.
+
+    Decided from the file, not from the exception a scanner caught, because cdk-nag
+    parses in a worker child and only an exception's name and text cross back. Pass
+    *text* when it is already read.
+    """
+    if text is None:
+        try:
+            text = read_template_text(candidate, scan_root)
+        except Exception:
+            return None
+    try:
+        get_model_from_template_text(text, Path(candidate))
+    except TemplateConstructorError as error:
+        reason = (
+            f"a value in the template could not be built: {describe_parse_error(error)}"
+        )
+    except TemplateDocumentError as error:
+        # The message is one of this module's own: the depth, never document text.
+        reason = f"ASH could not evaluate the template: {error}"
+    except Exception:
+        return None
+    else:
+        return None
+    return reason if _has_top_level_resources(text) else None
+
+
+NO_CLOUDFORMATION_TEMPLATE = "no CloudFormation template in the scanned files"
+
+#: The reason for a target cfn-nag's or cdk-nag's scan() attempted none of when it
+#: passed over a candidate it could not parse that could be a template: one
+#: holds_cloudformation_template counts, so the same tree without the tool is MISSING
+#: and "no template" would not hold. A file that fails the parser and could not be a
+#: template (a mkdocs.yml with python tags, a JSONC tsconfig.json, a Helm template)
+#: does not count, and a target with no other candidate gets
+#: NO_CLOUDFORMATION_TEMPLATE, as the tool-absent path words it (see
+#: ScannerPluginBase._nothing_scanned_reason).
+NO_PARSEABLE_CLOUDFORMATION_TEMPLATE = (
+    "no CloudFormation template it could parse in the scanned files"
+)
+
+
+def cloudformation_nothing_to_scan_reason(context: "PluginContext") -> str | None:
+    """``nothing_to_scan_reason`` for cfn-nag and cdk-nag.
+
+    Both trees a scan gives them: the source tree, and the converted tree when the
+    work directory holds any file (ScanPhase adds it as a target then).
+    """
+    trees = [("source", Path(context.source_dir))]
+    work_dir = Path(context.work_dir)
+    if work_dir.is_dir() and any(work_dir.rglob("*.*")):
+        trees.append(("converted", work_dir))
+    for target_type, root in trees:
+        if holds_cloudformation_template(
+            cloudformation_candidate_files(context, target_type), root
+        ):
+            return None
+    return NO_CLOUDFORMATION_TEMPLATE

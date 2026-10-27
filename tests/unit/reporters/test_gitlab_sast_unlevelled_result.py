@@ -52,8 +52,9 @@ def test_absent_level_key_still_carries_a_severity(reporter):
     report = json.loads(reporter.report(_model(result)))
     (vuln,) = report["vulnerabilities"]
 
-    assert vuln.get("severity") == "High", (
-        "an unlevelled error finding must not reach the dashboard with no severity"
+    # MISSING_SARIF_LEVEL, warning: Medium, as the gate and every report grade it.
+    assert vuln.get("severity") == "Medium", (
+        "an unlevelled finding must not reach the dashboard with no severity"
     )
 
 
@@ -65,4 +66,4 @@ def test_level_held_as_an_enum_member_still_carries_a_severity(reporter):
     report = json.loads(reporter.report(_model(result)))
     (vuln,) = report["vulnerabilities"]
 
-    assert vuln.get("severity") == "High"
+    assert vuln.get("severity") == "Critical"

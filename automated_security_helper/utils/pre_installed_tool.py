@@ -34,7 +34,10 @@ How the check works
    <requirement>`` decides. uv evaluates extras, environment markers and the
    version constraint the same way the scan's ``uv tool run`` would, and with no
    cache and no network it can only answer "Would make no changes" when that
-   environment already satisfies the requirement. Nothing is installed.
+   environment already satisfies the requirement. Nothing is installed. Under
+   ``--sandbox`` the dry run is granted that interpreter's environment the way a
+   spawn's own program is (``sandbox.scope.also_runs``); uv's own directory alone
+   does not hold it.
 
 Rejected alternatives: reading ``importlib.metadata`` in the tool's interpreter
 needs marker evaluation (bandit's ``toml`` extra is ``tomli; python_version <
@@ -84,9 +87,11 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Sequence, Tuple
-from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.error_text import ESCAPE_CODES
+from automated_security_helper.utils.output_excerpt import head_and_tail
+from automated_security_helper.utils.process_env import environ_for_parsed_output
 
-from automated_security_helper.utils.subprocess_utils import spawn_run
+from automated_security_helper.utils.subprocess_utils import find_executable, spawn_run
 
 Status = Literal["satisfied", "unsatisfied", "unverifiable"]
 
@@ -111,7 +116,16 @@ _INTERPRETER_NAMES = ("python", "python3", "python.exe")
 _NIX_EXEC_LINE = re.compile(r'^exec -a "\$0" "([^"]+)"', re.MULTILINE)
 _NIX_SITEDIR_LIST = re.compile(r"site\.addsitedir\(p, k\), \[([^\]]*)\]")
 _QUOTED = re.compile(r"'([^']+)'")
-_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+#: Strips escape codes from tool output; public, so other modules read a
+#: tool's lines through the same expression rather than keeping copies. The
+#: shared pattern (error_text.ESCAPE_CODES): every complete CSI or OSC
+#: sequence, not only color. A color-only copy here repeated the cause-match
+#: defect the uv mixin's offline explainer fixed -- a non-color code (an
+#: erase-line \x1b[2K) inside uv's "No solution found when resolving" phrase
+#: turned _dry_run's "unsatisfied" into "unverifiable" -- and a code one side
+#: strips and another keeps re-joins a split value in clear.
+ANSI_ESCAPE = ESCAPE_CODES
+_ANSI_ESCAPE = ANSI_ESCAPE
 # A makeWrapper script is a few kB; the addsitedir line of a large closure is
 # tens of kB. Neither file needs to be read past this.
 _WRAPPER_READ_LIMIT = 1 << 20
@@ -127,9 +141,21 @@ class PreInstalledToolVerdict:
     # True when the executable is a nixpkgs-wrapped Python program, whatever
     # the status. Callers use it to refuse a uv substitute for a pinned tool.
     from_nix: bool = False
+    # The first line of the executable's own ``--version`` answer, as uv's
+    # version probe reads a tool's, or None when the probe did not run or
+    # answered nothing. A caller that runs this copy reports this version.
+    version: Optional[str] = None
+    # One line about the verdict for callers whose messages reach the results
+    # (the jupyter converter's recorded reason): no path, no excerpt of a
+    # tool's own output, and no constraint text, since a constraint can be
+    # read from the environment. Empty for a satisfied verdict. ``detail``
+    # keeps the full story for the log.
+    summary: str = ""
 
 
-_verdict_cache: Dict[Tuple[str, int, Optional[str]], PreInstalledToolVerdict] = {}
+_verdict_cache: Dict[
+    Tuple[str, int, str, Tuple[str, ...]], PreInstalledToolVerdict
+] = {}
 _verdict_cache_lock = threading.Lock()
 
 
@@ -224,7 +250,7 @@ def find_tool_interpreter(executable: str) -> Optional[str]:
         return None
     interpreter = parts[0]
     if Path(interpreter).name == "env" and len(parts) > 1:
-        interpreter = shutil.which(parts[1]) or ""
+        interpreter = find_executable(parts[1]) or ""
     if "python" not in Path(interpreter).name.lower():
         return None
     return interpreter if Path(interpreter).is_file() else None
@@ -304,6 +330,19 @@ def _stage_nix_metadata(site_dirs: Sequence[str], target: Path) -> int:
 def _run(
     command: List[str], timeout: int
 ) -> Optional[subprocess.CompletedProcess[str]]:
+    """Run one probe; None when it could not run.
+
+    ``command``'s output is read here, so it runs without the caller's display
+    variables (``environ_for_parsed_output``).
+
+    Raises:
+        SandboxUnavailable: The active scanner sandbox scope refused the spawn. The
+            probe never ran, which says nothing about the tool, so it is raised to
+            ``verify_pre_installed_tool`` rather than read as a tool that does not
+            run.
+    """
+    from automated_security_helper.utils.sandbox.policy import SandboxUnavailable
+
     try:
         return spawn_run(  # nosec B603 - list args; executable resolved from PATH by the caller
             command,
@@ -313,8 +352,10 @@ def _run(
             timeout=timeout,
             encoding="utf-8",
             errors="replace",
-            env=snapshot_environ(),
+            env=environ_for_parsed_output(),
         )
+    except SandboxUnavailable:
+        raise
     except (OSError, subprocess.SubprocessError):
         return None
 
@@ -341,30 +382,80 @@ def _dry_run(
         command += ["--target", target]
     if no_deps:
         command.append("--no-deps")
-    result = _run(command + [requirement], _UV_DRY_RUN_TIMEOUT)
+    from automated_security_helper.utils.sandbox.scope import also_runs
+
+    # uv runs the interpreter to inspect it, so under --sandbox the spawn needs the
+    # interpreter's environment as well as uv's own directory.
+    with also_runs(interpreter):
+        result = _run(command + [requirement], _UV_DRY_RUN_TIMEOUT)
     if result is None:
         return "unverifiable", f"could not run uv to check {requirement!r}"
-    # uv colors its output into a pipe when FORCE_COLOR or CLICOLOR_FORCE is set; the
-    # escapes would otherwise land in the reason a user reads.
-    output = _ANSI_ESCAPE.sub(
-        "", f"{result.stdout or ''}\n{result.stderr or ''}"
-    ).strip()
-    if result.returncode == 0 and "Would make no changes" in output:
+    # uv colors its output into a pipe when FORCE_COLOR or CLICOLOR_FORCE is
+    # set, and a terminal-aware uv can also write non-color codes: the escapes
+    # would otherwise land in the reason a user reads, and a non-color code
+    # inside a marker phrase would defeat the cause match below (the shared
+    # pattern strips every complete CSI or OSC sequence, see ANSI_ESCAPE).
+    # NOT stripped: the detail is redacted downstream (the unverifiable arm,
+    # _first_cause), and a whole-text strip here eats the last character of a
+    # value that ends uv's text -- a form feed, say -- so no whole spelling
+    # matches and the fragment prints. The strip belongs after the redaction.
+    output = _ANSI_ESCAPE.sub("", f"{result.stdout or ''}\n{result.stderr or ''}")
+    # Matched with every run of whitespace as one space, so a message wrapped
+    # across lines still matches.
+    flowed = " ".join(output.split())
+    if result.returncode == 0 and "Would make no changes" in flowed:
         return "satisfied", ""
-    if result.returncode == 0 or any(m in output for m in _UV_UNSATISFIABLE_MARKERS):
+    if result.returncode == 0 or any(m in flowed for m in _UV_UNSATISFIABLE_MARKERS):
         return "unsatisfied", output
     return "unverifiable", output
 
 
-def _first_cause(output: str) -> str:
-    """uv's first "Because ..." clause, unwrapped, or its first line."""
-    text = " ".join(
-        line.strip(" \u2570\u2500\u25b6`->|") for line in output.splitlines()
+# uv's tree glyphs, taken only as a line PREFIX; trailing whitespace is
+# stripped separately. A prefix run must be followed by whitespace or the
+# line's end, so a redacted placeholder, or a word that merely starts with
+# "-", keeps itself whole. The strip runs AFTER the redaction (see
+# ``_first_cause``), so there is no value left for it to respell.
+_TREE_GLYPH_PREFIX = re.compile(r"^\s*(?:[╰─▶`|>\-]+(?:\s+|$))?")
+
+
+def _first_cause(
+    output: str, values: Sequence[str], requirement: str, package: str
+) -> str:
+    """uv's first "Because ..." clause, unwrapped, or its first line.
+
+    The text is REDACTED before it is unwrapped: uv wraps long clauses at the
+    terminal's width, so an env-read value can span the wrap, and flowing the
+    raw lines into one text first (every line break becomes a space) rewrites
+    the value's spelling before any redaction layer can match it whole. The
+    layer is the uv one ``_verify``'s own probe excerpt uses, with the probe's
+    plugin-built input, so a respelled env-read version is hidden here too.
+    That layer runs on the RAW text, nothing stripped first: a both-edges
+    glyph strip before it ate a value's own edge character ("-" starts or
+    ends base64url tokens) at a line edge, and ``splitlines`` dropped a
+    value's trailing FF the same way, so the whole-spelling match missed.
+    The layer itself normalizes each value's whitespace respelling back to
+    the value's own spelling (uv wraps a clause at a SPACE with an indented
+    continuation) and then decides what to hide under its own rules (the
+    under-floor pass-through included).
+
+    Only after the redaction are uv's tree glyphs removed, and only as a
+    line PREFIX plus trailing whitespace: a both-edges strip at this point
+    ate the closing ">" of a line-ending "<argument N not shown>"
+    placeholder.
+    """
+    from automated_security_helper.utils.uv_tool_runner import shown_uv_output
+
+    shown = shown_uv_output(
+        output, values, plugin_inputs=(requirement,), tool_name=package, limit=None
     )
+    stripped = "\n".join(
+        _TREE_GLYPH_PREFIX.sub("", line).rstrip() for line in shown.splitlines()
+    )
+    text = " ".join(stripped.split())
     match = re.search(r"Because (.+?)(?:, we can conclude|\.\s|$)", text)
     if match:
         return "because " + match.group(1).strip()
-    lines = [line for line in output.splitlines() if line.strip()]
+    lines = [line for line in stripped.splitlines() if line.strip()]
     return lines[0].strip() if lines else "uv reported it unsatisfiable"
 
 
@@ -374,45 +465,112 @@ def verify_pre_installed_tool(
     extras: Sequence[str] | None = None,
     version_constraint: str | None = None,
     uv_executable: str | None = None,
+    values: Sequence[str] = (),
 ) -> PreInstalledToolVerdict:
     """Decide whether ``executable`` satisfies ``package[extras]version_constraint``.
 
-    Memoized per (resolved path, file mtime, requirement): scanners call their
-    dependency check several times per run, and the ``--version`` probe of a
-    large tool takes seconds.
+    Memoized per (resolved path, file mtime, requirement, values): scanners
+    call their dependency check several times per run, and the ``--version``
+    probe of a large tool takes seconds. ``values`` is the caller's env-read
+    set: the probe's stderr excerpt is redacted with it BEFORE it is cut, so
+    a cut cannot split a value and leave a fragment the downstream
+    whole-spelling redaction misses; it is part of the memo key because the
+    cached detail embeds the redaction. A check the scanner sandbox refused is
+    ``unverifiable`` with the refusal as its detail, and is not memoized: it
+    never ran, and a later check in another scope may.
+
+    Checks of one copy that run at the same time share one probe: the others wait
+    on a per-key lock and answer from the memo the first probe leaves. A check the
+    sandbox refused leaves nothing in the memo, so the next one probes for itself.
     """
+    from automated_security_helper.utils.sandbox.policy import SandboxUnavailable
+
+    # Normalized ONCE: the memo key and _verify both read it, and a second
+    # tuple() of a generator argument is empty -- the key then recorded the
+    # values while the probe excerpt was cached unredacted under it.
+    values = tuple(values)
     try:
         validate_version_constraint(version_constraint)
     except ValueError as error:
         # Never handed to the dry run below: uv resolves whatever the requirement
         # names, and a path or URL would be built to read its metadata.
-        return PreInstalledToolVerdict("unverifiable", executable, None, str(error))
+        return PreInstalledToolVerdict(
+            "unverifiable",
+            executable,
+            None,
+            str(error),
+            summary="the version constraint is not a valid PEP 440 specifier",
+        )
     requirement = build_requirement(package, extras, version_constraint)
     resolved = os.path.realpath(executable)
     try:
         mtime = os.stat(resolved).st_mtime_ns
     except OSError:
         return PreInstalledToolVerdict(
-            "unverifiable", executable, requirement, f"{executable} does not exist"
+            "unverifiable",
+            executable,
+            requirement,
+            f"{executable} does not exist",
+            summary="the copy does not exist",
         )
 
-    key = (resolved, mtime, requirement)
-    with _verdict_cache_lock:
-        if key in _verdict_cache:
-            return _verdict_cache[key]
+    key = (resolved, mtime, requirement, tuple(values))
+    answered = _answer_without_a_probe(key)
+    if answered is not None:
+        return answered
 
-    verdict = _verify(
-        executable,
-        package,
-        list(extras or []),
-        version_constraint,
-        requirement,
-        uv_executable,
+    # One probe per key at a time. Checks of one copy that arrive together (the
+    # project instances of one scanner in a workspace scan) would each start their
+    # own probe, up to _VERSION_PROBE_TIMEOUT long, and the memo is written only
+    # when a probe ends. They park here instead, and read the memo again once the
+    # first probe has stored its answer. The lock's key is the hash of the memo
+    # key, so no env-read value is spelled in it; the "verdict::" prefix keeps it
+    # apart from the runner's own "version::" and "command::" probe locks, which
+    # are plain non-reentrant locks in the same table.
+    from automated_security_helper.utils.uv_tool_runner import (
+        _get_or_create_probe_lock,
+        _probe_lock_held,
+        _uv_tool_runner_cache_lock,
     )
 
+    # The table wants the runner's coarse lock for the get-or-create, and the probe
+    # lock must stay bound to a local until it is acquired (STRONG-REF CONTRACT,
+    # _get_or_create_probe_lock). The coarse lock is not held across the probe.
+    with _uv_tool_runner_cache_lock:
+        probe_lock = _get_or_create_probe_lock(f"verdict::{hash(key)}")
+    with _probe_lock_held(probe_lock):
+        answered = _answer_without_a_probe(key)
+        if answered is not None:
+            return answered
+        try:
+            verdict = _verify(
+                executable,
+                package,
+                list(extras or []),
+                version_constraint,
+                requirement,
+                uv_executable,
+                tuple(values),
+            )
+        except SandboxUnavailable as refusal:
+            return PreInstalledToolVerdict(
+                "unverifiable",
+                executable,
+                requirement,
+                f"the scanner sandbox refused the check: {refusal}",
+            )
+
+        with _verdict_cache_lock:
+            _verdict_cache[key] = verdict
+        return verdict
+
+
+def _answer_without_a_probe(
+    key: Tuple[str, int, str, Tuple[str, ...]],
+) -> Optional[PreInstalledToolVerdict]:
+    """The memoized verdict for ``key``, or None when the copy has to be probed."""
     with _verdict_cache_lock:
-        _verdict_cache[key] = verdict
-    return verdict
+        return _verdict_cache.get(key)
 
 
 def _verify(
@@ -422,22 +580,75 @@ def _verify(
     version_constraint: Optional[str],
     requirement: str,
     uv_executable: Optional[str],
+    values: Tuple[str, ...] = (),
 ) -> PreInstalledToolVerdict:
     probe = _run([executable, "--version"], _VERSION_PROBE_TIMEOUT)
     if probe is None:
         return PreInstalledToolVerdict(
-            "unverifiable", executable, requirement, f"could not execute {executable}"
+            "unverifiable",
+            executable,
+            requirement,
+            f"could not execute {executable}",
+            summary="the copy could not be executed",
         )
     if probe.returncode != 0:
-        excerpt = (probe.stderr or probe.stdout or "").strip()[:500]
+        from automated_security_helper.utils.uv_tool_runner import shown_uv_output
+
+        # REDACTED BEFORE the excerpt is cut: a cut can split a quoted
+        # env-read value, and the downstream whole-spelling redaction cannot
+        # match the fragment. With the uv input layer: the probed copy is a
+        # uv-managed tool's, and it can print an env-read version in another
+        # spelling ("9.9.9-RC777" as "9.9.9rc777") that the neutral layer's
+        # as-written match misses; the requirement is the probe's
+        # plugin-built input. For a non-uv copy the extra forms only hide
+        # more -- the accepted cost of one layer for every verdict.
+        # Stripped only AFTER the redaction: a whole-text strip first eats
+        # the last character of a value ending the probe's text (a form
+        # feed, say), and the fragment then misses the whole-spelling match.
+        excerpt = head_and_tail(
+            shown_uv_output(
+                probe.stderr or probe.stdout or "",
+                values,
+                plugin_inputs=(requirement,),
+                tool_name=package,
+                limit=None,
+            ).strip(),
+            500,
+        )
         return PreInstalledToolVerdict(
             "unsatisfied",
             executable,
             requirement,
             f"`{executable} --version` exited {probe.returncode}: {excerpt}",
+            summary=f"its --version probe exited {probe.returncode}",
         )
+    # The copy's own version: the answer's first non-blank line, as uv's probe
+    # reads one. Redacted whole BEFORE that cut, through the same uv layer the
+    # failed probe's excerpt gets: the probed copy can be a uv-managed tool's,
+    # and --version output is exactly where it prints an env-read version in
+    # another spelling ("9.9.9-RC777" as "9.9.9rc777") that the neutral
+    # as-written match misses. An env-read value holding a line break would
+    # also leave its first half in the carried version otherwise.
+    from automated_security_helper.utils.uv_tool_runner import shown_uv_output
 
-    uv = uv_executable or shutil.which("uv")
+    shown_answer = shown_uv_output(
+        probe.stdout or "",
+        values,
+        plugin_inputs=(requirement,),
+        tool_name=package,
+        limit=None,
+    )
+    version = next(
+        (line.strip() for line in shown_answer.splitlines() if line.strip()),
+        None,
+    )
+
+    if uv_executable is None:
+        # The uv installed with ASH first, then PATH; see find_uv_or_none.
+        from automated_security_helper.utils.uv_tool_runner import find_uv_or_none
+
+        uv_executable = find_uv_or_none()
+    uv = uv_executable
 
     nix_environment = find_nix_python_environment(executable)
     if nix_environment is not None:
@@ -446,8 +657,10 @@ def _verify(
                 "unverifiable",
                 executable,
                 requirement,
-                "uv is not on PATH",
+                "no uv was found beside ASH's interpreter or on PATH",
                 from_nix=True,
+                version=version,
+                summary="no uv was found beside ASH's interpreter or on PATH",
             )
         nix_interpreter, site_dirs = nix_environment
         with tempfile.TemporaryDirectory(prefix="ash-nix-metadata-") as target:
@@ -459,6 +672,9 @@ def _verify(
                     f"{executable} is a Nix-wrapped Python program, but no "
                     "distribution metadata was found on its site-packages paths",
                     from_nix=True,
+                    version=version,
+                    summary="it is a Nix-wrapped Python program with no "
+                    "distribution metadata on its site-packages paths",
                 )
             return _judge(
                 executable,
@@ -470,6 +686,8 @@ def _verify(
                 nix_interpreter,
                 target,
                 f"its Nix environment ({nix_interpreter}, {len(site_dirs)} store paths)",
+                version,
+                values=values,
             )
 
     interpreter = find_tool_interpreter(executable)
@@ -479,11 +697,18 @@ def _verify(
             executable,
             requirement,
             f"could not locate the Python environment that provides {executable}",
+            version=version,
+            summary="no Python environment could be located for the copy",
         )
 
     if uv is None:
         return PreInstalledToolVerdict(
-            "unverifiable", executable, requirement, "uv is not on PATH"
+            "unverifiable",
+            executable,
+            requirement,
+            "no uv was found beside ASH's interpreter or on PATH",
+            version=version,
+            summary="no uv was found beside ASH's interpreter or on PATH",
         )
 
     return _judge(
@@ -496,6 +721,8 @@ def _verify(
         interpreter,
         None,
         f"its environment ({interpreter})",
+        version,
+        values=values,
     )
 
 
@@ -509,12 +736,37 @@ def _judge(
     interpreter: str,
     target: Optional[str],
     environment: str,
+    version: Optional[str] = None,
+    *,
+    values: Sequence[str],
 ) -> PreInstalledToolVerdict:
     from_nix = target is not None  # --target is only ever a staged Nix closure
     status, output = _dry_run(uv, interpreter, requirement, target)
     if status != "unsatisfied":
+        # The unverifiable arm's detail is uv's own output, never routed
+        # through the cause extraction, and it reaches the dependency reason
+        # and the through-uv log line. It takes the same uv redaction layer
+        # (which normalizes uv's wrap) before it is returned: the memo's
+        # contract that the cached detail embeds the redaction covers this
+        # arm too. The satisfied arm's output is empty, so this is free there.
+        from automated_security_helper.utils.uv_tool_runner import shown_uv_output
+
         return PreInstalledToolVerdict(
-            status, executable, requirement, output, from_nix=from_nix
+            status,
+            executable,
+            requirement,
+            # Stripped only AFTER the redaction: _dry_run keeps its text's
+            # edges so a value ending the text still matches whole.
+            shown_uv_output(
+                output, values, plugin_inputs=(requirement,), tool_name=package
+            ).strip(),
+            from_nix=from_nix,
+            version=version,
+            summary=(
+                ""
+                if status == "satisfied"
+                else "uv could not verify the requirement in its environment"
+            ),
         )
 
     # Name the cause. One probe per extra, plus one for the bare package with the
@@ -530,10 +782,15 @@ def _judge(
         == "unsatisfied"
     )
     reasons = []
+    # The summary's parallel parts name no extra, no constraint text and no
+    # path: the caller's own shown requirement (and the verdict's
+    # missing_extras field) carry what was asked, in redacted form.
+    summary_parts = []
     if missing:
         reasons.append(
             f"missing extra{'s' if len(missing) > 1 else ''}: {', '.join(missing)}"
         )
+        summary_parts.append(f"missing extra{'s' if len(missing) > 1 else ''}")
     if (
         version_constraint
         and _dry_run(
@@ -546,8 +803,12 @@ def _judge(
         == "unsatisfied"
     ):
         reasons.append(f"installed {package} does not satisfy {version_constraint!r}")
+        summary_parts.append(
+            "the installed package does not satisfy the version constraint"
+        )
     if not reasons:
-        reasons.append(_first_cause(output))
+        reasons.append(_first_cause(output, values, requirement, package))
+        summary_parts.append("the requirement does not resolve in its environment")
     return PreInstalledToolVerdict(
         "unsatisfied",
         executable,
@@ -555,4 +816,6 @@ def _judge(
         f"{environment} does not satisfy {requirement!r}: " + "; ".join(reasons),
         missing,
         from_nix=from_nix,
+        version=version,
+        summary="; ".join(summary_parts),
     )

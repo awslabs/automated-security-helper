@@ -25,15 +25,21 @@ subject here, since it is the shape that broke ``runs[0]``.
 """
 
 import json
+import logging
+import re
 from pathlib import Path
 
+import sys
+
 import pytest
+from pydantic import ConfigDict
 
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
 )
+from automated_security_helper.core.exceptions import ASHValidationError
 from automated_security_helper.models.workspace import (
     ProjectRunStatus,
     WorkspaceProjectResult,
@@ -430,6 +436,120 @@ class TestPerProjectReporters:
         _emit(workspace, FakePerProjectReporter)
         entry = _manifest(output_dir)["reporters"]["fake-per-project"]
         assert entry["missing_per_project_artifacts"] == ["web"]
+
+    def test_the_missing_artefact_warning_names_output_formats(self, workspace, caplog):
+        """A project's own ``output_formats`` is a reason its report is absent.
+
+        The warning listed skipped, failed and disabled; a project whose config
+        leaves the reporter out of ``output_formats`` writes nothing for it either,
+        and an operator reading the warning would look everywhere but there.
+        """
+        _, output_dir, _ = workspace
+        (output_dir / "projects" / "web" / REPORTS_DIR_NAME / "ash.ghas.sarif").unlink()
+
+        with caplog.at_level(logging.WARNING):
+            _emit(workspace, FakePerProjectReporter)
+
+        warning = next(
+            record.getMessage()
+            for record in caplog.records
+            if "has no artefact for project(s)" in record.getMessage()
+        )
+        assert "web" in warning
+        assert "output_formats" in warning
+
+
+class _DefaultOffPerProjectConfig(ReporterPluginConfigBase):
+    name: str = "fake-default-off-per-project"
+    # The fixture writes ash.cdx.json in both projects' reports.
+    extension: str = "cdx.json"
+    enabled: bool = False
+
+
+class FakeDefaultOffPerProjectReporter(ReporterPluginBase[_DefaultOffPerProjectConfig]):
+    """A per-project reporter that ASH's default config leaves off, as the AWS ones."""
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = _DefaultOffPerProjectConfig()
+        return super().model_post_init(context)
+
+    def report(self, model) -> str:  # pragma: no cover - must never be reached
+        raise AssertionError("a PER_PROJECT reporter was invoked at workspace level")
+
+
+class TestPerProjectReportersTheDefaultConfigLeavesOff:
+    """Each project's scan reads its own config; the workspace step reads ASH's default.
+
+    A per-project reporter that the default leaves off, such as the AWS
+    reporters, can still have run in every project whose operator config enabled
+    it. Recording it as "skipped: disabled" sent the operator to edit a config
+    that already enables it. The manifest lists the artefacts its projects
+    wrote instead.
+    """
+
+    def test_the_artefacts_its_projects_wrote_are_listed(self, workspace):
+        _, output_dir, _ = workspace
+        outcome = _emit(workspace, FakeDefaultOffPerProjectReporter)
+
+        entry = _manifest(output_dir)["reporters"]["fake-default-off-per-project"]
+        assert "skipped" not in entry
+        assert entry["behaviour"] == "per-project"
+        assert entry["workspace_artifact"] is None
+        assert entry["per_project_artifacts"] == [
+            {"project": "api", "path": "projects/api/reports/ash.cdx.json"},
+            {"project": "web", "path": "projects/web/reports/ash.cdx.json"},
+        ]
+        assert entry["missing_per_project_artifacts"] == []
+        assert outcome.per_project_reporters == ("fake-default-off-per-project",)
+
+    def test_only_the_projects_that_wrote_one_are_listed(self, workspace):
+        """A project whose config left the reporter off is not missing anything."""
+        _, output_dir, _ = workspace
+        (output_dir / "projects" / "web" / REPORTS_DIR_NAME / "ash.cdx.json").unlink()
+
+        _emit(workspace, FakeDefaultOffPerProjectReporter)
+
+        entry = _manifest(output_dir)["reporters"]["fake-default-off-per-project"]
+        assert entry["per_project_artifacts"] == [
+            {"project": "api", "path": "projects/api/reports/ash.cdx.json"},
+        ]
+        assert entry["missing_per_project_artifacts"] == []
+
+    def test_with_no_artefact_on_disk_it_stays_skipped_as_disabled(self, workspace):
+        _, output_dir, _ = workspace
+        for project in ("api", "web"):
+            (
+                output_dir / "projects" / project / REPORTS_DIR_NAME / "ash.cdx.json"
+            ).unlink()
+
+        outcome = _emit(workspace, FakeDefaultOffPerProjectReporter)
+
+        entry = _manifest(output_dir)["reporters"]["fake-default-off-per-project"]
+        assert entry["skipped"] == "disabled"
+        assert entry["considered"] is False
+        assert entry["per_project_artifacts"] == []
+        assert outcome.per_project_reporters == ()
+
+    def test_the_s3_reporter_a_project_enabled_is_listed(self, workspace):
+        """The case the AWS reporters' default-off made common: S3 is per-project."""
+        from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import (
+            S3Reporter,
+        )
+
+        _, output_dir, _ = workspace
+        receipt = output_dir / "projects" / "api" / REPORTS_DIR_NAME / "ash.s3.json"
+        receipt.write_text("{}", encoding="utf-8")
+
+        _emit(workspace, S3Reporter)
+
+        entry = _manifest(output_dir)["reporters"]["s3"]
+        assert "skipped" not in entry
+        assert entry["per_project_artifacts"] == [
+            {"project": "api", "path": "projects/api/reports/ash.s3.json"},
+        ]
 
 
 class TestWorkspaceScopedReporters:
@@ -831,9 +951,11 @@ class TestTheManifestIsExhaustive:
         calls Bedrock and Security Hub, so without the stub this unit test reached a
         live AWS account -- slow, dependent on ambient credentials, and touching
         someone's real region to decide the outcome of a test about declarations.
-        Stubbing it also makes the assertion stronger: all nineteen are *considered*,
-        so each one's behaviour is exercised through the branch that acts on it
-        rather than through the skip branch.
+        Stubbing it also makes the assertion stronger: every reporter that ships
+        enabled is *considered*, so its behaviour is exercised through the branch
+        that acts on it rather than through the skip branch. The four AWS reporters
+        ship disabled (workspace-level reporting uses ASH's default config), so they
+        are recorded with their behaviour and skipped as disabled.
 
         Artefacts are not asserted. The four AWS reporters are all PER_PROJECT, so
         being considered does not invoke them -- which is what makes stubbing their
@@ -881,9 +1003,16 @@ class TestTheManifestIsExhaustive:
         not_considered = sorted(
             name for name, entry in entries.items() if not entry["considered"]
         )
-        # yaml and spdx ship disabled; nothing else should be turned away once
-        # dependencies are satisfied.
-        assert not_considered == ["spdx", "yaml"]
+        # yaml, spdx and the four AWS reporters ship disabled; nothing else should
+        # be turned away once dependencies are satisfied.
+        assert not_considered == [
+            "aws-security-hub",
+            "bedrock-summary-reporter",
+            "cloudwatch-logs",
+            "s3",
+            "spdx",
+            "yaml",
+        ]
 
     def test_unsatisfied_dependencies_are_distinguished_from_disabled(self, workspace):
         """Two reasons, two knobs: credentials or an install, versus the config.
@@ -1067,7 +1196,12 @@ class TestExecuteWorkspaceRunsTheReportStep:
         _, _, result = self._execute(
             tmp_path, phases=("scan",), reporter_classes=[FakeUnsupportedReporter]
         )
-        assert result.exit_code == 2  # the fixture findings, not a refusal
+        # The fixture's own verdict, not a refusal (which raises; see above): its
+        # projects are over threshold and also incomplete (no scanner recorded a
+        # result), and incomplete ranks first, as in a single-directory scan.
+        assert result.payload.status == "completed"
+        assert all(project.exceeds_threshold for project in result.payload.projects)
+        assert result.exit_code == 1
 
 
 class TestSarifStaysOneRunPerProject:
@@ -1140,3 +1274,99 @@ class TestSarifStaysOneRunPerProject:
                     artifact = location["physicalLocation"]["artifactLocation"]
                     assert not artifact["uri"].startswith("/")
                     assert artifact["uriBaseId"] == PROJECT_ROOT_URI_BASE_ID
+
+
+class _EscapingConfig(ReporterPluginConfigBase):
+    """A default is not validated, so this reaches the writer unchanged."""
+
+    model_config = ConfigDict(validate_default=False)
+
+    name: str = "fake-escaping"
+    extension: str = "x/../../escaped-probe.txt"
+    enabled: bool = True
+
+
+class FakeEscapingReporter(FakeMergedReporter):
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = _EscapingConfig()
+        return super().model_post_init(context)
+
+
+class FakeSymlinkedReporter(FakeMergedReporter):
+    """Writes ash.merged.txt, which the test makes a symlink to a file outside."""
+
+
+class TestTheWorkspaceWriterStaysInTheReportsDirectory:
+    def test_an_extension_with_a_path_writes_nothing_outside(self, workspace):
+        """Refused before any reporter writes, so the run fails rather than skips it."""
+        _, output_dir, _ = workspace
+        (output_dir / REPORTS_DIR_NAME / "ash.x").mkdir(parents=True)
+
+        with pytest.raises(ASHValidationError, match="is not a file in"):
+            _emit(workspace, FakeEscapingReporter)
+
+        assert not (output_dir / "escaped-probe.txt").exists()
+        assert [path.name for path in (output_dir / REPORTS_DIR_NAME).iterdir()] == [
+            "ash.x"
+        ]
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
+    def test_a_symlinked_report_file_refuses_the_step(self, workspace, tmp_path):
+        """Refused before any reporter runs; nothing is written through the link."""
+        _, output_dir, _ = workspace
+        outside = tmp_path / "outside.txt"
+        outside.write_text("unchanged", encoding="utf-8")
+        reports = output_dir / REPORTS_DIR_NAME
+        reports.mkdir(parents=True, exist_ok=True)
+        (reports / "ash.merged.txt").symlink_to(outside)
+
+        with pytest.raises(ASHValidationError, match="ash.merged.txt is a symlink"):
+            _emit(workspace, FakeSymlinkedReporter)
+
+        assert outside.read_text(encoding="utf-8") == "unchanged"
+        assert [path.name for path in reports.iterdir()] == ["ash.merged.txt"]
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+)
+def test_a_symlinked_manifest_refuses_the_step(workspace, tmp_path):
+    """Refused before any reporter runs, so no report is written beside it either."""
+    _, output_dir, _ = workspace
+    outside = tmp_path / "outside-manifest.json"
+    outside.write_text("unchanged", encoding="utf-8")
+    reports = output_dir / REPORTS_DIR_NAME
+    reports.mkdir(parents=True, exist_ok=True)
+    (reports / MANIFEST_FILENAME).symlink_to(outside)
+
+    with pytest.raises(
+        ASHValidationError, match=f"{re.escape(MANIFEST_FILENAME)} is a symlink"
+    ):
+        _emit(workspace, FakeMergedReporter)
+
+    assert outside.read_text(encoding="utf-8") == "unchanged"
+    assert [path.name for path in reports.iterdir()] == [MANIFEST_FILENAME]
+
+
+def test_a_report_that_cannot_be_written_does_not_stop_the_others(workspace):
+    _, output_dir, _ = workspace
+    reports = output_dir / REPORTS_DIR_NAME
+    (reports / "ash.merged.txt").mkdir(parents=True)
+
+    outcome = _emit(workspace, FakeMergedReporter, FakeWorkspaceScopedReporter)
+
+    assert "fake-merged" in outcome.failed_reporters
+    assert (reports / "ash.scoped.json").is_file()
+    assert outcome.manifest_path is not None and outcome.manifest_path.is_file()
+
+
+def test_a_manifest_that_cannot_be_written_is_not_reported_as_written(workspace):
+    _, output_dir, _ = workspace
+    (output_dir / REPORTS_DIR_NAME / MANIFEST_FILENAME).mkdir(parents=True)
+
+    outcome = _emit(workspace, FakeMergedReporter)
+
+    assert outcome.manifest_path is None

@@ -92,6 +92,29 @@ class TestRegisterProfiles:
         assert len(entry.path_sha256) == 64
         assert all(c in "0123456789abcdef" for c in entry.path_sha256)
 
+    @pytest.mark.parametrize("name", ["p.json", "p.JSON"])
+    def test_a_json_profile_is_read_as_json(self, tmp_path: Path, name) -> None:
+        """Both loads (the model's and the top-level key gate) read it as JSON,
+        whatever the suffix's case. JSON indented with a tab is not YAML."""
+        cfg = _write_yaml(tmp_path / name, '{\n\t"project_name": "p-json"\n}\n')
+        registry = register_profiles([f"default={cfg}"])
+        assert registry["default"].config.project_name == "p-json"
+
+    @pytest.mark.parametrize("name", ["p.toml", "P.TOML"])
+    def test_a_toml_profile_registers(self, tmp_path: Path, name) -> None:
+        """The top-level key gate read every profile as YAML or JSON, so a TOML
+        profile's lines were refused as unknown fields."""
+        cfg = _write_yaml(tmp_path / name, 'project_name = "p-toml"\n')
+        registry = register_profiles([f"default={cfg}"])
+        assert registry["default"].config.project_name == "p-toml"
+
+    def test_a_toml_profile_with_an_unknown_field_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        cfg = _write_yaml(tmp_path / "p.toml", 'project_name = "x"\nbogus_key = 1\n')
+        with pytest.raises(ProfileRegistryError, match="bogus_key"):
+            register_profiles([f"default={cfg}"])
+
     def test_multiple_profiles_register_independently(self, tmp_path: Path) -> None:
         a = _write_yaml(tmp_path / "a.yaml", _valid_config_yaml("a"))
         b = _write_yaml(tmp_path / "b.yaml", _valid_config_yaml("b"))
@@ -122,7 +145,8 @@ class TestRegisterProfiles:
         bad = _write_yaml(tmp_path / "bad.yaml", "project_name: {unclosed\n")
         with pytest.raises(ProfileRegistryError) as exc:
             register_profiles([f"broken={bad}"])
-        # The wrapper preserves the underlying YAML parser message.
+        # The refusal names the profile; the parse error is given by its type
+        # and place only (config_sources.unparsed_config_reason).
         assert "broken" in str(exc.value)
 
     def test_invalid_schema_rejected(self, tmp_path: Path) -> None:
@@ -134,6 +158,32 @@ class TestRegisterProfiles:
         with pytest.raises(ProfileRegistryError) as exc:
             register_profiles([f"badschema={bad}"])
         assert "badschema" in str(exc.value)
+
+    def test_a_profile_using_tagged_env_registers(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The top-level key check reads the file as from_file does, so a tag the
+        # loader resolves is not refused by a plain YAML parser first.
+        monkeypatch.setenv("ASH_PROFILE_NAME_PROBE", "from-env")
+        cfg = _write_yaml(
+            tmp_path / "env.yaml",
+            "project_name: !ENV ${ASH_PROFILE_NAME_PROBE:unset}\n",
+        )
+        registry = register_profiles([f"env={cfg}"])
+        assert registry["env"].config.project_name == "from-env"
+
+    def test_a_toml_profile_registers_and_is_still_checked(
+        self, tmp_path: Path
+    ) -> None:
+        good = _write_yaml(tmp_path / "good.ashrc.toml", 'project_name = "toml"\n')
+        bad = _write_yaml(tmp_path / "bad.ashrc.toml", "not_a_field = 1\n")
+
+        registry = register_profiles([f"toml={good}"])
+        with pytest.raises(ProfileRegistryError) as exc:
+            register_profiles([f"bad={bad}"])
+
+        assert registry["toml"].config.project_name == "toml"
+        assert "not_a_field" in str(exc.value)
 
     def test_atomic_failure_does_not_partially_install(self, tmp_path: Path) -> None:
         # The registry singleton must remain empty when registration fails;
@@ -189,6 +239,78 @@ class TestRegistrySingleton:
         registry = register_profiles([f"x={cfg}"])
         assert "x" in registry
         assert get_profile_registry() == {}
+
+
+class TestProfilesThatExtend:
+    """A profile loads through AshConfig.from_file, which follows `extends`
+    and applies `patch`, so the check of its top-level keys must not refuse
+    either directive as an unknown field. Each file of the chain is checked,
+    so a base's typo fails at boot too."""
+
+    def test_a_profile_that_extends_a_base_registers(self, tmp_path: Path) -> None:
+        _write_yaml(tmp_path / "base.yaml", "project_name: from-base\n")
+        cfg = _write_yaml(
+            tmp_path / "p.yaml",
+            "extends: base.yaml\nfail_on_findings: false\n",
+        )
+
+        registry = register_profiles([f"default={cfg}"])
+
+        assert registry["default"].config.project_name == "from-base"
+        assert registry["default"].config.fail_on_findings is False
+
+    def test_a_profile_that_patches_its_base_registers(self, tmp_path: Path) -> None:
+        _write_yaml(tmp_path / "base.yaml", "project_name: from-base\n")
+        cfg = _write_yaml(
+            tmp_path / "p.yaml",
+            "extends: base.yaml\npatch:\n"
+            "  - {op: replace, path: /project_name, value: patched}\n",
+        )
+
+        registry = register_profiles([f"default={cfg}"])
+
+        assert registry["default"].config.project_name == "patched"
+
+    def test_an_unknown_field_in_a_base_is_refused(self, tmp_path: Path) -> None:
+        base = _write_yaml(
+            tmp_path / "base.yaml", "project_name: b\nbogus_base_key: 1\n"
+        )
+        cfg = _write_yaml(tmp_path / "p.yaml", "extends: base.yaml\n")
+
+        with pytest.raises(ProfileRegistryError) as exc:
+            register_profiles([f"default={cfg}"])
+
+        assert "bogus_base_key" in str(exc.value)
+        assert base.name in str(exc.value)
+
+    def test_a_base_outside_the_profiles_directory_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        _write_yaml(tmp_path / "outside.yaml", "project_name: out\n")
+        (tmp_path / "profiles").mkdir()
+        cfg = _write_yaml(
+            tmp_path / "profiles" / "p.yaml", "extends: ../outside.yaml\n"
+        )
+
+        with pytest.raises(ProfileRegistryError):
+            register_profiles([f"default={cfg}"])
+
+    def test_a_base_named_by_a_variable_registers_and_hides_its_value(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("ASH_TEST_PROBE", "SECRETDIRZQ.yaml")
+        _write_yaml(tmp_path / "SECRETDIRZQ.yaml", "project_name: env-base\n")
+        cfg = _write_yaml(
+            tmp_path / "p.yaml", "extends: ${ASH_TEST_PROBE:missing.yaml}\n"
+        )
+
+        registry = register_profiles([f"default={cfg}"])
+        assert registry["default"].config.project_name == "env-base"
+
+        (tmp_path / "SECRETDIRZQ.yaml").unlink()
+        with pytest.raises(ProfileRegistryError) as exc:
+            register_profiles([f"default={cfg}"])
+        assert "SECRETDIRZQ" not in str(exc.value), exc.value
 
 
 class TestPathSha256IsPathOnly:

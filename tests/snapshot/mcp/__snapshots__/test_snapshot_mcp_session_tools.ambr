@@ -92,29 +92,11 @@
     'client_messages': list([
       list([
         'error',
-        '''
-          override_yaml parse error: while parsing a flow sequence
-            in "<unicode string>", line 1, column 6:
-              key: [unclosed
-                   ^
-          expected ',' or ']', but got '<stream end>'
-            in "<unicode string>", line 2, column 1:
-          
-              ^
-        ''',
+        "override_yaml parse error: expected ',' or ']', but got '<stream end>' (ParserError at line 2, column 1; started at line 1, column 6)",
       ]),
     ]),
     'result': dict({
-      'error': '''
-        override_yaml parse error: while parsing a flow sequence
-          in "<unicode string>", line 1, column 6:
-            key: [unclosed
-                 ^
-        expected ',' or ']', but got '<stream end>'
-          in "<unicode string>", line 2, column 1:
-        
-            ^
-      ''',
+      'error': "override_yaml parse error: expected ',' or ']', but got '<stream end>' (ParserError at line 2, column 1; started at line 1, column 6)",
       'session_id': '__default__',
       'success': False,
     }),
@@ -192,11 +174,12 @@
     'client_messages': list([
       list([
         'error',
-        "git clone failed (exit 128): fatal: repository 'https://example.com/org/missing.git/' not found",
+        "git clone failed (exit 128): fatal: repository 'https://example.com/org/missing.git/' not found. If the host answered with a redirect, HTTP redirects are not followed; give the URL the host redirects to (for example with the .git suffix).",
       ]),
     ]),
     'result': dict({
-      'error': "git clone failed (exit 128): fatal: repository 'https://example.com/org/missing.git/' not found",
+      'error': "git clone failed (exit 128): fatal: repository 'https://example.com/org/missing.git/' not found. If the host answered with a redirect, HTTP redirects are not followed; give the URL the host redirects to (for example with the .git suffix).",
+      'error_type': 'git_clone_failed',
       'session_id': 'session-a',
       'success': False,
     }),
@@ -245,6 +228,7 @@
     ]),
     'result': dict({
       'error': "refusing url with 'ext::' transport: it instructs git to execute an arbitrary command",
+      'error_type': 'clone_url_not_permitted',
       'session_id': 'session-a',
       'success': False,
     }),
@@ -255,26 +239,86 @@
   list([
     list([
       'git',
+      '-c',
+      'core.fsmonitor=false',
+      '-c',
+      'core.hooksPath=/dev/null',
+      '-c',
+      'credential.helper=',
+      '-c',
+      'core.askPass=',
+      '-c',
+      'protocol.allow=never',
+      '-c',
+      'protocol.https.allow=always',
+      '-c',
+      'protocol.ssh.allow=always',
+      '-c',
+      'http.followRedirects=false',
+      '-c',
+      'gc.auto=0',
+      '-c',
+      'maintenance.auto=false',
       'clone',
       '--depth',
       '1',
       '--',
       'https://example.com/org/repo.git',
-      '<TMP>/workspaces/session-a/source',
+      '<TMP>/workspaces/session-a/.source.incoming-<ID>',
     ]),
     list([
       'git',
+      '-c',
+      'core.fsmonitor=false',
+      '-c',
+      'core.hooksPath=/dev/null',
+      '-c',
+      'credential.helper=',
+      '-c',
+      'core.askPass=',
+      '-c',
+      'protocol.allow=never',
+      '-c',
+      'protocol.https.allow=always',
+      '-c',
+      'protocol.ssh.allow=always',
+      '-c',
+      'http.followRedirects=false',
+      '-c',
+      'gc.auto=0',
+      '-c',
+      'maintenance.auto=false',
       'clone',
       '--depth',
       '1',
       '--',
       'https://example.com/org/repo.git',
-      '<TMP>/workspaces/session-a/source',
+      '<TMP>/workspaces/session-a/.source.incoming-<ID>',
     ]),
     list([
       'git',
+      '-c',
+      'core.fsmonitor=false',
+      '-c',
+      'core.hooksPath=/dev/null',
+      '-c',
+      'credential.helper=',
+      '-c',
+      'core.askPass=',
+      '-c',
+      'protocol.allow=never',
+      '-c',
+      'protocol.https.allow=always',
+      '-c',
+      'protocol.ssh.allow=always',
+      '-c',
+      'http.followRedirects=false',
+      '-c',
+      'gc.auto=0',
+      '-c',
+      'maintenance.auto=false',
       '-C',
-      '<TMP>/workspaces/session-a/source',
+      '<TMP>/workspaces/session-a/.source.incoming-<ID>',
       'fetch',
       '--depth',
       '1',
@@ -283,11 +327,31 @@
     ]),
     list([
       'git',
+      '-c',
+      'core.fsmonitor=false',
+      '-c',
+      'core.hooksPath=/dev/null',
+      '-c',
+      'credential.helper=',
+      '-c',
+      'core.askPass=',
+      '-c',
+      'protocol.allow=never',
+      '-c',
+      'protocol.https.allow=always',
+      '-c',
+      'protocol.ssh.allow=always',
+      '-c',
+      'http.followRedirects=false',
+      '-c',
+      'gc.auto=0',
+      '-c',
+      'maintenance.auto=false',
       '-C',
-      '<TMP>/workspaces/session-a/source',
+      '<TMP>/workspaces/session-a/.source.incoming-<ID>',
       'checkout',
       '--detach',
-      'v1.2.3',
+      'FETCH_HEAD',
     ]),
   ])
 # ---
@@ -317,6 +381,7 @@
     ]),
     'result': dict({
       'error': "ref must not begin with '-': git would parse '--output=owned' as an option rather than a value",
+      'error_type': 'clone_ref_not_permitted',
       'session_id': 'session-a',
       'success': False,
     }),
@@ -333,6 +398,7 @@
     ]),
     'result': dict({
       'error': "url must not begin with '-': git would parse '--upload-pack=touch owned' as an option rather than a value",
+      'error_type': 'clone_url_not_permitted',
       'session_id': 'session-a',
       'success': False,
     }),
@@ -365,8 +431,8 @@
               relative:   api
               config:     ASH default config
               threshold:  MEDIUM
-              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
-              pins:       bandit >=1.7.0,<2.0.0
+              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor
+              pins:       bandit >=1.7.0,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           2. web
               label:      web
@@ -374,8 +440,8 @@
               relative:   web
               config:     <TMP>/allowed/work/web/.ash/.ash.yaml
               threshold:  HIGH
-              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
-              pins:       bandit >=1.7.0,<2.0.0
+              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor
+              pins:       bandit >=1.7.0,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           3. gone
               label:      gone
@@ -383,8 +449,8 @@
               relative:   gone
               config:     ASH default config
               threshold:  MEDIUM
-              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
-              pins:       bandit >=1.7.0,<2.0.0
+              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor
+              pins:       bandit >=1.7.0,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
         Nothing has been scanned. This is a resolution and validation pass only.
       ''',
@@ -393,22 +459,29 @@
           'config_source': None,
           'display_label': 'api',
           'effective_severity_threshold': 'MEDIUM',
+          'operator_config': None,
           'path': '<TMP>/allowed/work/api',
           'policy_scanners': list([
           ]),
           'project': 'api',
           'relative_path': 'api',
           'scanners': list([
+            'actionlint',
             'bandit',
             'cdk-nag',
+            'cfn-guard',
+            'cfn-lint',
             'cfn-nag',
             'checkov',
             'detect-secrets',
+            'gitleaks',
             'grype',
             'npm-audit',
             'opengrep',
             'semgrep',
             'syft',
+            'trivy',
+            'zizmor',
           ]),
           'severity_threshold': 'MEDIUM',
           'skip_detail': None,
@@ -420,22 +493,29 @@
           'config_source': '<TMP>/allowed/work/web/.ash/.ash.yaml',
           'display_label': 'web',
           'effective_severity_threshold': 'HIGH',
+          'operator_config': None,
           'path': '<TMP>/allowed/work/web',
           'policy_scanners': list([
           ]),
           'project': 'web',
           'relative_path': 'web',
           'scanners': list([
+            'actionlint',
             'bandit',
             'cdk-nag',
+            'cfn-guard',
+            'cfn-lint',
             'cfn-nag',
             'checkov',
             'detect-secrets',
+            'gitleaks',
             'grype',
             'npm-audit',
             'opengrep',
             'semgrep',
             'syft',
+            'trivy',
+            'zizmor',
           ]),
           'severity_threshold': 'HIGH',
           'skip_detail': None,
@@ -447,22 +527,29 @@
           'config_source': None,
           'display_label': 'gone',
           'effective_severity_threshold': 'MEDIUM',
+          'operator_config': None,
           'path': '<TMP>/allowed/work/gone',
           'policy_scanners': list([
           ]),
           'project': 'gone',
           'relative_path': 'gone',
           'scanners': list([
+            'actionlint',
             'bandit',
             'cdk-nag',
+            'cfn-guard',
+            'cfn-lint',
             'cfn-nag',
             'checkov',
             'detect-secrets',
+            'gitleaks',
             'grype',
             'npm-audit',
             'opengrep',
             'semgrep',
             'syft',
+            'trivy',
+            'zizmor',
           ]),
           'severity_threshold': 'MEDIUM',
           'skip_detail': None,
@@ -510,8 +597,8 @@
               relative:   api
               config:     ASH default config
               threshold:  MEDIUM
-              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
-              pins:       bandit >=1.7.0,<2.0.0
+              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor
+              pins:       bandit >=1.7.0,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           2. web
               label:      web
@@ -519,8 +606,8 @@
               relative:   web
               config:     <TMP>/allowed/work/web/.ash/.ash.yaml
               threshold:  HIGH
-              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
-              pins:       bandit >=1.7.0,<2.0.0
+              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor
+              pins:       bandit >=1.7.0,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           3. gone  [skipped: error]
               label:      gone
@@ -535,22 +622,29 @@
           'config_source': None,
           'display_label': 'api',
           'effective_severity_threshold': 'MEDIUM',
+          'operator_config': None,
           'path': '<TMP>/allowed/work/api',
           'policy_scanners': list([
           ]),
           'project': 'api',
           'relative_path': 'api',
           'scanners': list([
+            'actionlint',
             'bandit',
             'cdk-nag',
+            'cfn-guard',
+            'cfn-lint',
             'cfn-nag',
             'checkov',
             'detect-secrets',
+            'gitleaks',
             'grype',
             'npm-audit',
             'opengrep',
             'semgrep',
             'syft',
+            'trivy',
+            'zizmor',
           ]),
           'severity_threshold': 'MEDIUM',
           'skip_detail': None,
@@ -562,22 +656,29 @@
           'config_source': '<TMP>/allowed/work/web/.ash/.ash.yaml',
           'display_label': 'web',
           'effective_severity_threshold': 'HIGH',
+          'operator_config': None,
           'path': '<TMP>/allowed/work/web',
           'policy_scanners': list([
           ]),
           'project': 'web',
           'relative_path': 'web',
           'scanners': list([
+            'actionlint',
             'bandit',
             'cdk-nag',
+            'cfn-guard',
+            'cfn-lint',
             'cfn-nag',
             'checkov',
             'detect-secrets',
+            'gitleaks',
             'grype',
             'npm-audit',
             'opengrep',
             'semgrep',
             'syft',
+            'trivy',
+            'zizmor',
           ]),
           'severity_threshold': 'HIGH',
           'skip_detail': None,
@@ -589,6 +690,7 @@
           'config_source': None,
           'display_label': 'gone',
           'effective_severity_threshold': None,
+          'operator_config': None,
           'path': '<TMP>/allowed/work/gone',
           'policy_scanners': list([
           ]),
@@ -632,6 +734,8 @@
     'result': dict({
       'error': "mcp-session-id must not contain path separators: '../escape'",
       'error_type': 'invalid_session_id',
+      'exit_code': 5,
+      'exit_code_meaning': 'usage error',
       'success': False,
     }),
     'tool': 'resolve_ash_workspace',
@@ -646,19 +750,13 @@
       ]),
       list([
         'error',
-        '''
-          Workspace '<TMP>/allowed/work/dev.code-workspace' names projects that cannot be scanned. Nothing was scanned, because scanning the rest and exiting 0 would report a clean result for code that was never examined. Pass '--allow-missing-projects' to skip them instead:
-            - 'gone' does not exist as a directory at '<TMP>/allowed/work/gone'
-        ''',
+        "Workspace '<TMP>/allowed/work/dev.code-workspace' names projects that cannot be scanned. Nothing was scanned, because scanning the rest and exiting 0 would report a clean result for code that was never examined. Pass '--allow-missing-projects' to skip them instead:\\x0a  - 'gone' does not exist as a directory at '<TMP>/allowed/work/gone'",
       ]),
     ]),
     'result': dict({
       'context': dict({
       }),
-      'error': '''
-        Workspace '<TMP>/allowed/work/dev.code-workspace' names projects that cannot be scanned. Nothing was scanned, because scanning the rest and exiting 0 would report a clean result for code that was never examined. Pass '--allow-missing-projects' to skip them instead:
-          - 'gone' does not exist as a directory at '<TMP>/allowed/work/gone'
-      ''',
+      'error': "Workspace '<TMP>/allowed/work/dev.code-workspace' names projects that cannot be scanned. Nothing was scanned, because scanning the rest and exiting 0 would report a clean result for code that was never examined. Pass '--allow-missing-projects' to skip them instead:\\x0a  - 'gone' does not exist as a directory at '<TMP>/allowed/work/gone'",
       'error_category': 'unexpected_error',
       'error_type': 'WorkspaceDefinitionError',
       'exit_code': 4,
@@ -694,7 +792,7 @@
       'error_category': 'unexpected_error',
       'error_type': 'ProfileNotRegisteredError',
       'exit_code': 3,
-      'exit_code_meaning': 'invalid config',
+      'exit_code_meaning': 'invalid config or refused input',
       'operation': 'resolve_workspace',
       'success': False,
       'suggestions': list([
@@ -750,6 +848,8 @@
     'result': dict({
       'error': "mcp-session-id must not contain path separators: '../escape'",
       'error_type': 'invalid_session_id',
+      'exit_code': 5,
+      'exit_code_meaning': 'usage error',
       'success': False,
     }),
     'tool': 'run_ash_workspace_scan',
@@ -801,22 +901,35 @@
           'error': None,
           'exceeds_threshold': False,
           'finding_count': 0,
+          'ignore_file_exclusions': None,
+          'incomplete_converters': dict({
+          }),
+          'incomplete_scanner_details': dict({
+          }),
           'incomplete_scanners': list([
+          ]),
+          'inputs_not_scanned': list([
           ]),
           'invalid_config': False,
           'no_scanner_ran': False,
           'output_path': 'projects/api',
+          'partial_coverage_scanners': list([
+          ]),
           'policy_origin_finding_count': 0,
           'project': 'api',
           'relative_path': 'api',
           'sarif_run_index': None,
           'scan_id': '<PROJECT_SCAN_ID>',
           'scan_incomplete': False,
+          'scanner_reasons': dict({
+          }),
           'scanners': dict({
           }),
           'severity_threshold': 'MEDIUM',
           'skip_detail': None,
           'skip_reason': None,
+          'stale_content_databases': list([
+          ]),
           'status': 'completed',
         }),
         dict({
@@ -828,22 +941,35 @@
           'error': None,
           'exceeds_threshold': False,
           'finding_count': 0,
+          'ignore_file_exclusions': None,
+          'incomplete_converters': dict({
+          }),
+          'incomplete_scanner_details': dict({
+          }),
           'incomplete_scanners': list([
+          ]),
+          'inputs_not_scanned': list([
           ]),
           'invalid_config': False,
           'no_scanner_ran': False,
           'output_path': 'projects/web',
+          'partial_coverage_scanners': list([
+          ]),
           'policy_origin_finding_count': 0,
           'project': 'web',
           'relative_path': 'web',
           'sarif_run_index': None,
           'scan_id': '<PROJECT_SCAN_ID>',
           'scan_incomplete': False,
+          'scanner_reasons': dict({
+          }),
           'scanners': dict({
           }),
           'severity_threshold': 'HIGH',
           'skip_detail': None,
           'skip_reason': None,
+          'stale_content_databases': list([
+          ]),
           'status': 'completed',
         }),
         dict({
@@ -855,22 +981,35 @@
           'error': None,
           'exceeds_threshold': False,
           'finding_count': 0,
+          'ignore_file_exclusions': None,
+          'incomplete_converters': dict({
+          }),
+          'incomplete_scanner_details': dict({
+          }),
           'incomplete_scanners': list([
+          ]),
+          'inputs_not_scanned': list([
           ]),
           'invalid_config': False,
           'no_scanner_ran': False,
           'output_path': 'projects/gone',
+          'partial_coverage_scanners': list([
+          ]),
           'policy_origin_finding_count': 0,
           'project': 'gone',
           'relative_path': 'gone',
           'sarif_run_index': None,
           'scan_id': None,
           'scan_incomplete': False,
+          'scanner_reasons': dict({
+          }),
           'scanners': dict({
           }),
           'severity_threshold': None,
           'skip_detail': None,
           'skip_reason': None,
+          'stale_content_databases': list([
+          ]),
           'status': 'completed',
         }),
       ]),
@@ -906,19 +1045,13 @@
       ]),
       list([
         'error',
-        '''
-          Workspace '<TMP>/allowed/escaping/dev.code-workspace' lists folder entries that cannot be used:
-            - '<TMP>/outside-project' resolves to '<TMP>/outside-project', which is outside '<TMP>/allowed/escaping' (outside-root)
-        ''',
+        "Workspace '<TMP>/allowed/escaping/dev.code-workspace' lists folder entries that cannot be used:\\x0a  - '<TMP>/outside-project' resolves to '<TMP>/outside-project', which is outside '<TMP>/allowed/escaping' (outside-root)",
       ]),
     ]),
     'result': dict({
       'context': dict({
       }),
-      'error': '''
-        Workspace '<TMP>/allowed/escaping/dev.code-workspace' lists folder entries that cannot be used:
-          - '<TMP>/outside-project' resolves to '<TMP>/outside-project', which is outside '<TMP>/allowed/escaping' (outside-root)
-      ''',
+      'error': "Workspace '<TMP>/allowed/escaping/dev.code-workspace' lists folder entries that cannot be used:\\x0a  - '<TMP>/outside-project' resolves to '<TMP>/outside-project', which is outside '<TMP>/allowed/escaping' (outside-root)",
       'error_category': 'unexpected_error',
       'error_type': 'WorkspaceDefinitionError',
       'exit_code': 4,
@@ -1114,6 +1247,8 @@
     'result': dict({
       'error': "No source has been delivered under this session id, so there is nothing to scan. Deliver a tree first with set_source_git or set_source_zip_chunk/set_source_zip_finalize, or pass source_dir explicitly. Refusing to scan: falling back to the server's working directory holds none of your code, and would complete with no findings and no error.",
       'error_type': 'no_source_delivered',
+      'exit_code': 5,
+      'exit_code_meaning': 'usage error',
       'session_id': 'session-a',
       'success': False,
     }),

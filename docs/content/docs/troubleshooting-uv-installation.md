@@ -19,6 +19,16 @@ uv tool run checkov --version
 uv tool run semgrep --version
 ```
 
+The tools ASH runs with `uv tool` use uv's cache, which a `cache-dir` in your own
+or the system `uv.toml` moves (see
+[uv settings](https://awslabs.github.io/automated-security-helper/latest/docs/cli-reference/#uv-settings)).
+Run the cache commands below from `/` (on Windows, from the system drive's root,
+`cd $env:SystemDrive\`), as ASH does. A `uv.toml` or `pyproject.toml` `[tool.uv]`
+in the current directory or its parents changes the cache they name, and anyone
+who can write that directory or a parent, `/tmp` on a shared host included, could
+choose what they clean or change the owner of. Only an administrator can put such a
+file in `/`.
+
 ### Enable Debug Logging
 
 ```bash
@@ -44,7 +54,15 @@ UV tool validation failed - UV is not available but required
 ```
 
 #### Diagnosis
+
+ASH uses the uv installed with it first: the `uv` executable beside the Python
+interpreter that runs ASH (in its `Scripts` directory on a Windows Python outside a
+virtual environment). Only when that is missing does it look on `PATH`, in the ASH
+bin directory and in `/usr/local/bin`. Check both:
+
 ```bash
+# The interpreter running ASH; uv should be in the same directory
+head -1 "$(command -v ash)"
 which uv
 uv --version
 ```
@@ -96,7 +114,7 @@ Tool installation timed out after 300 seconds for bandit
 
 **Option A: Increase timeout**
 ```yaml
-# .ash/.ash.yaml
+# ASH config file (.ashrc.yaml in a new project)
 scanners:
   bandit:
     options:
@@ -230,14 +248,23 @@ Permission denied: '/usr/local/bin/uv'
 ```
 
 #### Diagnosis
+
+The `uv cache` commands on this page run from `/`, with `UV_PROJECT` and
+`UV_WORKING_DIR` unset (`env -u`), as ASH runs them: a `uv.toml` in the current
+directory, its parents, or a directory those variables name can choose another
+cache. The Cache Management section of the
+[UV tool installation guide](uv-tool-installation-guide.md) explains why and has
+the PowerShell form.
+
 ```bash
 # Check UV installation location
 which uv
 ls -la $(which uv)
 
-# Check UV cache directory permissions
-uv cache dir
-ls -la $(uv cache dir)
+# Check UV cache directory permissions, asking from /
+UV_CACHE="$(cd / && env -u UV_PROJECT -u UV_WORKING_DIR uv cache dir --color never)"
+ls -ld "$UV_CACHE"
+ls -la "$UV_CACHE"
 ```
 
 #### Solutions
@@ -247,8 +274,11 @@ ls -la $(uv cache dir)
 # If UV is installed system-wide
 sudo chown $(whoami) $(which uv)
 
-# If cache directory has permission issues
-sudo chown -R $(whoami) $(uv cache dir)
+# If cache directory has permission issues: find it, check that it is the
+# directory you expect, and only then change its owner
+UV_CACHE="$(cd / && env -u UV_PROJECT -u UV_WORKING_DIR uv cache dir --color never)"
+ls -ld "$UV_CACHE"
+sudo chown -R "$(whoami)" "$UV_CACHE"
 ```
 
 **Option B: Install UV in user directory**
@@ -304,8 +334,8 @@ uv tool install bandit
 uv tool install checkov
 uv tool install semgrep
 
-# Copy UV cache to offline machine
-tar -czf uv-cache.tar.gz $(uv cache dir)
+# Copy UV cache to offline machine (asked from /: the cache ASH's tools read)
+tar -czf uv-cache.tar.gz "$(cd / && env -u UV_PROJECT -u UV_WORKING_DIR uv cache dir --color never)"
 # Transfer and extract on offline machine
 ```
 
@@ -323,7 +353,7 @@ OSError: [Errno 28] No space left on device
 df -h
 
 # Check UV cache size
-du -sh $(uv cache dir)
+du -sh "$(cd / && env -u UV_PROJECT -u UV_WORKING_DIR uv cache dir --color never)"
 
 # Check specific tool sizes
 uv tool list
@@ -333,12 +363,13 @@ uv tool list
 
 **Option A: Clean UV cache**
 ```bash
-uv cache clean
+(cd / && env -u UV_PROJECT -u UV_WORKING_DIR uv cache clean)
 ```
 
 **Option B: Move UV cache to larger disk**
 ```bash
-# Set custom cache directory
+# Set custom cache directory (an absolute path: uv resolves a relative one
+# against each command's own working directory)
 export UV_CACHE_DIR=/path/to/larger/disk/uv-cache
 ```
 
@@ -473,7 +504,7 @@ which python
 # Check UV environment
 uv --version
 uv tool dir
-uv cache dir
+(cd / && env -u UV_PROJECT -u UV_WORKING_DIR uv cache dir)
 
 # Check system resources
 df -h
@@ -537,7 +568,7 @@ grep "INSTALLATION_SUCCESS\|INSTALLATION_FAILED" ash.log | \
 
 ```bash
 # Backup UV cache for offline use
-tar -czf uv-cache-backup.tar.gz $(uv cache dir)
+tar -czf uv-cache-backup.tar.gz "$(cd / && env -u UV_PROJECT -u UV_WORKING_DIR uv cache dir --color never)"
 
 # Backup tool installations
 uv tool list > installed-tools.txt
@@ -570,7 +601,7 @@ ash --version
 ash --list-scanners
 
 # Configuration
-cat .ash/.ash.yaml
+cat .ashrc.yaml  # your ASH config file; `ash config validate` prints which one a scan uses
 
 # Recent logs (sanitize sensitive information)
 tail -100 ash.log

@@ -18,14 +18,17 @@
       "total": 1,
       "passed": false,
       "threshold": "MEDIUM",
-      "threshold_source": "global",
+      "threshold_source": "unavailable",
       "actionable": 1,
       "status": "FAILED",
       "excluded": false,
       "dependencies_missing": false,
+      "missing_reason": null,
+      "skipped_reason": null,
       "duration": 0.0,
       "targets_attempted": null,
-      "targets_failed": 0
+      "targets_failed": 0,
+      "counters_unusable": false
     },
     {
       "scanner_name": "checkov",
@@ -38,14 +41,17 @@
       "total": 1,
       "passed": false,
       "threshold": "MEDIUM",
-      "threshold_source": "global",
+      "threshold_source": "unavailable",
       "actionable": 1,
       "status": "FAILED",
       "excluded": false,
       "dependencies_missing": false,
+      "missing_reason": null,
+      "skipped_reason": null,
       "duration": 0.0,
       "targets_attempted": null,
-      "targets_failed": 0
+      "targets_failed": 0,
+      "counters_unusable": false
     },
     {
       "scanner_name": "npm-audit",
@@ -58,14 +64,17 @@
       "total": 0,
       "passed": true,
       "threshold": "MEDIUM",
-      "threshold_source": "global",
+      "threshold_source": "unavailable",
       "actionable": 0,
       "status": "MISSING",
       "excluded": false,
       "dependencies_missing": true,
+      "missing_reason": "api: its dependencies were not available; no reason was recorded, and ash.log has the scanner's own message",
+      "skipped_reason": null,
       "duration": 0.0,
       "targets_attempted": null,
-      "targets_failed": 0
+      "targets_failed": 0,
+      "counters_unusable": false
     },
     {
       "scanner_name": "semgrep",
@@ -78,17 +87,21 @@
       "total": 1,
       "passed": false,
       "threshold": "MEDIUM",
-      "threshold_source": "global",
+      "threshold_source": "unavailable",
       "actionable": 1,
       "status": "FAILED",
       "excluded": false,
       "dependencies_missing": false,
+      "missing_reason": null,
+      "skipped_reason": null,
       "duration": 0.0,
       "targets_attempted": null,
-      "targets_failed": 0
+      "targets_failed": 0,
+      "counters_unusable": false
     }
   ],
   "content_databases": [],
+  "converter_refusals": [],
   "top_hotspots": [
     {
       "location": "main.tf",
@@ -101,7 +114,7 @@
   ],
   "findings": [
     {
-      "id": "bandit-B602-e9f369ff",
+      "id": "bandit-B602-a65db15ba58d",
       "title": "B602",
       "description": "subprocess call with shell=True identified, security issue.",
       "severity": "HIGH",
@@ -119,7 +132,7 @@
       "raw_data": "{\"ruleId\":\"B602\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"error\",\"message\":{\"text\":\"subprocess call with shell=True identified, security issue.\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app.py\",\"uriBaseId\":\"PROJECTROOT\",\"index\":-1},\"region\":{\"startLine\":7,\"endLine\":7,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[\"bandit\"],\"issue_severity\":\"HIGH\",\"issue_confidence\":\"HIGH\",\"scanner_name\":\"bandit\",\"scanner_version\":\"1.8.6\",\"scanner_details\":{\"tool_name\":\"bandit\",\"tool_version\":\"1.8.6\",\"tool_invocation\":{\"exit_code\":0,\"duration\":1.0,\"start_time\":\"2026-01-15T12:00:00+00:00\",\"end_time\":\"2026-01-15T12:00:01+00:00\"}},\"workspace_project\":\"api\",\"workspace_uri\":\"api/app.py\"}}"
     },
     {
-      "id": "checkov-CKV_AWS_20-89534355",
+      "id": "checkov-CKV_AWS_20-4fdd5e00737a",
       "title": "CKV_AWS_20",
       "description": "S3 Bucket has an ACL defined which allows public READ access.",
       "severity": "HIGH",
@@ -137,7 +150,7 @@
       "raw_data": "{\"ruleId\":\"CKV_AWS_20\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"error\",\"message\":{\"text\":\"S3 Bucket has an ACL defined which allows public READ access.\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"main.tf\",\"uriBaseId\":\"PROJECTROOT\",\"index\":-1},\"region\":{\"startLine\":1,\"endLine\":4,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[\"checkov\"],\"issue_severity\":\"HIGH\",\"scanner_name\":\"checkov\",\"scanner_version\":\"3.2.469\",\"scanner_details\":{\"tool_name\":\"checkov\",\"tool_version\":\"3.2.469\",\"tool_invocation\":{\"exit_code\":0,\"duration\":2.0,\"start_time\":\"2026-01-15T12:00:00+00:00\",\"end_time\":\"2026-01-15T12:00:02+00:00\"}},\"workspace_project\":\"web\",\"workspace_uri\":\"web/main.tf\"}}"
     },
     {
-      "id": "semgrep-terraform.aws.best-practice.s3-bucket-name-hardcoded-2ffa28f7",
+      "id": "semgrep-terraform.aws.best-practice.s3-bucket-name-hardcoded-054697600f8a",
       "title": "terraform.aws.best-practice.s3-bucket-name-hardcoded",
       "description": "Bucket name is hardcoded; derive it from a variable.",
       "severity": "MEDIUM",
@@ -159,7 +172,7 @@
     "workspace_file": "<REPO>/tests/test_data/snapshot_fixture/workspace/snapshot-with-skipped.code-workspace",
     "workspace_root": "<REPO>/tests/test_data/snapshot_fixture/workspace",
     "status": "completed",
-    "exit_code": 2,
+    "exit_code": 1,
     "projects": [
       {
         "project": "api",
@@ -178,12 +191,23 @@
           "npm-audit": "MISSING",
           "bandit": "FAILED"
         },
+        "scanner_reasons": {
+          "npm-audit": "its dependencies were not available; no reason was recorded, and ash.log has the scanner's own message"
+        },
         "incomplete_scanners": [
           "npm-audit"
         ],
+        "incomplete_scanner_details": {
+          "npm-audit": "MISSING"
+        },
+        "partial_coverage_scanners": [],
+        "stale_content_databases": [],
+        "inputs_not_scanned": [],
         "no_scanner_ran": false,
+        "incomplete_converters": {},
         "scan_incomplete": true,
         "ceiling_unreachable_findings": {},
+        "ignore_file_exclusions": null,
         "skip_reason": null,
         "skip_detail": null,
         "error": null,
@@ -206,10 +230,17 @@
           "checkov": "FAILED",
           "semgrep": "PASSED"
         },
+        "scanner_reasons": {},
         "incomplete_scanners": [],
+        "incomplete_scanner_details": {},
+        "partial_coverage_scanners": [],
+        "stale_content_databases": [],
+        "inputs_not_scanned": [],
         "no_scanner_ran": false,
+        "incomplete_converters": {},
         "scan_incomplete": false,
         "ceiling_unreachable_findings": {},
+        "ignore_file_exclusions": null,
         "skip_reason": null,
         "skip_detail": null,
         "error": null,
@@ -229,10 +260,17 @@
         "output_path": "projects/docs",
         "sarif_run_index": null,
         "scanners": {},
+        "scanner_reasons": {},
         "incomplete_scanners": [],
+        "incomplete_scanner_details": {},
+        "partial_coverage_scanners": [],
+        "stale_content_databases": [],
+        "inputs_not_scanned": [],
         "no_scanner_ran": false,
+        "incomplete_converters": {},
         "scan_incomplete": false,
         "ceiling_unreachable_findings": {},
+        "ignore_file_exclusions": null,
         "skip_reason": "error",
         "skip_detail": "'docs' does not exist as a directory at '<REPO>/tests/test_data/snapshot_fixture/workspace/docs'",
         "error": null,

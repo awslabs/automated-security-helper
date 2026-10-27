@@ -54,7 +54,8 @@ Failure and time limits. Each child is bounded by the scanner's ``scan_timeout``
 child that dies after answering some templates keeps those answers, fails the template
 it was working on, and a new child takes the rest; a child that answered nothing, or
 was killed at the timeout, fails every template still pending, each with the child's
-exit status (or the timeout) and the tail of its stderr. ``SystemExit`` and
+exit status (or the timeout) and the tail of its stderr, redacted whole with the
+scan's environment values before it is cut into lines. ``SystemExit`` and
 ``KeyboardInterrupt`` raised inside the child are not exceptions the wrapper could
 raise to the scanner before; they now end the child and fail its pending templates.
 """
@@ -65,14 +66,23 @@ import contextvars
 import json
 import logging
 import os
-import re
 import shutil
 import stat
 import sys
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional
+from typing import (
+    IO,
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+)
 
 if TYPE_CHECKING:
     from automated_security_helper.utils.cdk_nag_wrapper import CdkNagWrapperResponse
@@ -104,6 +114,9 @@ class _RecordCollector(logging.Handler):
                 "pathname": record.pathname,
                 "lineno": record.lineno,
                 "funcName": record.funcName,
+                # A message logged with MARKUP styles itself and has its values
+                # shown and escaped for Rich; replayed as text, it was shown again.
+                "markup": bool(getattr(record, "markup", False)),
             }
         )
 
@@ -244,12 +257,37 @@ def main(argv: List[str]) -> int:
     request_path, response_path = Path(argv[0]), Path(argv[1])
     request = json.loads(request_path.read_text(encoding="utf-8"))
     if request.get("protocol") != PROTOCOL_VERSION:
+        from automated_security_helper.utils.terminal_text import shown_on_one_line
+
+        # The request's value as read, which the file may hold as anything.
         sys.stderr.write(
-            f"cdk-nag worker speaks protocol {PROTOCOL_VERSION}, request carries "
-            f"{request.get('protocol')}\n"
+            shown_on_one_line(
+                f"cdk-nag worker speaks protocol {PROTOCOL_VERSION}, request carries "
+                f"{request.get('protocol')}"
+            )
+            + "\n"
         )
         return 2
-    with open(response_path, "w", encoding="utf-8") as out:
+    # Exclusively: the parent made this directory fresh for the run and wrote the
+    # request into it with fs_guard, so anything already at the name, a link
+    # included, is refused rather than opened. Reported as the protocol mismatch
+    # is, an error exit with a line on stderr, which the parent quotes as the
+    # reason the child gave no answer.
+    try:
+        out = open(response_path, "x", encoding="utf-8")
+    except FileExistsError:
+        from automated_security_helper.utils.terminal_text import shown_on_one_line
+
+        # The path is the parent's argument, shown as text, not obeyed.
+        sys.stderr.write(
+            shown_on_one_line(
+                f"cdk-nag worker: the response file {response_path} already exists, "
+                "and the worker writes only a file it creates"
+            )
+            + "\n"
+        )
+        return 2
+    with out:
         _evaluate(request, out)
     return 0
 
@@ -301,6 +339,8 @@ def _replay_logs(answer: Dict[str, Any]) -> None:
                 (),
                 None,
                 func=str(entry.get("funcName") or ""),
+                # As the wrapper logged it: markup, or text.
+                extra={"markup": entry.get("markup") is True},
             )
         )
 
@@ -351,7 +391,12 @@ def _key(template: "str | Path") -> str:
 
 
 def _strip_ansi(text: str) -> str:
-    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+    """Every escape the package strips (error_text.ESCAPE_CODES), not only
+    colors: a narrower set left a non-color code inside a value in place,
+    which split the redaction's match, and both halves printed."""
+    from automated_security_helper.utils.error_text import ESCAPE_CODES
+
+    return ESCAPE_CODES.sub("", text)
 
 
 def _read_answers(response_path: Path) -> List[Dict[str, Any]]:
@@ -411,18 +456,30 @@ def _run_child(
     work_root: Path,
     cwd: Path,
     timeout: Optional[float],
+    values: Sequence[str],
 ) -> "tuple[List[Dict[str, Any]], Optional[str], bool]":
     """Evaluate ``templates`` in one child.
 
     Returns the answers it gave, in template order and possibly fewer than asked for;
     the reason it stopped early, or None; and whether that reason was the timeout.
+    ``values`` are the scan config's environment values: the reason quotes the
+    child's stderr, which can echo one, and it is redacted HERE, before the
+    tail is cut from it, because the cut rewrites a value's line breaks as the
+    joiner and no later whole-spelling redaction can match that.
     """
     from automated_security_helper.utils.subprocess_utils import (
+        COULD_NOT_STOP_ENDING,
+        WAS_KILLED_ENDING,
+        response_could_not_stop,
         run_command_with_output_handling,
     )
 
     work_dir = work_root.joinpath(_WORK_DIR_NAME, uuid.uuid4().hex)
-    work_dir.mkdir(parents=True, exist_ok=True)
+    # A directory of this child's own, every time, retries included: one already
+    # at the name is not reused, so no request or response file is ever left
+    # from an earlier child.
+    work_dir.parent.mkdir(parents=True, exist_ok=True)
+    work_dir.mkdir()
     request_path = work_dir.joinpath("request.json")
     response_path = work_dir.joinpath("response.jsonl")
     try:
@@ -459,18 +516,49 @@ def _run_child(
             encoding="utf-8",
             errors="replace",
             timeout=timeout,
+            values=values,
         )
         answers = _read_answers(response_path)[: len(templates)]
         if len(answers) == len(templates):
             return answers, None, False
         if outcome.get("timed_out"):
+            # The limit through the one formatter every timeout message uses
+            # (error_text.timeout_limit_token), as its own quoted token. With
+            # no values: cdk-nag's section is builtin, and a config file cannot
+            # read its scan_timeout from the environment (the strict load
+            # refuses a reference there), so no environment value is this limit.
+            from automated_security_helper.utils.error_text import timeout_limit_token
+
+            limit = timeout_limit_token(timeout, ())
+            # "Was killed" only when the stop worked, from the response's
+            # recorded state (the flag, or a timeout with no exit code): a
+            # stop that failed left the child running, and the one thing this
+            # reason must not say is that it is gone.
+            ending = (
+                COULD_NOT_STOP_ENDING
+                if response_could_not_stop(outcome)
+                else WAS_KILLED_ENDING
+            ) + "."
             reason = (
-                f"the cdk-nag worker timed out after {timeout}s and was killed. Raise "
+                f"the cdk-nag worker timed out after {limit}{ending} Raise "
                 "scanners.cdk-nag.options.scan_timeout if these templates "
                 "legitimately need longer."
             )
             return answers, reason, True
-        stderr = _strip_ansi(outcome.get("stderr") or "").strip().splitlines()
+        # Redacted whole BEFORE the split (redact_then_split): the " | " join
+        # below rewrites a value's line break, so a redaction after it could
+        # not match the value's spelling and both halves would print. Escape
+        # codes are stripped from the whole text first for the same reason: a
+        # code inside a value splits the match.
+        from automated_security_helper.utils.error_text import redact_then_split
+
+        stderr = [
+            line
+            for line in redact_then_split(
+                _strip_ansi(outcome.get("stderr") or ""), values
+            )
+            if line.strip()
+        ]
         tail = " | ".join(stderr[-5:]) if stderr else "no stderr"
         reason = (
             f"the cdk-nag worker process exited {outcome.get('returncode')} "
@@ -494,11 +582,16 @@ class _Batch:
         work_root: Path,
         cwd: Path,
         timeout: Optional[float] = None,
+        values: Sequence[str] = (),
     ) -> None:
+        # values defaults empty for the batchless wrapper fallback, where the
+        # caller is not a scanner and has no scan config to take them from;
+        # the scanner seam (cdk_nag_worker_batch) requires them.
         self.templates = [_key(t) for t in templates]
         self.work_root = work_root
         self.cwd = cwd
         self.timeout = timeout
+        self.values = tuple(values)
         self.options: Optional[Dict[str, Any]] = None
         self.answers: Dict[str, Dict[str, Any]] = {}
         self.errors: Dict[str, str] = {}
@@ -514,7 +607,12 @@ class _Batch:
         while pending:
             try:
                 answers, error, timed_out = _run_child(
-                    pending, options, self.work_root, self.cwd, self.timeout
+                    pending,
+                    options,
+                    self.work_root,
+                    self.cwd,
+                    self.timeout,
+                    self.values,
                 )
             except Exception as exc:
                 answers, error, timed_out = [], f"{type(exc).__name__}: {exc}", False
@@ -545,7 +643,9 @@ class _Batch:
                 f"cdk-nag worker: {template} is outside the batch it was called in; "
                 "evaluating it in a separate child"
             )
-            single = _Batch([key], self.work_root, self.cwd, self.timeout)
+            single = _Batch(
+                [key], self.work_root, self.cwd, self.timeout, values=self.values
+            )
             return single.answer_for(key, options)
         if key not in self.answers and key not in self.errors:
             self._evaluate(
@@ -574,15 +674,26 @@ def cdk_nag_worker_batch(
     work_root: Path,
     cwd: Optional[Path] = None,
     timeout: Optional[float] = None,
+    *,
+    values: Sequence[str],
 ) -> Iterator[None]:
     """Evaluate ``templates`` in one child, on the first call made inside the block.
 
     ``work_root`` must be a directory the scanner may write, which inside a sandbox
     means its results directory. ``timeout`` bounds each child; a child killed at it
-    fails every template it had not answered.
+    fails every template it had not answered. ``values`` are the scan config's
+    environment values, which the worker's failure reasons are redacted with:
+    required, with no empty default, so a caller cannot silently run the
+    worker with redaction off.
     """
     token = _ACTIVE_BATCH.set(
-        _Batch(templates, Path(work_root), Path(cwd) if cwd else Path.cwd(), timeout)
+        _Batch(
+            templates,
+            Path(work_root),
+            Path(cwd) if cwd else Path.cwd(),
+            timeout,
+            values=values,
+        )
     )
     try:
         yield

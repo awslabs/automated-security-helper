@@ -1,0 +1,10 @@
+# Manifest for the actionlint reporter snapshots. actionlint.sarif is not committed:
+# the test builds it with ActionlintScanner's build_sarif from
+# ../actionlint-1.7.12-default.json (real output of the pinned binary). Read by tests/snapshot/reporters/test_snapshot_reporters_actionlint.py
+# through tests/snapshot/support/fixture_model.py; see that module for the format.
+scanners:
+  - name: actionlint
+    outcome: ran
+    output: actionlint.sarif
+    version: "1.7.12"
+    duration_seconds: 0.25

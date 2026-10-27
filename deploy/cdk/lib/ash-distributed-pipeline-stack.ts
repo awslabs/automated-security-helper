@@ -19,13 +19,13 @@
  * `--results` repeatable on the merge side. Shards also pass
  * `--no-fail-on-findings` to state the intent.
  *
- * That flag was NOT verified from this worktree — ASH is not installed here, so
- * `ash scan --help` could not be run. Correctness deliberately does not depend on
- * it. A shard succeeds if and only if ASH wrote `ash_aggregated_results.json`, and
- * the merge independently requires that file from every shard. Exit codes are only
- * recorded, never trusted, because Click reports a usage error as exit 2 and ASH
- * reports actionable findings as exit 2 — indistinguishable, and one of them means
- * nothing was scanned.
+ * Correctness deliberately does not depend on that flag. A shard succeeds if and
+ * only if ASH wrote `ash_aggregated_results.json`, and the merge independently
+ * requires that file from every shard. Exit codes are only recorded, never trusted.
+ * ASH 3.7.0 and 3.7.1 report a usage error as exit 2, the same code as actionable
+ * findings, and one of the two means nothing was scanned. ASH releases after 3.7.1
+ * exit 5 for a usage error, but `AshVersion` can name an older release, so the shard still
+ * decides on the results file rather than on the code.
  *
  * WHY SHARD RESULTS TRAVEL THROUGH S3 AND NOT PIPELINE ARTIFACTS
  * -------------------------------------------------------------
@@ -88,6 +88,7 @@ import {
 import * as codebuild from 'aws-cdk-lib/aws-codebuild';
 import * as codepipeline from 'aws-cdk-lib/aws-codepipeline';
 import * as codepipeline_actions from 'aws-cdk-lib/aws-codepipeline-actions';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
@@ -110,6 +111,7 @@ import {
   suppressPipelineRoleWildcards,
   suppressScanProjectRoleWildcards,
   suppressSecretRotation,
+  suppressShardProjectRoleWildcards,
   suppressUnevaluableRules,
   suppressBucketTlsLiteral,
 } from './ash-nag-suppressions';
@@ -288,7 +290,34 @@ export class AshDistributedPipelineStack extends Stack {
     );
 
     resultsBucket.grantReadWrite(mergeProject);
-    shardProjects.forEach((project) => resultsBucket.grantWrite(project));
+    /*
+     * Each shard may write only its own results key of an execution.
+     *
+     * The merge forms the pipeline's verdict from what sits under
+     * `executions/<execution id>/`, so each shard's results and the merged output are
+     * written only by the project that produces them. `grantPut` with the shard's own
+     * key pattern leaves each shard role the one prefix its post_build uploads to,
+     * and no Delete: the upload never deletes.
+     *
+     * The execution segment is `EXECUTION_ID_SEGMENT`, one `?` per character of a
+     * CodePipeline execution id, rather than `*`, which crosses `/`: with `*`, shard N
+     * could also write `executions/<id>/merged/shard-N/x` or
+     * `executions/<id>/shard-M/shard-N/x`. After the shard segment comes
+     * `${codebuild:BuildArn}`, which IAM replaces with the ARN of the build making
+     * the request, so a build writes only under its own ARN. IAM has no variable
+     * for the execution id, so a build could still write under another
+     * execution's id, but only under its own ARN there, and the merge of that
+     * execution reads only the builds CodePipeline reports for it
+     * (`ListActionExecutions`) and refuses any other key. The merge's download also
+     * refuses a key with an empty, `.` or `..` segment, which IAM's string match
+     * does not.
+     */
+    shardProjects.forEach((project, index) =>
+      resultsBucket.grantPut(
+        project,
+        `executions/${EXECUTION_ID_SEGMENT}/shard-${index}/\${codebuild:BuildArn}/*`,
+      ),
+    );
     shardProjects.forEach((project) => config.grantRead(project));
     config.grantRead(mergeProject);
 
@@ -375,10 +404,26 @@ export class AshDistributedPipelineStack extends Stack {
                 ASH_RESULTS_PREFIX: {
                   value: 'executions/#{codepipeline.PipelineExecutionId}',
                 },
+                ASH_PIPELINE_EXECUTION_ID: { value: '#{codepipeline.PipelineExecutionId}' },
               },
             }),
           ],
         },
+      ],
+    });
+
+    // The merge's `collect` asks CodePipeline which build ran each shard action of
+    // its execution. A policy of its own, authored after the pipeline rather than
+    // through the split, because the merge project's role policies come before the
+    // project and the pipeline after it. Named like the split's policies. It holds
+    // no wildcard, so it sits outside the merge scope that the IAM5 suppressions walk.
+    new iam.Policy(this, 'MergeProjectRoleCodepipelineAccess', {
+      roles: [mergeProject.role as iam.IRole],
+      statements: [
+        new iam.PolicyStatement({
+          actions: ['codepipeline:ListActionExecutions'],
+          resources: [pipeline.pipelineArn],
+        }),
       ],
     });
 
@@ -400,7 +445,7 @@ export class AshDistributedPipelineStack extends Stack {
      * project, five of which no rule could ever consult.
      */
     shardProjects.forEach((project) => {
-      suppressScanProjectRoleWildcards(ashRoleSplitScopeOf(project));
+      suppressShardProjectRoleWildcards(ashRoleSplitScopeOf(project));
       suppressUnevaluableRules(project, ['AwsSolutions-CB5']);
     });
     suppressScanProjectRoleWildcards(ashRoleSplitScopeOf(mergeProject));
@@ -465,7 +510,7 @@ export class AshDistributedPipelineStack extends Stack {
       this,
       `Shard${index}Project`,
       'codebuild.amazonaws.com',
-      suppressScanProjectRoleWildcards,
+      suppressShardProjectRoleWildcards,
     );
 
     return new codebuild.Project(scope, GENERATED_CONSTRUCT_ID, {
@@ -498,10 +543,11 @@ export class AshDistributedPipelineStack extends Stack {
               // --no-fail-on-findings states the intent: findings are the merge
               // action's business, not this shard's. But the shard's success does
               // NOT depend on that flag behaving, or on any exit code, because
-              // exit-code semantics here are genuinely ambiguous — Click uses
-              // exit 2 for a usage error and ASH uses exit 2 for actionable
-              // findings. So the shard succeeds if and only if ASH produced its
-              // aggregated results file, which is the thing the merge actually
+              // exit-code semantics here are ambiguous across releases — ASH 3.7.0
+              // and 3.7.1 exit 2 for a usage error, the code they use for
+              // actionable findings, and releases after 3.7.1 exit 5. So the
+              // shard succeeds if and only if ASH produced its aggregated
+              // results file, which is the thing the merge actually
               // consumes. That is robust whether the flag is absent (usage error,
               // no results), a scanner crashed (no results), findings were found
               // (results present) or the shard was clean (results present).
@@ -518,11 +564,10 @@ export class AshDistributedPipelineStack extends Stack {
                 'echo "shard ${ASH_SHARD_INDEX} finished with ASH exit code $ASH_EXIT"',
                 'if [ ! -f ./ash-shard-output/ash_aggregated_results.json ]; then',
                 '  echo "shard ${ASH_SHARD_INDEX} produced no ash_aggregated_results.json." >&2',
-                '  echo "ASH exit code was $ASH_EXIT. Exit 2 from a usage error (for example an" >&2',
-                '  echo "unrecognized --no-fail-on-findings on an older ASH) looks identical to" >&2',
-                '  echo "exit 2 for findings, which is why this check looks for the results file" >&2',
-                '  echo "instead. Failing here rather than letting the merge report a clean scan" >&2',
-                '  echo "for scanners that never ran." >&2',
+                '  echo "ASH exit code was $ASH_EXIT. ASH 3.7.0 and 3.7.1 exit 2 for a usage error," >&2',
+                '  echo "the code they use for findings (releases after 3.7.1 exit 5), which is why this" >&2',
+                '  echo "check looks for the results file instead. Failing here rather than" >&2',
+                '  echo "letting the merge report a clean scan for scanners that never ran." >&2',
                 '  exit 1',
                 'fi',
               ].join('\n'),
@@ -533,9 +578,11 @@ export class AshDistributedPipelineStack extends Stack {
               // Under errexit: a failed upload must fail the shard. The helper
               // raises rather than exiting 0 on a failed transfer, so errexit sees
               // it — the same property `aws s3 cp` had here.
+              // Under this build's own ARN, which is the one key prefix the shard
+              // role's `${codebuild:BuildArn}` grant lets it write.
               `python3 ${ASH_S3_SYNC_PATH} upload ./ash-shard-output ` +
                 '"$ASH_RESULTS_BUCKET" ' +
-                '"${ASH_RESULTS_PREFIX}/shard-${ASH_SHARD_INDEX}"',
+                '"${ASH_RESULTS_PREFIX}/shard-${ASH_SHARD_INDEX}/${CODEBUILD_BUILD_ARN}"',
               // Reaching here means ASH produced results and they uploaded, so the
               // shard has done its job. The pass/fail verdict on those findings is
               // the merge action's to make, never this shard's: a shard runs a
@@ -599,12 +646,15 @@ export class AshDistributedPipelineStack extends Stack {
             commands: [
               MATERIALIZE_CONFIG_COMMAND,
               MATERIALIZE_S3_SYNC_COMMAND,
-              // The helper strips the prefix from each key, so a shard's object at
-              // <prefix>/shard-2/ash_aggregated_results.json lands at
-              // ./shard-results/shard-2/ash_aggregated_results.json — the layout
-              // the completeness check below and `ash merge` both expect.
-              `python3 ${ASH_S3_SYNC_PATH} download ` +
-                '"$ASH_RESULTS_BUCKET" "$ASH_RESULTS_PREFIX" ./shard-results',
+              // `collect` asks CodePipeline which build ran each shard action of this
+              // execution and downloads only that build's keys, so a shard's object at
+              // <prefix>/shard-2/<build ARN>/ash_aggregated_results.json lands at
+              // ./shard-results/shard-2/ash_aggregated_results.json — the layout the
+              // completeness check below and `ash merge` both expect. Any key under
+              // the prefix from a build this execution does not list fails the merge.
+              `python3 ${ASH_S3_SYNC_PATH} collect ` +
+                '"$ASH_RESULTS_BUCKET" "$ASH_RESULTS_PREFIX" ./shard-results ' +
+                '"$ASH_PIPELINE_EXECUTION_ID" "$ASH_SHARD_COUNT"',
               [
                 '# Refuse to merge a partial result set. The test is for ASH\'s',
                 '# aggregated results FILE, not merely for a shard directory: an',
@@ -652,7 +702,11 @@ export class AshDistributedPipelineStack extends Stack {
               // --results is repeatable and accepts a file or a directory. One
               // flag per shard directory, so a shard that vanished between the
               // check above and here still fails rather than being skipped.
-              ['ash merge \\', ...resultsFlags, '  --output-dir ./ash-merged-output'].join('\n'),
+              [
+                'ash merge \\',
+                ...resultsFlags,
+                '  --output-dir ./ash-merged-output',
+              ].join('\n'),
             ],
           },
           post_build: {
@@ -676,7 +730,16 @@ export class AshDistributedPipelineStack extends Stack {
 }
 
 /**
- * Write the deployment-wide ASH config into the build, when one was supplied.
+ * One `?` per character of a CodePipeline execution id, whose documented pattern is
+ * `[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}` (the
+ * `pipelineExecutionId` field of the CodePipeline API's PipelineExecution type). In
+ * an IAM resource `?` matches exactly one character, so the segment is exactly as
+ * long as an execution id, with its hyphens in place.
+ */
+export const EXECUTION_ID_SEGMENT = '????????-????-????-????-????????????';
+
+/**
+ * Write the deployment-wide ASH config into the build, or `{}` when none was supplied.
  *
  * The CodeBuild environment runs the ASH image but not its MCP entrypoint, so
  * nothing has materialized the config yet. Same mechanism as the entrypoint:
@@ -684,9 +747,12 @@ export class AshDistributedPipelineStack extends Stack {
  *
  * `ASH_CONFIG` is set as a PROJECT environment variable, not exported here. An
  * `export` inside one buildspec command is not guaranteed to reach a later
- * phase's shell, so the path is always set and only the FILE is conditional.
- * That is safe because ASH's `get_default_config` tests the path for existence
- * before reading it and falls through to its defaults when it is absent.
+ * phase's shell, so the path is always set and the file is always written. With
+ * no `AshBaseConfigYaml` the file is `{}`, ASH's defaults, the same document the
+ * CodeCommit gate writes. Without a config ASH would look for one in the scanned
+ * checkout, so the repository would choose the scanners, ignore paths and
+ * `fail_on_findings` the shards record, and `ash merge` forms its verdict from
+ * what the shards record. An empty file is no substitute: ASH refuses it.
  *
  * THE READ IS THE SAME ONE THE ENTRYPOINT MAKES, DELIBERATELY. Character for
  * character the same `python3 -c` as `MCP_ENTRYPOINT_SCRIPT`, for two reasons.
@@ -702,5 +768,7 @@ const MATERIALIZE_CONFIG_COMMAND = `if [ -n "\${ASH_BASE_CONFIG_SSM_PARAMETER:-}
   python3 -c "import os, sys, boto3; sys.stdout.write(boto3.client('ssm').get_parameter(Name=os.environ['ASH_BASE_CONFIG_SSM_PARAMETER'], WithDecryption=True)['Parameter']['Value'])" \\
     > "$ASH_CONFIG"
 else
-  echo "No ASH base configuration supplied; ASH will use its built-in defaults."
+  mkdir -p "$(dirname "$ASH_CONFIG")"
+  printf '{}\\n' > "$ASH_CONFIG"
+  echo "No ASH base configuration supplied; scanning with ASH's defaults."
 fi`;

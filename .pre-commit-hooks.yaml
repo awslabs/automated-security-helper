@@ -4,44 +4,54 @@
 # Customer and either Amazon Web Services, Inc. or Amazon Web Services EMEA SARL
 # or both.
 
+# pre-commit hooks for ASH. docs/content/tutorials/using-ash-with-pre-commit.md
+# is the user guide; this comment is for whoever edits the hooks.
 #
-# This pre-commit hook configuration allows the ASH tool
-# to be run as a pre-commit hook on the local workstation
-# where pre-commit is installed.
+# pre-commit builds a `language: python` hook's environment with
+# `pip install . <additional_dependencies>`, run inside its clone of this
+# repository. A bare `.` installs ASH without extras, so the hook environment
+# has only what [project] dependencies name.
 #
-# The configuration parameters below turn on "verbose"
-# output, so that even when the hook returns success (0)
-# the output from the run of the ASH tool will be displayed
-# to the user.
+# `ash` and `ash-simple-scan` run `--mode precommit`, which always adds bandit,
+# detect-secrets, checkov, cdk-nag and npm-audit to the scanner selection
+# (interactions/run_ash_scan.py). cdk-nag needs the `cdk` extra; without it the
+# scanner is MISSING and the completeness gate exits 1 on every run, whatever the
+# repository contains. `.[cdk]` installs the extra from the same clone, so its
+# version ranges come from pyproject.toml rather than being restated here.
+# cdk-nag and npm-audit also need Node.js and npm on PATH, which a Python hook
+# environment cannot supply.
 #
-# The supported stages are listed below, including the
-# "manual" stage.  Users of this hook may want to limit
-# the stages where this hook runs to only "manual" since
-# the ASH tool can take several minutes to complete.
+# A user's own `additional_dependencies` replaces this list rather than adding to
+# it, so the user guide tells them to keep `.[cdk]` in theirs.
 #
-# Output from the run of the ASH tool can be found in
-# a file named "aggregated_results.txt" in the root
-# folder of the git repository where the pre-commit
-# command was invoked from.
-#
+# tests/unit/test_pre_commit_hooks_manifest.py checks every hook's entry against
+# the installed console scripts and the CLI's own options.
 - id: ash
   name: Use ASH for SAST/IaC/Secrets scanning
-  description: Runs various code scanners from Python directly
+  description: Runs ASH's pre-commit scanner set (bandit, detect-secrets, checkov, cdk-nag, npm-audit) locally
   entry: ashv3 --mode=precommit
   language: python
+  additional_dependencies: [".[cdk]"]
   pass_filenames: false
   args: []
+# The same hook as `ash`, under the id the README has documented since v3.0.0.
+# Kept so existing configurations keep working.
 - id: ash-simple-scan
   name: Use ASH for SAST/IaC/Secrets scanning
-  description: Runs various code scanners from Python directly
+  description: Same hook as `ash`; kept for configurations that use this id
   entry: ashv3 --mode=precommit
   language: python
+  additional_dependencies: [".[cdk]"]
   pass_filenames: false
   args: []
+# `language: python`, not `script`: a script hook's entry is a path inside this
+# repository, and there is no file named ashv3 here. The Python CLI's container
+# mode builds the ASH image and scans inside it, so the hook environment needs no
+# extras, but the host needs a container runtime (finch, docker, nerdctl or podman).
 - id: ash-full-scan
-  name: Use ASH for SAST/IaC/Secrets scanning
-  description: Runs full ASH scan with container build and all scanners (takes several minutes)
+  name: Use ASH for SAST/IaC/Secrets scanning (container)
+  description: Runs a full ASH scan in a container image it builds (takes several minutes)
   entry: ashv3 --mode=container --simple
-  language: script
+  language: python
   pass_filenames: false
   args: []

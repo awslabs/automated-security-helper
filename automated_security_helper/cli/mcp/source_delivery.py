@@ -8,9 +8,12 @@ Source delivery for the MCP server.
 Two delivery channels are supported:
 
 1. ``set_source_git`` — clone a remote repository (optionally at a specific
-   ref) into a per-session workspace via ``git clone --depth``. SSH keys are
-   resolved from a server-side keyring identifier; raw private keys are never
-   accepted over the wire.
+   ref) into a per-session workspace via ``git clone --depth``. git runs
+   without the server's own credentials or configuration (see
+   :func:`_git_environment`); no ssh key can be named, and raw private keys are
+   never accepted over the wire. The clone is made in a staging sibling and
+   renamed over ``source/`` only once it has worked, as a zip extraction is, so
+   a re-delivery that fails leaves the previously delivered tree in place.
 2. ``set_source_zip_chunk`` + ``set_source_zip_finalize`` — accept a zipped
    source tree as base64-encoded chunks (≤ 1 MiB each), reassemble in a
    per-session ``incoming/`` directory, verify a sha256 checksum at finalize
@@ -42,30 +45,52 @@ Each session lives under ``<workspace_root>/<session_id>/``. ``clear_source``
 recursively removes that directory.
 
 The session ↔ source_dir binding is persisted in a process-local registry
-(``_SESSION_SOURCE_DIRS``); when the larger session-state class lands
-(Track 10.3 / cascade-73), this dict is meant to be replaced by an attribute
-on the per-session object.
+(``_SESSION_SOURCE_DIRS``), the single source of truth for it; ``MCPSession``
+deliberately holds no ``source_dir`` field.
 """
 
 from __future__ import annotations
 
 import base64
+import contextlib
+import errno
+import functools
 import hashlib
+import inspect
 import os
+import re
 import shutil
+import signal
+import stat
 import subprocess  # nosec B404 - git is invoked as a subprocess; see _validate_clone_url
+import sys
+import time
+import unicodedata
+import uuid
 import zipfile
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar, cast
 
+from automated_security_helper.cli.mcp.session_identity import (
+    UNIDENTIFIED_SESSION_ID,
+)
 from automated_security_helper.cli.mcp.session_paths import (
+    hidden_deleting_name,
+    mark_session_workspace,
     session_directory,
     validated_path_component,
 )
 from automated_security_helper.utils.path_containment import (
     validate_contained_path,
 )
+from automated_security_helper.utils.git_command import GIT_PROGRAM, git_argv
+from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.subprocess_utils import (
+    run_ended_with_the_server,  # noqa: F401 - tests patch it on this module
+)
+
+_logger = ASH_LOGGER
 
 # ---------------------------------------------------------------------------
 # Hard limits — enforced at finalize time.
@@ -76,11 +101,44 @@ _MAX_EXTRACTED_BYTES: int = 500 * 1024 * 1024  # 500 MiB uncompressed
 _MAX_FILES: int = 50_000  # entry count
 _MAX_CHUNK_BYTES: int = 1 * 1024 * 1024  # 1 MiB per chunked b64 upload (decoded)
 
-# Extraction builds here and is renamed onto "source" only once it has
-# succeeded, so a refused re-delivery cannot destroy the tree it failed to
-# replace. A sibling of "source" rather than a subdirectory of it, so the rename
-# is within one directory and therefore atomic.
-_STAGING_DIR_NAME = ".source.incoming"
+# A zip extraction and a git clone build here, and the result is renamed onto
+# "source" only once it has succeeded, so a refused or failed re-delivery cannot
+# destroy the tree it failed to replace. A sibling of "source" rather than a
+# subdirectory of it, so the rename is within one directory and therefore atomic.
+# Each delivery names its staging directory with this prefix and a unique suffix, so
+# what an earlier delivery left (and could not delete) is never extracted or cloned
+# into and never blocks this one.
+_STAGING_DIR_PREFIX = ".source.incoming-"
+
+# A rename of one of the trees a delivery moves (the previous tree aside, the finished
+# staging directory onto "source", the previous tree back) is tried this many times,
+# this many seconds apart, before the delivery fails. A program that holds a handle
+# inside a tree (a virus scanner or a file indexer on Windows) makes the rename fail
+# for as long as it holds it, which is usually a fraction of a second. The tree is left
+# whole between attempts, so a refusal that passes costs no second clone or extraction;
+# the waits of one rename together stay under a second.
+_RENAME_ATTEMPTS = 5
+_RENAME_WAIT_SECONDS = 0.2
+
+# The staging directory of earlier versions had this fixed name. A delivery deletes
+# one it finds, as it does the others.
+_LEGACY_STAGING_DIR_NAME = ".source.incoming"
+
+# The previous tree of a re-delivery (zip or git) is renamed to a sibling with this
+# prefix (and a unique suffix). The recorded source path is therefore never a tree that
+# is being deleted. A tree under this name is whole: it is the previous source, and if
+# the swap that set it aside fails without putting it back, the next delivery puts it
+# back at "source" (``_put_a_lost_source_back``). It is deleted only after it has been
+# renamed to the trash name below.
+_REPLACED_DIR_PREFIX = ".source.replaced-"
+
+# A tree that is to be deleted is first renamed to a sibling with this prefix (and a
+# unique suffix), and deleted under that name. A delete that stops partway (a file
+# that something holds open) leaves a half-deleted tree, and that tree must never be
+# taken for the previous source: it would be put back at "source", and a scan of it
+# would miss the files that were deleted. A half-deleted tree therefore never carries
+# the replaced name; the next delivery deletes what stayed, and never puts it back.
+_TRASH_DIR_PREFIX = ".source.trash-"
 
 # ZipInfo external_attr bits for a symlink (S_IFLNK == 0xA000) shifted into
 # the high half of external_attr.
@@ -91,12 +149,77 @@ _S_IFMT_SHIFTED = 0xF000 << 16
 # ---------------------------------------------------------------------------
 # Per-process session → source_dir registry.
 #
-# Track 10.3 (cascade-73) is expected to land an MCPSession class; when that
-# happens, this dict should move onto that object as ``session.source_dir``.
-# Until then, we keep a process-local mapping keyed by session id.
+# The single source of truth for a session's delivered source directory.
+# ``MCPSession`` deliberately holds no ``source_dir`` field (test_sessions.py
+# pins the model's fields), so do not grow one there: a second copy of this
+# state drifts, and a scan would read a different tree than the delivery
+# recorded.
 # ---------------------------------------------------------------------------
 
 _SESSION_SOURCE_DIRS: Dict[str, Path] = {}
+
+
+class SourceDeliveryBusyError(RuntimeError):
+    """A change to the delivered tree was refused because a scan of the session runs.
+
+    Delivering replaces the tree, and the config files in it, and clearing
+    removes it, while the running scan is reading it: a scan whose tree
+    disappears under it can report clean for code it never examined, and the
+    config the scan checked would not be the config it used.
+    """
+
+
+#: ``error_type`` the MCP tools return for :class:`SourceDeliveryBusyError`.
+SOURCE_DELIVERY_BUSY = "source_delivery_busy"
+
+
+@contextlib.contextmanager
+def _no_scan_running(session_id: str) -> Iterator[None]:
+    """Hold the session's scan lock for a change to its tree, or refuse.
+
+    Refused too for a scan that has started and not yet taken the lock
+    (``MCPSession.try_claim_scan``). Not blocking: a delivery is called on the
+    server's event loop, and waiting there for a scan to finish would stall
+    every other session. A session that ended while the change held the lock is
+    removed once it is released.
+
+    Takes the in-memory session only: a change that is refused leaves no session
+    directory, and each change that writes creates and marks the directory
+    itself.
+    """
+    from automated_security_helper.cli.mcp.sessions import (
+        finish_ended_session,
+        get_default_registry,
+    )
+
+    session = get_default_registry().session_for(session_id)
+    if not session.try_begin_change():
+        raise SourceDeliveryBusyError(
+            "a scan of this session is running; change the delivered source after "
+            "it finishes"
+        )
+    try:
+        yield
+    finally:
+        session.end_change()
+        finish_ended_session(session_id)
+
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _while_no_scan_runs(function: _F) -> _F:
+    """Run a change to a session's tree under ``_no_scan_running`` for its session."""
+
+    signature = inspect.signature(function)
+
+    @functools.wraps(function)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        session_id = signature.bind(*args, **kwargs).arguments["session_id"]
+        with _no_scan_running(session_id):
+            return function(*args, **kwargs)
+
+    return cast(_F, wrapper)
 
 
 def get_session_source_dir(session_id: str) -> Optional[Path]:
@@ -153,6 +276,16 @@ def resolve_workspace_root() -> Path:
     return Path.home() / ".cache" / "ash-mcp"
 
 
+class InvalidSessionIdError(ValueError):
+    """The session id is not one a workspace directory can be made for.
+
+    A ValueError, so a caller that catches ValueError catches it. The MCP tools
+    report it as ``invalid_session_id``. ``set_source_git`` raises it before the
+    session is taken, so its caller can tell it from a ValueError raised while
+    git's step runs.
+    """
+
+
 def _session_workspace(workspace_root: Path, session_id: str) -> Path:
     """Return the per-session workspace path under ``workspace_root``.
 
@@ -163,38 +296,744 @@ def _session_workspace(workspace_root: Path, session_id: str) -> Path:
 
     The return value is the unresolved join, unchanged from before, so a caller
     comparing it against its own spelling of the path still matches.
+
+    Raises:
+        InvalidSessionIdError: for ``UNIDENTIFIED_SESSION_ID``, the caller the
+            server could not identify, which owns no workspace; or for an id
+            that does not name one directory.
     """
 
-    return session_directory(workspace_root, session_id)
+    if session_id == UNIDENTIFIED_SESSION_ID:
+        raise InvalidSessionIdError(
+            "this caller has no session the server issued, so it has no session "
+            "workspace"
+        )
+    try:
+        return session_directory(workspace_root, session_id)
+    except ValueError as e:
+        raise InvalidSessionIdError(str(e)) from e
+
+
+#: ``error_type`` every delivery tool returns for :class:`SessionWorkspaceError`.
+SESSION_WORKSPACE_UNAVAILABLE = "session_workspace_unavailable"
+
+
+class SessionWorkspaceError(OSError):
+    """The session's workspace could not be prepared for, or hold, the new source.
+
+    A directory of it could not be created, the previously delivered tree could
+    not be moved aside, or the new tree could not be moved into place. A tree that
+    a failed delivery could not fully delete is not one of these: it stays in its
+    staging directory, logged, and the delivery reports the failure that ended it.
+    An OSError, so a caller that catches OSError catches it. The MCP tools report it as
+    SESSION_WORKSPACE_UNAVAILABLE, an ``error_type`` a client can branch on, not
+    the exception's class name and not the errno's.
+    """
+
+
+class UploadNotFoundError(FileNotFoundError):
+    """A finalize named an upload that never received its last chunk.
+
+    The client's own mistake, which it fixes by sending the chunks, so the MCP tool
+    answers it with an ``error`` and no ``error_type``. A ``FileNotFoundError`` that
+    is not this one is a file that vanished on disk, during the extraction or the
+    checksum, and is a failure on disk like any other ``OSError`` raised there.
+    """
 
 
 def _ensure_dir(path: Path) -> Path:
-    path.mkdir(parents=True, exist_ok=True)
+    """Create ``path`` and its parents; SessionWorkspaceError if that fails."""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise SessionWorkspaceError(
+            e.errno, f"could not create the session workspace directory {path}: {e}"
+        ) from e
     return path
 
 
-# ---------------------------------------------------------------------------
-# SSH key resolution (placeholder).
-# ---------------------------------------------------------------------------
+def _make_writable(path: str) -> bool:
+    """Give the owner write access to ``path`` (and read and search, for a directory).
 
-
-def _resolve_ssh_key(ssh_key_id: Optional[str]) -> Optional[Path]:
-    """Resolve an ``ssh_key_id`` to a key file on disk.
-
-    The actual server-side keyring backend is out of scope for this track —
-    cascade-73 / a future security-track will own the real implementation.
-    For now this function returns ``None`` for any input, which causes the
-    git clone to fall back to whatever credentials the host process already
-    has access to (e.g. an agent-forwarded SSH key, or none).
-
-    Raw private-key material must never be accepted over the wire; only the
-    opaque identifier is accepted, by design.
+    A symlink is left alone, because chmod would follow it out of the tree. A
+    failure is ignored: the caller's retry reports it. Returns whether the mode
+    changed, read again after the chmod: a file system can accept a chmod and change
+    nothing (a CIFS mount without permissions, vfat, some FUSE file systems), and a
+    call that did nothing is not progress for the caller's loop.
     """
 
-    if ssh_key_id is None:
+    with contextlib.suppress(OSError):
+        st_mode = os.lstat(path).st_mode
+        if stat.S_ISLNK(st_mode):
+            return False
+        mode = stat.S_IMODE(st_mode)
+        owner = stat.S_IRWXU if stat.S_ISDIR(st_mode) else stat.S_IRUSR | stat.S_IWUSR
+        if mode | owner == mode:
+            return False
+        os.chmod(path, mode | owner)
+        return stat.S_IMODE(os.lstat(path).st_mode) != mode
+    return False
+
+
+#: Most passes ``_remove_tree`` makes over a tree. Each level of directories the owner
+#: cannot open costs a pass, so this is also the deepest such nesting it undoes.
+_REMOVE_TREE_MAX_PASSES = 64
+
+
+def _remove_tree(path: Path) -> bool:
+    """Delete ``path`` and everything under it; return whether it is gone.
+
+    A file or directory the delete cannot remove has its read-only bit cleared
+    (and its parent directory's, inside the tree) and the delete retried once:
+    git makes its pack files read-only, and Windows does not delete a read-only
+    file. A directory the owner cannot open is made accessible by the pass that
+    meets it and deleted by the next, so the tree is walked again while the
+    previous pass changed a permission, once more for each level of such
+    directories, at most ``_REMOVE_TREE_MAX_PASSES`` times and never fewer than
+    twice. What still cannot be removed (files another account owns) stays on disk
+    and the walk goes on with the rest, as ``ignore_errors=True`` did, and the
+    result is False, so a caller does not take scratch for gone.
+    """
+
+    root = str(path)
+    changed_a_permission = False
+
+    def clear_and_retry(func: Callable[[str], Any], failing: str, _error: Any) -> None:
+        nonlocal changed_a_permission
+        if _make_writable(failing):
+            changed_a_permission = True
+        if failing != root and _make_writable(os.path.dirname(failing)):
+            changed_a_permission = True
+        # Only a removal is retried: the other calls rmtree reports (open, scandir,
+        # lstat) take arguments this one does not pass, and the walk does not come
+        # back to an entry it could not open.
+        if func in (os.unlink, os.remove, os.rmdir):
+            with contextlib.suppress(OSError):
+                func(failing)
+
+    # Another pass when the root survives one: a directory the owner could not open
+    # is reported as a failed open, which the handler makes accessible but does not
+    # retry, so the walk went past it and the directories above it stayed. A
+    # directory inside it that the owner cannot open either is reported only once
+    # this pass has made the one above accessible, so it takes the pass after.
+    passes = 0
+    while True:
+        changed_a_permission = False
+        with contextlib.suppress(OSError):
+            if sys.version_info >= (3, 12):
+                shutil.rmtree(root, onexc=clear_and_retry)
+            else:
+                shutil.rmtree(root, onerror=clear_and_retry)
+        passes += 1
+        if not os.path.lexists(root):
+            return True
+        if passes >= _REMOVE_TREE_MAX_PASSES:
+            return False
+        if passes >= 2 and not changed_a_permission:
+            return False
+
+
+def _move_aside(path: Path, session_dir: Path, what: str) -> Path:
+    """Rename ``path`` to a sibling of its own in the session workspace; return it.
+
+    A rename, unlike a delete in place, cannot leave ``path`` holding a
+    half-deleted tree: when it returns nothing is at ``path``, and when it raises
+    ``path`` is as it was. The sibling is named like the tree a zip re-delivery
+    replaces, so what a caller does not delete is deleted by the next delivery. A
+    refused rename is tried again (``_rename_with_retries``).
+
+    Raises:
+        SessionWorkspaceError: if every attempt is refused; ``path`` is then as it
+            was.
+    """
+
+    aside = session_dir / f"{_REPLACED_DIR_PREFIX}{uuid.uuid4().hex}"
+    try:
+        _rename_with_retries(path, aside)
+    except OSError as e:
+        raise SessionWorkspaceError(
+            e.errno, f"could not move {what} at {path} aside: {e}"
+        ) from e
+    return aside
+
+
+def _a_wait_may_clear(error: OSError) -> bool:
+    """Whether a refused rename can be allowed by waiting for it.
+
+    A program that holds a handle inside a tree lets go of it within a fraction of a
+    second. What it causes is a permission error (access denied), a busy device, or on
+    Windows error 5 (access denied) or 32 (sharing violation), whichever errno those
+    were mapped to. Any other error is not about a handle: the tree to move is gone,
+    something took the place of its target, the file system is read-only or full, or
+    the move crosses devices. Waiting changes none of them.
+    """
+
+    return (
+        isinstance(error, PermissionError)
+        or error.errno == errno.EBUSY
+        or getattr(error, "winerror", None) in (5, 32)
+    )
+
+
+def _rename_with_retries(source: Path, target: Path) -> None:
+    """Rename ``source`` to ``target``, again after a refusal, a few times at most.
+
+    A program that holds a handle inside a tree (a virus scanner or a file indexer
+    on Windows) refuses the rename for as long as it holds the handle. A refusal
+    that waiting can clear (``_a_wait_may_clear``) is tried again, up to
+    ``_RENAME_ATTEMPTS`` times in all, ``_RENAME_WAIT_SECONDS`` apart; any other
+    error is raised at once, because the delivery runs inside the server's event
+    loop and every wait stalls it. ``source`` is not touched between attempts, and
+    not by the last one either: it is where it was when this raises.
+
+    Raises:
+        OSError: the refusal of the last attempt.
+    """
+
+    for attempt in range(1, _RENAME_ATTEMPTS + 1):
+        try:
+            source.rename(target)
+            return
+        except OSError as e:
+            if attempt == _RENAME_ATTEMPTS or not _a_wait_may_clear(e):
+                raise
+        time.sleep(_RENAME_WAIT_SECONDS)
+
+
+def _swap_into_place(
+    staging: Path, target: Path, session_dir: Path, what: str
+) -> Optional[Path]:
+    """Put the staged tree at ``target``, the previously delivered tree set aside first.
+
+    The old tree only goes away once the new one is complete on disk, and the
+    renames are within one directory, so the window in which neither is in place is
+    the rename of the staged tree into place rather than the whole fetch or
+    extraction: two renames when nothing refuses them, and when something holds a
+    handle inside a tree, up to ``_RENAME_ATTEMPTS`` attempts of that rename with
+    ``_RENAME_WAIT_SECONDS`` between them (under a second). The old tree
+    is renamed aside, never deleted where it stands: a delete that leaves entries
+    behind would leave the path the session is recorded against naming a
+    half-deleted tree, and what blocks the rename of a directory (an open handle
+    under it, a process whose working directory is in it) usually blocks the delete
+    as well. Each of the three renames (the old tree aside, the staged tree into
+    place, the old tree back) is tried again after a refusal that a wait can clear
+    (``_rename_with_retries``), because a handle that blocks a tree is often let go
+    within a fraction of a second, and the finished clone or extraction is worth
+    waiting for; a delivery already runs for the whole fetch or extraction, so the
+    waits add under a second to it for each rename that is refused.
+
+    ``what`` names the staged tree in the error message (``extracted``,
+    ``cloned``). Returns the ``.source.replaced-<hex>`` sibling the previous tree
+    was renamed to, for the caller to delete once the new tree is recorded, or None
+    when there was no previous tree.
+
+    Raises:
+        SessionWorkspaceError: when the previous tree cannot be renamed aside (it,
+            and the recorded ``source_dir``, stay as they were), or the staged tree
+            cannot be renamed into place after every attempt (the previous tree is
+            put back; when that fails too nothing is at ``target``, the error says
+            the previous source could not be restored and where it stays, a warning
+            names the same path, and the recorded ``source_dir`` names a path with
+            nothing at it, which ``run_ash_scan`` refuses as
+            ``delivered_source_missing``, where dropping the record would send a
+            stdio scan to the server's working directory).
+    """
+
+    replaced: Optional[Path] = None
+    if os.path.lexists(target):
+        replaced = _move_aside(target, session_dir, "the previously delivered source")
+    try:
+        _rename_with_retries(staging, target)
+    except OSError as e:
+        message = f"could not move the {what} source into place at {target}: {e}"
+        if replaced is not None:
+            try:
+                _rename_with_retries(replaced, target)
+            except OSError as restore_error:
+                # The previous tree stays under its hidden name, and the next
+                # delivery to the session puts it back before it does anything else
+                # (``_put_a_lost_source_back``); say where it is.
+                _logger.warning(
+                    "could not put the previous source back at %s from %s: %s; it "
+                    "stays under that name, and the next delivery to this session "
+                    "tries to put it back first",
+                    target,
+                    replaced,
+                    restore_error,
+                )
+                message += (
+                    f"; the previous source could not be restored from {replaced}: "
+                    f"{restore_error}"
+                )
+        raise SessionWorkspaceError(e.errno, message) from e
+    return replaced
+
+
+def _move_to_trash(tree: Path) -> Optional[Path]:
+    """Rename ``tree`` to a trash name beside it; return the new path.
+
+    Returns None when the rename is refused, and ``tree`` is then as it was. A delete
+    is only ever done on a tree that carries the trash name, so what a delete leaves
+    behind is never mistaken for the previous source (``_TRASH_DIR_PREFIX``). The
+    rename is tried once: a tree that is refused it stays whole, and the next
+    delivery tries again.
+    """
+
+    trash = tree.with_name(f"{_TRASH_DIR_PREFIX}{uuid.uuid4().hex}")
+    try:
+        tree.rename(trash)
+    except OSError:
         return None
-    # TODO(track-10.x security): wire this up to the real keyring backend.
-    return None
+    return trash
+
+
+def _delete_replaced_tree(replaced: Path) -> None:
+    """Delete a tree :func:`_move_aside` moved; log what stays. Never raises for it.
+
+    The delivery that replaced the tree took effect when its own tree was recorded,
+    so what is left of the old one is scratch under a name the next delivery
+    deletes, not a reason to fail. The tree is renamed to the trash name first and
+    deleted under it; a tree that cannot be renamed is not deleted in place. It stays
+    whole under the replaced name.
+    """
+
+    trash = _move_to_trash(replaced)
+    if trash is None:
+        _logger.warning(
+            "could not move the replaced source tree %s aside to delete it; it stays "
+            "whole in the session workspace and the next delivery to this session "
+            "tries again",
+            replaced,
+        )
+        return
+    if not _remove_tree(trash):
+        _logger.warning(
+            "could not delete the replaced source tree %s; it stays in the session "
+            "workspace and the next delivery to this session tries again",
+            trash,
+        )
+
+
+def _is_delivery_scratch(name: str) -> bool:
+    return name == _LEGACY_STAGING_DIR_NAME or name.startswith(
+        (_STAGING_DIR_PREFIX, _REPLACED_DIR_PREFIX, _TRASH_DIR_PREFIX)
+    )
+
+
+def _put_a_lost_source_back(
+    session_dir: Path, session_id: str, leftovers: List[Path]
+) -> List[Path]:
+    """Rename the previous source an earlier delivery lost back onto ``source/``.
+
+    A delivery that set the previous tree aside and could neither move the staged
+    tree into place nor put the previous one back leaves ``source/`` missing, the
+    previous tree under a ``.source.replaced-<hex>`` name, and the session's record
+    naming ``source/``. That tree is the delivered source, not scratch: sweeping it
+    would delete the only copy, and a delivery that then failed would leave the
+    session with none. While ``source/`` is missing and the record of ``session_id``
+    names ``source/`` (``clear_source`` and ``end_session`` drop the record, and a
+    restarted server has none, so a tree they left behind stays scratch), no tree
+    under the replaced name is deleted. When exactly one exists it is put back. When
+    several exist nothing says which is the source, so none is put back and none is
+    deleted; a warning says so, a delivery that works puts a new source in place, and
+    the next delivery deletes them. Only
+    whole trees carry the replaced name (``_delete_replaced_tree`` renames a tree to
+    the trash name before it deletes it), so a tree put back is not half-deleted. A
+    rename that is refused again keeps the tree out of the sweep and is logged; the
+    delivery goes on either way.
+
+    Returns the leftovers the sweep still has to delete.
+    """
+
+    target = session_dir / "source"
+    hidden = [
+        path
+        for path in leftovers
+        if path.name.startswith(_REPLACED_DIR_PREFIX)
+        and path.is_dir()
+        and not path.is_symlink()
+    ]
+    if (
+        not hidden
+        or os.path.lexists(target)
+        or get_session_source_dir(session_id) != target
+    ):
+        return leftovers
+    if len(hidden) > 1:
+        _logger.warning(
+            "the previous source of this session is missing and %d trees that may "
+            "hold it are in the session workspace; none of them is deleted or "
+            "restored, a delivery that works puts a new source in place, and the "
+            "next delivery deletes them",
+            len(hidden),
+        )
+        return [path for path in leftovers if path not in hidden]
+    previous = hidden[0]
+    try:
+        _rename_with_retries(previous, target)
+    except OSError as e:
+        _logger.warning(
+            "could not put the previous source back at %s from %s: %s; it stays "
+            "under that name and this delivery goes on",
+            target,
+            previous,
+            e,
+        )
+        return [path for path in leftovers if path != previous]
+    _logger.warning(
+        "the previous source was left under %s by an earlier delivery that could "
+        "not put it back; it is back at %s",
+        previous,
+        target,
+    )
+    return [path for path in leftovers if path != previous]
+
+
+def _sweep_delivery_scratch(session_dir: Path, session_id: str) -> None:
+    """Delete what earlier deliveries left beside ``source/``, as far as it can be.
+
+    A staging directory of a delivery that died between extraction (or the clone) and
+    the swap, a tree a delivery renamed aside whose delete left entries behind, and
+    the fixed staging name earlier versions used. None of it is the delivered tree or
+    reachable by a caller, and none of it ends a delivery: what cannot be deleted is
+    logged (once) and the delivery goes on, because each delivery works under names
+    of its own. One server's delivery to a session runs at a time
+    (``_no_scan_running``). The one hidden previous tree of a session whose
+    ``source/`` is missing is the delivered source, and is put back first
+    (``_put_a_lost_source_back``).
+    """
+
+    try:
+        with os.scandir(session_dir) as entries:
+            leftovers = [Path(e.path) for e in entries if _is_delivery_scratch(e.name)]
+    except OSError:
+        return
+    leftovers = _put_a_lost_source_back(session_dir, session_id, leftovers)
+    stuck: List[Path] = []
+    for leftover in leftovers:
+        if leftover.is_dir() and not leftover.is_symlink():
+            if leftover.name.startswith(_REPLACED_DIR_PREFIX):
+                # Deleted under the trash name, so a delete that stops partway does
+                # not leave a half-deleted tree under the name a lost previous
+                # source is put back from. A tree that cannot be renamed stays whole.
+                moved = _move_to_trash(leftover)
+                if moved is None:
+                    stuck.append(leftover)
+                    continue
+                leftover = moved
+            gone = _remove_tree(leftover)
+        else:
+            with contextlib.suppress(OSError):
+                leftover.unlink()
+            gone = not os.path.lexists(leftover)
+        if not gone:
+            stuck.append(leftover)
+    if stuck:
+        _logger.warning(
+            "could not delete %s, left in the session workspace by an earlier source "
+            "delivery; this delivery goes on and the next one tries again",
+            ", ".join(str(path) for path in stuck),
+        )
+
+
+def _discard_staging(staging: Path) -> None:
+    """Delete the staging directory of a delivery that did not finish; log what stays.
+
+    An error ended the delivery, and it is the one to report. The next delivery
+    deletes what stays, and does not need it to be gone. Never raises for it.
+    """
+
+    if not _remove_tree(staging):
+        _logger.warning(
+            "could not delete the staging directory %s of a source delivery "
+            "that did not finish; it stays in the session workspace and the "
+            "next delivery to this session tries again",
+            staging,
+        )
+
+
+def _created_session_dir(root: Path, session_id: str) -> Path:
+    """Create the session's directory, refusing one that is the default's.
+
+    ``session_identity.is_reserved_session_id`` refuses the spellings of the
+    default id that are known to map onto its directory. A volume can mint
+    spellings no list anticipates: a case-insensitive volume folds case, a
+    trailing dot is dropped from a path component on Windows volumes, and NTFS
+    generates short names (``__DEFA~1``, or two characters and four hex digits,
+    then ``~N``) that pass every lexical check. The filesystem is therefore
+    asked directly: once the directory exists, an id whose directory turns out
+    to be the default session's directory under another name is refused,
+    however it is spelled.
+
+    Raises:
+        ValueError: when ``session_id`` turned out to name the default
+            session's directory. The delivery tools report it as
+            ``invalid_session_id``, like a reserved-id refusal.
+        SessionWorkspaceError: when the directory could not be created
+            (``mark_session_workspace``). The delivery tools report it as
+            ``session_workspace_unavailable``.
+    """
+
+    from automated_security_helper.cli.mcp.profile_registry import (
+        DEFAULT_SESSION_ID,
+    )
+
+    workspace = _session_workspace(root, session_id)
+    try:
+        session_dir = mark_session_workspace(workspace)
+    except OSError as e:
+        raise SessionWorkspaceError(
+            e.errno,
+            f"could not create the session workspace directory {workspace}: {e}",
+        ) from e
+    if session_id != DEFAULT_SESSION_ID:
+        default_dir = _session_workspace(root, DEFAULT_SESSION_ID)
+        try:
+            is_alias = os.path.samefile(session_dir, default_dir)
+        except OSError:
+            # The default session's directory does not exist, so there is
+            # nothing this one could alias.
+            is_alias = False
+        if is_alias:
+            raise ValueError(
+                f"session_id {session_id!r} names the default session's "
+                "directory under another spelling; supply a different id"
+            )
+    return session_dir
+
+
+# ---------------------------------------------------------------------------
+# ssh keys and the environment git runs with.
+# ---------------------------------------------------------------------------
+
+
+def _refuse_ssh_key_id(ssh_key_id: Optional[str]) -> None:
+    """Refuse any ``ssh_key_id``: the server registers no ssh keys.
+
+    The parameter exists so a future operator-side key registry can be added
+    without changing the tool's signature. Until one exists every id names a
+    key nobody registered. Cloning anyway would authenticate with whatever the
+    server process can reach, which is the opposite of what naming a key asks
+    for, so the clone is refused before git runs.
+
+    Raises:
+        ValueError: for every non-None ``ssh_key_id``.
+    """
+
+    if ssh_key_id is not None:
+        raise ValueError(
+            f"ssh_key_id {ssh_key_id!r} is not registered: this server registers no "
+            f"ssh keys, so set_source_git cannot authenticate with one. Clone a "
+            f"repository that needs no credentials, or deliver the tree with "
+            f"set_source_zip_chunk and set_source_zip_finalize."
+        )
+
+
+#: Environment variables git may inherit from the server. Everything else --
+#: ssh agent sockets, askpass helpers, proxies, tokens, ``GIT_*`` overrides and
+#: config locations -- is dropped. Trust anchors for TLS are kept: they are not
+#: credentials, and an operator who installed a private CA needs them.
+_GIT_INHERITED_ENV = (
+    "PATH",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_MESSAGES",
+    "TZ",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "GIT_SSL_CAINFO",
+    "GIT_SSL_CAPATH",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+)
+
+#: ssh as git runs it for a clone: no configuration file (``-F`` also skips the
+#: system one), no identity file, no agent, no Kerberos, no shared connection,
+#: never a prompt, and only the system-wide known hosts. ssh reads the default
+#: identity files from the account's home directory in the password database,
+#: not from ``$HOME``, so overriding the environment alone would not stop it.
+_GIT_SSH_COMMAND = " ".join(
+    [
+        "ssh",
+        "-F",
+        os.devnull,
+        "-o BatchMode=yes",
+        "-o IdentitiesOnly=yes",
+        "-o IdentityFile=none",
+        "-o IdentityAgent=none",
+        "-o GSSAPIAuthentication=no",
+        "-o ControlPath=none",
+        "-o StrictHostKeyChecking=yes",
+        f"-o UserKnownHostsFile={os.devnull}",
+    ]
+)
+
+#: ``-c`` options on every git invocation of a delivery, placed before the
+#: subcommand so they outrank the repository's config and are not written into
+#: the clone's ``.git/config``. An empty ``credential.helper`` resets the helper
+#: list, so no configured helper runs; only the https and ssh protocols are
+#: allowed, for submodules and anything else git might reach as well as for the
+#: clone itself; an http redirect is not followed, so an allowed host cannot send
+#: git to one that is not. Every command is built by ``git_argv``, which also puts
+#: ``core.fsmonitor=false`` and ``core.hooksPath=/dev/null`` before these, so git
+#: starts neither the fsmonitor command nor a hook (the clone's post-checkout, the
+#: checkout's, a fetch's ref-update hooks), wherever they were configured. Git also
+#: starts no background maintenance (``gc.auto=0``, ``maintenance.auto=false``): a
+#: ``gc --auto`` that the fetch of a ref starts (a checkout starts none) runs detached
+#: inside the staging directory, and the handle it holds there makes the rename of the
+#: finished clone into place fail on Windows.
+_GIT_CONFIG = (
+    "-c",
+    "credential.helper=",
+    "-c",
+    "core.askPass=",
+    "-c",
+    "protocol.allow=never",
+    "-c",
+    "protocol.https.allow=always",
+    "-c",
+    "protocol.ssh.allow=always",
+    "-c",
+    "http.followRedirects=false",
+    "-c",
+    "gc.auto=0",
+    "-c",
+    "maintenance.auto=false",
+)
+
+#: The program a delivery runs as git. A tuple so a test can name a stand-in.
+_GIT_ARGV: Tuple[str, ...] = (GIT_PROGRAM,)
+
+#: Seconds each git command of a delivery (the clone, and for a ref the fetch
+#: and the checkout) may run. A command still running then is stopped together
+#: with every process it started, and the delivery fails with
+#: :class:`GitTimeoutError`.
+GIT_TIMEOUT_SECONDS = 600
+
+#: ``error_type`` the MCP tool returns for :class:`GitTimeoutError`.
+CLONE_TIMED_OUT = "clone_timed_out"
+
+
+class GitTimeoutError(RuntimeError):
+    """A git command of a delivery ran past ``GIT_TIMEOUT_SECONDS`` and was stopped."""
+
+
+def _stop_process_group(process: "subprocess.Popen[str]") -> None:
+    """Kill ``process`` and every process in the group it leads."""
+
+    # sys.platform rather than os.name: it is the check mypy reads, so the
+    # Windows-only names below are checked on Windows alone.
+    if sys.platform == "win32":
+        with contextlib.suppress(OSError, ValueError):
+            process.send_signal(signal.CTRL_BREAK_EVENT)
+        with contextlib.suppress(OSError):
+            process.kill()
+        return
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(process.pid, signal.SIGKILL)
+
+
+def _run_git(
+    cmd: List[str], *, env: Dict[str, str]
+) -> subprocess.CompletedProcess[str]:
+    """Run one git command of a delivery, for at most ``GIT_TIMEOUT_SECONDS``.
+
+    git runs in a process group of its own, with no stdin, so that on expiry the
+    helpers it started (ssh, ``git-remote-https``) are stopped with it.
+
+    git's output is read as text, and a byte that is not valid in the encoding
+    (a path or a remote's message written in another one) is kept as its
+    ``\\xNN`` escape instead of raising, so git's exit status decides the result
+    and its message stays readable.
+
+    Raises:
+        GitTimeoutError: when the command runs past the timeout.
+    """
+
+    # An if statement, not a conditional expression: mypy applies a platform
+    # check only to statements.
+    group: Dict[str, Any]
+    if sys.platform == "win32":
+        group = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    else:
+        group = {"start_new_session": True}
+    process = subprocess.Popen(  # nosec B603 - list-form argv, git from _GIT_ARGV, url and ref validated before any call; see set_source_git
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors="backslashreplace",
+        env=env,
+        **group,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=GIT_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        _stop_process_group(process)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.communicate(timeout=10)
+        subcommand = next(
+            (part for part in cmd if part in ("clone", "fetch", "checkout")), "command"
+        )
+        raise GitTimeoutError(
+            f"git {subcommand} did not finish within {GIT_TIMEOUT_SECONDS} seconds and "
+            f"was stopped"
+        ) from None
+    except BaseException:
+        _stop_process_group(process)
+        process.wait()
+        raise
+    return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
+
+
+def _git_environment(home: Path) -> Dict[str, str]:
+    """The environment git runs with for a delivery.
+
+    Built from an allowlist rather than by deleting known-bad names from the
+    server's environment, because the bad set is open-ended: a deployment can
+    hold any number of token or proxy variables under names nothing here could
+    list. System and global git configuration are switched off, so no helper,
+    proxy or rewrite rule the server's own account configured applies, and
+    ``HOME`` is the session's own directory. LFS smudging is off
+    (``GIT_LFS_SKIP_SMUDGE=1``, which git-lfs honors), so a checkout writes
+    pointer files and starts no transfer. git prints its messages in English
+    (``LC_MESSAGES=C``).
+
+    Args:
+        home: The session directory, used as ``HOME``.
+    """
+
+    inherited = snapshot_environ()
+    env = {name: inherited[name] for name in _GIT_INHERITED_ENV if name in inherited}
+    # git's messages in English, whatever the server's locale: the delivery tells a
+    # full disk from other failures by reading them (``_DISK_FULL_MESSAGES``).
+    # LC_ALL outranks LC_MESSAGES, so it is passed on as LC_CTYPE, which keeps how git
+    # handles text as the server set it and leaves only the language of the messages
+    # pinned. LANGUAGE, which gettext reads first, is not in the allowlist. The
+    # Windows message for a full disk comes from the system and follows the system's
+    # language, which no variable here changes.
+    if "LC_ALL" in env:
+        env["LC_CTYPE"] = env.pop("LC_ALL")
+    env["LC_MESSAGES"] = "C"
+    env.update(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_SSH_COMMAND": _GIT_SSH_COMMAND,
+            "GIT_LFS_SKIP_SMUDGE": "1",
+        }
+    )
+    return env
 
 
 # ---------------------------------------------------------------------------
@@ -216,9 +1055,52 @@ def _resolve_ssh_key(ssh_key_id: Optional[str]) -> Optional[Path]:
 # below reject the option-like shape outright rather than trying to escape it.
 _DANGEROUS_URL_PREFIXES = ("ext::",)
 
+#: ``error_type`` values set_source_git returns, besides the scan-target refusal
+#: of a local clone source (scan_target_not_permitted) and invalid_session_id.
+#: A client branches on these, so they are stable; the message is for a person.
+CLONE_URL_NOT_PERMITTED = "clone_url_not_permitted"
+CLONE_REF_NOT_PERMITTED = "clone_ref_not_permitted"
+INVALID_CLONE_DEPTH = "invalid_clone_depth"
+GIT_CLONE_FAILED = "git_clone_failed"
+GIT_CHECKOUT_FAILED = "git_checkout_failed"
+
+#: The most commits of history ``set_source_git`` fetches: a limit on how much history
+#: a delivery fetches. It is not a limit on disk or time (a depth of 1000 is the whole
+#: history of a repository with 1000 commits or fewer, and one commit of a large
+#: repository can be many gigabytes). A depth above it is refused as
+#: ``invalid_clone_depth``, as ``0`` and a negative one are. The default depth is 1.
+MAX_CLONE_DEPTH = 1000
+
+
+class GitCommandError(RuntimeError):
+    """``git clone`` or ``git checkout`` failed; ``error_type`` says which.
+
+    ``disk_full`` is True when git's own message says the disk is full. The delivery
+    that knows whether it has a source to free adds the advice to the message
+    (``_with_the_disk_advice``).
+    """
+
+    def __init__(
+        self, message: str, error_type: str, *, disk_full: bool = False
+    ) -> None:
+        super().__init__(message)
+        self.error_type = error_type
+        self.disk_full = disk_full
+
 
 def _reject_option_like(value: str, what: str) -> str:
-    """Reject a caller-supplied git argument that git would parse as an option.
+    """Reject a git argument that is option-like or holds a control character.
+
+    Two kinds of value are refused here, before anything is created or cloned:
+
+    * one that begins with ``-``, which git parses as an option;
+    * one that holds a control character (NUL, the other C0 controls, DEL and the
+      C1 controls) or a lone surrogate. A process cannot be started with an argument
+      that holds a NUL character, nor on POSIX with one the file system encoding
+      cannot write, so the delivery would otherwise clone for up to
+      ``GIT_TIMEOUT_SECONDS`` and fail at the next command that carries the value.
+      A control character is no part of a ref name or a url either, and the
+      refusal's text does not quote the value.
 
     Args:
         value: The caller-supplied value.
@@ -228,13 +1110,19 @@ def _reject_option_like(value: str, what: str) -> str:
         ``value`` unchanged when it is safe to pass as a positional argument.
 
     Raises:
-        ValueError: if ``value`` begins with ``-``.
+        ValueError: if ``value`` begins with ``-``, or holds a control character
+            or a lone surrogate.
     """
 
     if value.startswith("-"):
         raise ValueError(
             f"{what} must not begin with '-': git would parse "
             f"{value!r} as an option rather than a value"
+        )
+    if any(unicodedata.category(ch) in ("Cc", "Cs") for ch in value):
+        raise ValueError(
+            f"{what} must not contain a NUL character, another control character or "
+            f"a lone surrogate"
         )
     return value
 
@@ -249,8 +1137,8 @@ def _validate_clone_url(url: str) -> str:
         ``url`` unchanged when it is safe to clone from.
 
     Raises:
-        ValueError: if ``url`` is option-like or uses a command-executing
-            transport.
+        ValueError: if ``url`` is option-like, holds a control character or a
+            lone surrogate, or uses a command-executing transport.
     """
 
     _reject_option_like(url, "url")
@@ -262,6 +1150,92 @@ def _validate_clone_url(url: str) -> str:
                 f"execute an arbitrary command"
             )
     return url
+
+
+#: URL schemes a clone may use. Plain http and the git protocol carry no
+#: integrity protection, file:// reads the server's own filesystem, and every
+#: other scheme is a transport helper.
+_CLONE_SCHEMES = ("https", "ssh")
+
+#: A host name as the allowlist compares it: letters, digits, dots and hyphens,
+#: starting with a letter or digit. Anything else is refused rather than
+#: interpreted, so this parser and git's cannot disagree about the host.
+_HOST_NAME = re.compile(r"[a-z0-9][a-z0-9.-]*")
+
+#: Characters refused between ``ssh://`` and the first ``/``. Without them, the
+#: host the allowlist checks is the host git hands ssh.
+_SSH_AUTHORITY_REFUSED = frozenset("%?#[]")
+
+
+def remote_clone_host(url: str) -> str:
+    """Return the host ``url`` makes git connect to, or raise if it is not allowed.
+
+    Accepts ``https://`` and ``ssh://`` URLs and the scp-like ``[user@]host:path``
+    form, the three ways git reaches a remote over https or ssh. The host is
+    returned lower-cased with any trailing dot removed, for comparison against
+    the operator's allowlist.
+
+    Raises:
+        ValueError: for a local path or ``file://`` URL, any other scheme, or a
+            host this parser cannot state unambiguously.
+    """
+
+    from urllib.parse import urlsplit
+
+    if any(ch.isspace() or ord(ch) < 0x20 or ch == "\\" for ch in url):
+        raise ValueError(
+            "refusing a clone url with whitespace, control characters or backslashes"
+        )
+    if local_clone_path(url) is not None:
+        raise ValueError(
+            "refusing a local clone source: set_source_git clones from a remote "
+            "https or ssh url only; it never reads the server's filesystem"
+        )
+    if "://" in url:
+        scheme, rest = url.split("://", 1)
+        scheme = scheme.lower()
+        if scheme not in _CLONE_SCHEMES:
+            raise ValueError(
+                f"refusing a {scheme}:// clone url: only "
+                f"{', '.join(s + '://' for s in _CLONE_SCHEMES)} and the scp-like "
+                f"user@host:path form are allowed"
+            )
+        authority = rest.split("/", 1)[0]
+        refused = sorted(set(authority) & _SSH_AUTHORITY_REFUSED)
+        if scheme == "ssh" and refused:
+            raise ValueError(
+                f"refusing an ssh:// clone url with {' '.join(refused)} before the "
+                f"path; write the host and user plainly."
+            )
+        try:
+            host = urlsplit(url).hostname or ""
+        except ValueError:
+            raise ValueError(
+                f"refusing a clone url whose host cannot be read: {url!r}"
+            ) from None
+    else:
+        authority = url.split(":", 1)[0]
+        host = authority.rsplit("@", 1)[-1]
+    host = host.lower().rstrip(".")
+    if not _HOST_NAME.fullmatch(host):
+        raise ValueError(f"refusing a clone url whose host cannot be read: {url!r}")
+    return host
+
+
+#: Hosts ``set_source_git`` may clone from, set by the operator. Comma- or
+#: whitespace-separated host names. Unset or empty means no remote is allowed.
+ASH_MCP_GIT_ALLOWED_HOSTS_ENV = "ASH_MCP_GIT_ALLOWED_HOSTS"
+
+
+def git_allowed_hosts() -> frozenset[str]:
+    """The hosts the operator allows clones from, lower-cased; possibly none."""
+
+    raw = os.environ.get(ASH_MCP_GIT_ALLOWED_HOSTS_ENV, "")
+    return frozenset(
+        entry.strip().lower().rstrip(".")
+        for entry in raw.replace(",", " ").split()
+        if entry.strip()
+    )
 
 
 def _is_windows_drive_path(url: str) -> bool:
@@ -283,15 +1257,63 @@ def local_clone_path(url: str) -> Optional[Path]:
     from urllib.parse import unquote, urlsplit
 
     if "://" in url:
-        parts = urlsplit(url)
-        if parts.scheme.lower() != "file":
+        if url.split("://", 1)[0].lower() != "file":
             return None
-        return Path(unquote(parts.path))
+        try:
+            return Path(unquote(urlsplit(url).path))
+        except ValueError:
+            # Not a url Python can split, but a file:// source all the same.
+            return Path(url)
     colon = url.find(":")
     slash = url.find("/")
     if colon > 0 and (slash == -1 or colon < slash) and not _is_windows_drive_path(url):
         return None
     return Path(url)
+
+
+def _git_executable() -> str:
+    """The git to clone with, as an absolute path: ``_GIT_ARGV``'s program.
+
+    Not the bare name: on Windows a program started by name is looked for in the
+    working directory before PATH, and ``find_executable`` does not answer from the
+    working directory. A program ``_GIT_ARGV`` names by absolute path is used as is.
+
+    Raises:
+        RuntimeError: git was not found, so nothing is run.
+    """
+    from automated_security_helper.utils.subprocess_utils import find_executable
+
+    program = _GIT_ARGV[0]
+    git = program if os.path.isabs(program) else find_executable(program)
+    if git is None:
+        raise RuntimeError(
+            "git was not found on PATH, so the repository cannot be cloned"
+        )
+    return git
+
+
+def _validated_clone_depth(depth: object) -> int:
+    """``depth`` if it is a whole number of commits from 1 to ``MAX_CLONE_DEPTH``.
+
+    Anything else raises ValueError: ``0`` and a negative number, a bool, a float, a
+    string and ``None``, and a number above the maximum. (Over MCP the tool's argument
+    model declares the depth an integer and validates it before the tool runs, so
+    what reaches this check is an integer, and only a number outside the range is
+    answered ``invalid_clone_depth``; a value that is not an integer is refused by the
+    argument model first. A caller of the function gets every refusal from here.)
+    """
+
+    if (
+        isinstance(depth, bool)
+        or not isinstance(depth, int)
+        or depth < 1
+        or depth > MAX_CLONE_DEPTH
+    ):
+        raise ValueError(
+            f"refusing clone depth {depth!r}: the depth is a whole number of commits "
+            f"from 1 to {MAX_CLONE_DEPTH}"
+        )
+    return depth
 
 
 def set_source_git(
@@ -305,13 +1327,26 @@ def set_source_git(
 ) -> Path:
     """Clone ``url`` (optionally at ``ref``) into the session workspace.
 
+    The operator's host allowlist is the MCP tool boundary's policy
+    (``mcp_tools.mcp_set_source_git``); this function enforces what holds for
+    every caller: a remote https or ssh url, no ssh key, and git run without the
+    server's credentials or configuration.
+
+    A re-delivery needs room for both trees at once: the new clone is made beside
+    the delivered source, which is deleted only after it. A clone, fetch or checkout
+    that fails for want of space is raised with git's own message. When the session
+    has a delivered source the message adds the advice to call ``clear_source`` to
+    free it first (``_DISK_FULL_HINT``); on a first delivery it adds only that the
+    disk is full (``_DISK_FULL_NOTE``), because there is nothing to free.
+
     Args:
         url: Remote URL to clone (https or ssh).
         ref: Optional branch/tag/commit to check out. When ``None``, the
             remote default branch is used.
-        ssh_key_id: Opaque identifier resolved server-side via
-            :func:`_resolve_ssh_key`. Raw private keys are not accepted.
-        depth: Shallow-clone depth. Defaults to 1 (latest commit only).
+        ssh_key_id: Must be None. No ssh keys are registered, so any id is
+            refused; raw private keys are never accepted.
+        depth: Shallow-clone depth, a whole number of commits from 1 to
+            ``MAX_CLONE_DEPTH``. Defaults to 1 (latest commit only).
         workspace_root: Override workspace root; defaults to
             :func:`resolve_workspace_root`.
         session_id: MCP session identifier used to scope the clone.
@@ -320,95 +1355,386 @@ def set_source_git(
         The absolute path of the cloned working tree.
 
     Raises:
-        ValueError: if ``session_id`` is invalid, or if ``url``/``ref`` is
-            option-like or uses a command-executing git transport.
-        RuntimeError: if ``git clone`` (or the optional ``git checkout``
-            for an explicit ref) fails.
+        InvalidSessionIdError: a ValueError, if ``session_id`` is not one a
+            workspace can be made for. Raised before anything is created.
+        ValueError: if ``url``/``ref`` is option-like, holds a control character or
+            a lone surrogate, or uses a command-executing git transport, if ``url``
+            is local or not https/ssh, if ``ssh_key_id`` is set, or if ``depth`` is
+            not a whole number from 1 to ``MAX_CLONE_DEPTH`` (``0``, a negative
+            number, a number above the maximum, a bool, a float, a string and
+            ``None`` are refused). Raised before anything is created.
+        RuntimeError: if git is not on PATH.
+        GitCommandError: if ``git clone`` (or the optional ``git checkout``
+            for an explicit ref) fails, or if git cannot be started for a step
+            with the url or the ref given. The partial clone is deleted; one that
+            cannot be fully deleted stays in the delivery's staging directory beside
+            ``source``, logged, for the next delivery to delete, and this is still
+            the error raised.
+        SessionWorkspaceError: if a directory of the session's workspace cannot be
+            created, if the previous clone cannot be moved aside once the new one is
+            made (it and the session's recorded ``source_dir`` stay as they were), or
+            if the new clone cannot be moved into place (the previous clone is put
+            back; when that fails too nothing is at ``source`` and the recorded
+            ``source_dir`` names a path with nothing at it). The clone is made in the
+            staging directory and replaces the previous clone only when it has worked,
+            so a delivery that fails leaves the previous clone and the recorded
+            ``source_dir`` as they were.
     """
 
-    # Validate before touching the filesystem so a rejected request leaves no
-    # session directory behind.
+    # Validated here, before the session is taken: taking it creates the session
+    # workspace, and a refused request leaves nothing behind.
     url = _validate_clone_url(url)
+    remote_clone_host(url)
+    _refuse_ssh_key_id(ssh_key_id)
     if ref:
         ref = _reject_option_like(ref, "ref")
+    depth = _validated_clone_depth(depth)
+    # The session id last, still before the session is taken. An id no workspace
+    # can be made for raises InvalidSessionIdError here rather than a plain
+    # ValueError from the session registry, so a caller can tell it from a
+    # ValueError raised while git's step runs.
+    _session_workspace(
+        workspace_root if workspace_root is not None else resolve_workspace_root(),
+        session_id,
+    )
+    return _clone_into_session(
+        url, ref, depth=depth, workspace_root=workspace_root, session_id=session_id
+    )
+
+
+@_while_no_scan_runs
+def _clone_into_session(
+    url: str,
+    ref: Optional[str],
+    *,
+    depth: int,
+    workspace_root: Optional[Path],
+    session_id: str,
+) -> Path:
+    """Clone a validated ``url`` into the session workspace; see ``set_source_git``."""
 
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
-    session_dir = _ensure_dir(_session_workspace(root, session_id))
+    session_dir = _created_session_dir(root, session_id)
 
-    # Wipe any previous source for this session before cloning a fresh one;
-    # callers are expected to call clear_source explicitly, but cloning over
-    # an existing tree is a footgun we'd rather avoid.
+    # Resolved before the session directory is touched, like the validation above.
+    git = _git_executable()
+
+    # What earlier deliveries left beside source/ goes first; it never ends this one.
+    _sweep_delivery_scratch(session_dir, session_id)
+
+    # The clone goes into a staging directory of this delivery's own and replaces the
+    # previous tree only once it, and the checkout of a ref, have worked, as a zip
+    # extraction does. Replacing first would leave the session without a source for a
+    # mistyped ref, a network error or a timeout, and the client's clone would be gone
+    # for nothing. Anything that ends the delivery before the swap leaves the previous
+    # tree, and the record that names it, as they were.
     target = session_dir / "source"
-    if target.exists():
-        shutil.rmtree(target, ignore_errors=True)
-    _ensure_dir(target)
+    staging = session_dir / f"{_STAGING_DIR_PREFIX}{uuid.uuid4().hex}"
+    _ensure_dir(staging)
 
-    env = snapshot_environ()
-    key_path = _resolve_ssh_key(ssh_key_id)
-    if key_path is not None:
-        env["GIT_SSH_COMMAND"] = (
-            f"ssh -i {str(key_path)} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-        )
+    swapped = False
+    replaced: Optional[Path] = None
+    # Read before the clone: only a session that has a source to free, or previous
+    # source trees kept, is told that freeing them makes room (``_DISK_FULL_HINT``,
+    # ``_DISK_FULL_KEPT_HINT``).
+    a_source_is_delivered = os.path.lexists(target)
+    kept_trees = _kept_previous_trees(session_dir)
+    try:
+        env = _git_environment(session_dir)
+        try:
+            _clone(url, ref, git=git, depth=depth, target=staging, env=env)
+        except GitCommandError as e:
+            if e.disk_full:
+                raise GitCommandError(
+                    _with_the_disk_advice(str(e), a_source_is_delivered, kept_trees),
+                    e.error_type,
+                    disk_full=True,
+                ) from e
+            raise
+        replaced = _swap_into_place(staging, target, session_dir, "cloned")
+        swapped = True
+    finally:
+        # Whatever ended the delivery (git failed or ran too long, the environment git
+        # runs with could not be built, an error no handler names, an interrupt), the
+        # staging directory is empty or holds a clone of the wrong ref. It is deleted;
+        # what cannot be deleted is logged, and the exception that ended the delivery
+        # is the one raised.
+        if not swapped:
+            _discard_staging(staging)
 
-    cmd = [
-        "git",
+    _set_session_source_dir(session_id, target)
+    if replaced is not None:
+        # The new tree is in place and recorded; what is left of the old one is
+        # session scratch that the next delivery, clear_source or the end of the
+        # session removes.
+        _delete_replaced_tree(replaced)
+    return target
+
+
+def _run_git_step(
+    cmd: List[str],
+    *,
+    env: Dict[str, str],
+    what: str,
+    error_type: str,
+) -> subprocess.CompletedProcess[str]:
+    """``_run_git``, except that a git which cannot be run fails the delivery.
+
+    A git the system cannot start (the program is gone since an earlier command
+    of the delivery ran, it is not executable, no process could be made) makes
+    ``Popen`` raise an ``OSError``, and an argument it cannot pass to the process
+    (one holding a NUL character, or on POSIX one the file system encoding cannot
+    write) makes it raise a ``ValueError``. To a client either is a failed command
+    like one git ran and refused: the answer carries ``error_type``, not the
+    exception's class name. The clone's staging directory is not touched here. The
+    delivery that made it deletes it, and logs what it could not delete, whatever
+    ended the delivery, so the error raised is git's, never a workspace error about
+    the cleanup.
+
+    Args:
+        what: The command as the message names it, such as ``git clone``.
+        error_type: The ``error_type`` of the step this command belongs to.
+
+    Raises:
+        GitCommandError: when git cannot be run.
+        GitTimeoutError: when the command runs past ``GIT_TIMEOUT_SECONDS``.
+    """
+
+    try:
+        return _run_git(cmd, env=env)
+    except (OSError, ValueError) as e:
+        raise GitCommandError(
+            f"{what} failed: git could not be run ({e})", error_type
+        ) from e
+
+
+#: Appended to the text of a failed https clone: git's environment here does not
+#: follow http redirects, and a host that answers with one is a common cause.
+_REDIRECT_HINT = (
+    "If the host answered with a redirect, HTTP redirects are not followed; "
+    "give the URL the host redirects to (for example with the .git suffix)."
+)
+
+
+def _with_the_redirect_hint(detail: str) -> str:
+    """``detail`` (git's text) followed by the redirect hint as a sentence of its own.
+
+    A full stop is added after git's text unless it ends in one, and when git
+    printed nothing the hint is the whole detail.
+    """
+
+    text = detail.rstrip()
+    if not text:
+        return _REDIRECT_HINT
+    return f"{text}{' ' if text.endswith('.') else '. '}{_REDIRECT_HINT}"
+
+
+#: Appended to the text of a failed clone, fetch or checkout when git's message says
+#: the disk is full and the session has a delivered source. A re-delivery clones
+#: beside the source already delivered, so a repository that fits once may not fit
+#: twice, and git's own words say only that the disk is full.
+_DISK_FULL_HINT = (
+    "A re-delivery needs room for both the delivered source and the new clone at "
+    "once; call clear_source to free the delivered one, then deliver again."
+)
+
+#: Appended instead when the session has no delivered source but keeps previous source
+#: trees under the replaced name (``_put_a_lost_source_back`` keeps every one when it
+#: cannot tell which is the source). Each takes a source's worth of space, and
+#: ``clear_source`` frees them.
+_DISK_FULL_KEPT_HINT = (
+    "The session workspace also keeps previous source trees that take room; call "
+    "clear_source to free them, then deliver again."
+)
+
+#: Appended when the session has neither: there is nothing to free, and
+#: ``clear_source`` would only wipe the session's workspace.
+_DISK_FULL_NOTE = "The disk is full."
+
+#: What git prints, lowercased, when a write fails for want of space: the POSIX
+#: strerror of ENOSPC, and the Windows message of ERROR_DISK_FULL.
+_DISK_FULL_MESSAGES = ("no space left on device", "not enough space on the disk")
+
+
+#: git prints the messages of the server it talks to behind this prefix.
+_REMOTE_LINE_PREFIX = "remote:"
+
+
+def _is_disk_full(detail: str) -> bool:
+    """Whether a line git wrote itself says that this disk is full.
+
+    A ``remote:`` line is the server's message, in the server's language: when it says
+    the disk is full, the server's disk is, and freeing the delivered source here does
+    not help. Those lines are not read.
+    """
+
+    own_lines = [
+        line
+        for line in detail.splitlines()
+        if not line.lstrip().lower().startswith(_REMOTE_LINE_PREFIX)
+    ]
+    lowered = "\n".join(own_lines).lower()
+    return any(message in lowered for message in _DISK_FULL_MESSAGES)
+
+
+def _kept_previous_trees(session_dir: Path) -> int:
+    """How many whole previous source trees ``session_dir`` keeps under the replaced name."""
+
+    try:
+        with os.scandir(session_dir) as entries:
+            return sum(
+                1
+                for entry in entries
+                if entry.name.startswith(_REPLACED_DIR_PREFIX)
+                and entry.is_dir(follow_symlinks=False)
+            )
+    except OSError:
+        return 0
+
+
+def _with_the_disk_advice(
+    detail: str, a_source_is_delivered: bool, kept_trees: int = 0
+) -> str:
+    """``detail`` followed by what to do about a full disk, as a sentence of its own.
+
+    The advice is to free the delivered source when the session has one
+    (``_DISK_FULL_HINT``), to free the previous source trees it keeps when it has
+    only those (``_DISK_FULL_KEPT_HINT``), and only the fact that the disk is full
+    when it has neither (``_DISK_FULL_NOTE``). A full stop is added after ``detail``
+    unless it ends in one. ``detail`` is the text of a message that names a full disk,
+    so it is never empty.
+    """
+
+    text = detail.rstrip()
+    if a_source_is_delivered:
+        advice = _DISK_FULL_HINT
+    elif kept_trees:
+        advice = _DISK_FULL_KEPT_HINT
+    else:
+        advice = _DISK_FULL_NOTE
+    return f"{text}{' ' if text.endswith('.') else '. '}{advice}"
+
+
+def _clone(
+    url: str,
+    ref: Optional[str],
+    *,
+    depth: int,
+    target: Path,
+    env: Dict[str, str],
+    git: Optional[str] = None,
+) -> None:
+    """Run the clone, and for a ref the fetch and checkout, into ``target``.
+
+    ``git`` is ``_git_executable()``'s answer, resolved here when not given; the
+    rest of ``_GIT_ARGV`` follows it. Every command is built by ``git_argv``.
+
+    ``target`` is the caller's: whatever ends this function, it is left as it is,
+    whole or partial, and the caller deletes it (``_clone_into_session`` does, in a
+    ``finally``). Deleting it here as well would delete the same tree twice, and a
+    tree that cannot be deleted would replace git's own error with a workspace error.
+
+    Raises:
+        GitCommandError: when the clone or the checkout fails, or when git cannot be
+            run for the clone, the fetch or the checkout. ``error_type`` is
+            ``git_checkout_failed`` for the checkout and ``git_clone_failed`` for the
+            clone and the fetch.
+        GitTimeoutError: when a command runs past ``GIT_TIMEOUT_SECONDS``.
+    """
+
+    # PATH's anchored entries only, for the programs git starts by name (ssh, a
+    # credential helper); see subprocess_utils._spawn_env.
+    from automated_security_helper.utils.subprocess_utils import child_environ
+
+    env = child_environ(env)
+
+    program = (git if git is not None else _git_executable(), *_GIT_ARGV[1:])
+    # git_argv: no hook or fsmonitor that git config names runs for the
+    # clone, the fetch or the checkout.
+    cmd = git_argv(
+        *_GIT_CONFIG,
         "clone",
         "--depth",
-        str(int(depth)),
+        str(depth),
         # End-of-options marker, so even a future change that loosens
         # _validate_clone_url cannot turn the url into a git flag.
         "--",
         url,
         str(target),
-    ]
-    result = subprocess.run(  # nosec B603 - list-form argv, literal "git" executable, url validated by _validate_clone_url and fenced behind "--"
-        cmd,
-        capture_output=True,
-        text=True,
-        env=env,
-        check=False,
+        program=program,
     )
+    result = _run_git_step(cmd, env=env, what="git clone", error_type=GIT_CLONE_FAILED)
     if result.returncode != 0:
-        shutil.rmtree(target, ignore_errors=True)
-        raise RuntimeError(
-            f"git clone failed (exit {result.returncode}): {result.stderr.strip() or result.stdout.strip()}"
-        )
+        detail = result.stderr.strip() or result.stdout.strip()
+        disk_full = _is_disk_full(detail)
+        # A full disk is not a redirect, whatever the scheme. The advice for it is
+        # added by the delivery, which knows whether there is a source to free.
+        if not disk_full and url.lower().startswith("https://"):
+            # A common failure shape behind http.followRedirects=false: the
+            # host answers with a redirect (often to the .git form) and git
+            # refuses to follow it. Git's text does not say that was the cause,
+            # so the hint is worded as a condition, and it is a sentence of its
+            # own after git's text (or the whole detail when git printed none).
+            detail = _with_the_redirect_hint(detail)
+        message = f"git clone failed (exit {result.returncode}): {detail}"
+        raise GitCommandError(message, GIT_CLONE_FAILED, disk_full=disk_full)
+    if not ref:
+        return
 
-    if ref:
-        # ``--depth 1`` may not have fetched the requested ref. Fetch it
-        # explicitly before checking out so non-default refs work reliably.
-        fetch_cmd = [
-            "git",
+    # A shallow clone is single-branch, so a ref off the default branch is not in
+    # it. The fetch brings it, and records it only in FETCH_HEAD: a named branch
+    # or tag gets no local ref, so the checkout takes FETCH_HEAD. A fetch that
+    # fails (a commit id the remote won't serve by id) leaves the checkout to
+    # find the ref in the clone itself, and to report it if it isn't there. A git
+    # that cannot be run is not such a fetch: it says nothing about what the clone
+    # holds, so the delivery fails there, as a failed clone. Neither is a fetch
+    # that ran out of space: the ref may well exist, and a checkout that follows
+    # would report it as missing.
+    fetch = _run_git_step(
+        git_argv(
+            *_GIT_CONFIG,
             "-C",
             str(target),
             "fetch",
             "--depth",
-            str(int(depth)),
+            str(depth),
             "origin",
             ref,
-        ]
-        fetch_res = subprocess.run(  # nosec B603 - list-form argv, literal "git" executable, ref validated by _reject_option_like
-            fetch_cmd, capture_output=True, text=True, env=env, check=False
-        )
-        if fetch_res.returncode != 0:
-            # Not all refs need an explicit fetch (e.g. a tag already in the
-            # initial clone). Don't fail here; let checkout produce the
-            # diagnostic.
-            pass
-
-        checkout_cmd = ["git", "-C", str(target), "checkout", "--detach", ref]
-        co_res = subprocess.run(  # nosec B603 - list-form argv, literal "git" executable, ref validated by _reject_option_like
-            checkout_cmd, capture_output=True, text=True, env=env, check=False
-        )
-        if co_res.returncode != 0:
-            shutil.rmtree(target, ignore_errors=True)
-            raise RuntimeError(
-                f"git checkout {ref!r} failed (exit {co_res.returncode}): "
-                f"{co_res.stderr.strip() or co_res.stdout.strip()}"
+            program=program,
+        ),
+        env=env,
+        what=f"git fetch {ref!r}",
+        error_type=GIT_CLONE_FAILED,
+    )
+    if fetch.returncode != 0:
+        fetch_detail = fetch.stderr.strip() or fetch.stdout.strip()
+        if _is_disk_full(fetch_detail):
+            raise GitCommandError(
+                f"git fetch {ref!r} failed (exit {fetch.returncode}): {fetch_detail}",
+                GIT_CLONE_FAILED,
+                disk_full=True,
             )
-
-    _set_session_source_dir(session_id, target)
-    return target
+    revision = "FETCH_HEAD" if fetch.returncode == 0 else ref
+    checkout = _run_git_step(
+        git_argv(
+            *_GIT_CONFIG,
+            "-C",
+            str(target),
+            "checkout",
+            "--detach",
+            revision,
+            program=program,
+        ),
+        env=env,
+        what=f"git checkout {ref!r}",
+        error_type=GIT_CHECKOUT_FAILED,
+    )
+    if checkout.returncode != 0:
+        detail = checkout.stderr.strip() or checkout.stdout.strip()
+        message = f"git checkout {ref!r} failed (exit {checkout.returncode}): {detail}"
+        raise GitCommandError(
+            message, GIT_CHECKOUT_FAILED, disk_full=_is_disk_full(detail)
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -518,10 +1844,35 @@ def set_source_zip_chunk(
     Raises:
         ValueError: on out-of-order sequence, oversize chunk, malformed b64
             payload, or duplicate ``last=True``.
+        sessions.SessionWorkspaceBusyError: while the TTL sweep removes the
+            session (``sessions.writing_session_state``). The upload is gone
+            then, so it is sent again from its first chunk.
     """
+    from automated_security_helper.cli.mcp.sessions import writing_session_state
 
+    with writing_session_state(session_id):
+        return _append_zip_chunk(
+            upload_id,
+            sequence,
+            data_b64,
+            last,
+            workspace_root=workspace_root,
+            session_id=session_id,
+        )
+
+
+def _append_zip_chunk(
+    upload_id: str,
+    sequence: int,
+    data_b64: str,
+    last: bool,
+    *,
+    workspace_root: Optional[Path],
+    session_id: str,
+) -> Dict[str, object]:
+    """:func:`set_source_zip_chunk`, once the session is held against the sweep."""
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
-    session_dir = _ensure_dir(_session_workspace(root, session_id))
+    session_dir = _created_session_dir(root, session_id)
     part = _part_path(session_dir, upload_id)
     _ensure_dir(part.parent)
 
@@ -606,6 +1957,7 @@ def _validate_zip_member(name: str) -> None:
             raise ValueError(f"path traversal in zip: {name!r}")
 
 
+@_while_no_scan_runs
 def set_source_zip_finalize(
     upload_id: str,
     expected_sha256: str,
@@ -624,12 +1976,28 @@ def set_source_zip_finalize(
     Returns:
         Absolute path of the extracted source tree (the session's
         ``source_dir``). Unchanged on every failure path: extraction goes to a
-        staging sibling and is renamed into place only after it succeeds, so a
-        refused re-delivery leaves the previously delivered tree intact rather
-        than leaving the session registered against an empty directory.
+        staging directory of the delivery's own and is renamed into place only
+        after it succeeds, so a refused re-delivery leaves the previously
+        delivered tree intact rather than leaving the session registered against
+        an empty directory. The one exception is a swap that cannot complete (see
+        SessionWorkspaceError below). What earlier deliveries left beside
+        ``source/`` and could not delete is logged and never ends this one.
 
     Raises:
-        FileNotFoundError: if the upload never received its final chunk.
+        SessionWorkspaceError: if a directory of the session's workspace cannot
+            be created, or the swap fails: the previous tree cannot be renamed
+            aside (it and the recorded ``source_dir`` stay as they were; nothing is
+            deleted where it stands, and the uploaded zip stays, so the same
+            finalize can be sent again), or the extracted tree cannot be moved into
+            place (the previous tree is put back; when that fails too nothing is at
+            ``source/`` and the recorded ``source_dir`` names a path with nothing at
+            it). The recorded ``source_dir`` is never dropped, so a scan given no
+            ``source_dir`` is refused as ``delivered_source_missing`` and never
+            reads the server's working directory. The failure is one error whatever
+            the OSError was.
+        UploadNotFoundError: a FileNotFoundError, if the upload never received its
+            final chunk. A FileNotFoundError that is not this one is a file that
+            vanished while the archive was read or extracted, a failure on disk.
         ValueError: if ``upload_id`` does not name a single path component, or on
             sha256 mismatch, oversize zip, oversize extraction, too-many-files,
             or path-traversal/symlink-out-of-tree entries.
@@ -639,10 +2007,10 @@ def set_source_zip_finalize(
     """
 
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
-    session_dir = _ensure_dir(_session_workspace(root, session_id))
+    session_dir = _created_session_dir(root, session_id)
     final = _final_zip_path(session_dir, upload_id)
     if not final.exists():
-        raise FileNotFoundError(
+        raise UploadNotFoundError(
             f"no finalized zip for upload_id={upload_id!r} "
             f"(did the last chunk arrive with last=True?)"
         )
@@ -650,7 +2018,12 @@ def set_source_zip_finalize(
     # Hard limit on the on-disk zip size.
     actual_size = final.stat().st_size
     if actual_size > _MAX_ZIP_BYTES:
-        final.unlink(missing_ok=True)
+        # Removing the refused zip is scratch cleanup, best effort: an AV scanner
+        # or indexer holding the file (routine on Windows) makes the unlink raise
+        # PermissionError, and that must not replace the refusal the caller is
+        # owed. A zip that stays is refused again by the same call.
+        with contextlib.suppress(OSError):
+            final.unlink()
         raise ValueError(f"zip too large: {actual_size} > {_MAX_ZIP_BYTES} bytes")
 
     # Verify checksum before opening the archive.
@@ -660,7 +2033,9 @@ def set_source_zip_finalize(
             digest.update(block)
     actual_sha = digest.hexdigest()
     if actual_sha.lower() != expected_sha256.lower():
-        final.unlink(missing_ok=True)
+        # Best effort, as above: the mismatch is the answer, not a held file.
+        with contextlib.suppress(OSError):
+            final.unlink()
         raise ValueError(
             f"sha256 mismatch: expected {expected_sha256}, got {actual_sha}"
         )
@@ -676,15 +2051,17 @@ def set_source_zip_finalize(
     # security scanner. Costs one delivery's worth of extra peak disk, since the
     # old and new trees coexist until the rename.
     target = session_dir / "source"
-    staging = session_dir / _STAGING_DIR_NAME
-    if staging.exists():
-        # Left behind by a delivery that died between extraction and the swap.
-        # It is scratch space and never the delivered tree, so removing it
-        # cannot lose anything a caller can still reach.
-        shutil.rmtree(staging, ignore_errors=True)
+    # Left behind by a delivery that died between extraction and the swap, or
+    # renamed aside by one whose delete stopped short: scratch space, never the
+    # delivered tree, so deleting it cannot lose anything a caller can still reach.
+    # What cannot be deleted does not end this delivery, which extracts into a
+    # directory of its own name and so cannot put those entries in source/.
+    _sweep_delivery_scratch(session_dir, session_id)
+    staging = session_dir / f"{_STAGING_DIR_PREFIX}{uuid.uuid4().hex}"
     _ensure_dir(staging)
 
     swapped = False
+    replaced: Optional[Path] = None
     try:
         # Pre-extraction validation pass: walk the namelist and the zipinfo
         # list, rejecting absolute paths, traversal components, oversize totals,
@@ -715,7 +2092,7 @@ def set_source_zip_finalize(
                     #
                     # Source tree shipping over MCP does not need symlinks.
                     # Refusing them outright eliminates the pre/post-write
-                    # divergence. See DA r6 #5.
+                    # divergence, as an earlier review noted.
                     link_target = zf.read(info).decode("utf-8", errors="replace")
                     raise ValueError(
                         f"symlink {info.filename!r} -> {link_target!r}: "
@@ -725,21 +2102,29 @@ def set_source_zip_finalize(
             # Validation passed; extract into staging.
             zf.extractall(staging)
 
-        # Swap. The old tree only goes away once the new one is complete on
-        # disk, and the rename is within one directory so the window in which
-        # neither is in place is two syscalls wide rather than the whole
-        # validate-and-extract pass.
-        if target.exists():
-            shutil.rmtree(target, ignore_errors=True)
-        staging.rename(target)
+        # Swap (_swap_into_place). The window in which neither tree is in place is
+        # the rename of the staged tree into place (two renames when nothing refuses
+        # them, under a second more when a held handle makes one be tried again)
+        # rather than the whole validate-and-extract pass, and a
+        # previous tree that cannot be renamed aside ends the delivery with that
+        # tree, and the record that names it, as they were.
+        replaced = _swap_into_place(staging, target, session_dir, "extracted")
         swapped = True
     finally:
         if not swapped:
-            shutil.rmtree(staging, ignore_errors=True)
+            _discard_staging(staging)
 
     _set_session_source_dir(session_id, target)
-    # The on-disk zip is no longer needed.
-    final.unlink(missing_ok=True)
+    if replaced is not None:
+        # The new tree is in place and recorded; what is left of the old one is
+        # session scratch that the next delivery, clear_source or the end of the
+        # session removes.
+        _delete_replaced_tree(replaced)
+    # The on-disk zip is no longer needed. Best effort: the delivery took effect
+    # at _set_session_source_dir, and a failed unlink of a scratch file must not
+    # report that delivery as failed, which invites a retry of a done delivery.
+    with contextlib.suppress(OSError):
+        final.unlink()
     return target
 
 
@@ -748,13 +2133,83 @@ def set_source_zip_finalize(
 # ---------------------------------------------------------------------------
 
 
+@_while_no_scan_runs
 def clear_source(session_id: str, *, workspace_root: Optional[Path] = None) -> None:
     """Wipe the session workspace and forget any recorded ``source_dir``.
 
-    Idempotent: missing workspaces are silently ignored.
+    Idempotent: missing workspaces are silently ignored. Read-only entries are
+    made writable and deleted (see :func:`_remove_tree`). Entries the process
+    cannot delete (files another account owns) stay on disk and are logged; the
+    recorded ``source_dir`` is forgotten whatever the delete leaves behind.
+
+    Raises:
+        SourceDeliveryBusyError: while a scan of the session runs.
+    """
+
+    if not remove_session_workspace(session_id, workspace_root=workspace_root):
+        _logger.warning(
+            "could not delete the whole workspace of session %s; the entries that "
+            "stay are not part of any delivered source",
+            session_id,
+        )
+
+
+def remove_session_workspace(
+    session_id: str, *, workspace_root: Optional[Path] = None
+) -> bool:
+    """Remove the session workspace and its record, without taking the scan lock.
+
+    For a caller that already holds the session's lock --
+    ``sessions.end_session`` -- or that has decided a scan cannot be running.
+    Read-only entries are made writable and deleted, as in ``clear_source``.
+
+    The workspace is renamed to a hidden sibling first and the delete runs on
+    that name, so the session's own path is free for the whole delete: a request
+    for the same id that arrives during it builds a workspace of its own there,
+    and nothing in this removal touches that one. What the delete cannot remove
+    stays under the hidden name, which the TTL sweep clears
+    (``sessions.sweep_stale_workspaces``). A rename the filesystem refuses falls
+    back to deleting the workspace where it stands.
+
+    The record is dropped whatever the delete leaves behind, and nothing is
+    raised for it, so a caller that is ending a session goes on with the rest of
+    its work. Returns whether the workspace is gone.
     """
 
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
     session_dir = _session_workspace(root, session_id)
-    shutil.rmtree(session_dir, ignore_errors=True)
+    doomed = _set_aside_for_removal(session_dir, session_id)
+    gone = True if doomed is None else _remove_tree(doomed)
     _drop_session_source_dir(session_id)
+    return gone
+
+
+def _set_aside_for_removal(workspace: Path, session_id: str) -> Optional[Path]:
+    """Rename ``workspace`` to its hidden delete name and return that path.
+
+    Returns None only when the stat says nothing is on disk at ``workspace``
+    (``FileNotFoundError``). It returns ``workspace`` itself when the stat fails
+    for any other reason (EACCES, EIO and ESTALE say nothing about whether the
+    tree is there) or when the rename fails (the entry vanished between the check
+    and the rename, or the filesystem refused it), so the caller's delete still
+    runs; only that path deletes at the session's own name.
+    """
+
+    try:
+        os.lstat(workspace)
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return workspace
+    doomed = workspace.parent / hidden_deleting_name(session_id)
+    try:
+        os.rename(workspace, doomed)
+    except OSError:
+        return workspace
+    # A same-parent rename leaves the directory's own modification time as it was.
+    # Set to the time of the rename, the directory is young for as long as a TTL
+    # sweep of another server sharing the root would wait before it took the
+    # leftover for its own to delete.
+    with contextlib.suppress(OSError):
+        os.utime(doomed)
+    return doomed

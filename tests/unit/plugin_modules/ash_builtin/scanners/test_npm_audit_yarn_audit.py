@@ -216,6 +216,42 @@ def test_a_failed_yarn_audit_raises_instead_of_reporting_clean(
     assert "    at " not in message, "a stack frame leaked into the reason"
 
 
+def test_a_raising_values_hook_degrades_the_failure_detail_not_the_scan(
+    plugin_context,
+):
+    """_values_to_redact is an overridable hook, and the audit-failure texts
+    are best-effort records: a raising hook costs the quoted tool text, never
+    the scan. Before the guarded read it crashed the scan from inside the
+    failure builder."""
+    capture = _capture("classic-closedport")
+    scanner = _scanner(plugin_context)
+    _project(plugin_context.work_dir)
+    side_effect, _commands = _respond(capture["yarn_version"], _response(capture))
+
+    with (
+        patch.object(
+            NpmAuditScanner, "_run_subprocess", autospec=True, side_effect=side_effect
+        ),
+        patch.object(
+            NpmAuditScanner,
+            "_values_to_redact",
+            side_effect=RuntimeError("hook broke on '/opt/qz4b/config'"),
+        ),
+    ):
+        with pytest.raises(ScannerError) as excinfo:
+            scanner.scan(target=plugin_context.work_dir, target_type="converted")
+
+    message = str(excinfo.value)
+    assert "could not audit 1 lockfile(s)" in message, message
+    assert "yarn.lock" in message, message
+    assert "qz4b" not in message, "an unredacted text reached the reason"
+    # The degrade drops the tool's excerpt: without the values it cannot be
+    # redacted, and showing it with an empty value set would print what the
+    # values would have hidden. The same capture's reason normally carries
+    # this text (test_a_failed_yarn_audit_raises_instead_of_reporting_clean).
+    assert "ECONNREFUSED" not in message, message
+
+
 def test_yarn_audit_on_yarn_4_is_a_usage_error_not_a_report():
     """What the scanner used to run on yarn 2+: `yarn audit` is not a command
     there, and its usage error must not read as a clean report."""
@@ -323,33 +359,39 @@ def test_a_version_yarn_cannot_report_is_a_failure(plugin_context):
 
 
 class TestOffline:
-    """Offline keeps npm's behavior: an audit that cannot reach its advisory
-    source is a warning naming the lockfile, not an error."""
+    """Offline no yarn runs: yarn 1's `yarn audit --offline` refuses to ask the
+    registry ("Can't make a request in offline mode") and `yarn npm audit` has no
+    offline mode, so the lockfile is recorded as not audited, with a warning, and
+    scan() returns False, which the executor records MISSING."""
 
-    def test_yarn_1_offline_failure_is_a_warning(self, plugin_context, caplog):
-        capture = _capture("classic-offline")
-        with caplog.at_level(logging.WARNING):
-            report, commands = _scan(plugin_context, capture, offline=True)
-
-        assert [c for c in commands if "--version" not in c] == [capture["command"]]
-        assert report.runs[0].results == []
-        warnings = [r.message for r in caplog.records]
-        assert any(
-            "npm-audit (offline) could not audit 1 lockfile(s)" in m
-            and "Can't make a request in offline mode" in m
-            for m in warnings
-        ), warnings
-
-    def test_yarn_4_offline_is_not_run_and_is_a_warning(self, plugin_context, caplog):
-        """`yarn npm audit` rejects --offline and always asks the registry."""
-        with caplog.at_level(logging.WARNING):
-            report, commands = _scan(
-                plugin_context, _capture("berry-clean"), offline=True
+    @pytest.mark.parametrize("capture_name", ["classic-offline", "berry-clean"])
+    def test_offline_yarn_is_not_run_and_the_lockfile_is_recorded(
+        self, plugin_context, caplog, capture_name
+    ):
+        scanner = _scanner(plugin_context, offline=True)
+        _project(plugin_context.work_dir)
+        side_effect, commands = _respond(
+            _capture(capture_name)["yarn_version"], _response(_capture(capture_name))
+        )
+        with (
+            patch.object(
+                NpmAuditScanner,
+                "_run_subprocess",
+                autospec=True,
+                side_effect=side_effect,
+            ),
+            caplog.at_level(logging.WARNING),
+        ):
+            report = scanner.scan(
+                target=plugin_context.work_dir, target_type="converted"
             )
 
-        assert [c for c in commands if "--version" not in c] == []
-        assert report.runs[0].results == []
-        assert any("no offline mode" in r.message for r in caplog.records)
+        assert [c for c in commands if "--version" not in c] == [], commands
+        assert report is False
+        assert [entry["path"] for entry in scanner.inputs_not_scanned] == ["yarn.lock"]
+        assert any(
+            "Offline, npm-audit audits nothing" in r.message for r in caplog.records
+        )
 
 
 class TestExecutorStatus:
@@ -401,3 +443,253 @@ class TestExecutorStatus:
 )
 def test_yarn_major(output, major):
     assert NpmAuditScanner._yarn_major(output) == major
+
+
+def test_the_yarn_fallback_reason_is_redacted_before_its_cut():
+    """A yarn failure whose only problem line is too long for the per-line
+    detail falls back to that first line, cut at 300 characters: the
+    redaction runs BEFORE the cut, so an env-read value straddling character
+    300 is hidden whole and no fragment survives. This pins the fallback's
+    own order -- reverting only this site's shown_tool_stderr leaves every
+    other cell green."""
+    value = "Zq7Kx9Lm2Pw4Nv"
+    pad = "p" * (300 - 12 - 6)
+    line = f"FetchError: {pad}{value} request to the registry failed"
+    response = {"stdout": line, "stderr": "", "returncode": 1}
+
+    report, reason = NpmAuditScanner._parse_yarn_audit(1, response, values=(value,))
+
+    assert report is None
+    assert "yarn audit reported an error" in (reason or ""), reason
+    assert "Zq7K" not in (reason or ""), reason
+
+
+def test_the_fallback_pass_runs_only_when_the_detail_is_empty(monkeypatch):
+    """The first-line fallback redacts the WHOLE problem text a second time
+    before its cut. That pass is computed only when the per-line detail
+    answered nothing: when an error event already names the failure, nobody
+    reads the fallback, so the text is not redacted again for it. The
+    recorder pins that: with a reported event, no redaction call receives
+    the joined problem text itself."""
+    recorded = []
+    real = npm_audit_scanner.shown_tool_stderr
+
+    def recorder(piece, values=()):
+        recorded.append(piece)
+        return real(piece, values)
+
+    monkeypatch.setattr(npm_audit_scanner, "shown_tool_stderr", recorder)
+    event = json.dumps({"type": "error", "data": "Request failed\nmore detail"})
+    response = {"stdout": event + "\n", "stderr": "", "returncode": 1}
+
+    report, reason = NpmAuditScanner._parse_yarn_audit(1, response, values=())
+
+    assert report is None
+    assert "Request failed" in (reason or ""), reason
+    assert (event + "\n") not in recorded, recorded
+
+
+def test_the_plain_yarn_text_is_redacted_whole_before_it_is_split(monkeypatch):
+    """An env-read value can hold a line break (a PEM, a multi-line token), and
+    a split is a cut: redacting line by line matches neither half. The plain
+    (non-event) text is put back together WITH its own separators -- a CRLF
+    value does not match a "\\n" rejoin -- and redacted as ONE piece before the
+    lines are split and filtered. The recorder pins that order: it sees one
+    piece holding the raw multi-line value, never the halves."""
+    value = "Zq7Kx9Lm\r\nPw4Nv2Rt"
+    redacted_pieces = []
+    real = npm_audit_scanner.shown_tool_stderr
+
+    def recorder(piece, values=()):
+        redacted_pieces.append(piece)
+        return real(piece, values)
+
+    monkeypatch.setattr(npm_audit_scanner, "shown_tool_stderr", recorder)
+    text = f"Error: cannot reach {value}/registry now\nat foo (x.js:1:2)\n"
+
+    detail = NpmAuditScanner._yarn_error_detail(text, values=(value,))
+
+    assert redacted_pieces == [text], redacted_pieces
+    assert "cannot reach" in detail, detail
+    assert "at foo" not in detail, detail
+    for part in ("Zq7Kx9Lm", "Pw4Nv2Rt"):
+        assert part not in detail, (part, detail)
+
+
+# A value holding a line break, one case per separator ``str.splitlines``
+# honors in real tool text (a PEM's LF, a CRLF-writing tool, a form feed).
+MULTILINE_VALUES = {
+    "lf": "Zq7Kx9Lm\nPw4Nv2Rt",
+    "crlf": "Zq7Kx9Lm\r\nPw4Nv2Rt",
+    "ff": "Zq7Kx9Lm\x0cPw4Nv2Rt",
+}
+
+
+@pytest.mark.parametrize("sep", sorted(MULTILINE_VALUES))
+def test_a_multi_line_value_in_a_yarn_error_event_is_hidden(sep):
+    """The error event's data is redacted WHOLE before its first line is
+    taken: splitting first leaves each half unmatched, and the first half
+    prints in the detail."""
+    value = MULTILINE_VALUES[sep]
+    event = json.dumps(
+        {"type": "error", "data": f"fetch failed for {value} at the registry"}
+    )
+
+    detail = NpmAuditScanner._yarn_error_detail(event + "\n", (value,))
+
+    assert "fetch failed" in detail, detail
+    for part in ("Zq7Kx9Lm", "Pw4Nv2Rt"):
+        assert part not in detail, (part, detail)
+
+
+@pytest.mark.parametrize("sep", sorted(MULTILINE_VALUES))
+def test_a_multi_line_value_in_a_plain_yarn_line_is_hidden(sep):
+    value = MULTILINE_VALUES[sep]
+    text = f"Error: cannot reach {value}/registry now\nat foo (x.js:1:2)\n"
+
+    detail = NpmAuditScanner._yarn_error_detail(text, (value,))
+
+    assert "cannot reach" in detail, detail
+    for part in ("Zq7Kx9Lm", "Pw4Nv2Rt"):
+        assert part not in detail, (part, detail)
+
+
+def test_a_single_line_value_in_an_event_is_still_hidden():
+    """Control: the whole-data redaction keeps the single-line contract."""
+    value = "Zq7Kx9LmPw4Nv2Rt"
+    event = json.dumps(
+        {"type": "error", "data": f"fetch failed for {value} at the registry"}
+    )
+
+    detail = NpmAuditScanner._yarn_error_detail(event + "\n", (value,))
+
+    assert "fetch failed" in detail and value not in detail, detail
+
+
+@pytest.mark.parametrize("sep", sorted(MULTILINE_VALUES))
+def test_a_multi_line_value_in_a_yarn_1_stdout_error_event_is_hidden(sep):
+    """The same contract through _parse_yarn_audit's own problems path: a
+    yarn 1 stdout error event's data was cut to its first RAW line before any
+    redaction saw it."""
+    value = MULTILINE_VALUES[sep]
+    event = json.dumps(
+        {"type": "error", "data": f"fetch failed for {value} at the registry"}
+    )
+    response = {"stdout": event + "\n", "stderr": "", "returncode": 1}
+
+    report, reason = NpmAuditScanner._parse_yarn_audit(1, response, values=(value,))
+
+    assert report is None
+    assert "yarn audit reported an error" in (reason or ""), reason
+    assert "fetch failed" in (reason or ""), reason
+    for part in ("Zq7Kx9Lm", "Pw4Nv2Rt"):
+        assert part not in (reason or ""), (part, reason)
+
+
+def test_a_yarn_1_stdout_error_event_is_reduced_to_its_first_line():
+    """An error event is reduced to its MESSAGE, the first line of its data,
+    as the stderr events are: yarn writes the summary first and the Node
+    error object after it. Unwrapping the data into plain text sent it down
+    the plain branch, which prefers an "Error:"-named line, so a multi-line
+    event's reason flipped from the message to the trailing Error line."""
+    event = json.dumps(
+        {"type": "error", "data": "Request failed\nError: getaddrinfo ENOTFOUND host"}
+    )
+    response = {"stdout": event + "\n", "stderr": "", "returncode": 1}
+
+    report, reason = NpmAuditScanner._parse_yarn_audit(1, response, values=())
+
+    assert report is None
+    assert "Request failed" in (reason or ""), reason
+    assert "getaddrinfo" not in (reason or ""), reason
+
+
+def test_each_of_several_error_events_keeps_its_message():
+    """One message per event: a multi-line event must not push a later
+    event's message out of the three-item cap with its continuation lines."""
+    events = [
+        json.dumps({"type": "error", "data": f"request {i} failed\ndetail line {i}"})
+        for i in (1, 2, 3)
+    ]
+    response = {"stdout": "\n".join(events) + "\n", "stderr": "", "returncode": 1}
+
+    report, reason = NpmAuditScanner._parse_yarn_audit(1, response, values=())
+
+    assert report is None
+    for i in (1, 2, 3):
+        assert f"request {i} failed" in (reason or ""), (i, reason)
+
+
+SPANNING_SHAPES = {
+    # The decoded stream reads "first request Zq7Kx9Lm\nPw4Nv2Rt second":
+    # the value's own LF falls exactly at the boundary between two decoded
+    # segments, so a per-segment redaction matches neither half.
+    "two-events": (
+        json.dumps({"type": "error", "data": "first request Zq7Kx9Lm"})
+        + "\n"
+        + json.dumps({"type": "error", "data": "Pw4Nv2Rt second"})
+        + "\n"
+    ),
+    "event-then-plain": (
+        json.dumps({"type": "error", "data": "first request Zq7Kx9Lm"})
+        + "\n"
+        + "Pw4Nv2Rt second line\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(SPANNING_SHAPES))
+def test_a_value_spanning_two_segments_is_hidden(shape):
+    """A value whose own line break sits at a segment boundary -- the end of
+    one error event's data and the start of the next event or plain line --
+    has no whole spelling inside either segment, so per-segment redaction
+    prints both halves. The decoded segments are redacted as ONE text."""
+    value = "Zq7Kx9Lm\nPw4Nv2Rt"
+
+    detail = NpmAuditScanner._yarn_error_detail(SPANNING_SHAPES[shape], (value,))
+
+    for part in ("Zq7Kx9Lm", "Pw4Nv2Rt"):
+        assert part not in detail, (part, detail)
+
+
+def test_a_planted_segment_marker_line_cannot_split_a_message(monkeypatch):
+    """The one-text redaction separates segments with a marker line carrying
+    a fresh nonce, so tool text cannot name it. If a planted line does match
+    it anyway (here: the marker hook pinned to a known value), the split no
+    longer maps to the segments, and attribution is abandoned for the one
+    redacted text rather than trusting a mapping the text controlled."""
+    marker = "ash-segment-feedfacefeedface\n"
+    monkeypatch.setattr(
+        NpmAuditScanner, "_segment_marker", staticmethod(lambda: marker)
+    )
+    value = "Zq7Kx9LmPw4Nv2Rt"
+    event = json.dumps({"type": "error", "data": f"fetch failed for {value} here"})
+    text = event + "\n" + marker + "plain trailing line\n"
+
+    detail = NpmAuditScanner._yarn_error_detail(text, (value,))
+
+    assert value not in detail, detail
+    assert "fetch failed" in detail, detail
+    # The fallback's distinguishing effect: without it, the planted line is
+    # read as a segment separator and the plain line after it is lost from
+    # the detail. The words above survive either way; this one does not.
+    assert "plain trailing line" in detail, detail
+
+
+def test_a_crlf_value_spanning_plain_stdout_lines_is_hidden():
+    """A non-JSON problem line was stripped and rejoined with "\\n" before the
+    redaction: a CRLF value spanning the join no longer matched whole. The
+    problem text must keep its own separators until it has been redacted."""
+    value = "Zq7Kx9Lm\r\nPw4Nv2Rt"
+    response = {
+        "stdout": f"Error: cannot reach {value}/registry now\n",
+        "stderr": "",
+        "returncode": 1,
+    }
+
+    report, reason = NpmAuditScanner._parse_yarn_audit(1, response, values=(value,))
+
+    assert report is None
+    assert "cannot reach" in (reason or ""), reason
+    for part in ("Zq7Kx9Lm", "Pw4Nv2Rt"):
+        assert part not in (reason or ""), (part, reason)

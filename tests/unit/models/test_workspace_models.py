@@ -4,7 +4,7 @@
 """Unit tests for the workspace exit-code contract and skipped-project payload.
 
 One test class here is unusual: TestCollisionWithAshExitCodes asserts that a
-known contradiction EXISTS. Code 2 means "actionable findings above threshold"
+known contradiction EXISTS. Code 2 means "actionable findings at or above threshold"
 in the shipped ASH contract and "workspace definition or policy error" in the
 workspace contract. Pinning it in a test keeps it from being rediscovered as a
 surprise, and makes the test suite fail loudly if someone changes one side
@@ -14,7 +14,10 @@ without the other.
 import pytest
 from pydantic import ValidationError
 
-from automated_security_helper.core.constants import ASH_EXIT_CODES
+from automated_security_helper.core.constants import (
+    ASH_EXIT_CODES,
+    ASH_EXIT_USAGE_ERROR,
+)
 from automated_security_helper.models.workspace import (
     WORKSPACE_EXIT_CODES,
     SkippedProject,
@@ -39,6 +42,7 @@ class TestWorkspaceExitCode:
             (WorkspaceExitCode.ACTIONABLE_FINDINGS, 2),
             (WorkspaceExitCode.INVALID_PROJECT_CONFIG, 3),
             (WorkspaceExitCode.WORKSPACE_ERROR, 4),
+            (WorkspaceExitCode.USAGE_ERROR, 5),
         ],
     )
     def test_values(self, member, value):
@@ -49,8 +53,8 @@ class TestWorkspaceExitCode:
         assert isinstance(WorkspaceExitCode.WORKSPACE_ERROR, int)
         assert WorkspaceExitCode.WORKSPACE_ERROR == 4
 
-    def test_exactly_five_codes(self):
-        assert len(WorkspaceExitCode) == 5
+    def test_exactly_six_codes(self):
+        assert len(WorkspaceExitCode) == 6
 
     def test_every_code_has_a_description(self):
         assert set(WORKSPACE_EXIT_CODES) == {c.value for c in WorkspaceExitCode}
@@ -87,9 +91,13 @@ class TestNoCollisionWithAshExitCodes:
     SEMANTIC_ALIGNMENT = [
         (WorkspaceExitCode.SUCCESS, "success"),
         (WorkspaceExitCode.INTERNAL_ERROR, "scan errors / scanner failures"),
-        (WorkspaceExitCode.ACTIONABLE_FINDINGS, "actionable findings above threshold"),
-        (WorkspaceExitCode.INVALID_PROJECT_CONFIG, "invalid config"),
+        (
+            WorkspaceExitCode.ACTIONABLE_FINDINGS,
+            "actionable findings at or above threshold",
+        ),
+        (WorkspaceExitCode.INVALID_PROJECT_CONFIG, "invalid config or refused input"),
         (WorkspaceExitCode.WORKSPACE_ERROR, "workspace definition or policy error"),
+        (WorkspaceExitCode.USAGE_ERROR, "usage error"),
     ]
 
     @pytest.mark.parametrize("code,published", SEMANTIC_ALIGNMENT)
@@ -113,15 +121,20 @@ class TestNoCollisionWithAshExitCodes:
         completed and found things. Collapsing them would let a CI job read a
         workspace that never ran as a successful scan with issues.
         """
-        assert ASH_EXIT_CODES[2] == "actionable findings above threshold"
+        assert ASH_EXIT_CODES[2] == "actionable findings at or above threshold"
         assert WorkspaceExitCode.WORKSPACE_ERROR.value != 2
         assert WorkspaceExitCode.WORKSPACE_ERROR.value == 4
         assert "workspace" in ASH_EXIT_CODES[4].lower()
 
-    def test_workspace_error_is_the_only_code_ash_did_not_already_have(self):
-        """Extending by exactly one code is what makes this non-breaking."""
-        preexisting = {0, 1, 2, 3}
-        added = {c.value for c in WorkspaceExitCode} - preexisting
+    def test_workspace_error_is_the_only_code_workspace_mode_added(self):
+        """Extending by exactly one code is what makes this non-breaking.
+
+        USAGE_ERROR is in the enum as well, but it is the CLI-wide code for a
+        refused command line, which a workspace invocation can also exit with,
+        not a code workspace mode introduced.
+        """
+        shared_with_every_scan = {0, 1, 2, 3, ASH_EXIT_USAGE_ERROR}
+        added = {c.value for c in WorkspaceExitCode} - shared_with_every_scan
         assert added == {WorkspaceExitCode.WORKSPACE_ERROR.value}
 
     def test_the_deviation_from_the_rfc_is_documented(self):

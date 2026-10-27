@@ -209,6 +209,9 @@ def _model_with_two_targets(
             scanner_name="cdk-nag",
             target_type=target_type,
             targets_attempted=attempted,
+            # Every writer records both counters; a stored attempt count above zero with
+            # no failure accounting is the unusable-counters shape.
+            targets_failed=0,
         )
         container.status = container.determine_status("MEDIUM")
         reports[target_type] = _dump(container)

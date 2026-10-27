@@ -1,0 +1,21 @@
+# serializer version: 1
+# name: test_zizmor_scanner_row
+  dict({
+    'actionable_finding_count': 6,
+    'dependencies_satisfied': True,
+    'duration': 0.25,
+    'excluded': False,
+    'exit_code': 0,
+    'finding_count': 7,
+    'severity_counts': dict({
+      'critical': 0,
+      'high': 5,
+      'info': 0,
+      'low': 1,
+      'medium': 1,
+      'suppressed': 0,
+    }),
+    'status': 'FAILED',
+    'suppressed_finding_count': 0,
+  })
+# ---

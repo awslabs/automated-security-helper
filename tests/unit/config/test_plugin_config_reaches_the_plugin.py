@@ -33,6 +33,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import BaseModel, ValidationError
 
 import automated_security_helper
 import automated_security_helper.plugin_modules as plugin_packages
@@ -96,20 +97,55 @@ def _cases(plugin_type):
     ]
 
 
+def _options_class(plugin_class):
+    annotation = _config_class(plugin_class).model_fields["options"].annotation
+    args = [
+        a
+        for a in (typing.get_args(annotation) or (annotation,))
+        if isinstance(a, type) and issubclass(a, BaseModel)
+    ]
+    return args[0]
+
+
+def _option_probe(plugin_class):
+    """A declared option of the plugin, and a value for it that is not its default.
+
+    An option the plugin does not declare refuses the config, so the probe has
+    to be one it declares. None for a plugin that declares no option at all;
+    for those, ``enabled: false`` is what can reach the plugin, and
+    _assert_reached checks that it did. (A key beside it that the section does
+    not declare refuses the config too.)
+    """
+    options_cls = _options_class(plugin_class)
+    for name, field in options_cls.model_fields.items():
+        default = field.get_default(call_default_factory=True)
+        candidates = []
+        if isinstance(default, bool):
+            candidates.append(not default)
+        elif isinstance(default, int):
+            candidates.append(default + 1)
+        candidates.append(MARKER)
+        for value in candidates:
+            try:
+                validated = options_cls.model_validate({name: value})
+            except ValidationError:
+                continue
+            if value != default and getattr(validated, name) == value:
+                return name, value
+    return None
+
+
 def _probe_config(plugin_type) -> AshConfig:
     segment_key, _ = SEGMENTS[plugin_type]
-    return AshConfig.model_validate(
-        {
-            "project_name": "probe",
-            segment_key: {
-                _documented_key(plugin_type, cls): {
-                    "enabled": False,
-                    "options": {"probe_marker": MARKER},
-                }
-                for cls in _shipped(plugin_type)
-            },
-        }
-    )
+    sections = {}
+    for cls in _shipped(plugin_type):
+        probe = _option_probe(cls)
+        section = {"enabled": False}
+        if probe is not None:
+            name, value = probe
+            section["options"] = {name: value}
+        sections[_documented_key(plugin_type, cls)] = section
+    return AshConfig.model_validate({"project_name": "probe", segment_key: sections})
 
 
 def _context(tmp_path: Path, config: AshConfig) -> PluginContext:
@@ -128,7 +164,18 @@ def _assert_reached(instance):
         f"{type(instance).__name__} runs with enabled={instance.config.enabled}; "
         "its configuration never reached it"
     )
-    assert getattr(instance.config.options, "probe_marker", None) == MARKER
+    probe = _option_probe(type(instance))
+    if probe is None:
+        assert not _options_class(type(instance)).model_fields, (
+            f"{type(instance).__name__} declares options; probe one of them"
+        )
+        return
+    name, value = probe
+    assert getattr(instance.config.options, name, None) == value, (
+        f"{type(instance).__name__} runs with options.{name}="
+        f"{getattr(instance.config.options, name, None)!r}, not the configured "
+        f"{value!r}; its options never reached it"
+    )
 
 
 def test_every_shipped_plugin_type_is_represented():

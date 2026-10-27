@@ -525,9 +525,11 @@ class TestResolveSecuritySeverity:
             reporter._resolve_security_severity("R", rules_map, {"R": "error"}) == "9.8"
         )
 
+    # error scores 9.5, GitHub's Critical band, because the gate fails an error
+    # finding as CRITICAL; it was 8.0 (High).
     @pytest.mark.parametrize(
         "level,expected",
-        [("error", "8.0"), ("warning", "6.0"), ("note", "3.0"), ("none", "1.0")],
+        [("error", "9.5"), ("warning", "6.0"), ("note", "3.0"), ("none", "1.0")],
     )
     def test_derived_from_rule_default_level(self, reporter, level, expected):
         rules_map = {"R": {"security_severity": None, "default_level": level}}
@@ -535,7 +537,7 @@ class TestResolveSecuritySeverity:
 
     @pytest.mark.parametrize(
         "level,expected",
-        [("error", "8.0"), ("warning", "6.0"), ("note", "3.0"), ("none", "1.0")],
+        [("error", "9.5"), ("warning", "6.0"), ("note", "3.0"), ("none", "1.0")],
     )
     def test_derived_from_result_level_when_rule_has_no_default(
         self, reporter, level, expected
@@ -546,18 +548,25 @@ class TestResolveSecuritySeverity:
             == expected
         )
 
-    def test_rule_default_level_outranks_result_level(self, reporter):
+    def test_result_severity_outranks_rule_default_level(self, reporter):
+        """The results decide, as they decide the gate, not the rule default.
+
+        A result carries ``issue_severity`` and may override the rule's level,
+        and the gate grades results, so a rule defaulting to ``note`` whose finding
+        is ``error`` reaches GitHub as it fails the scan, CRITICAL, not Low (3.0).
+        """
         rules_map = {"R": {"security_severity": None, "default_level": "note"}}
         assert (
-            reporter._resolve_security_severity("R", rules_map, {"R": "error"}) == "3.0"
+            reporter._resolve_security_severity("R", rules_map, {"R": "CRITICAL"})
+            == "9.5"
         )
 
-    def test_unknown_level_string_falls_back_to_medium(self, reporter):
-        # The example used to be "Level.warning", which was the stringified enum
-        # member this reporter was actually producing -- the fallback was
-        # absorbing a bug rather than an unrecognized SARIF level. _level_value
-        # now makes that string unreachable, so the coverage is kept against a
-        # level that really is foreign.
+    def test_unknown_level_string_reads_as_the_missing_level(self, reporter):
+        # A level that is not a SARIF level is read as MISSING_SARIF_LEVEL
+        # ("warning", MEDIUM) by every grader, so it scores Medium, 6.0. The
+        # example is not "Level.warning", the stringified enum member, since
+        # _level_value makes that unreachable,
+        # so the coverage is kept against a level that really is foreign.
         rules_map = {"R": {"security_severity": None, "default_level": "critical"}}
         assert reporter._resolve_security_severity("R", rules_map, {}) == "6.0"
 
@@ -681,10 +690,10 @@ class TestBuildSlimResults:
 
         assert len(doc["runs"][0]["results"]) == 1
 
-    def test_missing_result_level_defaults_to_error(self, reporter):
+    def test_missing_result_level_is_the_missing_level(self, reporter):
         # level=None sets the field, so this covers the explicit-None path only.
         # The absent-key path is a different shape; see
-        # test_result_with_an_absent_level_key_emits_error below.
+        # test_result_with_an_absent_level_key_emits_warning below.
         run = Run(
             tool=Tool(driver=ToolComponent(name="ASH")),
             results=[_result("R", level=None)],
@@ -692,11 +701,11 @@ class TestBuildSlimResults:
 
         doc = json.loads(reporter.report(_model(run)))
 
-        assert doc["runs"][0]["results"][0]["level"] == "error", (
-            "an unlevelled finding must not silently downgrade"
-        )
+        # MISSING_SARIF_LEVEL, as the gate and every report read it. It was
+        # "error" here, CRITICAL, while the gate read the same finding as LOW.
+        assert doc["runs"][0]["results"][0]["level"] == "warning"
 
-    def test_result_with_an_absent_level_key_emits_error(self, reporter):
+    def test_result_with_an_absent_level_key_emits_warning(self, reporter):
         """The emitted value must be a SARIF level, not a stringified enum.
 
         GitHub reads ``level`` to place the alert. "Level.error" is not a member
@@ -710,16 +719,18 @@ class TestBuildSlimResults:
 
         doc = json.loads(reporter.report(_model(run)))
 
-        assert doc["runs"][0]["results"][0]["level"] == "error"
+        # SARIF's own default (3.27.10), MISSING_SARIF_LEVEL; it was "error".
+        assert doc["runs"][0]["results"][0]["level"] == "warning"
 
-    def test_result_with_an_absent_level_key_keeps_error_security_severity(
+    def test_result_with_an_absent_level_key_scores_as_the_missing_level(
         self, reporter
     ):
-        """8.0 is GitHub's High band; the unknown-level fallback 6.0 is Medium.
+        """An absent level is the field default, warning: 6.0, GitHub's Medium band.
 
         The rule is declared but carries neither a scanner security-severity nor
         a defaultConfiguration, so _resolve_security_severity falls through to
-        the result level -- the value report() derived from ``result.level``.
+        the result -- graded as the gate grades it, MISSING_SARIF_LEVEL being
+        MEDIUM, here and at the gate.
         """
         run = Run(
             tool=Tool(driver=ToolComponent(name="ASH", rules=[_rule("R")])),
@@ -729,7 +740,7 @@ class TestBuildSlimResults:
         doc = json.loads(reporter.report(_model(run)))
 
         (rule,) = doc["runs"][0]["tool"]["driver"]["rules"]
-        assert rule["properties"]["security-severity"] == "8.0"
+        assert rule["properties"]["security-severity"] == "6.0"
 
     def test_level_held_as_an_enum_member_emits_error(self, reporter):
         """Assignment is unvalidated, so the reporter cannot trust the type."""
@@ -759,7 +770,7 @@ class TestBuildSlimResults:
         doc = json.loads(reporter.report(_model(run)))
 
         levels = [r["level"] for r in doc["runs"][0]["results"]]
-        assert levels == ["error", "warning", "error"]
+        assert levels == ["warning", "warning", "warning"]
         assert all("." not in level for level in levels), levels
 
     def test_result_level_is_carried_through(self, reporter):
@@ -826,7 +837,12 @@ class TestBuildSlimResults:
         (rule,) = doc["runs"][0]["tool"]["driver"]["rules"]
         assert rule["properties"]["security-severity"] == "3.0"
 
-    def test_first_result_level_wins_for_a_repeated_rule(self, reporter):
+    def test_the_most_severe_result_decides_for_a_repeated_rule(self, reporter):
+        """The rule's alert severity is its worst finding's, whatever the order.
+
+        The first result does not win, so a rule whose note comes first is not
+        scored Low while its error fails the scan as CRITICAL.
+        """
         run = Run(
             tool=Tool(driver=ToolComponent(name="ASH", rules=[_rule("R")])),
             results=[
@@ -838,16 +854,99 @@ class TestBuildSlimResults:
         doc = json.loads(reporter.report(_model(run)))
 
         (rule,) = doc["runs"][0]["tool"]["driver"]["rules"]
+        assert rule["properties"]["security-severity"] == "9.5"
+
+    def test_a_result_left_out_of_the_file_does_not_score_its_rule(self, reporter):
+        """Only the results the file emits decide a rule's security-severity.
+
+        A suppressed error is left out of ash.ghas.sarif by default, and it still
+        raised its rule to 9.5, so GitHub showed the rule's one remaining alert,
+        a note, as Critical.
+        """
+        run = Run(
+            tool=Tool(driver=ToolComponent(name="ASH", rules=[_rule("R")])),
+            results=[
+                _result(
+                    "R",
+                    level=Level.error,
+                    suppressions=[Suppression(kind=Kind1.external)],
+                ),
+                _result("R", level=Level.note),
+            ],
+        )
+
+        doc = json.loads(reporter.report(_model(run)))
+
+        assert [r["level"] for r in doc["runs"][0]["results"]] == ["note"]
+        (rule,) = doc["runs"][0]["tool"]["driver"]["rules"]
         assert rule["properties"]["security-severity"] == "3.0"
+
+    @pytest.mark.parametrize(
+        "default_level, expected", [(None, "6.0"), (Level.note, "3.0")]
+    )
+    def test_a_rule_whose_results_are_all_left_out_keeps_its_baseline(
+        self, reporter, default_level, expected
+    ):
+        """The rule stays, scored as if it had no results: its own default.
+
+        It is kept rather than dropped so the rules list does not depend on which
+        findings are suppressed; with no result in the file, no alert carries it.
+        """
+        run = Run(
+            tool=Tool(
+                driver=ToolComponent(
+                    name="ASH", rules=[_rule("R", level=default_level)]
+                )
+            ),
+            results=[
+                _result(
+                    "R",
+                    level=Level.error,
+                    suppressions=[Suppression(kind=Kind1.external)],
+                )
+            ],
+        )
+
+        doc = json.loads(reporter.report(_model(run)))
+
+        assert doc["runs"][0]["results"] == []
+        (rule,) = doc["runs"][0]["tool"]["driver"]["rules"]
+        assert rule["properties"]["security-severity"] == expected
+
+    def test_a_suppressed_result_the_file_keeps_still_scores_its_rule(
+        self, test_plugin_context
+    ):
+        """With exclude_suppressed off the result is emitted, so it counts."""
+        reporter = GHASReporter(
+            context=test_plugin_context,
+            config=GHASReporterConfig(
+                options=GHASReporterConfigOptions(exclude_suppressed=False)
+            ),
+        )
+        run = Run(
+            tool=Tool(driver=ToolComponent(name="ASH", rules=[_rule("R")])),
+            results=[
+                _result(
+                    "R",
+                    level=Level.error,
+                    suppressions=[Suppression(kind=Kind1.external)],
+                ),
+                _result("R", level=Level.note),
+            ],
+        )
+
+        doc = json.loads(reporter.report(_model(run)))
+
+        assert len(doc["runs"][0]["results"]) == 2
+        (rule,) = doc["runs"][0]["tool"]["driver"]["rules"]
+        assert rule["properties"]["security-severity"] == "9.5"
 
     def test_synthetic_rule_entry_is_recorded_in_the_rules_map(self, reporter):
         """A result naming an undeclared rule gets a rules_map entry.
 
-        Note the ordering: report() builds the emitted rules list *before*
-        _build_slim_results runs, so a synthetic entry created here does not
-        reach the emitted document. This pins the current behaviour of the
-        helper itself; see test_undeclared_rule_is_absent_from_emitted_rules
-        for the document-level consequence.
+        report() builds the emitted rules from rules_map after this helper
+        runs, so the entry reaches the document; see
+        test_an_undeclared_rule_is_emitted_and_scored_from_its_results.
         """
         rules_map = {}
         level_map = {}
@@ -868,13 +967,25 @@ class TestBuildSlimResults:
         }
         assert level_map["UNDECLARED"] == "warning"
 
-    def test_undeclared_rule_is_absent_from_emitted_rules(self, reporter):
-        """Documents the known gap: results can reference an unlisted rule."""
+    def test_an_undeclared_rule_is_emitted_and_scored_from_its_results(self, reporter):
+        """A result whose rule the run does not declare still gets a rule entry.
+
+        The rules list was built before the results, so the entry made for an
+        undeclared rule never reached the document: GitHub got the result with
+        no rule, and no security-severity, for it.
+        """
         run = Run(
             tool=Tool(driver=ToolComponent(name="ASH", rules=[_rule("DECLARED")])),
             results=[
                 _result("DECLARED", level=Level.error),
-                _result("UNDECLARED", level=Level.error),
+                Result.model_validate(
+                    {
+                        "ruleId": "UNDECLARED",
+                        "level": "error",
+                        "message": {"text": "finding text"},
+                        "properties": {"issue_severity": "HIGH"},
+                    }
+                ),
             ],
         )
 
@@ -884,9 +995,59 @@ class TestBuildSlimResults:
             "DECLARED",
             "UNDECLARED",
         }
-        assert {r["id"] for r in doc["runs"][0]["tool"]["driver"]["rules"]} == {
+        rules = {r["id"]: r for r in doc["runs"][0]["tool"]["driver"]["rules"]}
+        assert list(rules) == ["DECLARED", "UNDECLARED"]
+        assert rules["UNDECLARED"]["properties"]["security-severity"] == "8.0"
+
+    def test_a_result_naming_its_rule_through_rule_id_keeps_it(self, reporter):
+        """SARIF lets a result name its rule as rule.id instead of ruleId (3.27.7).
+
+        Such a result was emitted with neither a ruleId nor a rule entry, so
+        GitHub had nothing to group it under and no security-severity for it.
+        """
+        run = Run(
+            tool=Tool(driver=ToolComponent(name="ASH", rules=[])),
+            results=[
+                Result.model_validate(
+                    {
+                        "rule": {"id": "VIA-RULE"},
+                        "level": "error",
+                        "message": {"text": "finding text"},
+                        "properties": {"issue_severity": "HIGH"},
+                    }
+                )
+            ],
+        )
+
+        doc = json.loads(reporter.report(_model(run)))
+
+        assert [r.get("ruleId") for r in doc["runs"][0]["results"]] == ["VIA-RULE"]
+        (rule,) = doc["runs"][0]["tool"]["driver"]["rules"]
+        assert rule["id"] == "VIA-RULE"
+        assert rule["properties"]["security-severity"] == "8.0"
+
+    def test_an_undeclared_rule_with_no_result_in_the_file_is_not_emitted(
+        self, reporter
+    ):
+        """Only the results the file emits make an undeclared rule's entry."""
+        run = Run(
+            tool=Tool(driver=ToolComponent(name="ASH", rules=[_rule("DECLARED")])),
+            results=[
+                _result("DECLARED", level=Level.note),
+                _result(
+                    "UNDECLARED",
+                    level=Level.error,
+                    suppressions=[Suppression(kind=Kind1.external)],
+                ),
+            ],
+        )
+
+        doc = json.loads(reporter.report(_model(run)))
+
+        assert [r["ruleId"] for r in doc["runs"][0]["results"]] == ["DECLARED"]
+        assert [r["id"] for r in doc["runs"][0]["tool"]["driver"]["rules"]] == [
             "DECLARED"
-        }
+        ]
 
 
 class TestBuildSlimLocations:

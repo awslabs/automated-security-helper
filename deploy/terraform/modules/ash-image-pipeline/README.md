@@ -42,13 +42,29 @@ Two stacked Docker builds:
    `INSTALL_ASH_REVISION=LOCAL`, rather than letting the Dockerfile re-clone.
    That matters because the Dockerfile's own remote path uses
    `git clone --branch`, which cannot resolve a commit SHA — doing the fetch
-   outside is what makes SHA pinning possible.
+   outside is what makes SHA pinning possible. `ash_version` and
+   `ash_repository_clone_url` follow `--` on the git command line, so git
+   takes them as the ref and the remote URL even when one starts with `-`; such
+   a value names no ref or repository, and the build fails at the fetch. The
+   ASH `Dockerfile` installs cfn-nag's gems frozen from its committed
+   `Gemfile.lock`, so builds of one `ash_version` install the same gems.
 2. A thin wrapper (`files/wrapper.Dockerfile`) adding two scripts:
    - `ash-container-init` (the `ENTRYPOINT`) materializes the base config from
      SSM to `.ash/.ash.yaml`, resolves the MCP auth header value from Secrets
-     Manager, then `exec`s whatever command it was given.
+     Manager, then `exec`s whatever command it was given. The value is handed
+     over in an in-memory file the command inherits, named by
+     `ASH_MCP_AUTH_HEADER_VALUE_FD`, not in the environment: an ASH config may
+     read any `ASH_*` variable, so an exported value could be copied into the
+     effective config, logs and reports.
    - `ash-mcp-serve` (the `CMD`) builds an `ash mcp` command line from
-     environment variables and execs it.
+     environment variables and execs it. It reads the auth header value from
+     that file, or from `ASH_MCP_AUTH_HEADER_VALUE` when an operator sets it
+     directly, and removes both variables first, so `ash mcp` and the scanners
+     it starts see neither. It hands the value to `ash mcp` in a new in-memory
+     file, as `--auth-header-value-fd N`, which `ash mcp` reads once and closes,
+     so the value is on no command line. An `ash_version` whose `ash mcp` has no
+     `--auth-header-value-fd` gets `--auth-header-value` instead, with a warning
+     on stderr.
 
 The wrapper exists because Bedrock AgentCore Runtime has **no container command
 override** — its `container_configuration` block accepts only `container_uri`.
@@ -66,7 +82,7 @@ the mapping is one to one.
 
 | Variable | Contract | Type | Default | Notes |
 |---|---|---|---|---|
-| `ash_version` | `AshVersion` | `string` | *required* | Git ref: release tag, branch, or full commit SHA. No default, so the pin is always deliberate. |
+| `ash_version` | `AshVersion` | `string` | *required* | Git ref: release tag, branch, or full commit SHA. No default, so the pin is always deliberate. Use the release these modules came from, as the examples do; see [Which `AshVersion` to use](../../../README.md#which-ashversion-to-use). |
 | `ash_offline_mode` | `AshOfflineMode` | `bool` | `false` | Builds with `OFFLINE=YES`, vendoring rulesets and setting `ASH_OFFLINE` in the image. |
 | `ash_base_config_yaml` | `AshBaseConfigYaml` | `string` | `null` | Full `.ash.yaml` contents. Stored in SSM, written to `.ash/.ash.yaml` at container start. Capped at 8192 bytes. |
 | `rebuild_schedule` | `RebuildSchedule` | `string` | `"rate(1 day)"` | EventBridge `rate(...)` or `cron(...)`. |

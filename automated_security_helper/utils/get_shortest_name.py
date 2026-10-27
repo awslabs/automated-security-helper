@@ -38,3 +38,61 @@ def get_shortest_name(input: str | Path):  # noqa: A002
     else:
         shortest = input
     return Path(shortest).as_posix()
+
+
+def home_as_tilde(text: str) -> str:
+    """*text* with the user's home directory written as ``~``.
+
+    For text that goes into the results and reports rather than ash.log: a
+    scanner's ``missing_reason`` names where ASH looked for its tool (ASH's bin
+    directory is under the home directory by default) and, for a uv-run tool, the
+    uv executable it found. The home directory is the host-specific part, and the
+    reports reach ash.flat.json, MCP clients and the cloud reporters.
+
+    Replaced: the home directory as given and its resolved form, since one is often
+    a symlink to the other, and on Windows each with ``/`` for ``\\`` too, since the
+    not-found reason writes ``as_posix()`` paths; a drive-letter home is matched
+    without regard to case. Only a whole path is replaced: it must start the text or
+    follow whitespace or one of ``,;:(='"`[<{`` and end the text or be followed by a
+    separator, whitespace or one of ``,;:)'"`]>}``, so ``/home/a`` is left alone
+    inside ``/home/ab``, ``/srv/home/a``, ``//home/a`` and ``file:///home/a``. A
+    name that goes on with one of those characters is rewritten too, though it is
+    not under the home directory: ``/home/a]x/y`` becomes ``~]x/y`` and
+    ``/opt/a[/home/a/x`` becomes ``/opt/a[~/x``. This text is for display, and such
+    names are rare enough that the boundary is not narrowed for them.
+
+    Left alone: a home that is not absolute (its resolved form would be the working
+    directory joined to it, not a home), and a root (``/``, ``C:\\``), since
+    replacing either would rewrite other paths. Not recognized: a UNC home
+    (``\\\\server\\share\\u``), a ``\\\\?\\``-prefixed path, and a Python repr's
+    doubled backslashes; no reason ASH writes uses those forms.
+    """
+    import os
+    import re
+
+    from automated_security_helper.core.constants import usable_home
+
+    home_path = usable_home()
+    if home_path is None:
+        return text
+    home = str(home_path)
+    drive = re.compile(r"^[A-Za-z]:[\\/]")
+    if not (home.startswith("/") or drive.match(home)):
+        return text
+    forms: set[str] = set()
+    for candidate in {home, os.path.realpath(home)}:
+        windows = bool(drive.match(candidate))
+        if not (candidate.startswith("/") or windows):
+            continue
+        stripped = candidate.rstrip("/\\")
+        if not stripped or re.fullmatch(r"[A-Za-z]:", stripped):
+            continue
+        forms.add(stripped)
+        if windows:
+            forms.add(stripped.replace("\\", "/"))
+    before = r"(?<![^\s,;:(='\"`\[<{])"
+    after = r"(?![^/\\\s,;:)'\"`\]>}])"
+    for form in sorted(forms, key=len, reverse=True):
+        flags = re.IGNORECASE if drive.match(form) else 0
+        text = re.sub(before + re.escape(form) + after, "~", text, flags=flags)
+    return text

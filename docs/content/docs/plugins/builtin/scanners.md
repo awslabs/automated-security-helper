@@ -1,6 +1,6 @@
 # Built-in Security Scanners
 
-ASH includes 10 built-in security scanners that analyze different aspects of your code and infrastructure. Each scanner specializes in specific security domains and file types.
+ASH includes 16 built-in security scanners that analyze different aspects of your code and infrastructure. Each scanner specializes in specific security domains and file types.
 
 > For detailed visual diagrams of the built-in scanner architecture and workflows, see [Built-in Scanner Diagrams](scanners-diagrams.md).
 
@@ -18,6 +18,12 @@ ASH includes 10 built-in security scanners that analyze different aspects of you
 | **[Opengrep](#opengrep)**             | Code pattern matching           | Multiple languages              | Custom rule engine                         |
 | **[Semgrep](#semgrep)**               | Static analysis scanner         | 30+ languages                   | Community and custom rules                 |
 | **[Syft](#syft)**                     | SBOM generator                  | Container images, filesystems   | Software inventory generation              |
+| **[actionlint](#actionlint)**         | GitHub Actions linter           | Workflow files                  | Script injection, expression types         |
+| **[cfn-lint](#cfn-lint-and-cfn-guard)** | CloudFormation validation     | YAML, JSON                      | Resource schema checks                     |
+| **[cfn-guard](#cfn-lint-and-cfn-guard)** | CloudFormation policy         | YAML, JSON                      | AWS Guard Rules Registry rules             |
+| **[Gitleaks](#gitleaks)**             | Secret detection                | All text files                  | Rule-based secret detection, redacted      |
+| **[Trivy](#trivy)**                   | Dependency vulnerabilities      | Manifests and lockfiles         | `trivy fs`, vulnerability scanner only     |
+| **[zizmor](#zizmor)**                 | GitHub Actions static analysis  | Workflows, composite actions    | Template injection, credential exposure    |
 
 ## Scanner Details
 
@@ -40,6 +46,33 @@ scanners:
 Individual bandit test IDs are selected in a bandit configuration file, not through
 ASH options. `severity_threshold` belongs under `options`, alongside the rest.
 
+ASH passes bandit an `--exclude` list for each scan. Besides `excluded_paths` and
+the virtual-environment and `node_modules` directories, it holds ASH's output
+directory when that is inside the scanned directory, so bandit does not read the
+converters' output twice, and a bandit glob for each of the scan's `ignore_paths`
+that is a file path (`src/app.py`), of the form `dir/`, `dir/**` or `**/dir/**`, or
+like `src/*.py`. Such a glob makes
+bandit skip only files the ignore path covers, though it can skip fewer: bandit
+matches case-sensitively and ASH does not. A pattern with a character class
+(`[...]`) is never passed to bandit: ASH lower-cases the pattern and the path
+before matching, so `src/[!A-Z].py` does not cover `src/b.py`, and bandit would
+skip it. bandit also skips any file whose path contains an entry as plain text, so
+an entry is not passed when a file path under the scanned directory contains it,
+which takes a `*`, `?` or `[` in a file or directory name (`docs/*.md/app.py` for
+the entry of `docs/*.md`). bandit also turns an entry that names an existing
+directory into `<entry>/*`, so an entry is not passed when it names one (an empty
+directory, or a symlink, literally named `docs/*.md`). Every ignore path is still
+applied when the results are processed, as for every scanner, so the findings it
+covers are dropped either way.
+
+An `excluded_paths` entry is applied by bandit alone, and names a path anywhere
+below the scanned directory: `app.py` skips every file named `app.py`, `vendor`
+the files of every `vendor` directory (and a file named `vendor`), `tests/*` what
+the glob matches, and `vendor/` or `**/vendor/**` only the files of `vendor`
+directories. bandit matches these case-sensitively. An entry with a `,`, or with a
+`.` or empty path component, has no bandit form; the scanner logs a warning and
+skips nothing for it.
+
 **Key Checks**:
 - SQL injection vulnerabilities
 - Hardcoded passwords and secrets
@@ -61,9 +94,14 @@ scanners:
   cdk_nag:
     enabled: true
     options:
-      rules_to_suppress: ["AwsSolutions-S1", "AwsSolutions-S2"]
-      verbose: true
+      nag_packs:                       # Which cdk-nag packs to apply
+        AwsSolutionsChecks: true
+        HIPAASecurityChecks: false
+      include_compliant_checks: false  # Also report compliant resources (INFO)
 ```
+
+To skip a cdk-nag rule, suppress it like any other finding (`rule_id:
+AwsSolutions-S1` under `global_settings.suppressions`).
 
 **Key Checks**:
 - S3 bucket security configurations
@@ -72,7 +110,11 @@ scanners:
 - Encryption requirements
 - Logging and monitoring setup
 
-**Dependencies**: AWS CDK CLI, Node.js
+**Dependencies**: the `aws-cdk-lib`, `cdk-nag` and `constructs` Python packages in
+ASH's environment (`ash dependencies install --tool cdk-nag` adds them), and Node.js
+with `node` on `PATH`, which ASH does not install. The AWS CDK CLI is not needed.
+When either is missing the scanner is MISSING, and the reason it records says which:
+the unavailable packages, or "Node.js not found on PATH".
 
 ---
 
@@ -86,9 +128,11 @@ scanners:
   cfn_nag:
     enabled: true
     options:
-      rules_to_suppress: ["W1", "W2"]
-      fail_on_warnings: false
+      severity_threshold: "MEDIUM"
 ```
+
+cfn-nag has no options of its own beyond those every scanner takes; suppress a rule
+with `global_settings.suppressions`.
 
 **Key Checks**:
 - IAM policies with excessive permissions
@@ -98,6 +142,12 @@ scanners:
 - Insecure resource configurations
 
 **Dependencies**: `cfn-nag` Ruby gem
+
+**Template copy**: cfn-nag is given a copy of each template, staged in its results
+directory as `template.json`, `template.yaml` or `template.yml` by the template's
+extension, and as `template.yaml` for any other extension. The `cfn_nag_scan` command
+line is therefore the same whatever the template is called, including on Windows,
+where `cfn_nag_scan` is a batch file. Findings name the original template.
 
 ---
 
@@ -123,6 +173,11 @@ scanners:
 Individual check IDs and custom check directories are configured in a checkov
 configuration file, which `config_file` points at.
 
+ASH adds a `--skip-path` for each of its own output directories inside the scanned
+directory, unless that directory's path holds a parenthesis, which checkov's terraform
+module finder cannot take, or ASH runs on Windows; then checkov reads the directory,
+ASH logs a warning naming it, and the findings checkov reports there are dropped.
+
 **Key Checks**:
 - Cloud resource misconfigurations
 - Kubernetes security policies
@@ -144,10 +199,29 @@ scanners:
   detect_secrets:
     enabled: true
     options:
-      plugins: ["ArtifactoryDetector", "AWSKeyDetector", "Base64HighEntropyString"]
-      exclude_files: ".*\\.lock$"
-      exclude_lines: "password.*=.*\\{\\{.*\\}\\}"
+      baseline_file: ".secrets.baseline"  # detect-secrets baseline, relative to the source
+      skip_generated_lockfiles: true      # Skip package-lock.json, yarn.lock and similar
+      max_worker_output_mib: 256          # Most of the scan's findings output read back, in MiB
 ```
+
+A finding is about 300 bytes of output, so the default of 256 MiB holds about
+900,000 findings. Reading the output back costs about three times its size in
+memory. A scan whose output is larger fails, records no findings, and names
+`max_worker_output_mib` in its error.
+
+`max_worker_output_mib` is at most 4096, and only the operator sets it: from
+`--config-overrides` or a config file outside the scanned tree. Whatever a config
+file inside the tree writes for it, a value past 4096 included, is ignored, with a
+warning, because the repository being scanned wrote that file. When such a file is
+part of the configuration, the limit is the operator's whether or not that file
+names it: an override's, the value a config file outside the tree gives it, or
+else the operator's base configuration's (the file `ASH_CONFIG` names, a
+workspace's default config, or 256), so a lower limit the operator set holds for a
+repository that says nothing about it.
+
+Which detectors run, and which files and lines they skip, are set in the
+detect-secrets baseline (`baseline_file`) or in `scan_settings`, in detect-secrets'
+own format.
 
 **Key Checks**:
 - High entropy strings (potential secrets)
@@ -155,6 +229,17 @@ scanners:
 - Private keys and certificates
 - Database connection strings
 - API keys and tokens
+
+**Baseline**: ASH reads a detect-secrets baseline for the plugins, filters and accepted
+findings to use. It takes `baseline_file` when set, else `.ash/.secrets.baseline`, else
+`.secrets.baseline`, each relative to the source directory, so the same tree gives the
+same result whichever directory ASH runs from. See
+[Detect-Secrets](../../configuration-guide.md#detect-secrets) in the configuration guide.
+
+**Secret verification**: detect-secrets can send a candidate secret to the service that
+issued it. ASH does that only when the operator's own configuration turns it on, never
+from a baseline or config file the scanned repository holds, and never offline. See
+[Secret verification](../../configuration-guide.md#secret-verification).
 
 **Dependencies**: `detect-secrets` Python package
 
@@ -172,7 +257,7 @@ scanners:
     options:
       severity_threshold: "MEDIUM"   # ALL, LOW, MEDIUM, HIGH, CRITICAL
       offline: false                 # Skip database updates
-      config_file: null              # Explicit grype config, relative to the source directory
+      config_file: null              # Explicit grype config, relative to the config file that sets it
 ```
 
 **Key Checks**:
@@ -195,15 +280,48 @@ scanners:
   npm_audit:
     enabled: true
     options:
-      audit_level: "moderate"  # info, low, moderate, high, critical
-      production_only: false
+      severity_threshold: "HIGH"  # ALL, LOW, MEDIUM, HIGH, CRITICAL
 ```
+
+npm-audit has no options of its own beyond those every scanner takes.
 
 **Key Checks**:
 - Known vulnerabilities in npm packages
 - Dependency tree analysis
 - Severity-based filtering
 - Fix recommendations
+
+In offline mode npm-audit runs no audit, since npm, pnpm and yarn audit only against
+the registry's advisory service. Each lockfile is listed as not scanned in the results
+and the summaries, and with a lockfile to audit npm-audit is MISSING, so the scan fails
+under the default completeness gate. `--exclude-scanners npm-audit` leaves it out of an
+offline scan. See
+[What offline mode turns off](../../advanced-usage.md#what-offline-mode-turns-off).
+
+npm-audit runs npm, pnpm and yarn without the scanned repository's settings files:
+its `.npmrc`, the settings in `pnpm-workspace.yaml`, `.yarnrc` and `.yarnrc.yml`,
+including a `yarn-path` or `yarnPath`, which would run a file from the repository.
+Your own settings still apply: `~/.npmrc`, the global npmrc, `~/.yarnrc` and
+`~/.yarnrc.yml`, so a private registry and its credentials work as before. npm and
+pnpm run from a private copy of each package's `package.json` and lockfile; yarn
+runs from a copy, outside the scanned tree, of its lockfile and every
+`package.json` below it, with `YARN_IGNORE_PATH=1`. Under `--sandbox` the tool's home
+is private, so only environment variables reach it, and yarn runs in the package
+directory reading no settings file (`--no-default-rc`, or `YARN_RC_FILENAME` for
+yarn 2 and later).
+
+A `pnpm.auditConfig` in the repository's `package.json` (`ignoreCves`,
+`ignoreGhsas`) hides those advisories, as a suppression in the repository's ASH
+configuration would; `--ignore-suppressions` removes it from the copy pnpm audits.
+
+npm, pnpm and yarn follow links. So every file npm-audit hands one of them (the
+package's `package.json`, the lockfiles it reads, `npm-shrinkwrap.json` included,
+and for yarn every workspace `package.json` below the package) has to resolve inside
+the scanned tree and be a regular file. A package with a file that is a link out of
+the tree, or that sits in a linked directory pointing out of it, is not audited: the
+file is listed as not scanned, with the reason "link leaves the scanned tree", and
+the scan fails, as for any lockfile left unaudited. A link to a file elsewhere in the
+scanned tree (another project of the workspace, in workspace mode) is followed.
 
 **Dependencies**: Node.js, npm
 
@@ -280,9 +398,13 @@ scanners:
     enabled: true
     options:
       additional_outputs: ["syft-table"]   # Extra output formats beyond CycloneDX
-      exclude: []                          # Paths to skip, matched as regular expressions
+      exclude: []                          # Paths to skip, as globs starting ./, */ or **/
       offline: false                       # Skip update checks
 ```
+
+syft runs from outside the scanned tree and is not given a `.syft.yaml` or
+`config_file` from it, online or offline, because such a file can turn on remote
+license and package lookups. A `config_file` outside the tree is still used.
 
 **Key Features**:
 - Package discovery across multiple ecosystems
@@ -291,6 +413,36 @@ scanners:
 - License identification
 
 **Dependencies**: `syft` binary
+
+### actionlint
+
+**Purpose**: Lints GitHub Actions workflow files (`.github/workflows`): script injection from untrusted event data, expression types, hard-coded container credentials, always-true `if:` conditions.
+
+**Dependencies**: `actionlint` binary (pinned; `ash dependencies install` and the container image provide it). See [actionlint](actionlint.md).
+
+### cfn-lint and cfn-guard
+
+**Purpose**: cfn-lint validates CloudFormation templates against the resource schemas; cfn-guard evaluates them against the AWS Guard Rules Registry (default rule set `wa-Security-Pillar`, every violation HIGH). Both read the templates cfn-nag reads.
+
+**Dependencies**: `cfn-lint` (uv tool) and the `cfn-guard` binary with the Guard Rules Registry bundle (pinned). See [cfn-lint and cfn-guard](cfn-lint-and-cfn-guard.md).
+
+### Gitleaks
+
+**Purpose**: Finds credentials in the working tree's files with `gitleaks dir` (no git history), beside detect-secrets. Findings are CRITICAL and values are redacted.
+
+**Dependencies**: `gitleaks` binary (pinned). See [Gitleaks](gitleaks.md).
+
+### Trivy
+
+**Purpose**: `trivy fs` over each target, the vulnerability scanner only by default, held to the trivy database's 24h bound. It reads no trivy configuration from the scanned repository unless configured.
+
+**Dependencies**: `trivy` binary (pinned) and its vulnerability database (downloaded online; offline it must already be in the cache). See [Trivy filesystem scanner](trivy.md).
+
+### zizmor
+
+**Purpose**: Static analysis of GitHub Actions workflows and composite actions, run with `--offline`; GitHub tokens are withheld unless the operator sets `options.online_audits` (`--config-overrides` or a config outside every git checkout and the scanned directory).
+
+**Dependencies**: `zizmor` (uv tool). See [zizmor](zizmor.md).
 
 ## Best Practices
 
@@ -333,10 +485,12 @@ scanners:
 # Different thresholds for different environments
 scanners:
   bandit:
-    severity_threshold: "LOW"    # Strict for production
+    options:
+      severity_threshold: "LOW"    # Strict for production
 
   checkov:
-    severity_threshold: "MEDIUM" # Balanced for staging
+    options:
+      severity_threshold: "MEDIUM" # Balanced for staging
 ```
 
 ## Troubleshooting

@@ -270,6 +270,9 @@ def _forms_setup(tmp_path: Path, monkeypatch, name: str):
 @pytest.mark.parametrize("form", _FORMS)
 def test_checkov_passes_exactly_the_path_that_was_checked(tmp_path, monkeypatch, form):
     source, value_for, expected = _forms_setup(tmp_path, monkeypatch, "ck.yaml")
+    # A relative override is taken from the working directory; run from the
+    # source directory so each form names the file it names from there.
+    monkeypatch.chdir(source)
     value = value_for(form)
     argv = _checkov_argv(
         source,
@@ -378,8 +381,30 @@ def test_ferret_always_gets_an_explicit_config_outside_the_tree(tmp_path):
         config=FerretScannerConfig(options={"use_default_config": False}),
         context=_context(source, tmp_path, config),
     )
-    values = [a.value for a in scanner.args.extra_args if a.key == "--config"]
+    argv = scanner._resolve_arguments(source, tmp_path / "results.sarif")
+    values = [argv[i + 1] for i, arg in enumerate(argv[:-1]) if arg == "--config"]
     assert len(values) == 1
     passed = Path(values[0])
     assert not passed.resolve().is_relative_to(source.resolve())
     assert passed.read_text().strip() == "{}"
+
+
+def test_ferret_gets_only_the_operators_config_when_one_is_named(tmp_path):
+    """ASH's empty config replaces a missing one; it is never passed beside the operator's."""
+    from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
+        FerretScanScanner,
+        FerretScannerConfig,
+    )
+
+    source = _tree(tmp_path, "")
+    operator = _outside(tmp_path, "ferret.yaml")
+    config = resolve_config(source_dir=source)
+    scanner = FerretScanScanner(
+        config=FerretScannerConfig(
+            options={"config_file": str(operator), "use_default_config": False}
+        ),
+        context=_context(source, tmp_path, config),
+    )
+    argv = scanner._resolve_arguments(source, tmp_path / "results.sarif")
+    values = [argv[i + 1] for i, arg in enumerate(argv[:-1]) if arg == "--config"]
+    assert values == [str(operator.resolve())]

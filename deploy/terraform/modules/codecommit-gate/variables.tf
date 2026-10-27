@@ -101,25 +101,29 @@ variable "min_severity" {
   type        = string
   default     = "low"
 
-  # Restricted to the values ASH's ladder actually ranks. ASH does not validate
-  # this option itself -- it does `_SEVERITY_RANK.get(min_severity.lower(), 1)`,
-  # so an unrecognized value silently becomes rank 1, which is "low". A typo would
-  # therefore produce a working gate at a threshold nobody chose. This validation
-  # is what turns that into an error.
+  # Restricted to the values ASH's ladder actually ranks. ASH 3.7.0 and 3.7.1 do
+  # not validate this option themselves -- they do
+  # `_SEVERITY_RANK.get(min_severity.lower(), 1)`, so an unrecognized value
+  # silently becomes rank 1, which is "low", and a typo produces a working gate at
+  # a threshold nobody chose. ASH releases after 3.7.1 refuse any value other than
+  # critical, high, medium, low or none as a usage error (exit 5), which reports
+  # an error on every pull request. Either way, this validation is what turns the
+  # typo into an error at plan time.
   #
-  # Worth knowing which way that fails: rank 1 is "low", the strictest setting, so
-  # the silent substitution errs toward failing pull requests rather than passing
-  # them. A fat-fingered "hihg" gets a gate that blocks on medium findings with no
-  # explanation -- irritating and hard to diagnose, but it cannot quietly weaken a
-  # gate. That is why this is a correctness-and-clarity fix rather than a
-  # vulnerability.
+  # Worth knowing which way that fails on 3.7.0 and 3.7.1: rank 1 is "low", the strictest
+  # setting, so the silent substitution errs toward failing pull requests rather
+  # than passing them. A fat-fingered "hihg" gets a gate that blocks on medium
+  # findings with no explanation -- irritating and hard to diagnose, but it cannot
+  # quietly weaken a gate. That is why this is a correctness-and-clarity fix
+  # rather than a vulnerability.
   #
-  # "info" is deliberately not accepted: ASH has no such rank, so it would be
-  # silently reinterpreted as "low". "none" is not accepted either, because rank 0
-  # skips the severity filter path entirely rather than meaning "everything".
+  # "info" is deliberately not accepted: ASH has no such rank, so 3.7.0 and 3.7.1
+  # would silently reinterpret it as "low" and releases after 3.7.1 refuse it. "none" is not
+  # accepted either, because rank 0 skips the severity filter path entirely rather
+  # than meaning "everything".
   validation {
     condition     = contains(["critical", "high", "medium", "low"], lower(var.min_severity))
-    error_message = "min_severity must be one of: critical, high, medium, low. ASH ranks no other value and would silently treat it as \"low\"."
+    error_message = "min_severity must be one of: critical, high, medium, low. ASH ranks no other value: 3.7.0 and 3.7.1 silently treat one as \"low\", and releases after 3.7.1 refuse it."
   }
 }
 
@@ -247,9 +251,17 @@ variable "ash_scan_extra_args" {
   description = <<-EOT
     Extra arguments appended to the `ash scan` command line, split on whitespace.
 
-    `--changed-files-only` together with `--base-ref` is worth considering here:
-    it scales scan time with the size of the change rather than the size of the
-    repository, which is what makes the 900 second ceiling reachable.
+    For presentation and diagnostic flags such as `--log-level`. Options the gate
+    owns are refused, and so is anything that narrows what gets scanned or what
+    counts (refused: `--changed-files-only` and `--base-ref` among them): the
+    gate would then report a pass about less than the whole tree;
+    GATE_OWNED_SCAN_OPTIONS in files/ash_pr_gate.py is the full list. A refused
+    option ends every pull request in outcome "error".
+
+    An option ASH does not accept, a typo included, is a usage error on ASH
+    releases after 3.7.1: `ash scan` exits 5 and every pull request reports an
+    error that names this variable. ASH 3.7.0 and 3.7.1 ignore an unknown option
+    instead.
   EOT
   type        = string
   default     = ""
@@ -262,7 +274,7 @@ variable "ash_offline_mode" {
 }
 
 variable "base_config_ssm_parameter_name" {
-  description = "Contract name: AshBaseConfigYaml (indirect). SSM parameter the entrypoint reads to write .ash/.ash.yaml. Pass the ash-image-pipeline output."
+  description = "Contract name: AshBaseConfigYaml (indirect). SSM parameter the entrypoint reads to write .ash/.ash.yaml, which the gate passes to ash scan with --config. Without one the gate passes {} (ASH's defaults), so a pull request's own config is never read. Pass the ash-image-pipeline output."
   type        = string
   default     = null
 }
@@ -390,8 +402,9 @@ variable "scan_egress_cidr" {
     function may reach on TCP 443 once it is in a VPC; it is the security group's
     only egress rule.
 
-    The function calls CodeCommit (the API and git-codecommit) and Systems Manager
-    for its config parameter. The Lambda service, not the function's network
+    The function calls CodeCommit (the API and git-codecommit) and, when
+    base_config_ssm_parameter_name is set, Systems Manager for its config
+    parameter. The Lambda service, not the function's network
     interfaces, pulls the image and delivers its logs. With ash_offline_mode false
     the scanners also download rules and vulnerability databases from public hosts
     outside AWS. So: your VPC CIDR for an offline image with interface endpoints

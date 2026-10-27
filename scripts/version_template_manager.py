@@ -37,6 +37,7 @@ class VersionTemplateManager:
             "docs/content/docs/advanced-usage.md",
             "docs/content/tutorials/running-ash-in-ci.md",
             "docs/content/tutorials/running-ash-locally.md",
+            "docs/content/tutorials/using-ash-with-pre-commit.md",
             "examples/streamlit_ui/README.md",
         ]
 
@@ -160,6 +161,91 @@ class VersionTemplateManager:
             print(f"Error converting {file_path} to template: {e}")
             return False
 
+    # A block of template text that depends on the version being documented:
+    #
+    #     {{#after 3.7.1}}
+    #     text for a release after 3.7.1
+    #     {{else}}
+    #     text for 3.7.1 and earlier (optional)
+    #     {{/after}}
+    #
+    # Each marker sits on a line of its own and the line is dropped. "After" compares
+    # major.minor.patch, so 3.8.0rc1 is after 3.7.1. It exists for docs that describe
+    # a feature main has and the documented release does not: the docs publish on
+    # every push to main, so without it they would describe the feature as part of
+    # the release, and an example copied from them would not run against it.
+    #
+    # Blocks do not nest, and an unbalanced or malformed marker is an error rather
+    # than text, so a typo cannot publish both branches. A line that holds anything
+    # resembling a marker (`{{#after`, `{{else`, `{{/after`, in any case and with any
+    # spacing, anywhere on the line) must be exactly one of the three markers above,
+    # alone on its line. `convert` cannot recreate a block from a generated doc; edit
+    # the template, never regenerate it with `convert`.
+    _AFTER_OPEN = re.compile(r"\{\{#after (?P<threshold>\d+\.\d+\.\d+)\}\}")
+    _AFTER_ELSE = "{{else}}"
+    _AFTER_CLOSE = "{{/after}}"
+    _MARKER_LIKE = re.compile(r"\{\{\s*(?:#\s*after|/\s*after|else)\b", re.IGNORECASE)
+    # A release or a PEP 440 prerelease, development or post release of one; the
+    # whole string, so "3.8.0junk" or "3.8.0.1" is not read as 3.8.0.
+    _VERSION = re.compile(
+        r"(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)"
+        r"(?:(?:a|b|rc)\d+)?(?:\.post\d+)?(?:\.dev\d+)?"
+    )
+
+    @classmethod
+    def _release(cls, version: str, what: str) -> Tuple[int, int, int]:
+        match = cls._VERSION.fullmatch(version)
+        if not match:
+            raise ValueError(f"{what} {version!r} is not a major.minor.patch version")
+        return (int(match["major"]), int(match["minor"]), int(match["patch"]))
+
+    def render(self, content: str, version: str) -> str:
+        """The template text with its version blocks resolved and the placeholder filled.
+
+        The version is checked only when a block needs it, so a template without one
+        renders for any version string.
+        """
+        release = None
+        out: List[str] = []
+        block = None  # (shown when after, in else branch)
+        for number, line in enumerate(content.splitlines(keepends=True), 1):
+            marker = line.strip()
+            if not self._MARKER_LIKE.search(line):
+                if block is None or block[0] != block[1]:
+                    out.append(line)
+                continue
+            opened = self._AFTER_OPEN.fullmatch(marker)
+            if opened:
+                if block is not None:
+                    raise ValueError(f"line {number}: version blocks do not nest")
+                if release is None:
+                    release = self._release(version, "version")
+                threshold = self._release(opened.group("threshold"), "threshold")
+                block = [release > threshold, False]
+                continue
+            if marker not in (self._AFTER_ELSE, self._AFTER_CLOSE):
+                raise ValueError(
+                    f"line {number}: malformed version block marker {marker!r}; a "
+                    "marker is {{#after X.Y.Z}}, {{else}} or {{/after}}, alone on "
+                    "its line"
+                )
+            if marker == self._AFTER_ELSE:
+                if block is None or block[1]:
+                    raise ValueError(
+                        f"line {number}: {{{{else}}}} outside a version block"
+                    )
+                block[1] = True
+                continue
+            if marker == self._AFTER_CLOSE:
+                if block is None:
+                    raise ValueError(
+                        f"line {number}: {{{{/after}}}} without a version block"
+                    )
+                block = None
+        if block is not None:
+            raise ValueError("a version block is not closed with {{/after}}")
+        return "".join(out).replace(self.version_placeholder, version)
+
     def generate_from_template(self, template_path: Path) -> bool:
         """
         Generate final file from template by replacing placeholders with actual version.
@@ -178,9 +264,9 @@ class VersionTemplateManager:
             with open(template_path, "r", encoding="utf-8") as f:
                 content = f.read()
 
-            # Replace version placeholder with actual version
+            # Resolve version blocks and replace the placeholder with the version
             current_version = get_version()
-            content = content.replace(self.version_placeholder, current_version)
+            content = self.render(content, current_version)
 
             # Generate output file (remove .template suffix)
             output_path = template_path.with_suffix("")
@@ -195,6 +281,10 @@ class VersionTemplateManager:
             print(f"Generated {output_path} from template")
             return True
 
+        except ValueError:
+            # A malformed version block: stop rather than skip the file and leave a
+            # stale doc behind a success message.
+            raise
         except Exception as e:
             print(f"Error generating from template {template_path}: {e}")
             return False

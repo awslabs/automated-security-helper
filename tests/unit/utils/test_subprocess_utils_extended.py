@@ -17,7 +17,10 @@ from automated_security_helper.utils.subprocess_utils import (
     create_completed_process,
     raise_called_process_error,
     create_process_with_pipes,
+    SPAWN_FAILURE_RETURNCODE,
+    UNRECORDED_RUN_RETURNCODE,
 )
+from tests.utils.fake_tool_paths import fake_tool_path
 
 
 @patch("shutil.which")
@@ -25,28 +28,37 @@ from automated_security_helper.utils.subprocess_utils import (
 def test_find_executable_found_in_path(mock_exists, mock_which):
     clear_find_executable_cache()
     """Test finding an executable in PATH."""
-    mock_which.return_value = "/usr/bin/test_cmd"
+    # An answer from ``which`` is passed on only when it is anchored, and on Windows
+    # that takes a drive: a bare POSIX path is read as relative and skipped.
+    found_on_path = fake_tool_path("/usr/bin/test_cmd")
+    mock_which.return_value = found_on_path
     mock_exists.return_value = False
 
     result = find_executable("test_cmd")
 
-    assert result == "/usr/bin/test_cmd"
+    assert result == found_on_path
     mock_which.assert_called_once()
 
 
 @patch("shutil.which")
-@patch("pathlib.Path.exists")
-def test_find_executable_found_in_ash_bin(mock_exists, mock_which):
-    """Test finding an executable in ASH_BIN_PATH."""
+def test_find_executable_found_in_ash_bin(mock_which, tmp_path, monkeypatch):
+    """Test finding an executable in ASH_BIN_PATH.
+
+    A real executable file: the directory probe counts only a file it may run, so a
+    patched ``Path.exists`` no longer stands for one.
+    """
     clear_find_executable_cache()
     mock_which.return_value = None
-    mock_exists.return_value = True
+    tool = tmp_path / "test_cmd"
+    tool.write_text("#!/bin/sh\n", encoding="utf-8")
+    tool.chmod(0o755)
+    monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path))
 
     result = find_executable("test_cmd")
 
-    assert result is not None
+    assert result == tool.as_posix()
     mock_which.assert_called_once()
-    mock_exists.assert_called()
+    clear_find_executable_cache()
 
 
 @patch("shutil.which")
@@ -63,7 +75,7 @@ def test_find_executable_not_found(mock_exists, mock_which):
     assert mock_which.call_count >= 1
 
 
-@patch("subprocess.run")
+@patch("automated_security_helper.utils.subprocess_utils._run_plain")
 @patch("automated_security_helper.utils.subprocess_utils.find_executable")
 def test_run_command_success(mock_find_executable, mock_run):
     """Test running a command successfully."""
@@ -81,7 +93,44 @@ def test_run_command_success(mock_find_executable, mock_run):
     mock_run.assert_called_once()
 
 
-@patch("subprocess.run")
+@patch("automated_security_helper.utils.subprocess_utils._run_plain")
+@patch("automated_security_helper.utils.subprocess_utils.find_executable")
+def test_a_raising_log_shower_loses_the_line_not_the_run(
+    mock_find_executable, mock_run, caplog, monkeypatch
+):
+    """The "Running command:" line is decorated by the scope shower OUTSIDE
+    run_command's try, before the spawn. The shower is best-effort
+    decoration of a log line, so when it raises the line is replaced by a
+    placeholder and the run still happens -- and the placeholder never
+    carries the command text, which is exactly what the shower was hiding."""
+    import logging
+
+    mock_find_executable.return_value = "/usr/bin/test_cmd"
+    mock_process = MagicMock()
+    mock_process.returncode = 0
+    mock_process.stdout = ""
+    mock_process.stderr = ""
+    mock_run.return_value = mock_process
+
+    def _raises(text, values=()):
+        raise TypeError("shower drift")
+
+    monkeypatch.setattr(
+        "automated_security_helper.utils.sandbox.scope.scope_shown_text", _raises
+    )
+    caplog.set_level(logging.DEBUG, logger="ash")
+
+    result = run_command(["test_cmd", "SECRET-ARG-77"])
+
+    assert result.returncode == 0
+    mock_run.assert_called_once()
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert "(this line could not be shown)" in logged, logged
+    assert "SECRET-ARG-77" not in logged, logged
+    assert "shower drift" not in logged, logged
+
+
+@patch("automated_security_helper.utils.subprocess_utils._run_plain")
 @patch("automated_security_helper.utils.subprocess_utils.find_executable")
 def test_run_command_failure(mock_find_executable, mock_run):
     """Test running a command that fails."""
@@ -99,21 +148,67 @@ def test_run_command_failure(mock_find_executable, mock_run):
     mock_run.assert_called_once()
 
 
-@patch("subprocess.run")
+@patch("automated_security_helper.utils.subprocess_utils._run_plain")
+@patch("automated_security_helper.utils.subprocess_utils.find_executable")
+def test_the_stderr_debug_record_is_not_built_with_debug_off(
+    mock_find_executable, mock_run, monkeypatch
+):
+    """The failed command's "Command stderr:" record walks the full stderr
+    through the record redaction, and with any scope or record context that
+    walk reads megabytes per failed command. With DEBUG off the record is
+    never emitted, so the walk buys nothing: the line takes the same
+    isEnabledFor guard prepare_spawn's own debug line has."""
+    import logging
+
+    from automated_security_helper.utils import subprocess_utils
+
+    mock_find_executable.return_value = "/usr/bin/test_cmd"
+    mock_process = MagicMock()
+    mock_process.returncode = 1
+    mock_process.stdout = ""
+    mock_process.stderr = "error message"
+    mock_run.return_value = mock_process
+
+    shown: list = []
+    real = subprocess_utils._logged_without
+
+    def recording(text, values=()):
+        shown.append(text)
+        return real(text, values)
+
+    monkeypatch.setattr(subprocess_utils, "_logged_without", recording)
+    previous = subprocess_utils.ASH_LOGGER.level
+    subprocess_utils.ASH_LOGGER.setLevel(logging.INFO)
+    try:
+        run_command(["test_cmd", "arg1"])
+        quiet = [text for text in shown if "Command stderr" in text]
+        subprocess_utils.ASH_LOGGER.setLevel(logging.DEBUG)
+        run_command(["test_cmd", "arg1"])
+        loud = [text for text in shown if "Command stderr" in text]
+    finally:
+        subprocess_utils.ASH_LOGGER.setLevel(previous)
+
+    assert quiet == [], "the record was built for a level that never emits it"
+    assert loud, "with DEBUG on the record must still be built and emitted"
+
+
+@patch("automated_security_helper.utils.subprocess_utils._run_plain")
 @patch("automated_security_helper.utils.subprocess_utils.find_executable")
 def test_run_command_exception(mock_find_executable, mock_run):
-    """Test handling exceptions when running a command."""
+    """A spawn that raised ran nothing: 127, the code for a command that never ran,
+    and not 1, which most scanners read as "ran and found issues"."""
     mock_find_executable.return_value = "/usr/bin/test_cmd"
     mock_run.side_effect = Exception("Test exception")
 
     result = run_command(["test_cmd", "arg1"])
 
-    assert result.returncode == 1
+    assert result.returncode == SPAWN_FAILURE_RETURNCODE
+    assert getattr(result, "spawn_failed", False) is True
     assert "Test exception" in result.stderr
     mock_run.assert_called_once()
 
 
-@patch("subprocess.run")
+@patch("automated_security_helper.utils.subprocess_utils._run_plain")
 @patch("automated_security_helper.utils.subprocess_utils.find_executable")
 def test_run_command_timeout(mock_find_executable, mock_run):
     """Test handling timeout when running a command."""
@@ -128,7 +223,7 @@ def test_run_command_timeout(mock_find_executable, mock_run):
     mock_run.assert_called_once()
 
 
-@patch("subprocess.run")
+@patch("automated_security_helper.utils.subprocess_utils._run_plain")
 @patch("automated_security_helper.utils.subprocess_utils.find_executable")
 def test_run_command_with_check_true(mock_find_executable, mock_run):
     """Test running a command with check=True."""
@@ -150,14 +245,14 @@ def test_run_command_with_output_handling_return():
     mock_process.stdout = "test output"
     mock_process.stderr = "test error"
 
-    # Directly mock subprocess.run at the module level
+    # Directly mock the plain runner at the module level
     with (
         patch(
             "automated_security_helper.utils.subprocess_utils.find_executable",
             return_value="/usr/bin/test_cmd",
         ),
         patch(
-            "automated_security_helper.utils.subprocess_utils.subprocess.run",
+            "automated_security_helper.utils.subprocess_utils._run_plain",
             return_value=mock_process,
         ),
     ):
@@ -185,14 +280,14 @@ def test_run_command_with_output_handling_write(mock_open, mock_mkdir, ash_temp_
     mock_mkdir.reset_mock()
     mock_open.reset_mock()
 
-    # Directly mock subprocess.run and find_executable at the module level
+    # Directly mock the plain runner and find_executable at the module level
     with (
         patch(
             "automated_security_helper.utils.subprocess_utils.find_executable",
             return_value="/usr/bin/test_cmd",
         ),
         patch(
-            "automated_security_helper.utils.subprocess_utils.subprocess.run",
+            "automated_security_helper.utils.subprocess_utils._run_plain",
             return_value=mock_process,
         ),
     ):
@@ -211,16 +306,18 @@ def test_run_command_with_output_handling_write(mock_open, mock_mkdir, ash_temp_
         assert mock_open.call_count == 2
 
 
-@patch("subprocess.run")
+@patch("automated_security_helper.utils.subprocess_utils._run_plain")
 @patch("automated_security_helper.utils.subprocess_utils.find_executable")
 def test_run_command_with_output_handling_exception(mock_find_executable, mock_run):
-    """Test handling exceptions in run_command_with_output_handling."""
+    """A spawn that raised ran nothing: 127 and ``spawn_failed``, as for an
+    OSError, and not 1, which most scanners read as "ran and found issues"."""
     mock_find_executable.return_value = "/usr/bin/test_cmd"
     mock_run.side_effect = Exception("Test exception")
 
     result = run_command_with_output_handling(["test_cmd", "arg1"])
 
-    assert result["returncode"] == 1
+    assert result["returncode"] == SPAWN_FAILURE_RETURNCODE
+    assert result["spawn_failed"] is True
     assert "error" in result
     assert "Test exception" in result["error"]
     mock_run.assert_called_once()
@@ -263,14 +360,39 @@ def test_run_command_stream_output(mock_find_executable, mock_popen):
 @patch("subprocess.Popen")
 @patch("automated_security_helper.utils.subprocess_utils.find_executable")
 def test_run_command_stream_output_exception(mock_find_executable, mock_popen):
-    """Test handling exceptions in run_command_stream_output."""
+    """A Popen that raises started nothing: 127, the code for a command that never
+    ran, and not 1, which most scanners read as "ran and found issues"."""
     mock_find_executable.return_value = "/usr/bin/test_cmd"
     mock_popen.side_effect = Exception("Test exception")
 
     returncode = run_command_stream_output(["test_cmd", "arg1"])
 
-    assert returncode == 1
+    assert returncode == SPAWN_FAILURE_RETURNCODE
     mock_popen.assert_called_once()
+
+
+@patch("subprocess.Popen")
+@patch("automated_security_helper.utils.subprocess_utils.find_executable")
+def test_run_command_stream_output_failing_to_read_is_not_exit_1(
+    mock_find_executable, mock_popen
+):
+    """ASH failing while it reads the tool's output stops the tool; not exit 1."""
+
+    def unreadable():
+        yield "line1\n"
+        raise ValueError("cannot decode the output")
+
+    mock_find_executable.return_value = "/usr/bin/test_cmd"
+    mock_process = MagicMock()
+    mock_process.stdout = unreadable()
+    mock_process.poll.return_value = None
+    mock_popen.return_value = mock_process
+
+    returncode = run_command_stream_output(["test_cmd", "arg1"])
+
+    # The tool started, so this is not the never-started 127 either.
+    assert returncode == UNRECORDED_RUN_RETURNCODE
+    mock_process.kill.assert_called_once()
 
 
 @patch("automated_security_helper.utils.subprocess_utils.run_command")

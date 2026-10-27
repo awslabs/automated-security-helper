@@ -3,12 +3,17 @@
 
 """ash_plugin_modules from a config file in the scanned tree name installed modules only.
 
-Each test builds a tmp source tree that holds a stand-in package, ``standin_plugins``,
-whose ``__init__`` only defines a constant, and puts the tree on ``sys.path`` the way
-a ``python -m`` launch from inside it would. The in-tree config names the package.
-The assertions are that the name is gone from the resolved config and that the
-package is not in ``sys.modules`` after the loaders the scan engine calls have run.
-See config/plugin_module_trust.py.
+Each test builds a tmp source tree that holds a stand-in package,
+``standin_ash_plugins``, whose ``__init__`` only defines a constant, and puts the tree
+on ``sys.path`` the way a ``python -m`` launch from inside it would. The in-tree config
+names the package. The assertions are that the name is gone from the resolved config
+and that the package is not in ``sys.modules`` after the loaders the scan engine calls
+have run. See config/plugin_module_trust.py.
+
+The stand-in names are inside the plugin namespace (they end in ``_ash_plugins``),
+because a name outside it is not this filter's to drop: it is kept for the scan's
+namespace refusal, which refuses the scan with exit code 3 and imports nothing
+(tests/unit/plugins/test_refused_plugin_modules_in_tree.py).
 """
 
 import logging
@@ -23,7 +28,7 @@ from automated_security_helper.plugins.discovery import discover_plugins
 from automated_security_helper.plugins.loader import load_additional_plugin_modules
 from automated_security_helper.utils.log import ASH_LOGGER
 
-STANDIN = "standin_plugins"
+STANDIN = "standin_ash_plugins"
 INSTALLED = "automated_security_helper.plugin_modules.ash_trivy_plugins"
 
 
@@ -108,7 +113,7 @@ def test_a_comma_joined_entry_is_checked_name_by_name(tmp_path, monkeypatch):
 
 
 def test_a_module_that_is_not_importable_is_refused(tmp_path, monkeypatch):
-    source = _tree(tmp_path, monkeypatch, ["no_such_module_anywhere"])
+    source = _tree(tmp_path, monkeypatch, ["no_such_ash_plugins"])
     assert resolve_config(source_dir=source).ash_plugin_modules == []
 
 
@@ -178,13 +183,13 @@ def test_a_workspace_project_cannot_add_a_module_from_elsewhere_in_the_workspace
 def _installed_package(tmp_path_factory, monkeypatch, with_child: bool) -> str:
     """A package outside the tree, on sys.path, whose __init__ only defines a constant."""
     site = tmp_path_factory.mktemp("site")
-    package = site / "standin_installed"
+    package = site / "standin_installed_ash_plugins"
     package.mkdir()
     (package / "__init__.py").write_text("STANDIN_INSTALLED_LOADED = True\n")
     if with_child:
         (package / "child.py").write_text("")
     monkeypatch.syspath_prepend(str(site))
-    return "standin_installed"
+    return "standin_installed_ash_plugins"
 
 
 @pytest.mark.parametrize("with_child", [False, True])

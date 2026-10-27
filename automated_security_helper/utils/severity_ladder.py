@@ -94,13 +94,16 @@ Failure modes and known limitations
 * An unrecognised *severity* name fails closed -- it fails every configured
   threshold -- so an unexpected value cannot silently slip past a gate. Both
   in-repo callers pass known names, so this path is defensive only.
-* An unrecognised or missing SARIF level is read as ``note``, matching
-  ``run_ash_scan``, which defaults a missing level the same way.
+* A missing or unrecognised SARIF level is read as :data:`MISSING_SARIF_LEVEL`,
+  SARIF 2.1.0's own default (``warning``, MEDIUM), by every grader: the results
+  model's default, :func:`result_severity`, :func:`sarif_level_fails_threshold`
+  (and so the exit-code gate and workspace mode) and Bedrock, so one finding gets
+  one grade everywhere.
 """
 
 from __future__ import annotations
 
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 # The ladder, as data. Ordered strictest to loosest -- see the module docstring
 # for why that is the opposite of the severity ordering.
@@ -145,8 +148,104 @@ _SARIF_LEVEL_TO_SEVERITY: Dict[str, str] = {
     "none": "INFO",
 }
 
-# A missing or unrecognised level is read as `note`, matching run_ash_scan.
-_DEFAULT_SARIF_LEVEL = "note"
+#: The level of a result that states none, and of one whose level is not a SARIF
+#: level: SARIF 2.1.0 3.27.10, "IF level has not yet been set THEN SET level to
+#: "warning"", which applies when kind is "fail" (its default) and the rule
+#: gives no default level. ``resolve_missing_levels`` applies the rest of that
+#: procedure at ingestion, where the rules are available. One constant for the
+#: results model's default, the gate, ``result_severity`` and Bedrock, which
+#: graded such a result CRITICAL, LOW and INFO. "note" (LOW) is the
+#: alternative a maintainer may prefer; it would make the gate laxer for them.
+MISSING_SARIF_LEVEL = "warning"
+
+
+def effective_sarif_level(result: object) -> str:
+    """The SARIF level of *result* (a ``Result`` or its JSON form), lower-case.
+
+    Its own level when it is one of SARIF's four, else :data:`MISSING_SARIF_LEVEL`.
+    Accepts a ``Level`` enum member as well as a string.
+    """
+    level = (
+        result.get("level")
+        if isinstance(result, dict)
+        else getattr(result, "level", None)
+    )
+    # `.value` first: str(Level.error) is "Level.error" on Python 3.11+.
+    raw = getattr(level, "value", level)
+    normalized = str(raw).strip().lower() if raw else ""
+    return normalized if normalized in _SARIF_LEVEL_TO_SEVERITY else MISSING_SARIF_LEVEL
+
+
+def resolve_missing_levels(sarif_report: object) -> None:
+    """Give every result of *sarif_report* that states no level an explicit one.
+
+    SARIF 2.1.0 3.27.10: with ``kind`` other than "fail", a missing level "SHALL
+    default to "none""; with "fail" (the default) it is the rule's
+    ``defaultConfiguration.level`` when the rule gives one, else "warning". The
+    rule is looked up by ``ruleId`` (or ``rule.id``) in the run's driver and
+    extensions; invocation-level rule overrides are not consulted. Results that
+    state a level keep it. Run where a scanner's report enters the results, so
+    the level is explicit in memory, in ``ash.sarif`` and in the saved results.
+    """
+    for run in getattr(sarif_report, "runs", None) or []:
+        tool = getattr(run, "tool", None)
+        components = [getattr(tool, "driver", None)] + list(
+            getattr(tool, "extensions", None) or []
+        )
+        rule_levels: Dict[Any, str] = {}
+        for component in components:
+            for rule in getattr(component, "rules", None) or []:
+                configuration = getattr(rule, "defaultConfiguration", None)
+                if configuration is None or "level" not in getattr(
+                    configuration, "model_fields_set", ()
+                ):
+                    continue
+                rule_levels.setdefault(
+                    getattr(rule, "id", None), effective_sarif_level(configuration)
+                )
+        for result in getattr(run, "results", None) or []:
+            if "level" in getattr(result, "model_fields_set", ("level",)):
+                continue
+            kind = getattr(result, "kind", None)
+            kind = str(getattr(kind, "value", kind) or "fail")
+            if kind != "fail":
+                result.level = "none"
+                continue
+            rule = getattr(result, "rule", None)
+            rule_id = getattr(result, "ruleId", None) or getattr(
+                getattr(rule, "root", rule), "id", None
+            )
+            result.level = rule_levels.get(rule_id, MISSING_SARIF_LEVEL)
+
+
+def result_severity(result: object) -> str:
+    """The ASH severity of one SARIF result, as the summary counts and gate read it.
+
+    ``properties.issue_severity`` decides when it names one of :data:`SEVERITIES`
+    (any case); otherwise the level does: ``error`` CRITICAL, ``warning``
+    MEDIUM, ``note`` LOW, ``none`` INFO. A result with no level, or one this
+    table does not know, is read as :data:`MISSING_SARIF_LEVEL` (MEDIUM).
+
+    The one rule for every consumer. Reporters and ``ash inspect`` each kept their
+    own: flat-json, CSV, the HTML/Markdown/text finding lists and inspect graded
+    ``error`` HIGH, GitLab SAST and inspect ignored ``issue_severity``, OCSF and
+    GHAS mapped levels to their own scales. A finding could be CRITICAL in the
+    summary and the verdict and HIGH in the report a reader triages from.
+
+    Accepts a ``Result`` model or its JSON form (a dict), and a ``Level`` enum
+    member as well as a string for the level.
+    """
+    if isinstance(result, dict):
+        properties = result.get("properties")
+    else:
+        properties = getattr(result, "properties", None)
+    if isinstance(properties, dict):
+        declared = properties.get("issue_severity")
+    else:
+        declared = getattr(properties, "issue_severity", None)
+    if isinstance(declared, str) and declared.strip().upper() in _SEVERITY_RANK:
+        return declared.strip().upper()
+    return _SARIF_LEVEL_TO_SEVERITY[effective_sarif_level(result)]
 
 
 def normalize_threshold(value: object) -> Optional[str]:
@@ -235,8 +334,8 @@ def sarif_level_fails_threshold(level: Optional[str], threshold: Optional[str]) 
     Args:
         level: A SARIF level -- ``error``, ``warning``, ``note`` or ``none``.
             Case-insensitive. A missing or unrecognised value is read as
-            ``note``. Accepts the str-backed ``Level`` enum as well as a plain
-            string.
+            :data:`MISSING_SARIF_LEVEL`. Accepts the str-backed ``Level`` enum
+            as well as a plain string.
         threshold: As for :func:`severity_fails_threshold`.
 
     Returns:
@@ -244,11 +343,39 @@ def sarif_level_fails_threshold(level: Optional[str], threshold: Optional[str]) 
     """
     if not threshold:
         return False
-    # Read `.value` first: str(Level.error) is "Level.error" on Python 3.11+,
-    # because Level is a (str, Enum) mixin rather than a StrEnum.
-    raw = getattr(level, "value", level)
-    normalized = str(raw).lower() if raw else _DEFAULT_SARIF_LEVEL
-    severity = _SARIF_LEVEL_TO_SEVERITY.get(
-        normalized, _SARIF_LEVEL_TO_SEVERITY[_DEFAULT_SARIF_LEVEL]
-    )
+    severity = _SARIF_LEVEL_TO_SEVERITY[effective_sarif_level({"level": level})]
     return severity_fails_threshold(severity, threshold)
+
+
+def resolve_scanner_threshold(
+    scanner_threshold: Optional[str], ash_config: object
+) -> Tuple[str, str]:
+    """The threshold a scanner is graded against, and where it came from.
+
+    The scanner's own ``options.severity_threshold`` when it is set (source
+    ``"config"``); otherwise ``global_settings.severity_threshold`` of
+    *ash_config*, or ``ASH_DEFAULT_SEVERITY_LEVEL`` without a config (source
+    ``"global"``).
+
+    Shared by ``ScannerExecutor``, which grades each target's container and so
+    writes the status in ``scanners/<name>/<target>/ASH.ScanResults.json``, and by
+    ``ScannerStatisticsCalculator``, which the summary table, the scanner rows and
+    the exit code read. Both need the fallback because None turns the gate off: a
+    scanner with no threshold of its own, given only its own value, would be
+    PASSED in its own report and FAILED in the summary against the global MEDIUM.
+
+    A global threshold that is not a string (None, or a test's mock config, neither
+    of which a validated config holds) is read as no config at all: it cannot reach
+    the ladder as an unrecognised value, and None, which turns the gate off, is
+    never returned.
+    """
+    if scanner_threshold is not None:
+        return scanner_threshold, "config"
+    global_settings = getattr(ash_config, "global_settings", None)
+    if global_settings is not None and hasattr(global_settings, "severity_threshold"):
+        configured = global_settings.severity_threshold
+        if isinstance(configured, str):
+            return configured, "global"
+    from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
+
+    return ASH_DEFAULT_SEVERITY_LEVEL, "global"

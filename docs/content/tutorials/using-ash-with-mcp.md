@@ -30,7 +30,7 @@ To start a security scan, use the `scan_directory` tool:
 ```python
 result = await mcp_scan_directory(
     directory_path="/path/to/your/code",
-    severity_threshold="MEDIUM",  # Optional, default is "MEDIUM"
+    severity_threshold="MEDIUM",  # Optional; omit it to use the config's threshold
     config_path=None,  # Optional, path to ASH configuration file
 )
 ```

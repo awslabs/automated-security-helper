@@ -29,6 +29,7 @@ from tests.snapshot.support.fixture_model import pin_clock
 # fixtures: a parse failure stops the lint, and unused suppressions need a report.
 EVERY_ISSUE = """\
 fail_on_findings: true
+fail_on_incomplete_scanners: sometimes
 build:
   build_mode: ONLINE
 legacy_option: 1
@@ -42,6 +43,8 @@ scanners:
     enabled: true
   npm_audit:
     enabled: false
+  trivy-repo:
+    enabled: true
 reporters:
   html:
     extension: html
@@ -71,6 +74,10 @@ global_settings:
       rule_id: B107
       expiration: "31/01/2099"
       reason: Wrong date format
+    - path: src/app.rb
+      rule_id: B108
+      symbol: Handler.run
+      reason: A file type with no symbol grammar
 fail_on_findings: false
 """
 
@@ -128,6 +135,11 @@ def project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     report = project / "out" / "reports" / "ash.unused-suppressions.json"
     report.parent.mkdir(parents=True)
     report.write_text(json.dumps(UNUSED_REPORT), encoding="utf-8")
+    # The symbols extra installed, as if: whether this host has it is not the
+    # output under test, and without it a valid symbol adds a warning of its own.
+    from automated_security_helper.utils import symbol_spans
+
+    monkeypatch.setattr(symbol_spans, "symbols_extra_available", lambda: True)
     # Fresh, so the "report is N hours old" warning (a wall-clock value) never fires.
     now = time.time()
     os.utime(report, (now, now))
@@ -177,17 +189,20 @@ def test_fixtures_exercise_every_lint_category(project_dir, snapshot):
     assert {name: _issues(r) for name, r in results.items()} == snapshot
 
 
+# EVERY_ISSUE, BROKEN and BAD_EXTENDS are configs a scan refuses (a value the model
+# refuses, a parse error, a base that does not exist), so lint exits 3 as the scan
+# does, even after declining --fix.
 @pytest.mark.parametrize(
     "args, stdin, exit_code",
     [
-        pytest.param(["config", "lint"], None, 1, id="every-issue"),
-        pytest.param(["config", "lint", "-c", "broken.yaml"], None, 1, id="broken"),
+        pytest.param(["config", "lint"], None, 3, id="every-issue"),
+        pytest.param(["config", "lint", "-c", "broken.yaml"], None, 3, id="broken"),
         pytest.param(["config", "lint", "-c", "clean.yaml"], None, 0, id="clean"),
-        pytest.param(["config", "lint", "-c", "missing.yaml"], None, 1, id="missing"),
+        pytest.param(["config", "lint", "-c", "missing.yaml"], None, 3, id="missing"),
         pytest.param(
-            ["config", "lint", "-c", "extends.yaml"], None, 1, id="bad-extends"
+            ["config", "lint", "-c", "extends.yaml"], None, 3, id="bad-extends"
         ),
-        pytest.param(["config", "lint", "--fix"], "n\n", 0, id="fix-declined"),
+        pytest.param(["config", "lint", "--fix"], "n\n", 3, id="fix-declined"),
     ],
 )
 def test_config_lint(args, stdin, exit_code, project_dir, text_snapshot):
@@ -203,7 +218,10 @@ def test_config_lint(args, stdin, exit_code, project_dir, text_snapshot):
 def test_config_lint_fix_rewrites_config(project_dir, text_snapshot):
     run = run_cli(["config", "lint", "--fix", "--non-interactive"])
 
-    assert run.exit_code == 0, run.output
+    # The fixes are applied, and the exit code describes the file they leave:
+    # its symbol, expiration and fail_on_incomplete_scanners values are still
+    # ones the model refuses.
+    assert run.exit_code == 3, run.output
     assert text_snapshot("txt")(name="stdout") == run.document
     assert text_snapshot("yaml")(name="fixed") == (
         project_dir / ".ash" / ".ash.yaml"

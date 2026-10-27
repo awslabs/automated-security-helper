@@ -1346,8 +1346,8 @@ global_settings:
         keep these findings actionable.
     - rule_id: HIPAA.Security-IAMNoInlinePolicy
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      line_start: 1236
-      line_end: 1236
+      line_start: 1323
+      line_end: 1323
       reason: >-
         LINE-PINNED to ScanFunctionRoleEc2Access99A7E33E, the line ASH reports for
         that resource (the first line naming its logical id, the function's
@@ -1370,8 +1370,8 @@ global_settings:
         this template holds.
     - rule_id: NIST.800.53.R4-IAMNoInlinePolicy
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      line_start: 1236
-      line_end: 1236
+      line_start: 1323
+      line_end: 1323
       reason: >-
         LINE-PINNED to ScanFunctionRoleEc2Access99A7E33E, the line ASH reports for
         that resource (the first line naming its logical id, the function's
@@ -1393,8 +1393,8 @@ global_settings:
         id, so leaving it out would keep these findings actionable.
     - rule_id: NIST.800.53.R5-IAMNoInlinePolicy
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      line_start: 1236
-      line_end: 1236
+      line_start: 1323
+      line_end: 1323
       reason: >-
         LINE-PINNED to ScanFunctionRoleEc2Access99A7E33E, the line ASH reports for
         that resource (the first line naming its logical id, the function's
@@ -1416,8 +1416,8 @@ global_settings:
         id, so leaving it out would keep these findings actionable.
     - rule_id: PCI.DSS.321-IAMNoInlinePolicy
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      line_start: 1236
-      line_end: 1236
+      line_start: 1323
+      line_end: 1323
       reason: >-
         LINE-PINNED to ScanFunctionRoleEc2Access99A7E33E, the line ASH reports for
         that resource (the first line naming its logical id, the function's
@@ -2533,8 +2533,8 @@ global_settings:
         KMS key-or-alias ARN pattern. See the block comment above.
     - rule_id: F3031
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      line_start: 1115
-      line_end: 1115
+      line_start: 1202
+      line_end: 1202
       reason: >-
         LINE-PINNED to ScanFunction322CD7EE, the line ASH reports for that resource
         (the first line naming its logical id), and listed before the file-level
@@ -2799,18 +2799,13 @@ global_settings:
       reason: "urlopen in download(): every asset is digest-checked before extraction and nothing downloaded is executed."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 469
-      line_end: 469
-      reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
-    - rule_id: threat-process-download-exec
-      path: automated_security_helper/assets/install-pinned-tool.py
       line_start: 701
       line_end: 701
       reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 738
-      line_end: 738
+      line_start: 973
+      line_end: 973
       reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
@@ -2829,18 +2824,13 @@ global_settings:
       reason: "file:///etc/passwd is an input the test asserts is rejected as non-https."
     - rule_id: threat-filesystem-destruction
       path: tests/snapshot/test_snapshot_normalizer.py
-      line_start: 261
-      line_end: 261
-      reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
-    - rule_id: threat-filesystem-destruction
-      path: tests/snapshot/test_snapshot_normalizer.py
       line_start: 264
       line_end: 264
       reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
     - rule_id: threat-filesystem-destruction
       path: tests/snapshot/test_snapshot_normalizer.py
-      line_start: 269
-      line_end: 269
+      line_start: 272
+      line_end: 272
       reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
     - rule_id: threat-filesystem-destruction
       path: tests/snapshot/test_snapshot_normalizer.py
@@ -2849,18 +2839,13 @@ global_settings:
       reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_artifact_contents_gate.py
-      line_start: 771
-      line_end: 771
-      reason: "Symlink target in a synthetic archive that the gate under test must reject."
-    - rule_id: threat-filesystem-read
-      path: tests/unit/test_artifact_contents_gate.py
       line_start: 782
       line_end: 782
       reason: "Symlink target in a synthetic archive that the gate under test must reject."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_artifact_contents_gate.py
-      line_start: 1448
-      line_end: 1448
+      line_start: 1469
+      line_end: 1469
       reason: "Symlink target in a synthetic archive that the gate under test must reject."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_artifact_contents_gate.py
@@ -2869,8 +2854,8 @@ global_settings:
       reason: "Symlink target in a synthetic archive that the gate under test must reject."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_defense_in_depth.py
-      line_start: 403
-      line_end: 403
+      line_start: 404
+      line_end: 404
       reason: "'v1.0|cat /etc/passwd' is a revision string the test asserts is rejected."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_defense_in_depth.py
@@ -2879,8 +2864,8 @@ global_settings:
       reason: "'v1.0|cat /etc/passwd' is a revision string the test asserts is rejected."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_pinned_tool_version_check.py
-      line_start: 448
-      line_end: 448
+      line_start: 1131
+      line_end: 1131
       reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_pinned_tool_version_check.py
@@ -2889,8 +2874,8 @@ global_settings:
       reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
     - rule_id: threat-runtime-obfuscation-base64exec
       path: tests/unit/utils/test_opengrep_pinned_download.py
-      line_start: 380
-      line_end: 380
+      line_start: 392
+      line_end: 392
       reason: "Decodes a nix SRI hash to hex to compare with the pinned table; nothing is executed."
     - rule_id: threat-runtime-obfuscation-base64exec
       path: tests/unit/utils/test_opengrep_pinned_download.py
@@ -3030,10 +3015,10 @@ reporters:
 scanners:
   bandit:
     enabled: true
+    # .ash/bandit.yaml is named with --config-overrides, as grype's config is below.
     options:
       confidence_level: all
       ignore_nosec: false
-      config_file: .ash/bandit.yaml
   cdk-nag:
     enabled: true
     options:
@@ -3052,7 +3037,8 @@ scanners:
         - all
       additional_formats: []
       skip_path: []
-      config_file: .ash/.checkov.yaml
+      # .ash/.checkov.yaml is not named here: a checkov config file inside the
+      # scanned tree is not passed to checkov, whoever names it.
       severity_threshold: LOW
   detect-secrets:
     enabled: true
@@ -3060,8 +3046,9 @@ scanners:
     enabled: true
   grype:
     enabled: true
-    options:
-      config_file: .ash/.grype.yaml
+    # .ash/.grype.yaml is named with --config-overrides where this repository
+    # scans itself (.github/workflows/ash-repo-scan.yml): a config file inside the
+    # scanned tree does not choose a scanner's own config file.
   opengrep:
     enabled: true
   semgrep:

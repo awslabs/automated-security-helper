@@ -73,6 +73,19 @@ def test_with_isolated_config():
         # Test code here
 ```
 
+Some state lives in the process no matter what a test does: the uv tool runner that
+`get_uv_tool_runner()` returns, the answers it memoizes (whether uv is available, a
+tool's version, where an executable is), and the plugin manager's registrations. An
+autouse fixture in `tests/conftest.py`, `_restore_process_wide_tool_state`, puts all
+of it back after every test, except successful answers from uv (a tool's version,
+the uv command), which are kept because the probes are slow. Two habits keep a test from relying on that:
+
+- Build the object under test before patching `subprocess.run`. Construction can
+  probe uv, and a probe that reaches a stand-in records a made-up answer.
+- Patch the module's own name for what it calls, not the standard library's, and to
+  fake a tool version, patch `UVToolRunner.get_tool_version` itself rather than the
+  subprocess call under it.
+
 ### 4. Use Test-Specific Environment Variables
 
 When tests need environment variables, use isolated names:
@@ -101,14 +114,33 @@ def test_with_config(isolated_config_file):
     # Use isolated_config_file in your test
 ```
 
+### 6. Do Not Walk the Repository Tree
+
+`tests/pytest-temp` is the tests' scratch area, inside the checkout, and other
+workers create and remove directories there throughout a parallel run. A walk that
+descends into it, such as `REPO_ROOT.rglob("*.md")` or `os.walk(REPO_ROOT)`, races
+them: on Python 3.10 and 3.11 `rglob` raises `FileNotFoundError` when a directory goes
+away mid-walk (3.12 and later skip it silently), and on every version it returns
+whatever the other workers wrote.
+
+To list files in the checkout, ask git (`git ls-files`), or walk with
+`tests.utils.helpers.iter_repo_files(root)`, which skips the scratch tree before it
+descends. Walking a subtree no per-run directory is under, such as
+`automated_security_helper/` or `.github/`, or a test's own `tmp_path`, is fine.
+
+`tests/unit/test_repo_walkers_skip_scratch.py` enforces this. It evaluates every walk
+in `tests/`, and in the script functions a test loads, imports or runs, and fails on
+one that can enter `tests/pytest-temp`, `.ash/ash_output`, `.venv`, or the `node_modules`
+beside a tracked `package.json` outside `tests/` (one under `tests/` is a fixture), or
+whose directory it cannot work out from the code. A walk of a directory that only
+exists at run time, and is safe, is listed in that file's `_EXEMPT` with the reason.
+
 ## Marking Tests as Non-Parallel
 
-Some tests may not be suitable for parallel execution. Mark these tests with the `pytest.mark.serial` decorator:
+There is no marker that takes a test out of the parallel run. pytest-xdist schedules every test the same way, so a test that cannot share the machine with others has to isolate what it touches instead, as described above. To run a test in a single process while debugging it, pass `-n 0`:
 
-```python
-@pytest.mark.serial
-def test_that_must_run_serially():
-    # This test will not run in parallel with other tests
+```bash
+uv run pytest tests/unit/core/test_progress.py -n 0
 ```
 
 ## Troubleshooting Parallel Test Issues

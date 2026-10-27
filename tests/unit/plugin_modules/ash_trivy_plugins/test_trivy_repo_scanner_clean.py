@@ -154,7 +154,7 @@ class TestTrivyRepoScannerConfigProcessing:
         assert ignore_arg is None
 
     def test_process_severity_threshold(self, mock_plugin_context):
-        """Test severity threshold processing uses --severity with inclusion list."""
+        """A severity threshold is not passed to trivy as --severity."""
         config = TrivyRepoScannerConfig(options=TrivyRepoScannerConfigOptions())
         config.options.severity_threshold = "HIGH"
 
@@ -165,11 +165,12 @@ class TestTrivyRepoScannerConfigProcessing:
         severity_arg = next(
             (arg for arg in extra_args if arg.key == "--severity"), None
         )
-        assert severity_arg is not None
-        assert severity_arg.value == "HIGH,CRITICAL"
+        # Applied by ASH after the scan, as for every scanner: trivy --severity
+        # would drop the lower findings before they are reported or counted.
+        assert severity_arg is None
 
     def test_process_critical_severity_threshold(self, mock_plugin_context):
-        """Test CRITICAL severity threshold maps to CRITICAL only."""
+        """Not for CRITICAL either."""
         config = TrivyRepoScannerConfig(options=TrivyRepoScannerConfigOptions())
         config.options.severity_threshold = "CRITICAL"
 
@@ -180,8 +181,9 @@ class TestTrivyRepoScannerConfigProcessing:
         severity_arg = next(
             (arg for arg in extra_args if arg.key == "--severity"), None
         )
-        assert severity_arg is not None
-        assert severity_arg.value == "CRITICAL"
+        # Applied by ASH after the scan, as for every scanner: trivy --severity
+        # would drop the lower findings before they are reported or counted.
+        assert severity_arg is None
 
     def test_process_all_severity_threshold(self, mock_plugin_context):
         """Test ALL severity threshold omits --severity flag."""

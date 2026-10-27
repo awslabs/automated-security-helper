@@ -7,30 +7,48 @@ CLI subcommand for inspecting and analyzing ASH plugins.
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Annotated, List
 import typer
-from rich.console import Console
+from automated_security_helper.utils.ui_theme import rich_theme
 from rich.table import Table
 
 from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.config.named_config import (
+    refuse_a_named_config_that_does_not_exist,
+)
+from automated_security_helper.config.plugin_option_check import (
+    refuse_unknown_options_of_registered,
+)
 from automated_security_helper.config.resolve_config import (
     find_config_file,
     resolve_config,
 )
 from automated_security_helper.core.constants import ASH_CONFIG_SOURCES_DESCRIPTION
-from automated_security_helper.plugins.loader import load_plugins
-from automated_security_helper.utils.log import get_logger
+from automated_security_helper.core.exceptions import ASHConfigValidationError
+from automated_security_helper.plugins.loader import (
+    PluginModuleError,
+    PluginModuleNamespaceError,
+    load_plugins,
+    plugin_module_fix,
+)
+from automated_security_helper.utils.console import ash_console, secho
+from automated_security_helper.utils.error_text import error_text, text_without_values
+from automated_security_helper.utils.log import (
+    escape_markup,
+    get_logger,
+    show_debug_locals,
+)
+from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 plugin_app = typer.Typer(
     name="plugin",
     help="Manage ASH plugins",
     pretty_exceptions_enable=True,
     pretty_exceptions_short=True,
-    pretty_exceptions_show_locals=os.environ.get("ASH_DEBUG_SHOW_LOCALS", "NO").upper()
-    in ["YES", "1", "TRUE"],
+    # Not on a CI runner: locals can hold secrets (utils/log.py).
+    pretty_exceptions_show_locals=show_debug_locals(),
 )
 
 
@@ -102,20 +120,45 @@ def list_plugins(
         use_color=color,
     )
 
-    if config is None:
-        found = find_config_file()
-        if found is not None:
-            logger.info(f"Using config file found at: {found.as_posix()}")
-            config = found.as_posix()
-    else:
-        logger.info(f"Using config file specified at: {config}")
-
     try:
-        console = Console()
+        # A named config file that is not there is refused first, exit 3 below:
+        # resolve_config would answer it with the default configuration, and the
+        # listing would describe a configuration other than the one named.
+        refuse_a_named_config_that_does_not_exist(config)
+        # Inside the try: discovery refuses a source it cannot read (exit 3).
+        if config is None:
+            found = find_config_file()
+            if found is not None:
+                # One line: the path is the caller's text, as in cli/config.py.
+                logger.info(
+                    shown_on_one_line(f"Using config file found at: {found.as_posix()}")
+                )
+                config = found.as_posix()
+        else:
+            logger.info(shown_on_one_line(f"Using config file specified at: {config}"))
+
+        # The theme is ASH's own (rich_theme); the console stays the
+        # command-safe one (ash_console), which passes Console's own
+        # arguments through.
+        console = ash_console(theme=rich_theme())
         ash_config = resolve_config(
             config_path=config, config_overrides=config_overrides
         )
-        ash_config.ash_plugin_modules.extend(ash_plugin_modules)
+        # Split on commas and stripped, from the config and the flag alike, the way
+        # a scan reads them: "a_ash_plugins, b_ash_plugins" names two modules.
+        from automated_security_helper.config.plugin_module_trust import (
+            reindex_plugin_module_references,
+            split_plugin_modules,
+        )
+
+        entries_as_written = [*ash_config.ash_plugin_modules, *ash_plugin_modules]
+        split_modules = split_plugin_modules(entries_as_written)
+        # The split renumbers the list (a comma-joined entry becomes several),
+        # so the config's references move with their entries: a refusal naming
+        # an entry the file read from the environment reads them by index.
+        # The move comes first: it changes nothing when it refuses.
+        reindex_plugin_module_references(ash_config, entries_as_written, split_modules)
+        ash_config.ash_plugin_modules = split_modules
         plugin_context = PluginContext(
             source_dir=Path.cwd(),
             output_dir=Path.cwd().joinpath(".ash", "ash_output"),
@@ -125,11 +168,34 @@ def list_plugins(
         # Load all plugins
         loaded_plugins = load_plugins(plugin_context=plugin_context)
 
+        # What is registered, which is what a scan selects from. The ASH_SCANNERS,
+        # ASH_CONVERTERS and ASH_REPORTERS lists load_plugins returns register
+        # nothing, so showing them would miss a decorated plugin a package does not
+        # list, and show a listed class that was never registered. The lists give
+        # the order, so the built-in tables keep it.
+        from automated_security_helper.plugins import ash_plugin_manager
+
+        # Before any plugin is built, as the scan engine and ash report check: a
+        # configuration with an unknown or refused option of a plugin loaded from
+        # ash_plugin_modules is refused, exit 3 (below), and the refusal names no
+        # value or key read from the environment.
+        refuse_unknown_options_of_registered(ash_config, ash_plugin_manager)
+
+        def _registered(plugin_type: str, declared: List) -> List:
+            registered = list(ash_plugin_manager.plugin_modules(plugin_type))
+            order = {cls: index for index, cls in enumerate(declared)}
+            return sorted(
+                registered,
+                key=lambda cls: (order.get(cls, len(order)), registered.index(cls)),
+            )
+
         # Create tables for each plugin type
         plugin_types = {
-            "scanners": loaded_plugins.get("scanners", []),
-            "converters": loaded_plugins.get("converters", []),
-            "reporters": loaded_plugins.get("reporters", []),
+            "scanners": _registered("scanner", loaded_plugins.get("scanners", [])),
+            "converters": _registered(
+                "converter", loaded_plugins.get("converters", [])
+            ),
+            "reporters": _registered("reporter", loaded_plugins.get("reporters", [])),
         }
 
         # When --show-versions is requested, describe the loaded scanners through
@@ -269,16 +335,34 @@ def list_plugins(
                                 )
                             )
                         )
-                        # Enabled may be a bool; Rich requires str cells.
-                        table.add_row(*[str(cell) for cell in row])
+                        # Enabled may be a bool; Rich requires str cells. A str
+                        # cell is markup, and the config's values, the tool's
+                        # version and the names are not ASH's: each is escaped,
+                        # with the values the config read from the environment
+                        # masked first -- the config column dumps the typed
+                        # options, and the error row's error_text already
+                        # masks the same values.
+                        table.add_row(
+                            *[
+                                escape_markup(
+                                    text_without_values(
+                                        str(cell), ash_config._environment_values
+                                    )
+                                )
+                                for cell in row
+                            ]
+                        )
                     except Exception as e:
                         # If we can't instantiate, still show the plugin but note the
                         # error. The row must fill every column of the table, so it is
                         # built from the same column order rather than a fixed 3-arg
                         # call (the pre-existing bug: a 5- or 7-column table given 3
                         # cells raised "Not enough columns" and masked the real error).
+                        # error_text, with the config's environment values: a
+                        # plugin's own model error quotes its input otherwise.
+                        described = error_text(e, ash_config._environment_values)
                         error_row = [
-                            f"{plugin_class_name.lower()} (Error: {str(e)})",
+                            f"{plugin_class_name.lower()} (Error: {described})",
                             "Unknown",
                             plugin_class_name,
                             plugin_module,
@@ -287,16 +371,76 @@ def list_plugins(
                             error_row.append(_version_label(inventory_entry))
                             error_row.append(_reachable_label(inventory_entry))
                         error_row.append("")
-                        table.add_row(*[str(cell) for cell in error_row])
+                        table.add_row(
+                            *[
+                                escape_markup(
+                                    text_without_values(
+                                        str(cell), ash_config._environment_values
+                                    )
+                                )
+                                for cell in error_row
+                            ]
+                        )
 
             console.print(table)
+    except PluginModuleNamespaceError as e:
+        # The namespace refusal keeps its own advice: "install what the
+        # module needs" points an operator who named a standard-library
+        # module or a namespace package at dependencies that are not the
+        # problem. report, merge and dependencies keep this arm apart too.
+        secho(
+            shown_on_one_line(
+                "Invalid configuration: "
+                + e.shown_with(
+                    "Nothing was listed. Rename the package or name the "
+                    "packages inside it, or remove the entry from the config "
+                    "file, --config-overrides or --ash-plugin-modules."
+                )
+            ),
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(3)
+    except PluginModuleError as e:
+        # In the listing's own closing words: the default closing speaks of a
+        # scan this command does not make and of option spellings it does not
+        # take. The fix clause follows the loss's stage (plugin_module_fix).
+        # On one line: a masked label is fixed text, but a literal entry's
+        # name is the config file's own and can hold a newline.
+        secho(
+            shown_on_one_line(
+                "Invalid configuration: "
+                + e.shown_with(
+                    f"Nothing was listed. {plugin_module_fix(e)}, rename "
+                    "the entry, or remove it from the config file, "
+                    "--config-overrides or --ash-plugin-modules."
+                )
+            ),
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(3)
+    except ASHConfigValidationError as e:
+        # Exit 3, the code every ASH command uses for an unusable configuration:
+        # listing the plugins of the default config instead would describe a
+        # configuration other than the one named or found. The refusal names
+        # the file, whose path is the caller's text, so each of its lines is
+        # shown on one line; which lines there are is
+        # parser_text.refusal_own_lines' one rule, as the scan's refusal uses.
+        from automated_security_helper.utils.parser_text import refusal_own_lines
+
+        for line in refusal_own_lines(e, f"Invalid configuration: {e}"):
+            secho(shown_on_one_line(line), err=True, fg=typer.colors.RED)
+        raise typer.Exit(3)
     except Exception as e:
-        typer.secho(
-            f"Error: {e}",
+        secho(
+            f"Error: {error_text(e)}",
             err=True,
         )
         raise typer.Exit(1)
 
 
 if __name__ == "__main__":
-    plugin_app()
+    from automated_security_helper.cli.entrypoint import run_module_app
+
+    run_module_app(plugin_app)

@@ -176,7 +176,7 @@ def test_detect_secrets_scanner_sarif_output(
 
     # Verify invocation details. ``commandLine`` must be the joined argv
     # (parity with legacy GrepScannerBase.scan format) — the binary alone
-    # is no longer accepted post DA r4 #2.
+    # is no longer accepted after an earlier review round.
     invocation = result.runs[0].invocations[0]
     assert invocation.commandLine.startswith("ash-detect-secrets-scanner")
     assert "--target" in invocation.commandLine

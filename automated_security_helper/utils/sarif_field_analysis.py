@@ -6,8 +6,10 @@ from pathlib import Path
 from typing import Annotated, Dict, Any
 
 import typer
-from rich.console import Console
 from rich.table import Table
+
+from automated_security_helper.utils.console import ash_console
+from automated_security_helper.utils.log import escape_markup
 
 from automated_security_helper.utils.meta_analysis.reporting import (
     generate_html_report,
@@ -147,7 +149,10 @@ def analyze_sarif_fields(
     4. Outputs results in both JSON and CSV formats
     5. Generates a comprehensive HTML report with field analysis
     """
-    console = Console()
+    # The console reads markup, and every path and scanner name printed below is
+    # one ASH was given or found, so each is escaped once: a "[/x]" in one raised
+    # MarkupError, and a "[bold]" was taken as a style.
+    console = ash_console()
 
     # Set default directories if not provided
     if sarif_dir is None:
@@ -163,10 +168,13 @@ def analyze_sarif_fields(
     results_dict: Dict[str, Dict[str, bool]] = {}
     excluded_dict: Dict[str, Dict[str, bool]] = {}  # For tracking excluded fields
 
-    # Define the search patterns in the specified order
+    # Define the search patterns in the specified order. The directory is escaped,
+    # so its own name is not read as a pattern: one named with "[ab]" or "*"
+    # found a sibling's files and not its own.
+    searched_dir = glob.escape(str(sarif_dir))
     search_patterns = [
-        os.path.join(sarif_dir, "reports", "*.sarif"),
-        os.path.join(sarif_dir, "scanners", "**", "*.sarif"),
+        os.path.join(searched_dir, "reports", "*.sarif"),
+        os.path.join(searched_dir, "scanners", "**", "*.sarif"),
     ]
 
     # Find all SARIF files in the specified patterns
@@ -177,7 +185,9 @@ def analyze_sarif_fields(
         all_sarif_files.extend(sorted(glob.glob(pattern, recursive=True)))
 
     if not all_sarif_files:
-        console.print(f"[bold red]No SARIF files found in {sarif_dir}[/bold red]")
+        console.print(
+            f"[bold red]No SARIF files found in {escape_markup(sarif_dir)}[/bold red]"
+        )
         raise typer.Exit(code=1)
 
     console.print(f"Found [bold green]{len(all_sarif_files)}[/bold green] SARIF files")
@@ -196,7 +206,7 @@ def analyze_sarif_fields(
     # Process each SARIF file
     with console.status("[bold green]Analyzing SARIF files..."):
         for file_path in sarif_files:
-            console.print(f"Analyzing [cyan]{file_path}[/cyan]")
+            console.print(f"Analyzing [cyan]{escape_markup(file_path)}[/cyan]")
 
             # Get scanner name from file path
             scanner_name = get_scanner_name_from_path(file_path)
@@ -229,41 +239,57 @@ def analyze_sarif_fields(
 
             except Exception as e:
                 console.print(
-                    f"[bold red]Error processing {file_path}: {str(e)}[/bold red]"
+                    f"[bold red]Error processing {escape_markup(file_path)}: "
+                    f"{escape_markup(str(e))}[/bold red]"
                 )
+
+    # The inspect phase writes these below the output directory: never through a
+    # link there (fs_guard).
+    from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 
     # Write JSON output for included fields
     json_path = os.path.join(output_dir, "sarif_fields.json")
-    with open(json_path, mode="w", encoding="utf-8") as f:
+    with open_for_write(json_path) as f:
         json.dump(results_dict, f, indent=2)
-    console.print(f"Wrote included fields JSON to [cyan]{json_path}[/cyan]")
+    console.print(
+        f"Wrote included fields JSON to [cyan]{escape_markup(json_path)}[/cyan]"
+    )
 
     # Write JSON output for excluded fields
     excluded_json_path = os.path.join(output_dir, "sarif_excluded_fields.json")
-    with open(excluded_json_path, mode="w", encoding="utf-8") as f:
+    with open_for_write(excluded_json_path) as f:
         json.dump(excluded_dict, f, indent=2)
-    console.print(f"Wrote excluded fields JSON to [cyan]{excluded_json_path}[/cyan]")
+    console.print(
+        "Wrote excluded fields JSON to "
+        f"[cyan]{escape_markup(excluded_json_path)}[/cyan]"
+    )
 
     # Write CSV output for included fields
     csv_path = os.path.join(output_dir, "sarif_fields.csv")
-    with open(csv_path, "w", newline="") as f:
+    # UTF-8, as the JSON files are: a field name can hold any character, and the
+    # locale's encoding (ASCII under the C locale) cannot write every one.
+    with open_for_write(csv_path, encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["field", "scanners"])
 
         for field_name, scanners in sorted(results_dict.items()):
             writer.writerow([field_name, ", ".join(sorted(scanners.keys()))])
-    console.print(f"Wrote included fields CSV to [cyan]{csv_path}[/cyan]")
+    console.print(
+        f"Wrote included fields CSV to [cyan]{escape_markup(csv_path)}[/cyan]"
+    )
 
     # Write CSV output for excluded fields
     excluded_csv_path = os.path.join(output_dir, "sarif_excluded_fields.csv")
-    with open(excluded_csv_path, "w", newline="") as f:
+    with open_for_write(excluded_csv_path, encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["field", "scanners", "reason"])
 
         for field_name, scanners in sorted(excluded_dict.items()):
             reason = "Intentionally excluded during aggregation"
             writer.writerow([field_name, ", ".join(sorted(scanners.keys())), reason])
-    console.print(f"Wrote excluded fields CSV to [cyan]{excluded_csv_path}[/cyan]")
+    console.print(
+        f"Wrote excluded fields CSV to [cyan]{escape_markup(excluded_csv_path)}[/cyan]"
+    )
 
     # Generate HTML report
     # Convert results_dict to the format expected by generate_html_report
@@ -344,7 +370,9 @@ def analyze_sarif_fields(
     # Generate HTML report
     html_report_path = os.path.join(output_dir, "sarif_validation_report.html")
     generate_html_report(validation_results, html_report_path, field_presence)
-    console.print(f"Wrote HTML report to [cyan]{html_report_path}[/cyan]")
+    console.print(
+        f"Wrote HTML report to [cyan]{escape_markup(html_report_path)}[/cyan]"
+    )
 
     # Create a summary table
     table = Table(title="SARIF Field Analysis Summary")
@@ -438,7 +466,7 @@ def analyze_sarif_fields(
 
         # Add row to table
         scanner_table.add_row(
-            scanner,
+            escape_markup(scanner),
             str(total_fields),
             str(unique_count),
             str(missing_count),

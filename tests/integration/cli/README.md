@@ -6,16 +6,14 @@ client does, rather than calling the tool functions directly.
 ## How to run them
 
 These tests are gated. `tests/conftest.py` skips anything marked `integration` unless
-`--run-integration` is passed, and `pytest.ini` carries `--cov` with a `fail_under=80`
-gate in `.coveragerc`, so any subset run exits non-zero even when every test passes.
-Use `--no-cov` and read the summary line:
+`--run-integration` is passed. Read the summary line:
 
 ```bash
 # everything in this directory
-python -m pytest tests/integration/cli/ --run-integration --no-cov
+python -m pytest tests/integration/cli/ --run-integration
 
 # one module
-python -m pytest tests/integration/cli/test_mcp_scan_workflow.py --run-integration --no-cov
+python -m pytest tests/integration/cli/test_mcp_scan_workflow.py --run-integration
 ```
 
 Do not grep the output for `FAILED`. It appears as a parametrization value in green logs.
@@ -54,7 +52,8 @@ convention that a domain failure comes back as a successful call carrying
 `success: False` while an unknown tool or a missing required argument comes back with
 `is_error: True`; `resources/list` and `resources/read` for all five resources, with a
 structural check on the generated config schema and an equality check of `ash://exit-codes`
-against `ASH_EXIT_CODES`; `prompts/get` for both prompts including argument
+against `ASH_EXIT_CODES` and its `commands` entry against `ASH_EXIT_BAD_SELECTION`;
+`prompts/get` for both prompts including argument
 interpolation; and the `ASH_MCP_ALLOWED_ROOTS` scan-target policy in both directions.
 
 ### `test_mcp_scan_workflow.py`

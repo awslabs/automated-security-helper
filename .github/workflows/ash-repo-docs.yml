@@ -1,9 +1,14 @@
 name: Docs Build & Deploy
 on:
+  # No tags. A tag push ran deploy-docs, which holds contents: write and publishes
+  # the site from the tagged commit, and with `tags: ["*"]` any tag on any commit
+  # did that. Release tags do not need it: ash-tag-on-merge.yml creates them through
+  # the API with GITHUB_TOKEN, which starts no workflow, and the release PR's merge
+  # to main already published the site. A narrower tag filter would bind only
+  # commits that carry it; a tag pushed on an older commit runs that commit's copy
+  # of this file, which a tag ruleset has to cover (DEVELOPMENT.md, Releasing).
   push:
     branches:
-      - "*"
-    tags:
       - "*"
   pull_request:
     branches:
@@ -16,15 +21,18 @@ permissions:
   contents: read
 
 concurrency:
-  # One in-flight run per pull request; pushing again supersedes the previous run.
+  # One in-flight run per pull request or branch; pushing again supersedes the previous
+  # run.
   #
   # github.ref is refs/pull/<n>/merge on pull_request, and on merge_group it is the
   # per-entry gh-readonly-queue/main/pr-<n>-<sha> branch, so every queue entry lands
   # in its own group and entries never serialize behind one another.
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Only pull_request runs may be cancelled. A merge_group run must finish or the
-  # queue loses its verdict, and push/tag runs feed docs and releases.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # pull_request runs may be cancelled, and so may push runs on branches other than
+  # main: a newer push to the same pull request or branch supersedes the build of its
+  # old head, and only a push to main deploys. A push to main must finish, because it is
+  # the publish, and a workflow_dispatch run was asked for by a person.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main') }}
 
 jobs:
   build-docs:
@@ -41,9 +49,9 @@ jobs:
       # uv's cache is restored here and saved by deploy-docs on a push to main, the
       # only job in this workflow that runs there. setup-uv's own `enable-cache:
       # true` restored on every event and saved from every ref, pull requests
-      # included; this job now writes nothing to the cache. The `if:` above admits
-      # tag pushes too (a tag ref is not refs/heads/main), so the restore is
-      # skipped on a tag push: a tag run reads no cache entry.
+      # included; this job now writes nothing to the cache. Tag pushes no longer
+      # start this workflow; the restore still skips a tag ref, so a tag run, if
+      # one is ever added, reads no cache entry.
       - name: Install uv
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
@@ -90,13 +98,15 @@ jobs:
     permissions:
       #checkov:skip=CKV2_GHA_1:The permissions are not set to write-all at the top-level, or any level
       contents: write
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+    # A push to main only, so a tag trigger added back to this file later would
+    # still start no deploy.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # No cache restore in this job. It publishes the site with `contents: write`,
-      # on main and on tag pushes, so nothing a cache entry carries may reach it.
+      # No cache restore in this job. It publishes the site with `contents: write`
+      # on a push to main, so nothing a cache entry carries may reach it.
       # It still saves uv's cache on a push to main, for build-docs to restore:
       # what it saves is what its own `uv sync` just resolved from uv.lock.
       - name: Install uv

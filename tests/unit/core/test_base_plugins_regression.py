@@ -592,7 +592,8 @@ class TestBug52SameDayExpiry:
 class TestBug54FnmatchCaseSensitivity:
     """#54: fnmatch case sensitivity is OS-dependent. On macOS/Windows,
     fnmatch.fnmatch is case-insensitive, but on Linux it's case-sensitive.
-    Fix: normalize both sides to lowercase."""
+    Fix: rule IDs are lowercased on both sides; file paths are compared with
+    fnmatchcase, case-sensitively, which is the same on every OS."""
 
     def test_rule_id_match_case_insensitive(self):
         """Rule ID matching should be case-insensitive regardless of OS."""
@@ -614,22 +615,21 @@ class TestBug54FnmatchCaseSensitivity:
             "Bug #54: exact rule ID match should be case-insensitive"
         )
 
-    def test_file_path_match_case_insensitive(self):
-        """File path matching should be case-insensitive regardless of OS."""
+    def test_file_path_match_is_case_sensitive_regardless_of_os(self):
+        """File path matching gives one answer on every OS, and it is
+        case-sensitive: on a case-sensitive filesystem ``SRC/`` is not ``src/``."""
         from automated_security_helper.utils.suppression_matcher import (
             file_path_matches,
         )
 
-        assert file_path_matches("SRC/File.py", "src/file.py"), (
-            "Bug #54: file path match should be case-insensitive"
-        )
+        assert not file_path_matches("SRC/File.py", "src/file.py")
+        assert file_path_matches("src/file.py", "src/file.py")
 
-    def test_file_path_glob_case_insensitive(self):
-        """File path glob matching should be case-insensitive."""
+    def test_file_path_glob_is_case_sensitive_regardless_of_os(self):
+        """The same for a glob."""
         from automated_security_helper.utils.suppression_matcher import (
             file_path_matches,
         )
 
-        assert file_path_matches("SRC/MyFile.py", "src/*.py"), (
-            "Bug #54: file path glob should be case-insensitive"
-        )
+        assert not file_path_matches("SRC/MyFile.py", "src/*.py")
+        assert file_path_matches("src/MyFile.py", "src/*.py")

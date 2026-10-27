@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 from typing import Annotated, ClassVar, Dict, List, Literal, Optional, Tuple
 
-from pydantic import Field, model_validator
+from pydantic import Field, PrivateAttr, model_validator
 
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase, release_tag
@@ -173,6 +173,9 @@ def _refuse_unverified_install_command(
 class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
     """OpengrepScanner implements code scanning using Opengrep."""
 
+    #: opengrep is a native binary. See ScannerPluginBase.python_only.
+    python_only: ClassVar[bool | None] = False
+
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         network=True,
         cache_paths=("~/.opengrep",),
@@ -184,6 +187,8 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         # {CACHE_DIR}/opengrep/<version>, which is $XDG_CACHE_HOME when set, and
         # runs opengrep.bin from there.
         unpack_dir_env="XDG_CACHE_HOME",
+        # The offline rule cache ASH checked before the scan and passes as --config.
+        read_path_env=("OPENGREP_RULES_CACHE_DIR",),
     )
 
     def model_post_init(self, context):
@@ -199,7 +204,20 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
             scan_path_arg=None,
             extra_args=[],
         )
-        super().model_post_init(context)
+        self._constructing = True
+        try:
+            super().model_post_init(context)
+        finally:
+            self._constructing = False
+
+    # Whether --metrics applies depends on the installed opengrep's version, and
+    # asking starts opengrep. The arguments are built at construction, which the scan
+    # phase does for every registered scanner, selected or not, so the question
+    # waits for _resolve_arguments.
+    _constructing: bool = PrivateAttr(default=False)
+    _metrics_decision_pending: bool = PrivateAttr(default=False)
+    # The answer, once asked, so the arguments rebuilt with it do not ask again.
+    _metrics_flag: bool | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def setup_custom_install_commands(self) -> "OpengrepScanner":
@@ -273,8 +291,33 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         return ["p/ci"]
 
     def emit_metrics_flag(self) -> bool:
-        """`--metrics` was removed in opengrep 1.7.0; only emit on older versions."""
-        return self._should_use_metrics_flag()
+        """`--metrics` was removed in opengrep 1.7.0; only emit on older versions.
+
+        During construction the answer is no, and the question is left for
+        ``_resolve_arguments``.
+        """
+        if self._constructing:
+            self._metrics_decision_pending = True
+            return False
+        if self._metrics_flag is None:
+            self._metrics_flag = self._should_use_metrics_flag()
+        return self._metrics_flag
+
+    def _resolve_arguments(
+        self, target: str | Path, results_file: str | Path | None = None
+    ) -> List[str]:
+        """The arguments, with ``--metrics`` decided on the first call.
+
+        Construction built them without ``--metrics``, which is right for the pinned
+        version and any 1.7.0 or later. For an older opengrep they are built again,
+        the same way, with it.
+        """
+        if self._metrics_decision_pending:
+            self._metrics_decision_pending = False
+            if self.emit_metrics_flag():
+                self.args.extra_args = []
+                self._process_config_options()
+        return super()._resolve_arguments(target=target, results_file=results_file)
 
     # ---------------------------------------------------------------
     # Dependency resolution
@@ -347,10 +390,17 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
     def _process_config_options(self):
         result = super()._process_config_options()
 
-        # Patterns mode: switch to JSON output and replace extra_args with
-        # only --json + --pattern entries (matches pre-refactor behaviour).
+        # Patterns mode: JSON output and --pattern entries in place of the rule
+        # configs, SARIF output and metrics flag. Every other argument stays,
+        # --x-ignore-semgrepignore-files and the exclusions among them, so a
+        # .semgrepignore in the tree is not honored here either.
         if self.config.options.patterns:
-            self.args.extra_args = [ToolExtraArg(key="--json", value="")]
+            kept = [
+                arg
+                for arg in self.args.extra_args
+                if arg.key not in ("--config", "--sarif", "--metrics", "--json")
+            ]
+            self.args.extra_args = [ToolExtraArg(key="--json", value=""), *kept]
             for pattern in self.config.options.patterns:
                 self.args.extra_args.append(
                     ToolExtraArg(key="--pattern", value=pattern)
@@ -370,7 +420,5 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         if self.config.options.patterns:
             results_file = results_file.parent / "opengrep_results.json"
             # Re-resolve final_args so output_arg uses the json path.
-            final_args = self._resolve_arguments(
-                target=target, results_file=results_file
-            )
+            final_args = self._resolve_scan_arguments(target, results_file)
         return final_args, results_file, env

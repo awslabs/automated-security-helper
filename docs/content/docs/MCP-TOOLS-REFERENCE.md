@@ -1,7 +1,26 @@
 # ASH MCP Server - Tools Reference
 
 ## Overview
+
+Scans started through the MCP server never run a scanner or other tool found inside
+the scanned or delivered directory, such as a project's `.venv/bin` or
+`node_modules/.bin`; `ASH_ALLOW_IN_TREE_TOOLS` and `--allow-in-tree-tools` are not
+honored by `ash mcp`. Install the scanners the server uses outside the repository. See
+[Tools inside the scanned directory](advanced-usage.md#tools-inside-the-scanned-directory).
+
+A scan also refuses an output directory reached through a symlink, as `ash scan` does
+(see [Output directory](concepts.md#output-directory)). This server writes a scan's
+output to `.ash/ash_output` in the scanned directory. A link at `.ash` or
+`.ash/ash_output` is refused before the scan starts, with `error_type`
+`output_dir_not_permitted`; a link at a directory or file ASH writes there fails the
+scan with `ASH exited with code 3:` and an error that asks for the link to be
+replaced with a directory. `run_ash_workspace_scan` takes `output_dir`, and its error
+asks for one that is not a link.
+
 The ASH MCP server provides multiple tools for accessing scan results with different levels of detail. The `get_scan_results` tool now includes a filter parameter for flexible response sizing, and two new specialized tools provide lightweight alternatives.
+
+### Which output directories a caller may read
+All three tools read a caller-named output directory, and the same roots that bound scanning bound reading: an output directory lives at `<source_dir>/.ash/ash_output`, so a directory a caller may scan is one whose results it may read. On stdio the single local client may read anything outside a short list of system directories unless `ASH_MCP_ALLOWED_ROOTS` narrows it. On a network transport (sse or streamable-HTTP) every caller is remote, whatever headers it sends: it may read the directories in `ASH_MCP_ALLOWED_ROOTS` and its own session workspace, never another session's. The session is the one the server issued, not a header the client chose; see [Session identity](mcp/streamable-http.md#session-identity). A refusal has `error_type: scan_target_not_permitted`.
 
 ## Tool 1: `get_scan_results` (Enhanced with Filter Parameter)
 
@@ -28,7 +47,7 @@ async def get_scan_results(
   - `"minimal"`: Return only basic scan status and completion info
 - `scanners` (str, optional): Comma-separated list of scanner names to include (e.g., "bandit,semgrep"). If not specified, includes all scanners.
 - `severities` (str, optional): Comma-separated list of severity levels to include (e.g., "critical,high,medium"). Options: critical, high, medium, low, info, suppressed. If not specified, includes all severities.
-- `actionable_only` (bool): If True, exclude suppressed findings from results. This filters out findings that have been marked as false positives or accepted risks. Default is False.
+- `actionable_only` (bool): If True, keep only the actionable findings, the ones that make the scan exit 2: not suppressed, and at or above the severity threshold the scan was judged by (a scanner's own threshold where its config sets one). Findings below the threshold, which the scan reports but does not fail on, are left out, as are findings marked as false positives or accepted risks. Adds `findings`, a flat list of them, with `findings_count`, in a `filter_level="full"` response. Default is False.
 
 ### Returns
 
@@ -150,7 +169,7 @@ async def get_scan_results(
 # Get full results (backward compatible - default behavior)
 results = await get_scan_results(output_dir="/path/to/.ash/ash_output")
 
-# Get only actionable findings (exclude suppressed)
+# Get only actionable findings (unsuppressed, at or above the severity threshold)
 actionable_results = await get_scan_results(
     output_dir="/path/to/.ash/ash_output", actionable_only=True
 )
@@ -454,13 +473,13 @@ for scanner, targets in paths["scanner_results"].items():
 | `get_scan_summary` | ~5-10KB | Quick status check, statistics | Metadata, counts by severity/scanner |
 | `get_scan_results` (filter_level="summary") | ~5-15KB | Detailed summary | Same as get_scan_summary |
 | `get_scan_results` (filter_level="full") | 50KB-2MB | Full analysis | All data including raw results |
-| `get_scan_results` (actionable_only=True) | Varies | Actionable findings only | Excludes suppressed findings |
+| `get_scan_results` (actionable_only=True) | Varies | Actionable findings only | Excludes suppressed and below-threshold findings |
 | Direct file read | Varies | Full detail, specific format | Complete data in chosen format |
 
 ## Content Filtering Options
 
 ### Filter by Actionable Findings
-Use `actionable_only=True` to exclude suppressed findings (false positives or accepted risks):
+Use `actionable_only=True` to keep only the findings that fail the scan. It excludes suppressed findings (false positives or accepted risks) and findings below the scan's severity threshold:
 
 ```python
 # Get only findings that require action
@@ -563,7 +582,7 @@ if summary["findings_summary"]["by_severity"]["high"] > 10:
 ### Workflow 3: CI/CD Pipeline
 ```python
 # Minimal data transfer for fast CI/CD checks
-# Get only actionable findings (exclude suppressed)
+# Get only actionable findings (unsuppressed, at or above the severity threshold)
 summary = await get_scan_results(
     output_dir=".ash/ash_output", filter_level="summary", actionable_only=True
 )
@@ -582,7 +601,7 @@ else:
 
 ### Workflow 4: Focus on Actionable Findings
 ```python
-# Get only findings that require action (exclude suppressed)
+# Get only findings that require action (unsuppressed, at or above the threshold)
 actionable = await get_scan_results(
     output_dir=".ash/ash_output", actionable_only=True, filter_level="summary"
 )
@@ -594,11 +613,10 @@ if actionable["findings_summary"]["by_severity"]["actionable"] > 0:
         output_dir=".ash/ash_output", actionable_only=True, filter_level="full"
     )
 
-    # Process actionable findings...
-    for run in full_actionable["raw_results"]["sarif"]["runs"]:
-        for result in run["results"]:
-            # All results here are actionable (not suppressed)
-            print(f"Finding: {result['ruleId']} - {result['message']}")
+    # Process actionable findings. `findings` holds exactly the ones that fail
+    # the scan; the SARIF they come from is not part of the response.
+    for finding in full_actionable["findings"]:
+        print(f"Finding: {finding['rule_id']} - {finding.get('message')}")
 ```
 
 ## Benefits

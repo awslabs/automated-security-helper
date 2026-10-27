@@ -100,8 +100,10 @@ def test_semgrep_scanner_uv_tool_integration(test_plugin_context):
         # ``sys.executable``/``sys.prefix``, so probing the wrong one leaves the
         # scan's cache cold. The bare-name assertion this replaces could not tell
         # those two invocations apart.
+        # ``values`` is what the probe redacts from its own log lines: the values
+        # the scanner's config read from the environment, none for this config.
         mock_runner_instance.get_tool_version.assert_called_with(
-            "semgrep", scanner._uv_from_spec()
+            "semgrep", scanner._uv_from_spec(), values=()
         )
 
     # Test validation with UV tool available
@@ -183,21 +185,49 @@ def test_semgrep_scanner_configure(test_plugin_context, semgrep_rule_cache):
     assert scanner.config.options.offline is True
 
 
+#: What semgrep writes for a clean scan: SARIF with one run and no results. The
+#: template refuses a log with no run as nothing to grade, so a mocked clean
+#: run has to carry the run semgrep's writer always adds.
+SEMGREP_CLEAN_RUN_SARIF = (
+    '{"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "semgrep"}}, '
+    '"results": []}]}'
+)
+
+
 def test_semgrep_scanner_scan(test_semgrep_scanner, test_data_dir):
-    """Test SemgrepScanner scan method."""
+    """Test SemgrepScanner scan method: a mocked clean run returns its report."""
     # Mock the scan to avoid actual execution
     import unittest.mock
 
     with (
         unittest.mock.patch.object(test_semgrep_scanner, "_run_subprocess"),
-        unittest.mock.patch("builtins.open", unittest.mock.mock_open(read_data="{}")),
-        unittest.mock.patch("json.load", return_value={}),
+        unittest.mock.patch(
+            "builtins.open", unittest.mock.mock_open(read_data=SEMGREP_CLEAN_RUN_SARIF)
+        ),
     ):
         # Run the scan
         results = test_semgrep_scanner.scan(test_data_dir, target_type="source")
 
-    # Check that results were returned
+    # Check that the clean run came back as a report with its one run
     assert results is not None
+    assert len(results.runs) == 1
+    assert results.runs[0].results == []
+
+
+def test_semgrep_scanner_scan_refuses_a_result_with_no_run(
+    test_semgrep_scanner, test_data_dir
+):
+    """``{}`` validates as SARIF with no run, and no run is no scan: refused."""
+    import unittest.mock
+
+    from automated_security_helper.core.exceptions import ScannerError
+
+    with (
+        unittest.mock.patch.object(test_semgrep_scanner, "_run_subprocess"),
+        unittest.mock.patch("builtins.open", unittest.mock.mock_open(read_data="{}")),
+        pytest.raises(ScannerError, match="holds no SARIF run"),
+    ):
+        test_semgrep_scanner.scan(test_data_dir, target_type="source")
 
 
 def test_semgrep_scanner_scan_error(test_semgrep_scanner):

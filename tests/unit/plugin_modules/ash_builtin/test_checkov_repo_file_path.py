@@ -12,8 +12,10 @@ that shape; tests/integration/scanners/test_checkov_real_config_and_paths.py run
 the real checkov against it.
 """
 
+import json
 import os
 from pathlib import Path
+from urllib.parse import quote, unquote
 
 import pytest
 
@@ -312,6 +314,101 @@ def test_a_cwd_one_level_below_a_common_ancestor_gives_the_same_paths(tmp_path):
         assert checkov_repo_file_path(file_path, str(child)) == checkov_repo_file_path(
             file_path, str(tmp_path)
         )
+
+
+def _checkov_sarif_file(scanner: CheckovScanner, *files: Path) -> Path:
+    """checkov's SARIF for a finding in each of *files*, run from the root."""
+    results_file = Path(scanner.results_dir) / "source" / "results_sarif.sarif"
+    results_file.parent.mkdir(parents=True, exist_ok=True)
+    uris = [quote(checkov_repo_file_path(f.as_posix(), "/").lstrip("/")) for f in files]
+    results_file.write_text(json.dumps(_sarif(*uris)), encoding="utf-8")
+    return results_file
+
+
+def test_a_name_holding_a_backslash_is_recovered_from_the_scan_set(tmp_path):
+    """checkov writes every backslash as "/" (its convert_to_unix_path), so its
+    URI for the POSIX file a\\b.tf names a/b.tf, which does not exist. The scan
+    set holds the one file checkov spells that way."""
+    scanner = _scanner(tmp_path)
+    named = Path(scanner.context.source_dir) / "a\\b.tf"
+    named.write_text('resource "x" "y" {}\n', encoding="utf-8")
+
+    raw = scanner._read_results_file(_checkov_sarif_file(scanner, named))
+
+    assert _uris(raw) == ["a%5Cb.tf"]
+    assert (Path(scanner.context.source_dir) / unquote(_uris(raw)[0])).is_file()
+
+
+def test_when_both_spellings_exist_checkovs_path_is_kept(tmp_path):
+    """checkov's URI for a\\b.tf is a/b.tf, which exists here, so the two files
+    cannot be told apart from checkov's output and its path is kept. A limit of
+    checkov's spelling, not something the rewrite can recover."""
+    scanner = _scanner(tmp_path)
+    source = Path(scanner.context.source_dir)
+    (source / "a\\b.tf").write_text("x\n", encoding="utf-8")
+    (source / "a").mkdir()
+    (source / "a" / "b.tf").write_text("y\n", encoding="utf-8")
+
+    raw = scanner._read_results_file(_checkov_sarif_file(scanner, source / "a\\b.tf"))
+
+    assert _uris(raw) == ["a/b.tf"]
+
+
+def test_two_scanned_files_checkov_spells_alike_keep_checkovs_path(tmp_path):
+    """checkov writes both a\\b\\c.tf and a/b\\c.tf as a/b/c.tf, which names
+    neither of them. With two scanned files spelled that way the rewrite cannot
+    tell which one checkov meant, so checkov's path is kept rather than one of
+    them picked."""
+    scanner = _scanner(tmp_path)
+    source = Path(scanner.context.source_dir)
+    (source / "a\\b\\c.tf").write_text("x\n", encoding="utf-8")
+    (source / "a").mkdir()
+    (source / "a" / "b\\c.tf").write_text("y\n", encoding="utf-8")
+    assert not (source / "a" / "b" / "c.tf").exists()
+
+    raw = scanner._read_results_file(
+        _checkov_sarif_file(scanner, source / "a\\b\\c.tf")
+    )
+
+    assert _uris(raw) == ["a/b/c.tf"]
+
+
+def test_a_uri_matching_no_scanned_file_keeps_checkovs_form(tmp_path):
+    scanner = _scanner(tmp_path)
+    gone = Path(scanner.context.source_dir) / "gone" / "x.tf"
+
+    raw = scanner._read_results_file(_checkov_sarif_file(scanner, gone))
+
+    assert _uris(raw) == ["gone/x.tf"]
+
+
+def test_the_scan_set_is_read_only_after_a_uri_misses(tmp_path):
+    source = tmp_path / "repo"
+    source.mkdir()
+    (source / "main.tf").write_text("x\n", encoding="utf-8")
+    (source / "a\\b.tf").write_text("x\n", encoding="utf-8")
+    calls = []
+
+    def scanned_files():
+        calls.append(1)
+        return [str(source / "main.tf"), str(source / "a\\b.tf")]
+
+    present = _sarif(
+        checkov_repo_file_path((source / "main.tf").as_posix(), "/").lstrip("/")
+    )
+    rewrite_checkov_paths(
+        present, ran_in="/", source_dir=str(source), scanned_files=scanned_files
+    )
+    assert _uris(present) == ["main.tf"]
+    assert calls == []
+
+    missing = checkov_repo_file_path((source / "a\\b.tf").as_posix(), "/")
+    twice = _sarif(missing.lstrip("/"), missing.lstrip("/"))
+    rewrite_checkov_paths(
+        twice, ran_in="/", source_dir=str(source), scanned_files=scanned_files
+    )
+    assert _uris(twice) == ["a%5Cb.tf", "a%5Cb.tf"]
+    assert calls == [1]
 
 
 @pytest.mark.parametrize("which", ["checkov", "ferret-scan"])

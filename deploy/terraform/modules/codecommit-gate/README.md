@@ -37,6 +37,11 @@ onto the shared image:
   or the AWS CLI credential helper, and the ASH image ships neither the CLI nor a
   reason to hold static credentials.
 
+The image build's role can pull from any repository in the account and Region,
+because the shared base image's ARN is not known to this module, and can push only
+to this module's own repository. The build runs privileged Docker, so the push grant
+names no other repository.
+
 Keeping this separate from `ash-image-pipeline` is deliberate. Neither addition is
 useful to the other three targets, and `pip install` needs a reachable index at
 build time, which would break an otherwise offline image build for all of them.
@@ -47,6 +52,44 @@ the shared image's successful builds through an EventBridge rule on
 Lambda on an image whose base has been replaced — which is the staleness the
 schedule exists to prevent.
 
+## The scan runs with the operator's configuration
+
+Without `--config` or `ASH_CONFIG`, ASH looks for a config inside the scanned tree,
+which here is the pull request. The handler always passes `--config`: the base config
+from `base_config_ssm_parameter_name`, read again for every scan, or, with none set,
+a `{}` document beside the clone, which is ASH's defaults. A pull request's own
+`.ash/.ash.yaml` is never read. That is ASH's configuration only: ASH still passes
+some scanners a config file committed in the scanned tree (bandit's `.bandit` or
+`bandit.yaml`, grype's `.grype.yaml`), so a pull request can still configure those
+scanners. The copy `ash-container-init` writes at a cold start
+is not used, because the scan's own user can write it and a warm sandbox serves
+later pull requests too; reading the parameter per scan also means an edit reaches
+the next pull request without a cold start. A parameter that cannot be read, or a
+config path that names no file or resolves inside the clone, refuses the scan
+(outcome `error`, approval revoked).
+
+## The image's ASH must be able to fail an incomplete scan
+
+The scan always passes `--fail-on-incomplete-scanners`. ASH releases up to v3.7.1
+have no such option, and their `ash scan` silently drops options it does not know,
+so on them a scan in which no scanner ran would exit 0 and pass. The handler checks
+once per execution environment, with `ash scan --help`, that the option exists, and
+refuses to scan (outcome `error`, approval revoked) when it does not. Build the base
+image from an `ash_version` that has it.
+
+## The scan runs without the function's credentials
+
+The function's role can comment on and approve pull requests, and on Lambda its
+credentials are in the function's environment. The scanners run over code the pull
+request controls, so the handler starts `ash scan` with every credential and profile
+variable removed (`SCAN_ENV_DROPPED_VARIABLES` in `files/ash_pr_gate.py`) and IMDS
+switched off. Only the clone keeps the role, because git-remote-codecommit signs with
+it. A base config that enables a reporter which calls AWS (S3, Security Hub,
+CloudWatch Logs, Bedrock) therefore has no credentials in this gate, and that
+reporter fails. The variables leave the scan's environment, not the sandbox: a
+scanner running as the same user could still read the handler process's own
+environment through `/proc`.
+
 ## Three outcomes, and why the exit code is not enough
 
 The verdict is `ash scan`'s exit code, mapped directly:
@@ -55,7 +98,13 @@ The verdict is `ash scan`'s exit code, mapped directly:
 |---|---|---|
 | 0 | `pass` | No actionable findings at or above `min_severity` |
 | 2 | `findings` | Actionable findings, plus the severity table |
+| 5 | `error` | A usage error: ASH refused its command line, most likely a token in `ash_scan_extra_args` |
 | anything else | `error` | Explicitly **not** a pass, with the exit code and log tail |
+
+Exit 5 comes from ASH releases after 3.7.1, which refuse an option or value they do
+not accept. ASH 3.7.0 and 3.7.1 ignore an unknown option and exit 2 for the usage
+errors they do report, so on those releases such an error reads as `findings`; both
+outcomes revoke.
 
 **The handler does not compare severities to reach that verdict.** It hands
 `--min-severity` to ASH and reports what ASH decided. `ash scan` routes its exit
@@ -141,7 +190,7 @@ fetch what it needs.
 | `base_image_uri` | — | `string` | *required* | Shared ASH image, the base for the gate image. |
 | `base_image_codebuild_project_arn` | — | `string` | `null` | Set it to chain the gate rebuild off the base rebuild. |
 | `ash_offline_mode` | `AshOfflineMode` | `bool` | `false` | Sets `ASH_OFFLINE`. |
-| `base_config_ssm_parameter_name` | `AshBaseConfigYaml` (indirect) | `string` | `null` | From the image module. |
+| `base_config_ssm_parameter_name` | `AshBaseConfigYaml` (indirect) | `string` | `null` | From the image module. The scan's `--config`; `{}` when null. |
 | `base_config_ssm_parameter_arn` | — | `string` | `null` | Scopes `ssm:GetParameter`. |
 | `name_prefix` | — | `string` | `"ash-pr-gate"` | |
 | `trigger_events` | — | `list(string)` | created + source branch updated | The two that change what would merge. |
@@ -155,7 +204,7 @@ fetch what it needs.
 | `lambda_ephemeral_storage_mb` | — | `number` | `4096` | `/tmp` holds the clone and the output. |
 | `lambda_architecture` | — | `string` | `"x86_64"` | Must match the base image. |
 | `reserved_concurrent_executions` | — | `number` | `-1` | Worth setting on a busy repository. |
-| `ash_scan_extra_args` | — | `string` | `""` | `--changed-files-only --base-ref ...` recommended. |
+| `ash_scan_extra_args` | — | `string` | `""` | Options the gate owns are refused, `--changed-files-only` and `--base-ref` among them; see limitations. An option ASH does not accept makes every scan exit 5 (ASH releases after 3.7.1). |
 | `max_comment_chars` | — | `number` | `10000` | Defensive; the API documents no limit. |
 | `image_tag` | — | `string` | `"latest"` | |
 | `ecr_image_tag_mutability` | — | `string` | `"MUTABLE"` | Needed for the chained rebuild. |
@@ -165,7 +214,7 @@ fetch what it needs.
 | `log_retention_days` | — | `number` | `30` | |
 | `vpc_id` | `VpcId` | `string` | `""` | Opt-in VPC placement, with `vpc_subnet_ids`. Empty leaves egress open. Set, the module creates a security group in it whose only egress is TCP 443 to `scan_egress_cidr` (`scan_security_group_id` output, to widen it); your routes must reach what that CIDR names. Not deploy-tested: the ENI grant is pinned with `aws:RequestedRegion`, which AWS does not document for Lambda's service-side calls; if VPC attachment fails on `ec2:CreateNetworkInterface`, please report it. |
 | `vpc_subnet_ids` | `VpcSubnetIds` | `list(string)` | `[]` | Subnets in `vpc_id`. Set together with `vpc_id`, or neither. |
-| `scan_egress_cidr` | `ScanEgressCidr` | `string` | `""` | Required with `vpc_id`. The IPv4 CIDR the function may reach on TCP 443. It calls CodeCommit (API and `git-codecommit`) and SSM; the Lambda service pulls the image and delivers logs. With `ash_offline_mode = false` the scanners also download from public hosts outside AWS. Use your VPC CIDR for an offline image with interface endpoints, or `0.0.0.0/0` for an online image behind a NAT gateway. |
+| `scan_egress_cidr` | `ScanEgressCidr` | `string` | `""` | Required with `vpc_id`. The IPv4 CIDR the function may reach on TCP 443. It calls CodeCommit (API and `git-codecommit`) and, when `base_config_ssm_parameter_name` is set, SSM; the Lambda service pulls the image and delivers logs. With `ash_offline_mode = false` the scanners also download from public hosts outside AWS. Use your VPC CIDR for an offline image with interface endpoints, or `0.0.0.0/0` for an online image behind a NAT gateway. |
 | `tags` | — | `map(string)` | `{}` | |
 
 ## Outputs
@@ -178,20 +227,42 @@ fetch what it needs.
 ## Constraints and known limitations
 
 **Lambda's 900 second ceiling is the real constraint on this target, and it is
-not adjustable.** The clone plus the scan has to fit. Two things make that
-reachable, and a third is the fallback:
+not adjustable.** The clone plus the scan has to fit:
 
-1. `ash_scan_extra_args = "--changed-files-only --base-ref origin/<default>"`,
-   so scan time scales with the change rather than the repository.
+1. The scan cannot be narrowed to the pull request's changes. The handler
+   refuses `--changed-files-only` and `--base-ref` in `ash_scan_extra_args`,
+   because with them findings outside the diff stop counting, and so does every
+   finding in a file whose name git prints quoted (a non-ASCII byte, a quote, a
+   backslash or a control character), which can turn a failing pull request
+   into a pass.
 2. More `lambda_memory_mb`, since Lambda allocates CPU in proportion to memory
    and ASH is CPU-bound.
-3. For repositories where neither is enough, use the `codepipeline-executor`
+3. For repositories where that is not enough, use the `codepipeline-executor`
    module instead. CodeBuild's action timeout is measured in hours, not minutes.
+
+**The scan cannot be narrowed from `ash_scan_extra_args`.** This gate can approve
+a pull request, so the handler decides every option that changes what is scanned
+or how the verdict is reached, and refuses them in `ash_scan_extra_args`:
+`--changed-files-only` and `--base-ref` are refused because they drop findings
+outside the diff before the exit code is computed, and so are the scanner
+selection, the shard options, `--config` and `--config-overrides`, `--phases`,
+`--use-existing`, and the options it passes itself. `GATE_OWNED_SCAN_OPTIONS` in
+`files/ash_pr_gate.py` is the full list. A
+refused option is not dropped: the scan reports an error outcome on every pull
+request, and any approval the gate gave is revoked, until the option is removed.
 
 **The clone is not shallow.** CodeCommit does not reliably permit fetching an
 arbitrary commit SHA directly, so the pull request's source branch is cloned in
 full and the SHA is then checked out from that history. Clone time therefore
 scales with repository history, and it is the main cost driver here.
+
+**Only full commit ids are checked out.** The handler refuses an event whose
+`sourceCommit` or `destinationCommit` is not a full hex object id, before it
+runs git or calls CodeCommit, and the invocation fails. CodeCommit sends 40-digit
+ids, so this never refuses a real event. The check exists because `git checkout`
+takes whatever follows `--` as paths, so `--` cannot keep a commit argument from
+being read as an option there. The clone itself passes `--` before the
+repository.
 
 **The gate image build needs network access to a Python index**, for
 `awslambdaric` and `git-remote-codecommit`, even when `ash_offline_mode` is true.

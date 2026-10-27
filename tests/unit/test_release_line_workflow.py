@@ -51,6 +51,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ash-create-release.yml"
 JOB = "create-release-pr"
@@ -111,7 +113,13 @@ def _step_script(step_id: str) -> str:
 
 def _git(repo: Path, *args: str, env: dict) -> str:
     return subprocess.run(
-        ["git", *args], cwd=repo, env=env, check=True, capture_output=True, text=True
+        ["git", *args],
+        cwd=repo,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=CHILD_TIMEOUT_SECONDS,
     ).stdout.strip()
 
 

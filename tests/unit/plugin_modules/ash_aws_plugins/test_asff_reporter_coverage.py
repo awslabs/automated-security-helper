@@ -1,5 +1,6 @@
 """Unit tests for SecurityHubReporter to increase coverage."""
 
+import json
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -56,7 +57,12 @@ def test_security_hub_reporter_validate_success(mock_session):
 
 
 def test_security_hub_reporter_report_error(sample_ash_model):
-    """Test SecurityHubReporter report method with error."""
+    """A model with no findings is reported without contacting AWS.
+
+    BatchImportFindings takes at least one finding,
+    so with none there is no call to make, and the receipt says nothing was
+    imported. test_security_hub_batch_import.py covers the import itself.
+    """
     # Create mock context
     mock_context = PluginContext(
         source_dir=Path("/test/source"),
@@ -66,15 +72,25 @@ def test_security_hub_reporter_report_error(sample_ash_model):
     )
 
     # Create reporter
-    reporter = SecurityHubReporter(context=mock_context)
+    reporter = SecurityHubReporter(
+        context=mock_context,
+        # Enabled: report() refuses for a reporter that is not.
+        config=SecurityHubReporterConfig(
+            enabled=True,
+            options=SecurityHubReporterConfigOptions(
+                aws_region="us-east-1", findings_scope="asff-reporter-test"
+            ),
+        ),
+    )
     reporter.dependencies_satisfied = True
 
-    # Create mock model with findings
+    # sample_ash_model carries no SARIF results.
     mock_model = sample_ash_model
 
-    # Call report
-    result = reporter.report(mock_model)
+    # Call report; any boto3 session would mean an AWS call
+    with patch("boto3.Session", side_effect=AssertionError("AWS was contacted")):
+        result = reporter.report(mock_model)
 
-    # Check that the result contains expected content
-    assert "Security Hub integration in development" in result
-    assert "findings_count" in result
+    receipt = json.loads(result)
+    assert receipt["imported"] == 0
+    assert receipt["findings"] == []

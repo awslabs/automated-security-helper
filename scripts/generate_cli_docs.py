@@ -554,7 +554,7 @@ def generate_cli_docs() -> str:
         render_command_section(
             "build-image",
             build_ash_image_cli_command,
-            "Builds the ASH container image then runs a scan with it.",
+            "Builds the ASH container image, then scans the current directory with it unless --no-run is given.",
         )
     )
 

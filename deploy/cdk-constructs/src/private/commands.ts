@@ -89,9 +89,12 @@ export interface InstallOptions {
  * Default git ref installed when the caller does not pin one.
  *
  * A tag rather than a branch, so two runs of the same pipeline definition scan
- * with the same ASH. Bumping this is a deliberate step at release time; the
- * buildspec drift gate will fail until the generated files are regenerated,
- * which is the reminder.
+ * with the same ASH. It names the release this tree is: `cz bump` rewrites it at
+ * every release, together with the generated `buildspec*.yml` files, so the
+ * buildspec drift gate stays green on the release commit ([tool.commitizen]
+ * version_files in pyproject.toml). The sharded commands need `ash merge` and the
+ * shard options, which v3.7.0 and v3.7.1 predate, so this has to move with the
+ * release.
  */
 export const DEFAULT_ASH_REF = 'v3.7.0';
 
@@ -121,10 +124,14 @@ function gitRequirement(sourceRepository: string, ref: string): string {
  * the git repository at a pinned ref is what this repository documents for CI.
  *
  * Returns an empty list for `PREINSTALLED`, where the consumer's own image
- * already provides ASH, and for `UVX`, which resolves the repository as part of
- * the scan invocation instead.
+ * already provides ASH. `UVX` resolves the repository as part of the scan
+ * invocation instead, so it installs nothing here either.
+ *
+ * When the ref is deferred to a build environment variable, the first command,
+ * in both `PIP` and `UVX`, checks the variable's value; see `refCheckCommands`.
  */
 export function installCommands(install: InstallOptions): string[] {
+  const version = install.version ?? DEFAULT_ASH_REF;
   switch (install.mode) {
     case ASHInstallMode.PREINSTALLED:
       return [];
@@ -132,12 +139,13 @@ export function installCommands(install: InstallOptions): string[] {
     case ASHInstallMode.UVX:
       // uvx resolves and runs in one step, so there is nothing to install ahead
       // of the scan. See ashInvocation.
-      return [];
+      return refCheckCommands(version);
 
     case ASHInstallMode.PIP:
       return [
+        ...refCheckCommands(version),
         'python3 -m pip install --no-cache-dir --disable-pip-version-check ' +
-          gitRequirement(install.sourceRepository, install.version ?? DEFAULT_ASH_REF),
+          gitRequirement(install.sourceRepository, version),
       ];
   }
 }
@@ -157,23 +165,90 @@ function assertGitUrl(url: string): string {
   return url;
 }
 
+/** What a ref may consist of: characters that need no quoting in a shell word. */
+const REF_CHARACTERS =
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._/-';
+
+/** The rule both checks below apply, for their error messages. */
+const REF_RULE =
+  'a plain git ref (a tag, branch name or commit id): letters, digits and . _ / -, ' +
+  'not starting with - or ., with no .., no empty path component and no component ' +
+  'starting with . or ending in .lock';
+
 /**
- * Reject a git ref that could break out of the pip argument.
+ * Whether a ref is one git can only read as a ref.
+ *
+ * The installers hand the ref to git as an argument of its own: pip runs
+ * `git show-ref <ref>` and `git checkout -q <ref>`, and git reads an argument
+ * that starts with `-` as an option. So on top of the shell-safe characters, a
+ * ref has to follow git's ref-name rules (`git check-ref-format`) that those
+ * characters can break, the leading `-` among them. A full commit id passes.
+ */
+function isPlainGitRef(ref: string): boolean {
+  return (
+    ref !== '' &&
+    [...ref].every((c) => REF_CHARACTERS.includes(c)) &&
+    !ref.startsWith('-') &&
+    !ref.includes('..') &&
+    !ref.endsWith('.') &&
+    ref
+      .split('/')
+      .every((part) => part !== '' && !part.startsWith('.') && !part.endsWith('.lock'))
+  );
+}
+
+/**
+ * Reject a git ref that is not plainly a ref. See `isPlainGitRef`.
  *
  * A bare `$NAME` is allowed so the generated buildspecs can defer the ref to an
- * `ASH_VERSION` build environment variable.
+ * `ASH_VERSION` build environment variable. That value is not known until the
+ * build runs, so `refCheckCommands` checks it there, before the installer.
  */
 function assertGitRef(ref: string): string {
   if (ENV_REFERENCE.test(ref)) {
     return ref;
   }
-  if (!/^[A-Za-z0-9._/-]+$/.test(ref)) {
+  if (!isPlainGitRef(ref)) {
     throw new Error(
-      'version must be a plain git ref (tag, branch or commit) or a bare ' +
-        `$ENVIRONMENT_VARIABLE reference, got ${JSON.stringify(ref)}.`,
+      `version must be ${REF_RULE}, or a bare $ENVIRONMENT_VARIABLE reference; ` +
+        `got ${JSON.stringify(ref)}.`,
     );
   }
   return ref;
+}
+
+/**
+ * The shell command that applies `isPlainGitRef` to a ref deferred to a build
+ * environment variable, and stops the build when it fails.
+ *
+ * Empty for a literal ref, which `assertGitRef` has already checked. The case
+ * patterns are `isPlainGitRef`'s rules one by one; the characters are listed
+ * rather than written as ranges, because what a range matches depends on the
+ * shell's locale.
+ */
+function refCheckCommands(ref: string): string[] {
+  if (!ENV_REFERENCE.test(ref)) {
+    return [];
+  }
+  const variable = ref.slice(1);
+  const refused = [
+    "''",
+    '-*',
+    '*..*',
+    '*.',
+    '/*',
+    '*/',
+    '*//*',
+    '.*',
+    '*/.*',
+    '*.lock',
+    '*.lock/*',
+    `*[!${REF_CHARACTERS}]*`,
+  ];
+  return [
+    `case "$${variable}" in ${refused.join('|')}) ` +
+      `echo "${variable} must be ${REF_RULE}; got: $${variable}" >&2; exit 1;; esac`,
+  ];
 }
 
 /**

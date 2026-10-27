@@ -154,7 +154,7 @@ The following diagram shows how plugin configuration flows through the system:
 
 ```mermaid
 graph TD
-    A[.ash/.ash.yaml] --> B[Configuration Parser]
+    A[ASH config file] --> B[Configuration Parser]
     B --> C[Global Configuration]
     B --> D[Scanner Configuration]
     B --> E[Reporter Configuration]

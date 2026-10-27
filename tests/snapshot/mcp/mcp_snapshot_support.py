@@ -44,7 +44,6 @@ name it), and the confinement roots and the session workspace root point under
 
 from __future__ import annotations
 
-import asyncio
 import copy
 import json
 from pathlib import Path
@@ -52,6 +51,8 @@ from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock
 
 from mcp.server.mcpserver import Context
+
+from tests.utils.tasks import drain
 
 #: A results document with every section a client reads: findings from two
 #: scanners (one finding suppressed), scanner statuses, and summary counts.
@@ -262,7 +263,4 @@ def record(tool: str, result: Any, ctx: Optional[MagicMock] = None) -> Dict[str,
 
 async def drain_background_tasks() -> None:
     """Wait for every task the tool started (the scan runner, the monitor)."""
-    current = asyncio.current_task()
-    pending = [t for t in asyncio.all_tasks() if t is not current]
-    if pending:
-        await asyncio.gather(*pending)
+    await drain()

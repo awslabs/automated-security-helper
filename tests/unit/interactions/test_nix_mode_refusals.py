@@ -47,7 +47,7 @@ def shell_calls(monkeypatch):
     """Record any attempt to enter the shell; a refusal must make none."""
     calls: list = []
     monkeypatch.setattr(
-        run_ash_nix.subprocess, "run", lambda *a, **k: calls.append(a) or None
+        run_ash_nix, "_enter_shell", lambda *a, **k: calls.append(a) or None
     )
     return calls
 

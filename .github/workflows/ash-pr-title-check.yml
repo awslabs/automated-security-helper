@@ -39,10 +39,28 @@ jobs:
         if: github.event_name == 'pull_request'
         run: pip install commitizen
 
+      # The title is printed here, and commitizen prints it again when it is refused. The
+      # runner reads a line of output as a workflow command when it starts with `::` or
+      # holds `##[`, and starts a new line at a carriage return as well as a line feed,
+      # so a title holding either break, or `##[`, is refused first without being printed.
       - name: Validate PR title with commitizen
         if: github.event_name == 'pull_request'
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
+          # Byte by byte, in the C locale, so the runner's locale cannot change the
+          # answer: [[:cntrl:]] is C0 and DEL there, and the UTF-8 bytes of C1 and of
+          # U+2028 and U+2029 are named. Only this check; commitizen keeps the
+          # runner's locale.
+          if (
+            export LC_ALL=C
+            case "$PR_TITLE" in
+              *[[:cntrl:]]* | *$'\xc2'[$'\x80'-$'\x9f']* | *$'\xe2\x80'[$'\xa8\xa9']* | *'##['*) exit 0 ;;
+            esac
+            exit 1
+          ); then
+            echo "::error::the pull request title holds a line break, another control character or the legacy command marker, so it is refused without being printed. Edit the title."
+            exit 1
+          fi
           echo "Checking: $PR_TITLE"
           cz check --message "$PR_TITLE"

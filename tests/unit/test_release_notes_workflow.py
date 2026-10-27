@@ -47,6 +47,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ash-tag-on-merge.yml"
 JOB = "tag-and-release"
@@ -170,7 +172,14 @@ def _run(script: str, workdir: Path, version: str, tmp_path: Path) -> Result:
 
 
 def _git(repo: Path, *args: str, env: dict) -> None:
-    subprocess.run(["git", *args], cwd=repo, env=env, check=True, capture_output=True)
+    subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        env=env,
+        check=True,
+        capture_output=True,
+        timeout=CHILD_TIMEOUT_SECONDS,
+    )
 
 
 @pytest.fixture
@@ -229,6 +238,7 @@ def bumped_repo(tmp_path: Path) -> Path:
         env=env,
         check=True,
         capture_output=True,
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
     return repo
 

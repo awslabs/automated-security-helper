@@ -40,6 +40,7 @@ import pytest
 import typer
 
 from automated_security_helper.cli.mcp import mcp_command
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.utils.log import get_logger
 
 
@@ -120,20 +121,20 @@ class TestNothingIsWrittenToStdout:
         exc = _run(transport="not-a-transport")
 
         captured = capsys.readouterr()
-        assert exc.exit_code == 3
+        assert exc.exit_code == ASH_EXIT_USAGE_ERROR
         assert captured.out == ""
         assert "not-a-transport" in captured.err
 
     def test_startup_message_avoids_stdout_when_not_quiet(self, capsys):
         """The regression case from the issue.
 
-        --no-quiet is the only way to combine MCP with --verbose/--debug, so
-        this is the path a user debugging a stdio server actually takes.
+        --verbose and --debug require quiet to be off, so this is the path a
+        user debugging a stdio server actually takes.
         """
         exc = _run(quiet=False, transport="not-a-transport")
 
         captured = capsys.readouterr()
-        assert exc.exit_code == 3
+        assert exc.exit_code == ASH_EXIT_USAGE_ERROR
         assert captured.out == ""
         # Both the startup message and the error land on stderr.
         assert "Starting MCP server" in captured.err
@@ -143,7 +144,7 @@ class TestNothingIsWrittenToStdout:
         exc = _run(quiet=True, verbose=True)
 
         captured = capsys.readouterr()
-        assert exc.exit_code == 3
+        assert exc.exit_code == ASH_EXIT_USAGE_ERROR
         assert captured.out == ""
         assert "quiet" in captured.err.lower()
 
@@ -159,27 +160,42 @@ class TestNothingIsWrittenToStdout:
 
         Gating the command's own prints on --quiet could never have covered that,
         because the handler does not exist until a scan begins. Asserted on the
-        command rather than on the logger so the wiring cannot be dropped.
+        command rather than on the logger so the wiring cannot be dropped, and
+        read while the server runs, because that is when a scan can start: the
+        command puts the variable back when it returns
+        (test_log_to_stderr_is_scoped_to_the_command.py).
         """
+        seen = []
+
+        def serve():
+            seen.append(os.environ.get("ASH_LOG_TO_STDERR", ""))
+
         original = os.environ.get("ASH_LOG_TO_STDERR")
         try:
             os.environ.pop("ASH_LOG_TO_STDERR", None)
-            _run(transport="not-a-transport")
-
-            assert os.environ.get("ASH_LOG_TO_STDERR", "").upper() in (
-                "YES",
-                "1",
-                "TRUE",
-            ), (
-                "The mcp command does not redirect logging to stderr, so an "
-                "in-process scan will write its log records into the JSON-RPC "
-                "stream."
-            )
+            with (
+                patch(
+                    "automated_security_helper.cli.mcp.validate_mcp_dependencies",
+                    return_value=True,
+                ),
+                patch(
+                    "automated_security_helper.cli.mcp_server.run_mcp_server",
+                    side_effect=serve,
+                ),
+            ):
+                mcp_command(ctx=_Ctx())
         finally:
             if original is None:
                 os.environ.pop("ASH_LOG_TO_STDERR", None)
             else:
                 os.environ["ASH_LOG_TO_STDERR"] = original
+
+        assert len(seen) == 1, "the stub server was not started"
+        assert seen[0].upper() in ("YES", "1", "TRUE"), (
+            "The mcp command does not redirect logging to stderr while it serves, "
+            "so an in-process scan will write its log records into the JSON-RPC "
+            "stream."
+        )
         capsys.readouterr()
 
     def test_missing_dependency_guidance_avoids_stdout(self, capsys):
@@ -191,4 +207,4 @@ class TestNothingIsWrittenToStdout:
         assert captured.out == ""
         assert "MCP dependencies are not available" in captured.err
         # The remediation guidance has to be readable, just not on stdout.
-        assert "force-reinstall" in captured.err
+        assert "--reinstall-package automated-security-helper" in captured.err

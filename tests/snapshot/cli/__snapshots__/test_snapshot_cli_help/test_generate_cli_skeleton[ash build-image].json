@@ -4,7 +4,7 @@
   "force": false,
   "oci_runner": null,
   "container_network": "bridge",
-  "build_target": "non-root",
+  "build_target": null,
   "offline_semgrep_rulesets": "p/ci",
   "container_uid": null,
   "container_gid": null,

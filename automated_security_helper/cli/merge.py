@@ -107,6 +107,61 @@ shard's assignment through would make the merged file look like shard 0 of n, so
 a second ``ash merge`` over an output directory would accept it and report a
 whole scan as one fifth of itself.
 
+The recorded configuration is the repository's
+-----------------------------------------------
+Each shard's results carry the configuration its scan resolved, and the merge
+builds its reporters from the lowest-indexed shard's copy. That copy was built
+from whatever config the shard's scan read, a file inside the scanned tree
+included, and it reaches the merge as data in an artifact. So the settings a
+config file inside the scanned tree may not choose are not taken from it here
+either. :func:`confine_recorded_config` runs ``confine_to_trusted_base``, the
+steps ``resolve_config`` runs for such a file (sandbox grants, plugin modules,
+reporter destinations and whether the off-host reporters run, scanner config
+files), and ``confine_declared_reporter_destinations`` runs once the plugin
+modules are loaded. Both run against the operator's trusted base at merge time:
+the defaults, ``--config``, and ``--config-overrides``. ``--config`` is itself
+confined when it is inside the working directory's tree, as for ``ash report``:
+the outermost git checkout around the working directory, or the working
+directory itself outside one. A step added to ``confine_to_trusted_base``, or a
+row added to those modules' tables, applies here without a change to this one.
+
+Two things differ from a scan, and ``SHARD_RECORDED`` carries both. The warnings
+name the shard's results file and give ``ash merge``'s own options as the fix. And
+the merge imports ASH's built-in plugins and the modules the operator names, in
+``--config`` and ``--config-overrides``, whether or not a shard recorded them; an
+``ash_plugin_modules`` entry only a shard names is dropped even when it is an
+installed module outside the tree, with one warning naming it: nothing the merge
+imports is a shard's choice. So the merge does not need
+``drop_untrusted_off_host_plugins``; every class it loads comes from a module the
+operator named. ``enabled`` of a reporter that sends findings off the host comes
+from the operator alone, in both directions, as in a scan: a shard's ``false`` is
+ignored with the warning like its ``true``.
+
+``--config-overrides`` are applied to every shard's recorded configuration as it
+is loaded (:func:`apply_operator_overrides`), so the completion gate, the verdict
+and the reporters all see them, and they are replayed onto the trusted base, as
+in a scan. ``--config`` supplies only the trusted values and does not replace the
+recorded configuration: a reporter section the shards did not configure is added
+with ``--config-overrides``. Its plugin modules are the exception, as above.
+
+The verdict settings (``fail_on_findings``, ``fail_on_incomplete_scanners``, the
+severity thresholds, suppressions, ignore paths and content database bounds)
+still come from the shards, since the verdict follows the scan's own
+configuration. One verdict covers the merged scan, so shards whose recorded
+values differ after the overrides are refused (:func:`verify_verdict_settings_agree`)
+rather than decided by the lowest index, and a value ``--config`` sets for one of
+them is named in a warning with the override that would apply it
+(:func:`warn_on_ignored_operator_verdict_settings`).
+
+The exception is a field a shard recorded as a reference read from the
+environment, which its field (``severity_threshold``, ``output_formats``) cannot
+hold. The merge does not read the environment again, so that field comes from
+``--config-overrides`` or the file ``--config`` (or ``ASH_CONFIG``) names, and a
+merge in which any shard's field is supplied by neither is refused once, naming
+each field with its reference and the shards and results files that recorded it
+(:func:`supply_unread_recorded_fields`). A config file the merge finds in the
+working directory supplies nothing.
+
 Known limitations
 -----------------
 A directory passed to ``--results`` must resolve to exactly one results file.
@@ -116,13 +171,21 @@ was considered and rejected: it makes the set of merged shards depend on
 whatever else happens to be in the tree, including a previous merged output, and
 the repeatable ``--results`` flag already expresses "these n shards" exactly.
 
-``cyclonedx`` is adopted from the first shard that produced a non-empty SBOM
-rather than merged. This matches single-scan behaviour, where
-``scan_result_processor`` assigns ``aggregated_results.cyclonedx`` outright and
-the last SBOM-producing scanner wins; there is no CycloneDX merge primitive in
-the codebase to reuse. With the default scanner set only syft produces one, so
-it lands on exactly one shard and nothing is lost. Splitting two SBOM scanners
-across shards would keep only one SBOM.
+``cyclonedx`` is united across the shards the way a single scan unites its own
+SBOMs (syft runs on the source tree and on the converted tree), with
+``utils/sbom_merge.py``. Shards are visited in index order. The ``version`` and
+``metadata`` are the first SBOM's, the lowest-indexed shard's that has one. A merge
+that adds a component, a dependency or a reference gives the merged SBOM a new
+``serialNumber``; one that adds nothing keeps the first SBOM's. ``components`` hold
+every component of every shard, a repeat listed once and matched on ``bom-ref`` and
+``purl`` together or, for a component without a ``bom-ref``, on ``purl``, and
+``dependencies`` are united by ``ref``. Two limits carry over. A package that two
+shards name with different ``bom-ref`` values is listed twice. And only
+``components`` and ``dependencies`` are combined: every other list comes from the
+first SBOM, so a later shard's ``vulnerabilities``, ``services``, ``annotations``
+and ``compositions`` are not carried. syft writes none of them. With the default
+scanner set only syft produces an SBOM, so it lands on exactly one shard and that
+SBOM is kept as it is.
 
 ``summary_stats.duration`` is the longest shard's duration, not the sum. Shards
 run concurrently, so summing would report a wall-clock time several times longer
@@ -133,21 +196,48 @@ across shards is not recorded.
 
 from __future__ import annotations
 
+import functools
+import hashlib
+import json
 import logging
+import shlex
+import typing
+from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, Dict, List, Optional, Sequence, Tuple
+from typing import (
+    Annotated,
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Sized,
+    Tuple,
+    Type,
+)
 
 import typer
-from pydantic import ValidationError
+import yaml
+from pydantic import BaseModel, ValidationError
+from rich.text import Text
 
 # `print` shadows the builtin on purpose: this is rich's documented import
 # idiom, so every print() below renders markup and respects the console. The
 # fix A004 wants is an alias, which would mean rewriting every call in this
 # module for no behavior change -- and tests/unit/cli/mcp/test_stdout_jsonrpc_safety.py
-# reasons about this exact import form.
-from rich import print  # noqa: A004
+# reasons about this exact import form. It is utils/console.py's print, not rich's:
+# its console checks each line it writes off a terminal, so none reads as a CI command.
+from automated_security_helper.utils.console import print  # noqa: A004
 
+from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.base.reporter_plugin import (
+    ReporterPluginBase,
+    off_host_reporter_refused,
+    reporter_classes_for_run,
+    warn_off_host_section_without_enabled,
+)
 
 # Imported at module scope, and not lazily inside the functions that need it,
 # because importing this module is what calls AshAggregatedResults.model_rebuild().
@@ -156,27 +246,106 @@ from automated_security_helper.base.plugin_context import PluginContext
 # model_validate_json raises PydanticUserError. ``ash report`` gets the same
 # rebuild by side effect of importing resolve_config; relying on an import made
 # for another purpose is what makes this fragile, so the dependency is named here.
-from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.ash_config import AshConfig, reduced_plugin_name
+from automated_security_helper.config.plugin_module_trust import split_plugin_modules
+from automated_security_helper.config.reporter_trust import (
+    REPORTER_DESTINATION_OPTIONS,
+    REPORTER_ENABLED_DEFAULTS,
+    confine_declared_reporter_destinations,
+    confine_off_host_reporters_to_overrides,
+    declared_destination_options,
+    declared_enabled_defaults,
+)
+from automated_security_helper.config.recorded_config import (
+    HOW_TO_SUPPLY,
+    take_own_values,
+    unreadable_references,
+    unsupplied_references,
+    unsupplied_refusal,
+)
+from automated_security_helper.config.resolve_config import (
+    apply_config_overrides,
+    confine_to_trusted_base,
+    resolve_config,
+)
+from automated_security_helper.config.config_sources import describe_config_path
+from automated_security_helper.config.untrusted_source import SHARD_RECORDED
+from automated_security_helper.core.constants import (
+    ASH_EXIT_USAGE_ERROR,
+    PYTHON_ONLY_SKIPPED_REASON,
+)
 from automated_security_helper.core.enums import (
     AshLogLevel,
     ExportFormat,
+    MinSeverity,
     ScannerStatus,
 )
-from automated_security_helper.core.exceptions import ShardCoverageError
+from automated_security_helper.core.exceptions import (
+    ASHConfigSourceError,
+    ASHConfigValidationError,
+    ShardCoverageError,
+)
 from automated_security_helper.core.phases.report_phase import ReportPhase
 from automated_security_helper.core.progress import LiveProgressDisplay
 from automated_security_helper.core.sharding import (
     ShardAssignment,
     verify_shard_coverage,
 )
+from automated_security_helper.core.sharding import shown_shard_text as _shown
 from automated_security_helper.core.unified_metrics import (
     populate_metrics_from_unified_source,
+    recorded_reason,
+    target_counts,
 )
-from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.asharp_model import (
+    AshAggregatedResults,
+    new_report_id,
+    warning_of_dropped_keys,
+)
+from automated_security_helper.models.asharp_model import (
+    ConverterStatusInfo,
+    FailedInputInfo,
+    InputNotScanned,
+    RefusedInputInfo,
+)
+from automated_security_helper.models.core import (
+    IgnoreFileExclusions,
+    merged_honoring,
+)
 from automated_security_helper.plugins import ash_plugin_manager
-from automated_security_helper.plugins.loader import load_plugins
+from automated_security_helper.config.plugin_module_trust import config_module_names
+from automated_security_helper.plugins.loader import (
+    PluginModuleError,
+    PluginModuleNamespaceError,
+    combined_plugin_load_errors,
+    load_plugins,
+    plugin_module_fix,
+    refuse_plugin_modules_outside_namespace,
+)
 from automated_security_helper.utils.atomic_write import write_text_atomically
-from automated_security_helper.utils.log import ASH_LOGGER, get_logger
+from automated_security_helper.utils.display_text import (
+    escape_controls_in,
+    path_spellings,
+)
+from automated_security_helper.utils.inner_run_outcome import without_run_records
+from automated_security_helper.utils.log import (
+    ASH_LOGGER,
+    NO_MARKUP,
+    escape_markup,
+    get_logger,
+)
+from automated_security_helper.utils.output_dir_links import (
+    OutputDirLinkRefused,
+    refuse_linked_output_dir,
+)
+from automated_security_helper.utils.report_path_links import ReportPathRefused
+from automated_security_helper.utils.sbom_merge import merge_cyclonedx_reports
+from automated_security_helper.utils.secret_masking import mask_secrets_in_results
+from automated_security_helper.utils.terminal_text import (
+    raw_controls_on_one_line,
+    raw_controls_shown,
+    shown_on_one_line,
+)
 
 #: The filename every ASH scan writes its aggregated results to. A ``--results``
 #: directory is searched for this name.
@@ -206,6 +375,16 @@ _RESULTS_DIR_CANDIDATES = (
 _NEVER_ATTEMPTED_STATUSES = frozenset(
     {ScannerStatus.ERROR.value, ScannerStatus.MISSING.value}
 )
+
+
+def _each_value_once(*groups: Optional[Iterable[str]]) -> list[str]:
+    """The groups' values joined, each once, in their first order. A group
+    given as one string is one value (``value_tuple``), never its characters."""
+    from automated_security_helper.utils.redacted_model import value_tuple
+
+    return list(
+        dict.fromkeys(value for group in groups for value in value_tuple(group or ()))
+    )
 
 
 def _normalized(name: str) -> str:
@@ -294,13 +473,22 @@ def read_shard_assignment(results: AshAggregatedResults) -> ShardAssignment | No
 # ---------------------------------------------------------------------------
 
 
+class ResultsPathError(ShardCoverageError):
+    """A ``--results`` value that names no file or directory: a mistyped argument.
+
+    A ShardCoverageError too, so a caller that catches that catches this; the
+    CLI tells it apart to exit with the usage-error code rather than 1, which it
+    keeps for shards that exist and cannot be merged.
+    """
+
+
 def resolve_results_file(target: str | Path) -> Path:
     """Resolve one ``--results`` value to a single results file.
 
     A file is used as given. A directory is searched at the well-known relative
     locations first, and only then recursively -- the recursive search must find
     exactly one candidate, because picking one of several would silently drop
-    shards.
+    shards. Neither search follows a symlink beneath the directory.
 
     Args:
         target: A results file, or a directory containing one.
@@ -309,45 +497,66 @@ def resolve_results_file(target: str | Path) -> Path:
         The path to the results file.
 
     Raises:
-        ShardCoverageError: If *target* does not exist, or is a directory holding
-            no results file or more than one.
+        ResultsPathError: If *target* does not exist, or is neither a file nor a
+            directory.
+        ShardCoverageError: If *target* is a directory holding no results file or
+            more than one.
     """
     path = Path(target)
     if path.is_file():
         return path
     if not path.exists():
-        raise ShardCoverageError(
-            f"--results path does not exist: {path}. Refusing to merge, because "
-            f"skipping an unreadable shard would produce a partial report that "
-            f"reads as complete."
+        raise ResultsPathError(
+            f"--results path does not exist: {_shown(path)}. Refusing to merge, "
+            f"because skipping an unreadable shard would produce a partial report "
+            f"that reads as complete."
         )
     if not path.is_dir():
-        raise ShardCoverageError(
-            f"--results path is neither a file nor a directory: {path}."
+        raise ResultsPathError(
+            f"--results path is neither a file nor a directory: {_shown(path)}."
         )
 
+    # Not through a symlink at any level beneath the directory, here or in the
+    # recursive search: one can point anywhere, a file outside the tree or a procfs
+    # file that blocks included. A --results path the operator named is still
+    # followed.
     for candidate in _RESULTS_DIR_CANDIDATES:
         resolved = path.joinpath(candidate)
-        if resolved.is_file():
+        if not _reached_through_a_link(path, candidate) and resolved.is_file():
             return resolved
 
-    found = sorted(path.rglob(RESULTS_FILE_NAME))
+    # Regular files only: a named pipe by this name (an artifact archive can
+    # carry one) was returned, and reading it waited forever. rglob does not
+    # descend into a linked directory.
+    found = sorted(
+        p for p in path.rglob(RESULTS_FILE_NAME) if p.is_file() and not p.is_symlink()
+    )
     if not found:
         raise ShardCoverageError(
-            f"No {RESULTS_FILE_NAME} found in {path}. Checked "
+            f"No {RESULTS_FILE_NAME} found in {_shown(path)}. Checked "
             f"{', '.join(c.as_posix() for c in _RESULTS_DIR_CANDIDATES)} and then "
-            f"recursively. Check that the shard's CI job succeeded and uploaded "
-            f"its output directory."
+            f"recursively; symlinks beneath it are not followed. Check that the "
+            f"shard's CI job succeeded and uploaded its output directory."
         )
     if len(found) > 1:
-        listed = "\n  ".join(p.as_posix() for p in found)
+        listed = "\n  ".join(_shown(p.as_posix()) for p in found)
         raise ShardCoverageError(
-            f"{path} contains {len(found)} results files:\n  {listed}\n"
+            f"{_shown(path)} contains {len(found)} results files:\n  {listed}\n"
             f"Pass one --results per shard rather than a parent directory. Merging "
             f"everything found beneath a directory would make the merged set depend "
             f"on whatever else is in the tree, including a previous merged report."
         )
     return found[0]
+
+
+def _reached_through_a_link(base: Path, relative: Path) -> bool:
+    """Whether any component of *relative*, taken from *base*, is a symlink."""
+    current = base
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            return True
+    return False
 
 
 def load_shard_results(
@@ -370,20 +579,226 @@ def load_shard_results(
     for target in targets:
         results_file = resolve_results_file(target)
         try:
-            with open(results_file, "r", encoding="utf-8") as handle:
+            with (
+                open(results_file, "r", encoding="utf-8") as handle,
+                warning_of_dropped_keys(results_file) as context,
+            ):
                 loaded.append(
                     (
                         results_file,
-                        AshAggregatedResults.model_validate_json(handle.read()),
+                        AshAggregatedResults.model_validate_json(
+                            handle.read(), context=context
+                        ),
                     )
                 )
         except ShardCoverageError:
             raise
         except Exception as exc:
+            # from None: the ValidationError's own text quotes the file, and a
+            # traceback of this refusal would print it as the cause.
             raise ShardCoverageError(
-                f"Could not read shard results from {results_file}: {exc}"
-            ) from exc
+                f"Could not read shard results from {_shown(results_file)}: "
+                f"{_describe_unreadable_shard(exc)}"
+            ) from None
     return loaded
+
+
+#: What a refusal prints in place of a key that is not a field name, beside
+#: config_validator's REDACTED (``<value>``) for a value of the file.
+_REDACTED_KEY = "<key>"
+
+
+def _describe_unreadable_shard(exc: Exception) -> str:
+    """Why a shard results file could not be read, without repeating any of it.
+
+    A results file holds finding data: snippets, paths, and keys a scanner or a
+    configuration chose. pydantic's own text for a ValidationError quotes each
+    input as ``input_value='...'``, an error's location names every mapping key
+    on its path, and ASH's validators quote the value they refuse ("Use
+    YYYY-MM-DD: <value>"). So each error is given as ``Invalid value at '<loc>':
+    <message>``, the shape config_validator.format_model_error uses, where:
+
+    - a location part is printed only when it is a field name, alias or model
+      name of the results schema, an index as ``[n]``, and ``<key>`` otherwise;
+    - every string of the input is replaced in the message by ``<value>``,
+      except for invalid JSON, whose message gives a line and column and no
+      input;
+    - control characters are written as ``\\xNN``.
+
+    A file that is not UTF-8 is described by the offset of the first bad byte;
+    the decoder's own text prints the byte.
+    """
+    if isinstance(exc, UnicodeDecodeError):
+        text = f"not UTF-8 at byte offset {exc.start}"
+    elif isinstance(exc, ValidationError):
+        names = _results_schema_names()
+        problems = []
+        for error in exc.errors(include_url=False):
+            location = ""
+            for part in error["loc"]:
+                if isinstance(part, int):
+                    location += f"[{part}]"
+                else:
+                    shown = part if part in names else _REDACTED_KEY
+                    location += f".{shown}" if location else shown
+            message = str(error["msg"])
+            if error["type"] != "json_invalid":
+                message = _redact_values(message, _string_leaves(error.get("input")))
+            problems.append(
+                f"Invalid value at '{location or '(top level)'}': {message}"
+            )
+        text = "; ".join(problems)
+    elif isinstance(exc, OSError):
+        # The refusal names the shard; the error's own text would name it again,
+        # quoted, a Windows path's backslashes doubled.
+        text = exc.strerror or type(exc).__name__
+    else:
+        text = str(exc)
+    return _shown(text)
+
+
+def _shown_lines(message: str) -> str:
+    """A whole refusal as it is printed: its own line breaks kept, nothing obeyed.
+
+    Its values are already shown with _shown where merge.py and core/sharding.py
+    build it; this is the second guard, for the whole message. A control left raw
+    is written as its escape, tab and newline kept, and a line that would begin
+    with "::", or holds "##" with an optional name and "[", has that character
+    written as ``\\x3a`` or ``\\x23``, which a CI log shows but does not run (a
+    bare "##", a Markdown heading's, is no command and is left). Nothing is
+    shown again (utils/terminal_text.py's raw_controls_shown): showing each line
+    as _shown does doubled the backslash of every escape the sites wrote.
+    """
+    return raw_controls_shown(message)
+
+
+def _refusal_text(error: Exception) -> Text:
+    """A refusal as ``ash merge`` prints it: red, its values shown once.
+
+    The message is built from shown values (_shown) and shown whole by
+    _shown_lines, so it holds no control a terminal acts on. It is printed as
+    Text, which reads no markup, rather than through escape_markup: that shows a
+    value's controls itself, and run over shown text it doubled the backslash of
+    each escape, so a name holding ESC printed as ``x\\\\x1b`` where ``x\\x1b``
+    was meant.
+    """
+    return Text(f"Refusing to merge: {_shown_lines(str(error))}", style="red")
+
+
+def _invalid_config_text(error: Exception) -> Text:
+    """The operator-config refusal as ``ash merge`` prints it, before exit 3.
+
+    The message quotes the operator's path as it is (describe_config_path), and
+    the refusal is one line, so the whole message is shown once on one line:
+    every control in it, a newline included, is written as its escape
+    (``\\x0a``), its backslashes are kept and its CI command forms broken
+    (utils/terminal_text.py raw_controls_on_one_line). Printed as Text, which
+    reads no markup. Through escape_markup the backslash of each escape was
+    doubled, so a name holding ESC printed as ``\\\\x1b`` where ``\\x1b`` was
+    meant, and through _shown_lines a newline in the path started a line of its
+    own.
+    """
+    return Text(
+        f"Invalid configuration: {raw_controls_on_one_line(str(error))}", style="red"
+    )
+
+
+@functools.lru_cache(maxsize=1)
+def _results_schema_names() -> frozenset[str]:
+    """Every field name, alias and model name reachable from AshAggregatedResults.
+
+    The location of a pydantic error mixes these with the keys of mappings the
+    file chose (a scanner's name in scanner_results, a key the schema forbids),
+    which are data. Measured: 1077 names over 300 models, in about 3 ms.
+    """
+    names: set[str] = set()
+    seen: set[type] = set()
+
+    def visit(annotation: Any) -> None:
+        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+            if annotation in seen:
+                return
+            seen.add(annotation)
+            names.add(annotation.__name__)
+            for name, info in annotation.model_fields.items():
+                names.add(name)
+                if info.alias:
+                    names.add(info.alias)
+                if isinstance(info.validation_alias, str):
+                    names.add(info.validation_alias)
+                visit(info.annotation)
+            return
+        for argument in typing.get_args(annotation):
+            visit(argument)
+
+    visit(AshAggregatedResults)
+    return frozenset(names)
+
+
+def _string_leaves(value: Any) -> List[str]:
+    """Every string value in *value*, at any depth: what a validator might quote.
+
+    Mapping keys are left out: a key that reaches a message does so through the
+    location, which prints only schema names.
+    """
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [s for v in value.values() for s in _string_leaves(v)]
+    if isinstance(value, (list, tuple)):
+        return [s for item in value for s in _string_leaves(item)]
+    return []
+
+
+#: The characters pydantic's str_strip_whitespace trims: Rust's str::trim, the
+#: Unicode White_Space set. str.strip() also trims U+001C-001F, so a value starting
+#: with one is stored, and quoted by its validator, with it still there. Built with
+#: chr() so no escape in this file is rewritten into the character itself.
+_PYDANTIC_WHITESPACE = "".join(
+    chr(code)
+    for code in (
+        *range(0x09, 0x0E),
+        0x20,
+        0x85,
+        0xA0,
+        0x1680,
+        *range(0x2000, 0x200B),
+        0x2028,
+        0x2029,
+        0x202F,
+        0x205F,
+        0x3000,
+    )
+)
+
+
+def _redact_values(text: str, values: Iterable[str]) -> str:
+    """*text* with every whole occurrence of each value replaced by ``<value>``.
+
+    Through config_validator.redact_values, which a config's refusals use, with
+    each value given stripped too, both ways: metadata.generated_at is parsed
+    after str.strip(), and a str_strip_whitespace model (a
+    content_db_staleness_overrides entry) stores the value with pydantic's own
+    strip, and each error quotes what was kept. A copy of it here replaced one
+    match at a time: of two values that overlap, part of the second was left in
+    the message ("<value>/baz-long"), and a marker already there was marked again.
+
+    Only a ``<value>`` already there is left: a shard's message holds no
+    ``<from ${VAR}>`` of a config's, so a value shaped like one is the shard's.
+    """
+    from automated_security_helper.config.config_validator import (
+        REDACTED_MARKERS,
+        redact_values,
+    )
+
+    from automated_security_helper.utils.redacted_model import value_tuple
+
+    candidates = {
+        candidate
+        for value in value_tuple(values)
+        for candidate in (value, value.strip(), value.strip(_PYDANTIC_WHITESPACE))
+    }
+    return redact_values(text, candidates, markers=REDACTED_MARKERS, whole_words=True)
 
 
 # ---------------------------------------------------------------------------
@@ -413,7 +828,7 @@ def _collect_assignments(
             stamped.append((results_file, results, assignment))
 
     if unstamped:
-        listed = "\n  ".join(p.as_posix() for p in unstamped)
+        listed = "\n  ".join(_shown(p.as_posix()) for p in unstamped)
         raise ShardCoverageError(
             f"No shard provenance found in {len(unstamped)} results file(s):\n  {listed}\n"
             f"Only a scan run with --shard-index and --shard-count records which "
@@ -524,19 +939,28 @@ def _verify_scanner_union(
             for name in exempted
         )
         ASH_LOGGER.warning(
-            f"{len(exempted)} scanner(s) appear in shard results that no shard was "
-            f"assigned: {exempt_detail}. Each row records the scanner as never "
-            f"attempted, which is why this is not refused as a partitioning "
-            f"disagreement and the merge continues. The coverage is still short: "
-            f"--fail-on-incomplete-scanners is what turns that into a non-zero exit "
-            f"code, and under --no-fail-on-incomplete-scanners this line is the only "
-            f"record of it."
+            # Built from the values as the shards recorded them and shown whole,
+            # once: shown before they were put in, the sink showed them again and
+            # doubled each escape's backslash.
+            shown_on_one_line(
+                f"{len(exempted)} scanner(s) appear in shard results that no shard "
+                f"was assigned: {exempt_detail}. Each row records the scanner as "
+                f"never attempted, which is why this is not refused as a "
+                f"partitioning disagreement and the merge continues. The coverage is "
+                f"still short: --fail-on-incomplete-scanners is what turns that into "
+                f"a non-zero exit code, and under --no-fail-on-incomplete-scanners "
+                f"this line is the only record of it."
+            ),
+            # Text, not markup: a name such as "[/x]" raised MarkupError, which
+            # replaced the merge's verdict with exit 1.
+            extra=NO_MARKUP,
         )
 
     if unclaimed:
         listed = ", ".join(
-            f"{name} ({', '.join(sorted(statuses.get(name) or {'no status'}))}, "
-            f"seen in {seen[name].as_posix()})"
+            f"{_shown(name)} "
+            f"({_shown(', '.join(sorted(statuses.get(name) or {'no status'})))}, "
+            f"seen in {_shown(seen[name].as_posix())})"
             for name in unclaimed
         )
         raise ShardCoverageError(
@@ -563,7 +987,8 @@ def _verify_scanner_union(
     )
     if missing_from_owner:
         details = ", ".join(
-            f"{name} (owned by shard {shards[owner_by_scanner[name]][2].shard_index})"
+            f"{_shown(name)} (owned by shard "
+            f"{shards[owner_by_scanner[name]][2].shard_index})"
             for name in missing_from_owner
         )
         raise ShardCoverageError(
@@ -608,29 +1033,85 @@ def _completed(entry: Any) -> bool:
     return status_value in _COMPLETE_SCANNER_STATUSES
 
 
+def _ran_partially(results: AshAggregatedResults, name: str) -> bool:
+    """Whether the shard's recorded counts show the scanner ran and audited some targets.
+
+    The ERROR arm of shard verification, and only the ERROR arm: the recorded
+    status must be ERROR, compared by value the way ``_completed`` compares it.
+    A MISSING entry, or a status this version does not know (a shard from
+    another ASH version), with partial counts beside it is no evidence that the
+    scanner ran, so it stays refused. ``_completed`` reads the status alone,
+    and an ERROR status alone cannot say whether its scanner ever started. The
+    recorded target counts can: a scanner that attempted targets and failed only
+    some of them ran, audited the rest, and graded ERROR over the loss, so its
+    shard contributed real findings and refusing it as having run nothing would
+    discard them. The shortfall is not forgiven -- ``incomplete_scanners`` on the
+    merged product still names it and the exit gate still exits 1.
+
+    False for everything else, so the refusal keeps its reach: an ERROR entry
+    with no counts (the scanner does not track targets, or never got far enough
+    to record any) and one whose every attempted target failed are both
+    indistinguishable from a scanner that never ran, and a count outside
+    ``0 < failed < attempted`` makes no partial-coverage claim. *name* is a
+    normalized scanner name; the recorded spelling is looked up the way
+    :func:`_skipped_reason` does, because ``target_counts`` reads
+    ``additional_reports`` under the recorded key.
+    """
+    for recorded, entry in (results.scanner_results or {}).items():
+        if _normalized(recorded) == name:
+            status = getattr(entry, "status", None)
+            if getattr(status, "value", status) != ScannerStatus.ERROR.value:
+                return False
+            attempted, failed = target_counts(results, recorded)
+            return attempted is not None and 0 < failed < attempted
+    return False
+
+
 def _report_scanners_no_shard_selected(
     shards: Sequence[Tuple[Path, AshAggregatedResults, ShardAssignment]],
 ) -> None:
-    """Name the scanners assigned to a shard and intended by none of them.
+    """Name the scanners assigned to a shard, intended by none of them, and asked for.
 
-    A disclosure rather than a refusal, and the distinction is the whole design of
-    this function. Such a scanner ran on no shard, and the merged report presents it
-    as SKIPPED -- which ``_completed`` reads as a known outcome, so nothing above
-    objects. Two quite different causes produce that state and the provenance cannot
-    separate them: a scanner every shard's config disables, which is the operator's
-    choice, and a scanner one job's ``--scanners`` value dropped while the others
-    kept it, which is a coverage hole no existing check can see. A shard knows
-    nothing about scanners it does not own, so no cross-shard comparison can tell
-    which it was.
+    A disclosure rather than a refusal. Such a scanner ran on no shard, and the
+    merged report presents it as SKIPPED -- which ``_completed`` reads as a known
+    outcome, so nothing above objects. Two causes produce that state: a scanner
+    every job's selection leaves out (``--scanners``, ``--exclude-scanners``,
+    ``--python-only`` or its own ``enabled`` flag), which is the operator's choice,
+    and a scanner one job's selection dropped while another's kept it, which is a
+    coverage hole no other check can see.
 
-    Refusing would therefore break merges on any host where a scanner is legitimately
-    disabled, which is the same trap that narrowing ``assigned_scanners`` would have
-    walked into. WARNING is the compromise: the merged report says SKIPPED either way,
-    and this line is the only place that says no shard asked.
+    ``intended_scanners`` tells the two apart: each shard records what its
+    selection asks for over every candidate, not only over the scanners it owns.
+    A scanner some shard asked for and its owner did not select is the hole, and
+    is named at WARNING. A scanner no shard asked for is the operator's choice and
+    gets a VERBOSE line only, so a merge of shards run with the same
+    ``--scanners`` does not name every scanner outside the list.
 
-    Silent when no shard recorded a selection, which is every results file written
-    before ``selected_scanners`` existed. Inferring a hole from that absence would
-    name every scanner on every merge of an older fan-out's artifacts.
+    Shards written before ``intended_scanners`` existed cannot be told apart, so
+    when any shard lacks it every unselected scanner is named at WARNING, since
+    the merged report says SKIPPED either way. Silent when no shard
+    recorded a selection, which is every results file written before
+    ``selected_scanners`` existed. Inferring a hole from that absence would name
+    every scanner on every merge of an older fan-out's artifacts.
+
+    A scanner its owning shard recorded as left out by ``--python-only`` is not in
+    the warning when every shard ran with that flag. The flag is a selection too, so
+    a sharded ``--python-only`` scan leaves every non-Python scanner selected by no
+    shard, and naming each with advice about ``--scanners`` and
+    ``--exclude-scanners`` points at a cause nobody had. Its merged row says why it
+    was skipped, so it is named at INFO with the flag instead, unless a shard's
+    ``intended_scanners`` asked for it: then a job wanted it run and none ran it,
+    which is a hole whatever its owner's skip reason says. When the shards
+    disagree on the flag (``ShardAssignment.python_only``), or a shard did not
+    record it, such a scanner stays in the warning: one job left it out and no job
+    ran it, which is the hole the warning is for. Either warning then says what
+    the shards recorded: which ran with the flag and which did not; which recorded
+    running without it and which recorded nothing; or that none recorded it.
+
+    The names are the shards' own, so each line is built from them as recorded
+    and shown whole by shown_on_one_line, as text: a newline in a name cannot
+    start a line, and the sink writes the shown line as it is. A name shown before
+    it was put in would be shown again there, each escape's backslash doubled.
 
     Args:
         shards: Verified shard results, with assignments.
@@ -641,28 +1122,148 @@ def _report_scanners_no_shard_selected(
     # _normalized here takes one name, unlike sharding._normalized which takes an
     # iterable. Two functions, one name, different arities.
     assigned: dict[str, int] = {}
+    owner_results: dict[str, AshAggregatedResults] = {}
     selected: set[str] = set()
-    for _, _, assignment in shards:
+    for _, results, assignment in shards:
         for scanner in assignment.assigned_scanners:
             assigned[_normalized(scanner)] = assignment.shard_index
+            owner_results[_normalized(scanner)] = results
         for scanner in assignment.selected_scanners or []:
             selected.add(_normalized(scanner))
 
     unselected = sorted(set(assigned) - selected)
+    flags = {
+        assignment.shard_index: assignment.python_only for _, _, assignment in shards
+    }
+    every_shard_python_only = all(flag is True for flag in flags.values())
+    left_out_by_python_only = [
+        name
+        for name in unselected
+        if _skipped_reason(owner_results[name], name) == PYTHON_ONLY_SKIPPED_REASON
+    ]
+    # What each shard's selection asked for, over every candidate; None when a
+    # shard predates intended_scanners and the two causes cannot be told apart.
+    asked_for: Optional[dict[str, list[int]]] = None
+    if all(assignment.intended_scanners is not None for _, _, assignment in shards):
+        asked_for = {}
+        for _, _, assignment in shards:
+            for scanner in assignment.intended_scanners or []:
+                asked_for.setdefault(_normalized(scanner), []).append(
+                    assignment.shard_index
+                )
+    python_only = [
+        name
+        for name in left_out_by_python_only
+        if every_shard_python_only and (asked_for is None or name not in asked_for)
+    ]
+    if python_only:
+        ASH_LOGGER.info(
+            shown_on_one_line(
+                f"{len(python_only)} scanner(s) were left out by --python-only on "
+                f"the shard that owned them: {', '.join(python_only)}. The merged "
+                f"report shows them SKIPPED with that reason."
+            ),
+            extra=NO_MARKUP,
+        )
+    unselected = [name for name in unselected if name not in python_only]
     if not unselected:
+        return
+
+    def _python_only_disagreement(named: Sequence[str]) -> str:
+        """The sentence naming which shards ran --python-only, for *named*."""
+        ran_nowhere = [name for name in named if name in left_out_by_python_only]
+        if not ran_nowhere or every_shard_python_only:
+            return ""
+        with_flag = sorted(index for index, flag in flags.items() if flag is True)
+        without = sorted(index for index, flag in flags.items() if flag is not True)
+        if with_flag:
+            return (
+                f" The shards disagree on --python-only: shard(s) "
+                f"{', '.join(map(str, with_flag))} ran with it and shard(s) "
+                f"{', '.join(map(str, without))} did not or did not record it, so "
+                f"{', '.join(ran_nowhere)} ran nowhere."
+            )
+        if all(flag is None for flag in flags.values()):
+            # Written by a version that predates the record, or by hand: no shard
+            # says it ran with the flag, so there is no disagreement to name, only
+            # the scanners its reason left out.
+            return (
+                f" No shard recorded whether it ran with --python-only, and the "
+                f"shards that own {', '.join(ran_nowhere)} recorded them left out "
+                f"by it."
+            )
+        # No shard recorded True, but at least one recorded False: name what
+        # each shard recorded, against the reason the owners recorded.
+        recorded_false = sorted(index for index, flag in flags.items() if flag is False)
+        recorded_none = sorted(index for index, flag in flags.items() if flag is None)
+        nothing = (
+            f" and shard(s) {', '.join(map(str, recorded_none))} recorded nothing"
+            if recorded_none
+            else ""
+        )
+        return (
+            f" Shard(s) {', '.join(map(str, recorded_false))} recorded running "
+            f"without --python-only{nothing}, but the shards that own "
+            f"{', '.join(ran_nowhere)} recorded them left out by it, so they ran "
+            f"nowhere."
+        )
+
+    if asked_for is not None:
+        holes = [name for name in unselected if name in asked_for]
+        not_asked = [name for name in unselected if name not in asked_for]
+        if not_asked:
+            ASH_LOGGER.verbose(
+                shown_on_one_line(
+                    f"{len(not_asked)} scanner(s) were selected by no shard's "
+                    f"--scanners, --exclude-scanners or config, and the merged "
+                    f"report shows them SKIPPED: {', '.join(not_asked)}"
+                ),
+                extra=NO_MARKUP,
+            )
+        if not holes:
+            return
+        detail = ", ".join(
+            f"{name} (assigned to shard {assigned[name]}, which did not select it; "
+            f"asked for by shard "
+            f"{', '.join(str(index) for index in sorted(asked_for[name]))})"
+            for name in holes
+        )
+        ASH_LOGGER.warning(
+            shown_on_one_line(
+                f"{len(holes)} scanner(s) ran on no shard although a shard's "
+                f"selection asked for them: {detail}. The jobs of the matrix were "
+                f"given different --scanners, --exclude-scanners or config, so the "
+                f"merged report shows them SKIPPED and the scan did not run them."
+                f"{_python_only_disagreement(holes)}"
+            ),
+            extra=NO_MARKUP,
+        )
         return
 
     detail = ", ".join(
         f"{name} (assigned to shard {assigned[name]})" for name in unselected
     )
+    disagreement = _python_only_disagreement(unselected)
     ASH_LOGGER.warning(
-        f"{len(unselected)} scanner(s) were assigned to a shard but no shard "
-        f"intended to run them: {detail}. The merged report shows them SKIPPED, "
-        f"which is correct if a config disables them everywhere and misleading if "
-        f"one job's --scanners or --exclude-scanners value differed from the others' "
-        f"-- nothing in the shard results can tell those apart. Check that every job "
-        f"in the matrix was given the same scanner selection."
+        shown_on_one_line(
+            f"{len(unselected)} scanner(s) were assigned to a shard but no shard "
+            f"intended to run them: {detail}. The merged report shows them "
+            f"SKIPPED, which is correct if a config disables them everywhere and "
+            f"misleading if one job's --scanners or --exclude-scanners value "
+            f"differed from the others' -- nothing in the shard results can tell "
+            f"those apart. Check that every job in the matrix was given the same "
+            f"scanner selection.{disagreement}"
+        ),
+        extra=NO_MARKUP,
     )
+
+
+def _skipped_reason(results: AshAggregatedResults, name: str) -> str | None:
+    """The ``skipped_reason`` *results* recorded for the scanner *name* normalizes to."""
+    for recorded in results.scanner_results or {}:
+        if _normalized(recorded) == name:
+            return recorded_reason(results, recorded, "skipped_reason")
+    return recorded_reason(results, name, "skipped_reason")
 
 
 def _verify_shard_contributions(
@@ -703,6 +1304,10 @@ def _verify_shard_contributions(
         ShardCoverageError: If any shard that owned at least one scanner completed
             none of them.
     """
+    from automated_security_helper.utils.content_db_staleness import (
+        scanners_in_error_for_a_stale_database,
+    )
+
     offenders: List[str] = []
     for _, results, assignment in shards:
         owned = [_normalized(name) for name in assignment.assigned_scanners]
@@ -712,17 +1317,39 @@ def _verify_shard_contributions(
         entries = {
             _normalized(name): entry for name, entry in results.scanner_results.items()
         }
-        if any(name in entries and _completed(entries[name]) for name in owned):
+        # A scanner recorded ERROR because its clean result came from a database the
+        # policy rejects ran, and the merged scan exits 1 on that database. Counted
+        # as completed here, as it was when that result was recorded PASSED, so the
+        # shard is merged and the stale database is reported rather than the shard
+        # refused as having run nothing.
+        ran_against_a_stale_database = {
+            _normalized(name)
+            for name in scanners_in_error_for_a_stale_database(results)
+        }
+        if any(
+            name in entries
+            and (
+                _completed(entries[name])
+                or name in ran_against_a_stale_database
+                # An ERROR scanner whose counts show a partial audit ran; see
+                # _ran_partially. Checked last because it reads
+                # additional_reports, which the two status reads do not.
+                or _ran_partially(results, name)
+            )
+            for name in owned
+        ):
             continue
 
         detail = []
         for name in owned:
             entry = entries.get(name)
             if entry is None:
-                detail.append(f"{name} (no result recorded)")
+                detail.append(f"{_shown(name)} (no result recorded)")
             else:
                 status = getattr(entry, "status", None)
-                detail.append(f"{name} ({getattr(status, 'value', status)})")
+                detail.append(
+                    f"{_shown(name)} ({_shown(getattr(status, 'value', status))})"
+                )
         offenders.append(
             f"shard {assignment.shard_index} of {assignment.shard_count}: "
             f"{', '.join(detail)}"
@@ -828,6 +1455,33 @@ def _merge_timing(
         base.metadata.summary_stats.duration = max(durations)
 
 
+def _refuse_shards_without_a_config(
+    loaded: Sequence[Tuple[Path, AshAggregatedResults]],
+) -> None:
+    """Refuse a shard whose results record no scan configuration.
+
+    The merged verdict, the aggregated suppression pass and the report settings
+    are read from the configuration the shards scanned under. A shard with none
+    is not merged under ASH's defaults in its place.
+
+    Raises:
+        ShardCoverageError: Naming each shard that records no configuration.
+    """
+    missing = [
+        Path(path).as_posix()
+        for path, results in loaded
+        if not isinstance(results.ash_config, AshConfig)
+    ]
+    if missing:
+        raise ShardCoverageError(
+            f'Shard results record no scan configuration ("ash_config" is null): '
+            f"{', '.join(missing)}. The merged verdict, suppressions and report "
+            "settings come from the configuration the shards scanned under, so a "
+            "shard without one cannot be merged. Merge the results files the "
+            "shards wrote, unedited."
+        )
+
+
 def merge_shard_results(
     loaded: Sequence[Tuple[Path, AshAggregatedResults]],
     require_scanner_completion: bool = False,
@@ -839,10 +1493,14 @@ def merge_shard_results(
 
     Does not mutate its inputs; the base is a deep copy of the lowest-indexed
     shard. That shard supplies the report's identity -- name, description,
-    ``ash_config``, ``converter_results`` -- because those are properties of the
-    scan rather than of the shard, and taking them from the *lowest index* rather
-    than from the first ``--results`` argument makes the merged report
-    independent of the order the operator listed the shards in.
+    ``ash_config`` -- because those are properties of the scan rather than of the
+    shard, and taking them from the *lowest index* rather than from the first
+    ``--results`` argument makes the merged report independent of the order the
+    operator listed the shards in. ``converter_results`` rows are combined across
+    shards instead; see :func:`_merge_converter_rows`. So is
+    ``metadata.plugin_load_errors``, every shard's modules that failed to import
+    (``plugins.loader.combined_plugin_load_errors``). The ``report_id`` is the
+    exception: see :func:`_union_report_id`.
 
     Args:
         loaded: (path, results) pairs, in any order.
@@ -858,6 +1516,7 @@ def merge_shard_results(
         ShardCoverageError: If the shards do not reconstruct exactly one whole
             scan.
     """
+    _refuse_shards_without_a_config(loaded)
     shards = _collect_assignments(loaded)
     verify_shard_coverage([assignment for _, _, assignment in shards])
 
@@ -872,6 +1531,10 @@ def merge_shard_results(
         _verify_shard_contributions(shards)
 
     merged = shards[0][1].model_copy(deep=True)
+    # Without each shard's records about its own run: its completion marker, a
+    # refusal and the reports it wrote describe that run, not this merge. See
+    # utils/inner_run_outcome.py.
+    merged.validation_checkpoints = without_run_records(merged.validation_checkpoints)
 
     for _, shard, _ in shards[1:]:
         if merged.sarif is None:
@@ -880,27 +1543,67 @@ def merge_shard_results(
             merged.sarif.merge_sarif_report(shard.sarif)
             _merge_tool_extensions(merged, shard)
 
-        merged.validation_checkpoints.extend(shard.validation_checkpoints)
+        # Every shard read the same config, so each recorded the same config
+        # warnings; those are kept once. Other checkpoints are per shard.
+        merged.validation_checkpoints.extend(
+            checkpoint
+            for checkpoint in without_run_records(shard.validation_checkpoints)
+            if not (
+                checkpoint.get("type") == "config_warning"
+                and checkpoint in merged.validation_checkpoints
+            )
+        )
         merged.used_suppressions.update(shard.used_suppressions)
 
         for name, converter_result in shard.converter_results.items():
             # Converters are not sharded: every shard converts the whole tree, so
-            # the entries agree and the first one is as good as any. setdefault
-            # rather than assignment keeps the lowest-indexed shard's copy, which
-            # is what makes the result order-independent.
-            merged.converter_results.setdefault(name, converter_result)
+            # the rows normally agree. They are still each shard's own record, and
+            # one shard's runner can fail where another's succeeded -- nbconvert
+            # timing out, a tool missing -- so the rows are combined rather than
+            # the lowest-indexed one kept. Shards are visited in index order, so
+            # the result does not depend on the order they were passed in.
+            base = merged.converter_results.get(name)
+            merged.converter_results[name] = (
+                converter_result.model_copy(deep=True)
+                if base is None
+                else _merge_converter_rows(base, converter_result)
+            )
 
         for name, report in shard.additional_reports.items():
             merged.additional_reports.setdefault(name, report)
 
-        if not _has_sbom_components(merged.cyclonedx) and _has_sbom_components(
-            shard.cyclonedx
-        ):
-            merged.cyclonedx = shard.cyclonedx
+        # The shards' SBOMs are united in shard order by the rule a single scan
+        # uses for its own (utils/sbom_merge.py). A shard whose SBOM is None adds
+        # nothing, and the result is a copy rather than either argument, so the
+        # merged report shares no object with the shard it came from. Only
+        # components and dependencies are combined; a later shard's other lists
+        # (vulnerabilities, services, annotations, compositions) are not carried,
+        # and syft writes none of them.
+        merged.cyclonedx = merge_cyclonedx_reports(merged.cyclonedx, shard.cyclonedx)
 
     _adopt_owning_shard_results(merged, shards, owner_by_scanner)
+    _merge_scan_set_records(merged, shards)
+    # Every shard's, not the base shard's: each shard imports the plugin modules
+    # itself, and the completeness gate reads a module missing from this record
+    # as one that loaded.
+    merged.metadata.plugin_load_errors = combined_plugin_load_errors(
+        shard.metadata.plugin_load_errors for _, shard, _ in shards
+    )
     _merge_timing(merged, shards)
     _record_merge_provenance(merged, shards)
+    merged.metadata.report_id = _union_report_id(shards)
+    _merge_scan_markers(merged, shards)
+
+    # Each shard was masked against its own secret findings only, and shards split
+    # by scanner, so a secret one shard's scanner reports can sit in another
+    # shard's snippets. The merged set is masked against all of them before
+    # anything is written; see utils/secret_masking.py. By location from the
+    # findings themselves; by value from the shapes every shard recorded, since
+    # no shard holds the values any more once it has masked them.
+    mask_secrets_in_results(
+        merged,
+        shapes=[shape for _, shard, _ in shards for shape in shard.secret_value_shapes],
+    )
 
     # Recomputes summary_stats and per-scanner counts from the merged SARIF, the
     # same call the execution engine makes before the report phase. Without it
@@ -909,9 +1612,246 @@ def merge_shard_results(
     return populate_metrics_from_unified_source(aggregated_results=merged)
 
 
-def _has_sbom_components(cyclonedx: Any) -> bool:
-    """Return True when *cyclonedx* carries at least one component."""
-    return bool(getattr(cyclonedx, "components", None))
+def _merge_scan_set_records(
+    merged: AshAggregatedResults,
+    shards: Sequence[Tuple[Path, AshAggregatedResults, ShardAssignment]],
+) -> None:
+    """Set the merged scan-set records in ``metadata`` from every shard's.
+
+    Each shard builds ASH's scan set itself and records what it left out:
+    ``inputs_not_scanned`` (the links leaving the scanned tree) and
+    ``ignore_file_exclusions``. Shards normally agree, since they scan one tree, but
+    one that ran on a different checkout or with ``--no-honor-ignore-files`` does
+    not, and its scan-set readers did not scan what it left out. So the merged
+    report records what any shard left out, in shard order:
+
+    * ``inputs_not_scanned``: every shard's rows, each (path, reason) once, first
+      record kept; None when no shard recorded one.
+    * ``ignore_file_exclusions``: ``honored`` only when every shard honored the
+      ignore files (as a workspace's merged record says); for each ignore file the
+      most any shard says it removed; ``excluded_file_count`` the sum of those, or
+      the largest shard count when that is more (a shard that did not honor the
+      ignore files can count files the caller's ignore files removed without
+      naming them); ``output_dir_file_count`` the largest; and, when some shards
+      honored the ignore files and some did not, ``honored_scan_count`` and
+      ``scan_count``, so the summaries say that instead of either one-scan
+      sentence. None when no shard recorded one.
+
+    Shards are visited in index order, so the result does not depend on the order
+    they were passed in. No shard is modified.
+    """
+    rows: Dict[Tuple[str, str], InputNotScanned] = {}
+    for _, shard, _ in shards:
+        for row in shard.metadata.inputs_not_scanned or []:
+            rows.setdefault((row.path, row.reason), row)
+    merged.metadata.inputs_not_scanned = (
+        [row.model_copy() for row in rows.values()] if rows else None
+    )
+
+    records = [
+        shard.metadata.ignore_file_exclusions
+        for _, shard, _ in shards
+        if shard.metadata.ignore_file_exclusions is not None
+    ]
+    if not records:
+        merged.metadata.ignore_file_exclusions = None
+        return
+    by_ignore_file: Dict[str, int] = {}
+    for record in records:
+        for path, count in record.by_ignore_file.items():
+            by_ignore_file[path] = max(by_ignore_file.get(path, 0), count)
+    merged.metadata.ignore_file_exclusions = IgnoreFileExclusions(
+        excluded_file_count=max(
+            sum(by_ignore_file.values()),
+            max(record.excluded_file_count for record in records),
+        ),
+        by_ignore_file=by_ignore_file,
+        output_dir_file_count=max(record.output_dir_file_count for record in records),
+        # honored, and the scan counts when the shards disagree.
+        **merged_honoring(records),
+    )
+
+
+def _merge_converter_rows(
+    base: ConverterStatusInfo, other: ConverterStatusInfo
+) -> ConverterStatusInfo:
+    """One converter's row for the union of two shards' rows.
+
+    Combined so that the completeness gate (``run_ash_scan.incomplete_converters``)
+    sees in the union whatever it would have seen in either shard:
+
+    * ``failure``: every distinct one, in shard order.
+    * ``failed_inputs`` and ``refused_inputs``: every shard's, listed once per path
+      (and per archive member for a refusal), first record kept.
+    * ``dependencies_satisfied``: False if it was False in either shard, with the
+      candidate count of the shards where it was. Only a count of 0 exempts an
+      unavailable converter, so 0 is kept only when every such shard reported 0,
+      and a missing count stays missing.
+    * ``excluded``: True only if both shards excluded it; a shard that ran it is
+      not overridden by one that did not.
+    * ``converted_paths``: the union, in order.
+
+    A field neither row set is left unset, so a simple dump of two agreeing rows is
+    the base row's dump. Neither input is modified.
+    """
+    update: Dict[str, Any] = {}
+    fields_set = base.model_fields_set | other.model_fields_set
+
+    failures = list(dict.fromkeys(f for f in (base.failure, other.failure) if f))
+    if failures:
+        update["failure"] = "; ".join(failures)
+
+    if not (base.dependencies_satisfied and other.dependencies_satisfied):
+        update["dependencies_satisfied"] = False
+        counts = [
+            row.candidate_inputs
+            for row in (base, other)
+            if not row.dependencies_satisfied
+        ]
+        if any(count is None for count in counts):
+            update["candidate_inputs"] = None
+        else:
+            update["candidate_inputs"] = max(c for c in counts if c is not None)
+    elif "candidate_inputs" in fields_set:
+        update["candidate_inputs"] = base.candidate_inputs
+
+    if "excluded" in fields_set:
+        update["excluded"] = base.excluded and other.excluded
+
+    failed: Dict[str, FailedInputInfo] = {}
+    for record in [*base.failed_inputs, *other.failed_inputs]:
+        failed.setdefault(record.path, record)
+    if failed:
+        update["failed_inputs"] = [r.model_copy() for r in failed.values()]
+
+    refused: Dict[Tuple[str, Optional[str]], RefusedInputInfo] = {}
+    for refusal in [*base.refused_inputs, *other.refused_inputs]:
+        refused.setdefault((refusal.path, refusal.member), refusal)
+    if refused:
+        update["refused_inputs"] = [r.model_copy() for r in refused.values()]
+
+    if "converted_paths" in fields_set:
+        update["converted_paths"] = list(
+            dict.fromkeys([*base.converted_paths, *other.converted_paths])
+        )
+
+    merged = base.model_copy(deep=True)
+    for key, value in update.items():
+        setattr(merged, key, value)
+    return merged
+
+
+def _union_report_id(
+    shards: Sequence[Tuple[Path, AshAggregatedResults, ShardAssignment]],
+) -> str:
+    """One ``report_id`` for the merged report, derived from every shard's.
+
+    Each shard is a separate ``ash scan`` and mints its own id. Keeping the base
+    shard's would give the merged report the id of a document holding a fraction
+    of its findings, so a consumer keyed on the id could not tell the two apart.
+    A fresh random id would separate them but make every merge of the same shards
+    a different document, which sorting the shards by index exists to avoid.
+
+    So the id is the shard ids' digest, in shard-index order, with the base
+    shard's ``generated_at`` as its time: the same shards give the same id in any
+    order, other shards give another id, and it has the shape of a scan's id.
+    """
+    shard_ids = "\n".join(str(shard.metadata.report_id or "") for _, shard, _ in shards)
+    digest = hashlib.sha256(shard_ids.encode("utf-8")).hexdigest()[:12]
+    try:
+        started: Optional[datetime] = datetime.fromisoformat(
+            str(shards[0][1].metadata.generated_at)
+        )
+    except ValueError:
+        # Every model sets generated_at when it is built; a results file without a
+        # parseable one is not reproducible anyway, so the time is the merge's.
+        started = None
+    return new_report_id(now=started, token=digest)
+
+
+#: How much of a text value a WARNING names: a results file can carry any value
+#: in metadata, and a 100,000-element list made a 500,151-character log line.
+_NAMED_TEXT_LIMIT = 120
+
+
+def _named_value(value: Any) -> str:
+    """*value* as a WARNING names it: text quoted as recorded, cut at 120 characters.
+
+    Not its repr: the warning is shown whole, once, by shown_on_one_line, and a
+    repr's escapes were shown again there, so ESC read as the text "\\\\x1b". A
+    list or a mapping is no directory, so it is named by its kind and size rather
+    than by its items, which are text too; a number, a boolean or None as written.
+    """
+    if isinstance(value, str):
+        if len(value) > _NAMED_TEXT_LIMIT:
+            return f"'{value[:_NAMED_TEXT_LIMIT]}...'"
+        return f"'{value}'"
+    if value is None or isinstance(value, (bool, int, float)):
+        return repr(value)
+    kind = type(value).__name__
+    if isinstance(value, Sized):
+        return f"a {kind} of {len(value)} item{'' if len(value) == 1 else 's'}"
+    return f"a {kind}"
+
+
+def _named_values(values: Sequence[Any], limit: int = 5) -> str:
+    """The distinct *values*, each shortened, at most *limit* of them."""
+    named = sorted({_named_value(value) for value in values})
+    shown = ", ".join(named[:limit])
+    if len(named) > limit:
+        shown += f", and {len(named) - limit} more"
+    return shown
+
+
+def _merge_scan_markers(
+    merged: AshAggregatedResults,
+    shards: Sequence[Tuple[Path, AshAggregatedResults, ShardAssignment]],
+) -> None:
+    """Make ``scan_source`` and ``changed_files_only`` true of every shard.
+
+    The merged report is a deep copy of the lowest-indexed shard, so without
+    this it carried that shard's values whatever the others recorded. The
+    aws-security-hub reporter archives a stored finding only under the recorded
+    ``scan_source`` and only when ``changed_files_only`` is an explicit False,
+    so a shard that scanned another directory, or was filtered to changed files,
+    would have the findings it left out read as fixed.
+
+    Shards that disagree on ``scan_source`` (a shard without one, or with a
+    value that is not a string, counts as None) leave the merged report with
+    none, so nothing is archived, and the values are named in a WARNING.
+    ``changed_files_only`` is True when any shard says so, absent when a shard
+    does not say, and False only when every shard recorded False.
+    """
+    recorded = [getattr(shard.metadata, "scan_source", None) for _, shard, _ in shards]
+    # metadata keeps unknown keys as given, so a results file can carry a list or
+    # a mapping here, which is no directory and cannot go in a set.
+    sources = [source if isinstance(source, str) else None for source in recorded]
+    if len(set(sources)) > 1:
+        reason = "The shards record different scanned directories"
+    elif any(
+        source is None and value is not None for source, value in zip(sources, recorded)
+    ):
+        reason = "The shards record no scanned directory that is a string"
+    else:
+        reason = None
+    if reason is not None:
+        ASH_LOGGER.warning(
+            shown_on_one_line(
+                f"{reason} (scan_source {_named_values(recorded)}), so the merged "
+                "results record none and aws-security-hub archives nothing from "
+                "them."
+            ),
+            extra=NO_MARKUP,
+        )
+        setattr(merged.metadata, "scan_source", None)
+
+    markers = [
+        getattr(shard.metadata, "changed_files_only", None) for _, shard, _ in shards
+    ]
+    if any(marker is True for marker in markers):
+        setattr(merged.metadata, "changed_files_only", True)
+    elif any(marker is not False for marker in markers):
+        setattr(merged.metadata, "changed_files_only", None)
 
 
 def _adopt_owning_shard_results(
@@ -986,7 +1926,7 @@ def _record_merge_provenance(
     ``results.metadata.shard`` raises AttributeError instead of returning the
     field's default, and the field vanishes from ``model_dump_json`` entirely.
     That leaves a booby-trapped model for every consumer that reads the attribute
-    without a default: reporters, the committed JSON schema, and any later lane.
+    without a default: reporters, the committed JSON schema, and any later caller.
     None is the field's own default, serializes as ``"shard": null``, and
     :func:`read_shard_assignment` treats it as absent, so clearing achieves
     everything deleting did without the landmine.
@@ -1043,6 +1983,11 @@ def apply_aggregated_suppressions(
     the call is what ``ash scan`` does, so skipping it is what keeps the verdicts
     equal in the configurations no fixture here exercises.
 
+    Under the flag the merge path applies nothing: ``apply_suppressions_to_sarif``
+    is skipped, and the output-directory exclusion is not applied here in either
+    case -- each shard already dropped its own output-directory results, as the
+    comment at the call site says.
+
     Args:
         merged: The merged results, with metrics already populated from the union.
         plugin_context: Carries the scan's own config and ``ignore_suppressions``.
@@ -1052,11 +1997,7 @@ def apply_aggregated_suppressions(
         rather than mutated in place only because
         ``populate_metrics_from_unified_source`` returns the model.
     """
-    if (
-        not plugin_context.ignore_suppressions
-        and merged is not None
-        and merged.sarif is not None
-    ):
+    if merged is not None and merged.sarif is not None:
         # Imported here, matching the engine, which imports it inside the report
         # branch. sarif_utils pulls in the SARIF model and the config tree, and
         # ``ash merge`` reaches this point only after a successful merge.
@@ -1064,18 +2005,540 @@ def apply_aggregated_suppressions(
             apply_suppressions_to_sarif,
         )
 
-        merged.sarif = apply_suppressions_to_sarif(
-            sarif_report=merged.sarif,
-            plugin_context=plugin_context,
-            used_suppressions=getattr(merged, "used_suppressions", None),
-        )
+        # The output-directory exclusion is not applied again. Each shard already
+        # dropped the results in its own output directories that are not files
+        # the repository committed, with its own git answer and run ID. The merge
+        # has no run ID and may run outside git, where git's answer is that
+        # nothing is committed, so deciding again dropped a committed file every
+        # shard kept. The merge keeps what the shards kept.
+        if not plugin_context.ignore_suppressions:
+            merged.sarif = apply_suppressions_to_sarif(
+                sarif_report=merged.sarif,
+                plugin_context=plugin_context,
+                used_suppressions=getattr(merged, "used_suppressions", None),
+                exclude_output_dir=False,
+            )
 
     # Recomputed unconditionally, not only when suppressions ran. Under
-    # ``--ignore-suppressions`` the counts merge_shard_results already produced are
-    # correct, so this is a no-op there; making it conditional would put the "did
-    # the counts get refreshed" question on the same branch as "did suppressions
-    # run", and the exit code depends on the first.
+    # ``--ignore-suppressions`` the counts change only when a result in the output
+    # directory was removed; making this conditional would put the "did the counts
+    # get refreshed" question on the same branch as "did suppressions run", and the
+    # exit code depends on the first.
     return populate_metrics_from_unified_source(aggregated_results=merged)
+
+
+# ---------------------------------------------------------------------------
+# The recorded configuration
+# ---------------------------------------------------------------------------
+
+
+def resolve_operator_config(config_path: Optional[str]) -> AshConfig:
+    """The operator's trusted base: the defaults, or ``--config`` (or ``ASH_CONFIG``).
+
+    Resolved the way ``ash report`` resolves its config, except that a
+    ``--config`` naming nothing readable is refused rather than replaced by the
+    defaults: a merge whose operator values silently became the defaults would
+    send its reports somewhere other than the operator chose. The file is read
+    once, here; the rest of the merge uses what this returns. A refusal quotes the
+    path with its control characters escaped (``describe_config_path``).
+
+    Raises:
+        ASHConfigSourceError: When the path is not a file, or the file cannot be
+            read or parsed.
+        ASHConfigValidationError: When the file does not validate.
+    """
+    if config_path is None:
+        return resolve_config(config_path=None)
+    path = Path(config_path)
+    if not path.is_file():
+        raise ASHConfigSourceError(
+            f"--config {describe_config_path(path)} does not exist or is not a file."
+        )
+    try:
+        config = resolve_config(config_path=path, fallback_to_default=False)
+    except ASHConfigValidationError:
+        raise
+    except (OSError, UnicodeDecodeError, ValueError, yaml.YAMLError) as exc:
+        # json.JSONDecodeError is a ValueError.
+        raise ASHConfigSourceError(
+            f"--config {describe_config_path(path)} could not be read: "
+            f"{escape_controls_in(exc, path_spellings(path))}"
+        ) from exc
+    if config is None:
+        raise ASHConfigSourceError(
+            f"--config {describe_config_path(path)} could not be read."
+        )
+    return config
+
+
+def apply_operator_overrides(
+    loaded: Sequence[Tuple[Path, AshAggregatedResults]],
+    config_overrides: Sequence[str],
+) -> None:
+    """Apply ``--config-overrides`` to each shard's recorded config, in place.
+
+    Called before anything reads those configs, so the completion gate, the
+    verdict and the reporters all see the operator's values. A shard that
+    recorded no config is left without one, so
+    :func:`_resolve_require_scanner_completion` still passes over it.
+
+    Raises:
+        ASHConfigValidationError: If an override cannot be applied.
+    """
+    if not config_overrides:
+        return
+    for _, results in loaded:
+        if results.ash_config is not None:
+            results.ash_config = apply_config_overrides(
+                results.ash_config, list(config_overrides)
+            )
+
+
+def supply_unread_recorded_fields(
+    loaded: Sequence[Tuple[Path, AshAggregatedResults]],
+    trusted_config: AshConfig,
+    config_overrides: Sequence[str],
+    cli_values: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Supply, from the operator, each recorded field a shard's results could not
+    read, in place.
+
+    A shard records a value its scan read from the environment as the reference
+    its config file wrote. A fixed-choice field such as ``severity_threshold``
+    cannot hold one, so the shard's record reads it as the field's default and
+    lists it (``AshAggregatedResults.validate_ash_config``,
+    ``config/recorded_config.py``). The merge computes its reports and its
+    verdict from these fields, so each one comes from ``--config-overrides`` or
+    the file ``--config`` (or ``ASH_CONFIG``) names, or the merge is refused: the
+    default in place of the scan's severity threshold could drop findings from the
+    merged report.
+
+    The overrides are already on each shard's record
+    (:func:`apply_operator_overrides`) and not on ``trusted_config``, so the
+    operator's configuration is read with them applied to a copy: a field an
+    override names counts as supplied and takes the value the override gave it,
+    and one the file writes takes the file's.
+
+    ``cli_values`` maps a field to the value the command line gave it
+    (``--output-formats`` for ``output_formats``), in the shape of
+    :func:`verify_verdict_settings_agree`'s: ``None`` or an empty value is a flag
+    that was not given and supplies nothing. A given value supplies its field as
+    ``--config-overrides '<field>=<value>'`` does and is applied after the
+    overrides, so it replaces what they gave the field, as the flag replaces the
+    formats the merge reports with.
+
+    Every shard is checked before any is changed, and the refusal is one for all
+    of them: it names each field with its reference once, and under it every
+    shard and results file that recorded that reference, as
+    :func:`verify_verdict_settings_agree` does for a setting the shards disagree
+    on, so the operator supplies every field in one run.
+
+    Raises:
+        ASHConfigValidationError: A field neither supplies, named with the
+            reference, never a value.
+    """
+    if not any(unreadable_references(results.ash_config) for _, results in loaded):
+        return
+    given_on_command_line = [
+        f"{field}={json.dumps(value)}"
+        for field, value in (cli_values or {}).items()
+        if value
+    ]
+    operator_overrides = [*config_overrides, *given_on_command_line]
+    operator = (
+        apply_config_overrides(trusted_config, operator_overrides)
+        if operator_overrides
+        else trusted_config
+    )
+    missing = [
+        (path, results, field, reference)
+        for path, results in _in_index_order(loaded)
+        for field, reference in unsupplied_references(results.ash_config, operator)
+    ]
+    if missing:
+        raise unsupplied_refusal(
+            _named_with_shards(missing),
+            [(field, reference) for _, _, field, reference in missing],
+            HOW_TO_SUPPLY,
+        )
+    for _, results in loaded:
+        take_own_values(
+            results.ash_config, operator, refuse_unless_supplied=HOW_TO_SUPPLY
+        )
+
+
+def confine_recorded_config(
+    config: AshConfig,
+    trusted_config: AshConfig,
+    config_overrides: Sequence[str],
+    results_file: Path,
+) -> None:
+    """Hold a shard's recorded config to the rules for a config file in the scanned tree.
+
+    Runs ``confine_to_trusted_base``, the steps ``resolve_config`` runs for such a
+    file, with ``SHARD_RECORDED`` as the source: the warnings name
+    ``results_file`` and give ``ash merge``'s options as the fix, and an
+    ``ash_plugin_modules`` entry the operator's configuration does not name is
+    dropped. ``confine_reporter_destinations`` also records the trusted base on
+    ``config`` for ``confine_declared_reporter_destinations``, which the caller
+    runs with the same source once the plugin modules are loaded.
+
+    Args:
+        config: The merged report's config, changed in place.
+        trusted_config: The operator's config, without ``config_overrides``.
+        config_overrides: ``--config-overrides``, replayed onto ``trusted_config``.
+        results_file: The results file ``config`` was recorded in.
+    """
+    confine_to_trusted_base(
+        config,
+        trusted_config,
+        list(config_overrides),
+        Path.cwd(),
+        [results_file],
+        source=SHARD_RECORDED,
+    )
+
+
+def _in_index_order(
+    loaded: Sequence[Tuple[Path, AshAggregatedResults]],
+) -> List[Tuple[Path, AshAggregatedResults]]:
+    """``loaded`` by shard index, with any file that carries no provenance last.
+
+    The order :func:`merge_shard_results` takes the merged report's identity in,
+    for the readers of the recorded config that run before it.
+    """
+
+    def position(entry: Tuple[Path, AshAggregatedResults]) -> Tuple[bool, int]:
+        assignment = read_shard_assignment(entry[1])
+        return (assignment is None, assignment.shard_index if assignment else 0)
+
+    return sorted(loaded, key=position)
+
+
+def _shard_label(results: AshAggregatedResults) -> str:
+    """How a refusal names the shard that recorded something."""
+    assignment = read_shard_assignment(results)
+    if assignment is None:
+        return "a shard without provenance"
+    return f"shard {assignment.shard_index}"
+
+
+def _listed(items: Sequence[str]) -> str:
+    """``items`` as a phrase: one alone, two joined by "and", more as a comma list
+    with "and" before the last."""
+    if len(items) <= 2:
+        return " and ".join(items)
+    return f"{', '.join(items[:-1])}, and {items[-1]}"
+
+
+def _named_with_shards(
+    missing: Sequence[Tuple[Path, AshAggregatedResults, str, str]],
+) -> str:
+    """Each ``(field, reference)`` of ``missing`` once, with every shard and results
+    file that recorded it. ``missing`` comes in shard-index order, with a shard
+    whose results carry no shard assignment last (:func:`_in_index_order`), which
+    is not the order the shards were given on the command line.
+
+    The common pipeline records one reference in every shard, so the entry is
+    per reference and not per shard; the same field recorded as another
+    reference by another shard is another entry.
+    """
+    recorded_in: Dict[Tuple[str, str], List[str]] = {}
+    for path, results, field, reference in missing:
+        recorded_in.setdefault((field, reference), []).append(
+            f"{_shard_label(results)} ({path.as_posix()})"
+        )
+    return "; ".join(
+        f"{field} is recorded as {reference} in {_listed(places)}"
+        for (field, reference), places in recorded_in.items()
+    )
+
+
+def _base_results_file(loaded: Sequence[Tuple[Path, AshAggregatedResults]]) -> Path:
+    """The results file of the lowest-indexed shard, which supplies the merged config."""
+    return _in_index_order(loaded)[0][0]
+
+
+def _as_written(value: Any) -> Any:
+    """``value`` with each list entry reduced to what a config file writes.
+
+    A suppression or ignore path dumps every field, ``None`` for the ones left
+    out, and ASH's own ``client_supplied`` mark. Neither is part of what was
+    written, so a file that omits them compares equal to a full dump, and an
+    override suggested from them repeats only what the operator wrote.
+    """
+    if not isinstance(value, list):
+        return value
+    return [
+        {
+            key: item_value
+            for key, item_value in item.items()
+            if key != "client_supplied" and item_value is not None
+        }
+        if isinstance(item, dict)
+        else item
+        for item in value
+    ]
+
+
+def _verdict_settings(dumped: Dict[str, Any]) -> Dict[str, Any]:
+    """The settings of a dumped config that decide the merged verdict, by override key.
+
+    ``dumped`` is ``AshConfig.model_dump(mode="json", by_alias=True)``, with
+    ``exclude_unset`` for the settings a file sets. The keys are the
+    ``--config-overrides`` spelling of each setting, and list values are reduced
+    to what a file writes (``_as_written``).
+    """
+    settings: Dict[str, Any] = {}
+    for name, value in dumped.items():
+        if name in ("fail_on_findings", "fail_on_incomplete_scanners") or (
+            name.startswith("content_db_staleness")
+        ):
+            settings[name] = _as_written(value)
+    global_settings = dumped.get("global_settings") or {}
+    for name in ("severity_threshold", "suppressions", "ignore_paths"):
+        if name in global_settings:
+            settings[f"global_settings.{name}"] = _as_written(global_settings[name])
+    for scanner, section in (dumped.get("scanners") or {}).items():
+        options = section.get("options") if isinstance(section, dict) else None
+        if isinstance(options, dict) and "severity_threshold" in options:
+            key = f"scanners.{scanner}.options.severity_threshold"
+            settings[key] = options["severity_threshold"]
+    return settings
+
+
+def _recorded_verdict_settings(results: AshAggregatedResults) -> Dict[str, Any]:
+    config = results.ash_config
+    if config is None:
+        return {}
+    return _verdict_settings(config.model_dump(mode="json", by_alias=True))
+
+
+def _shown_setting(value: Any) -> str:
+    text = json.dumps(value, sort_keys=True)
+    return text if len(text) <= 60 else text[:57] + "..."
+
+
+#: The verdict settings ``ash merge`` has a flag for, with the flag's spelling for
+#: true and for false. A flag that is given decides the setting for the merge.
+VERDICT_FLAGS: Dict[str, Tuple[str, str]] = {
+    "fail_on_findings": ("--fail-on-findings", "--no-fail-on-findings"),
+    "fail_on_incomplete_scanners": (
+        "--fail-on-incomplete-scanners",
+        "--no-fail-on-incomplete-scanners",
+    ),
+}
+
+
+def _decided_by_flags(cli_values: Optional[Dict[str, Optional[bool]]]) -> set[str]:
+    """The verdict settings a flag given on the command line decides."""
+    return {key for key, value in (cli_values or {}).items() if value is not None}
+
+
+def verify_verdict_settings_agree(
+    loaded: Sequence[Tuple[Path, AshAggregatedResults]],
+    cli_values: Optional[Dict[str, Optional[bool]]] = None,
+) -> None:
+    """Refuse shards whose recorded configs disagree on a setting the verdict reads.
+
+    One verdict covers the merged scan, and it is computed from one config. Taking
+    the lowest-indexed shard's value for every shard would let one shard's
+    ``fail_on_findings: false`` or suppressions decide for findings another shard
+    produced under different settings. Compared after ``--config-overrides`` are
+    applied, so an override that sets the value for every shard settles it, and a
+    setting the command line's flag decides (``cli_values``, keyed as
+    ``VERDICT_FLAGS``) is not compared at all. A shard that recorded no
+    configuration at all is left out: it has no value to disagree with, and
+    ``merge_shard_results`` refuses it, naming it as one with no scan configuration.
+
+    Raises:
+        ASHConfigValidationError: Naming each setting that differs and every
+            shard's value for it.
+    """
+    decided = _decided_by_flags(cli_values)
+    shards = []
+    for path, results in _in_index_order(loaded):
+        if results.ash_config is None:
+            continue
+        shards.append(
+            (_shard_label(results), path, _recorded_verdict_settings(results))
+        )
+    keys = sorted(
+        {key for _, _, settings in shards for key in settings if key not in decided}
+    )
+    differing = [
+        key
+        for key in keys
+        if len(
+            {json.dumps(settings.get(key), sort_keys=True) for *_, settings in shards}
+        )
+        > 1
+    ]
+    if not differing:
+        return
+    lines = [
+        f"{key}: "
+        + "; ".join(
+            f"{label} ({path.as_posix()}) {_shown_setting(settings.get(key))}"
+            for label, path, settings in shards
+        )
+        for key in differing
+    ]
+    flags = [
+        f"{VERDICT_FLAGS[key][0]} or {VERDICT_FLAGS[key][1]} for {key}"
+        for key in differing
+        if key in VERDICT_FLAGS
+    ]
+    raise ASHConfigValidationError(
+        "the shards' recorded configurations disagree on settings that decide the "
+        "merged verdict:\n  " + "\n  ".join(lines) + "\nOne verdict covers the "
+        "merged scan, so ash merge does not take one shard's value for the others. "
+        "Run every shard with the same configuration, or set the value for all of "
+        "them with --config-overrides"
+        + (f", or with {', '.join(flags)}" if flags else "")
+        + "."
+    )
+
+
+def _override_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return value
+    return json.dumps(value)
+
+
+#: Follows a suggested override that had to be quoted. The quoting is a POSIX
+#: shell's, which PowerShell and cmd.exe do not read the same way.
+POSIX_QUOTING_NOTE = (
+    "(quoted for a POSIX shell; in PowerShell or cmd.exe, quote it for that shell)"
+)
+
+
+def _override_suggestion(key: str, value: Any) -> str:
+    """``--config-overrides`` setting ``key`` to ``value``, as one argument for a shell.
+
+    A list or mapping holds spaces and double quotes, and a string can hold
+    anything, so the argument is quoted the way a POSIX shell reads it back, and
+    a quoted one is followed by ``POSIX_QUOTING_NOTE``. ``key`` ends with ``+``
+    for an appending override.
+    """
+    text = f"{key}={_override_value(value)}"
+    argument = shlex.quote(text)
+    if argument == text:
+        return f"--config-overrides {argument}"
+    return f"--config-overrides {argument} {POSIX_QUOTING_NOTE}"
+
+
+def warn_on_ignored_operator_verdict_settings(
+    trusted_config: AshConfig,
+    recorded: AshConfig,
+    cli_values: Optional[Dict[str, Optional[bool]]] = None,
+) -> None:
+    """Name each verdict setting ``--config`` sets that the recorded config decides.
+
+    The verdict follows the scan's own configuration, so a setting the operator's
+    file sets for it does not apply at merge time. The exception is a field a
+    shard recorded as a reference its field cannot hold, which takes the
+    operator's value (:func:`supply_unread_recorded_fields`) before this runs:
+    the value ``--config-overrides`` gives it when it names the field, else the
+    file's. A field that took the file's value matches it and is not named here.
+    Only the settings the file writes are compared, so a file that sets only
+    reporters warns about nothing, and a setting a flag given on the command line
+    decides (``cli_values``) is not reported, since the flag applies.
+    """
+    decided = _decided_by_flags(cli_values)
+    operator = _verdict_settings(
+        trusted_config.model_dump(mode="json", by_alias=True, exclude_unset=True)
+    )
+    if not operator:
+        return
+    shards = _verdict_settings(recorded.model_dump(mode="json", by_alias=True))
+    for key, value in operator.items():
+        if key in decided or json.dumps(value, sort_keys=True) == json.dumps(
+            shards.get(key), sort_keys=True
+        ):
+            continue
+        flag = ""
+        if key in VERDICT_FLAGS and isinstance(value, bool):
+            flag = f" or {VERDICT_FLAGS[key][0 if value else 1]}"
+        ASH_LOGGER.warning(
+            f"ash merge's --config sets {key} to {_shown_setting(value)}, and the "
+            f"shards recorded {_shown_setting(shards.get(key))}. The verdict "
+            "follows the shards' own configuration, so their value applies. To "
+            "apply yours, pass "
+            f"{_override_suggestion(key, value)}{flag}."
+        )
+
+
+def _section_dict(section: Any) -> Dict[str, Any]:
+    if isinstance(section, dict):
+        return section
+    if hasattr(section, "model_dump"):
+        return section.model_dump(by_alias=True)
+    return {}
+
+
+def _apply_hint(key: str, value: Any) -> str:
+    """The ``--config-overrides`` that sets ``key`` to ``value``, shortened when long."""
+    if len(_override_value(value)) > 60:
+        return f"pass its value with --config-overrides {key}=VALUE"
+    return f"pass {_override_suggestion(key, value)}"
+
+
+def warn_on_unapplied_operator_settings(
+    trusted_config: AshConfig,
+    effective: AshConfig,
+    reporter_classes: Sequence[type],
+) -> None:
+    """Name each reporter setting ``--config`` sets that does not apply.
+
+    ``--config`` supplies the operator's values for the reporter sections the
+    shards' recorded config names, and adds no section: a reporter's ``enabled``
+    or destination option for a section the shards did not record is not used.
+    Each such entry is named with the ``--config-overrides`` that would add it.
+    Compared after every confinement step and the plugin load, so only what
+    really did not apply is named. The plugin modules ``--config`` names always
+    apply: they are the ones the merge loads (``confine_recorded_config``).
+    """
+    destinations: Dict[str, Tuple[str, ...]] = dict(REPORTER_DESTINATION_OPTIONS)
+    destinations.update(declared_destination_options(reporter_classes))
+    defaults: Dict[str, bool] = dict(REPORTER_ENABLED_DEFAULTS)
+    defaults.update(declared_enabled_defaults(reporter_classes))
+    written = trusted_config.model_dump(mode="json", by_alias=True, exclude_unset=True)
+    for section_key, section in (written.get("reporters") or {}).items():
+        if not isinstance(section, dict):
+            continue
+        plugin = next(
+            (
+                known
+                for known in destinations
+                if reduced_plugin_name(known) == reduced_plugin_name(section_key)
+            ),
+            None,
+        )
+        if plugin is None:
+            continue
+        current = _section_dict(effective.get_plugin_config("reporter", plugin))
+        unapplied: List[Tuple[str, Any]] = []
+        if "enabled" in section and bool(
+            current.get("enabled", defaults.get(plugin, True))
+        ) != bool(section["enabled"]):
+            unapplied.append((f"reporters.{section_key}.enabled", section["enabled"]))
+        options = section.get("options") or {}
+        current_options = current.get("options") or {}
+        for option in destinations[plugin]:
+            if option in options and current_options.get(option) != options[option]:
+                unapplied.append(
+                    (f"reporters.{section_key}.options.{option}", options[option])
+                )
+        for key, value in unapplied:
+            ASH_LOGGER.warning(
+                f"ash merge's --config sets {key}, which does not apply: the shards "
+                f"recorded no {section_key} section to take it, and --config supplies "
+                "values for what the shards recorded without adding to it. To apply "
+                f"it, {_apply_hint(key, value)}."
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1135,13 +2598,42 @@ def merge_command(
             ),
         ),
     ] = None,
+    config: Annotated[
+        Optional[str],
+        typer.Option(
+            "--config",
+            "-c",
+            help=(
+                "The operator's config file. Its values replace the shards' for "
+                "the settings a shard's recorded config cannot choose, such as "
+                "where reporters send findings and which off-host reporters run. "
+                "Its ash_plugin_modules are the plugin modules the merge loads, "
+                "with any --config-overrides adds; a module only the shards "
+                "recorded is not loaded. It adds no reporter section the shards "
+                "did not record; use --config-overrides for that."
+            ),
+            envvar="ASH_CONFIG",
+        ),
+    ] = None,
+    config_overrides: Annotated[
+        Optional[List[str]],
+        typer.Option(
+            "--config-overrides",
+            help=(
+                "Configuration overrides as key-value pairs (e.g., "
+                "'reporters.s3.enabled=true'), applied over the shards' recorded "
+                "config."
+            ),
+        ),
+    ] = None,
     min_severity: Annotated[
-        str,
+        MinSeverity,
         typer.Option(
             "--min-severity",
             help="Minimum severity that counts as actionable for the exit code.",
+            case_sensitive=False,
         ),
-    ] = "low",
+    ] = MinSeverity.LOW,
     ignore_suppressions: Annotated[
         bool,
         typer.Option(
@@ -1170,7 +2662,9 @@ def merge_command(
             help=(
                 "Refuse the merge when a shard completed none of the scanners it "
                 "owned, and exit 1 when any scanner in the union is ERROR or "
-                "MISSING. Without it, a shard whose scanners never ran "
+                "MISSING, or when every one is SKIPPED, such as when no selected "
+                "scanner had a file to scan. On by default: under "
+                "--no-fail-on-incomplete-scanners, a shard whose scanners never ran "
                 "contributes no findings and the merged report reads as a "
                 "complete, clean scan. Defaults to the scan configuration's "
                 "value, then to true; pass --no-fail-on-incomplete-scanners to "
@@ -1221,48 +2715,215 @@ def merge_command(
     )
 
     parsed_formats = _parse_output_formats(output_formats)
+    overrides = list(config_overrides or [])
+    # The verdict settings the command line's flags decide; see VERDICT_FLAGS.
+    cli_verdict = {
+        "fail_on_findings": fail_on_findings,
+        "fail_on_incomplete_scanners": fail_on_incomplete_scanners,
+    }
+
+    # The operator's --config, read first and once: a file that does not load
+    # refuses the merge with exit 3, as `ash report` refuses it, before any merged
+    # results exist and before any shard is read. resolve_operator_config is the
+    # one read of the file (a second load here opened it twice); the rest of the
+    # merge uses what it returns, as trusted_config below. A path that does not
+    # exist, or is not a file, is refused too: the defaults in its place would
+    # send the reports somewhere the operator did not choose. Every other error
+    # the load can raise arrives as an ASHConfigValidationError
+    # (resolve_operator_config wraps OSError, UnicodeDecodeError, ValueError and
+    # yaml.YAMLError into ASHConfigSourceError, naming the file once).
+    operator_config: Optional[AshConfig] = None
+    if config:
+        try:
+            operator_config = resolve_operator_config(config)
+        except ASHConfigValidationError as exc:
+            print(_invalid_config_text(exc))
+            raise typer.Exit(3)
+
+    # With the other operator-config refusals, before any shard is read:
+    # load_plugins imports these modules further down (before anything is
+    # written, so a refusal there leaves no merged file either), and a name
+    # refused only there would hide behind a shard error the operator fixes
+    # first for a merge that is then refused anyway.
+    operator_modules = split_plugin_modules(
+        getattr(operator_config, "ash_plugin_modules", None) or []
+    )
+    try:
+        refuse_plugin_modules_outside_namespace(
+            operator_modules,
+            shown=config_module_names(operator_config) if operator_config else None,
+        )
+    except PluginModuleNamespaceError as exc:
+        # In the merge's own closing words: the scan's say nothing was scanned
+        # and name options this command does not have.
+        message = exc.shown_with(
+            "Nothing was imported and nothing was merged. Rename the package or "
+            "name the packages inside it, or remove the entry from the --config "
+            "file."
+        )
+        print(f"[red]Refusing to merge: {escape_markup(message)}[/red]")
+        raise typer.Exit(3)
 
     try:
+        # The operator's trusted base: the --config read above, or the defaults
+        # resolved the way ``ash report`` resolves its config. The overrides are
+        # not applied to it here: the confinement below replays them onto it, as
+        # resolve_config does for a scan, and applying them twice would repeat an
+        # appending override.
+        trusted_config = (
+            operator_config
+            if operator_config is not None
+            else resolve_operator_config(config)
+        )
         loaded = load_shard_results(results)
+        apply_operator_overrides(loaded, overrides)
+        # --output-formats names the formats for the merge, so it supplies
+        # output_formats where a shard recorded the reference its scan read.
+        supply_unread_recorded_fields(
+            loaded, trusted_config, overrides, {"output_formats": parsed_formats}
+        )
+        # Before the completion gate below, which reads one shard's
+        # fail_on_incomplete_scanners: shards that disagree on it, or on any other
+        # verdict setting, are refused the same way whichever shard that is.
+        verify_verdict_settings_agree(loaded, cli_verdict)
         # Resolved before merging, because the contribution refusal has to happen
         # before a merged report exists on disk. Read from the shard results' own
         # config for the same reason the verdict is: a collector job need not have
         # the source tree checked out, and a config file found on this host could
         # disagree with the one the shards scanned under. The lowest-indexed shard
         # supplies the report's identity elsewhere in this module, so it supplies
-        # this too.
+        # this too, read in index order rather than --results order.
         require_completion = _resolve_require_scanner_completion(
-            loaded, fail_on_incomplete_scanners
+            _in_index_order(loaded), fail_on_incomplete_scanners
         )
         merged = merge_shard_results(
             loaded, require_scanner_completion=require_completion
         )
+        if merged.ash_config is None:
+            merged.ash_config = apply_config_overrides(AshConfig(), overrides)
+        warn_on_ignored_operator_verdict_settings(
+            trusted_config, merged.ash_config, cli_verdict
+        )
+        # What a config inside the scanned tree may not choose comes from the
+        # operator's base instead; see the module docstring.
+        confine_recorded_config(
+            merged.ash_config, trusted_config, overrides, _base_results_file(loaded)
+        )
+    except ASHConfigValidationError as exc:
+        print(_invalid_config_text(exc))
+        raise typer.Exit(3)
+    except ResultsPathError as exc:
+        # As Text: the message quotes the operator's path, which can read as
+        # markup, and its values are already shown (_refusal_text).
+        print(_refusal_text(exc))
+        raise typer.Exit(ASH_EXIT_USAGE_ERROR)
     except ShardCoverageError as exc:
         # Printed rather than raised as a traceback: every one of these is an
         # operator-actionable statement about their CI matrix or artifacts, and
         # the message already says what to check. Exit 1 is ASH's "error during
         # execution" code, which is the honest verdict -- the scan's findings are
         # unknown, which is not the same as "no findings".
-        print(f"[red]Refusing to merge: {exc}[/red]")
+        print(_refusal_text(exc))
         raise typer.Exit(1)
 
+    # The values the operator's config read from the environment join the
+    # shards': the merge redacts its lines and its output with the merged
+    # config's values, which were the shards' alone. The operator's config is
+    # the one whose !ENV reads this process holds -- the module entry, and any
+    # other value a module's import error can quote.
+    merged.ash_config._environment_values = _each_value_once(
+        getattr(merged.ash_config, "_environment_values", None),
+        getattr(trusted_config, "_environment_values", None),
+    )
+
+    # Before anything is written, and before the output directory is created. The
+    # merged config now names the plugin modules the reports are rendered with,
+    # the operator's, and a module outside the plugin namespace, the operator's or
+    # one a shard recorded, is refused here as the scan itself refuses it, without
+    # importing anything.
+    try:
+        refuse_plugin_modules_outside_namespace(
+            split_plugin_modules(
+                getattr(merged.ash_config, "ash_plugin_modules", None) or []
+            )
+        )
+    except PluginModuleError as exc:
+        # Escaped: the message quotes the configured name, which may hold markup
+        # characters.
+        print(f"[red]Invalid configuration: {escape_markup(str(exc))}[/red]")
+        raise typer.Exit(3)
+
     output_dir_path = _relocate_colliding_output_dir(Path(output_dir))
-    output_dir_path.mkdir(parents=True, exist_ok=True)
+    # The merged results and reports are written into the output directory, so a
+    # link there or at reports/ is refused as a scan refuses it.
+    try:
+        refuse_linked_output_dir(Path.cwd(), output_dir_path)
+    except OutputDirLinkRefused as refusal:
+        print(f"[red]{escape_markup(str(refusal))}[/red]")
+        # 3, as a scan exits for the same refusal (OUTPUT_DIR_REFUSED_EXIT_CODE).
+        raise typer.Exit(3)
+    # Not created yet: the plugin modules are loaded below, and a module that
+    # fails to import refuses the merge, which must leave no output directory
+    # either, as the namespace refusal above leaves none. The directory is
+    # made at the first write (below).
 
     # The scan's own configuration, carried through the shard results, rather
     # than a config file resolved on this host. The collector job need not have
     # the source tree checked out at all, and a config file found here could
     # disagree with the one the shards actually scanned under -- which would move
-    # the verdict without moving the findings.
+    # the verdict without moving the findings. It was confined above, and the
+    # merged results record it as confined.
     plugin_context = PluginContext(
         source_dir=Path.cwd(),
         output_dir=output_dir_path,
         work_dir=output_dir_path.joinpath("work"),
-        config=merged.ash_config or AshConfig(),
+        config=merged.ash_config,
         ignore_suppressions=ignore_suppressions,
     )
 
+    # Also before anything is written: a module the operator names that does not
+    # import refuses the merge with exit 3, as it refuses a scan. A refused
+    # merge leaves no merged results file, rather than one whose metadata
+    # records no load error and says nothing about the refusal.
+    ash_plugin_manager.set_context(plugin_context)
+    try:
+        load_plugins(plugin_context=plugin_context)
+    except PluginModuleError as exc:
+        # A configured module could not be loaded: only knowable by importing,
+        # so it fires here rather than beside the name checks above. In the
+        # merge's own closing words, with the fix clause following the loss's
+        # stage (plugin_module_fix).
+        message = exc.shown_with(
+            "Nothing was merged and no merged results file was written. "
+            f"{plugin_module_fix(exc)}, or remove the entry from the "
+            "--config file."
+        )
+        print(f"[red]Refusing to merge: {escape_markup(message)}[/red]")
+        raise typer.Exit(3)
+    # Only this merge's reporters: ASH's built-ins and the modules the merged
+    # config names (the operator's, confined above). The registry is
+    # process-wide, so it can also hold another run's reporters
+    # (reporter_classes_for_run).
+    reporter_plugins = reporter_classes_for_run(
+        split_plugin_modules(
+            getattr(merged.ash_config, "ash_plugin_modules", None) or []
+        ),
+        manager=ash_plugin_manager,
+    )
+    # The plugin modules are loaded, so the destination options each reporter
+    # declares are known. Before the merged results are written, so they record
+    # these as confined too.
+    confine_declared_reporter_destinations(
+        merged.ash_config, reporter_plugins, source=SHARD_RECORDED
+    )
+    warn_on_unapplied_operator_settings(
+        trusted_config, merged.ash_config, reporter_plugins
+    )
+
     merged = apply_aggregated_suppressions(merged, plugin_context)
+
+    # The first write to disk, made only after every refusal has had its say.
+    output_dir_path.mkdir(parents=True, exist_ok=True)
 
     # Written after the suppression pass, not before. Writing first was the
     # original order and it would now leave the merged results file describing a
@@ -1270,38 +2931,209 @@ def merge_command(
     # post-suppression one -- two artifacts of the same run disagreeing about
     # which findings are actionable.
     merged_file = output_dir_path.joinpath(RESULTS_FILE_NAME)
+    if merged.ash_config is not None:
+        # What the confinement took from the operator's config is recorded as
+        # that file wrote it, as a shard records its own
+        # (config/environment_record.py). The module list's references were
+        # carried with the list, at their indices in the merged list
+        # (plugin_module_trust.confine_plugin_modules), so they are not added
+        # again here at the operator's indices.
+        merged.ash_config._environment_references = (
+            *merged.ash_config._environment_references,
+            *(
+                reference
+                for reference in trusted_config._environment_references
+                if tuple(reference.path)[:1] != ("ash_plugin_modules",)
+            ),
+        )
     write_text_atomically(merged_file, merged.model_dump_json(indent=2))
     logger.info(f"Wrote merged results to {merged_file}")
 
-    ash_plugin_manager.set_context(plugin_context)
-    load_plugins(plugin_context=plugin_context)
+    # The plugins were loaded above, before anything was written.
+    # A reporter that sends findings off the host runs only when the operator
+    # enables it, with --config-overrides. The configuration the shards carried
+    # came from whatever config each shard's scan read, a file in the scanned
+    # repository included, and the reporter would send the merged findings with
+    # this host's credentials; so that configuration decides nothing for it, in
+    # either direction. Nor does a config file found on this host. Nor does
+    # --config: the shards do not record which tree was scanned, so that file may
+    # be the scanned tree's own (a directory beside this one, in no git checkout),
+    # and its enabled and destination options for these reporters are replaced
+    # with the defaults and the overrides (reporter_trust).
+    operator_config = None
+    if config or overrides:
+        operator_config = apply_config_overrides(
+            trusted_config if config else AshConfig(), overrides
+        )
+        if config:
+            from automated_security_helper.config.untrusted_source import (
+                MERGE_CONFIG_FILE,
+            )
+
+            confine_off_host_reporters_to_overrides(
+                operator_config, [Path(config)], overrides, MERGE_CONFIG_FILE
+            )
+            # The plugin modules are loaded, so the reporters they add are known.
+            # One that sends findings off the host and declares no destination
+            # options takes its whole section from the defaults and the overrides,
+            # as in ash report: the step above marked operator_config for it.
+            confine_declared_reporter_destinations(
+                operator_config, reporter_plugins, source=MERGE_CONFIG_FILE
+            )
+    local_reporters, off_host_reporters, notices = select_merge_reporters(
+        reporter_plugins,
+        shard_config=merged.ash_config,
+        operator_config=operator_config,
+    )
+    for notice in notices:
+        logger.warning(notice)
+    # The off-host reporters run only when no format is requested (below), so
+    # only then is an operator section that sets options but no enabled named.
+    if not parsed_formats:
+        for reporter_class in reporter_plugins:
+            if reporter_class in off_host_reporters:
+                continue
+            warn_off_host_section_without_enabled(
+                reporter_class, _section(operator_config, reporter_class)
+            )
 
     # ReportPhase writes reports/ash.<extension> for every enabled reporter, and
     # its progress display is used unconditionally, so a display is supplied with
     # output turned off rather than None.
+    from automated_security_helper.interactions.run_ash_scan import (
+        report_sarif_identity,
+    )
+
+    # The output directory may hold an ash.sarif from an earlier run, and the
+    # exit-code gate must not read one this merge did not write.
+    report_sarif_before = report_sarif_identity(output_dir_path)
     report_phase = ReportPhase(
-        plugins=ash_plugin_manager.plugin_modules(plugin_type="reporter"),
+        plugins=local_reporters,
         plugin_context=plugin_context,
         progress_display=LiveProgressDisplay(show_progress=False),
         asharp_model=merged,
     )
-    merged = report_phase.execute(
-        report_dir=output_dir_path.joinpath("reports"),
-        cli_output_formats=parsed_formats or None,
-        aggregated_results=merged,
-        python_based_plugins_only=False,
-    )
+    try:
+        merged = report_phase.execute(
+            report_dir=output_dir_path.joinpath("reports"),
+            cli_output_formats=parsed_formats or None,
+            aggregated_results=merged,
+            python_based_plugins_only=False,
+        )
+        # The off-host reporters run with the operator's configuration, so their
+        # destinations are the operator's too. No --output-formats value names one,
+        # so, as in a scan, they run only when no format is requested. With
+        # neither --config nor --config-overrides there is no operator config and
+        # every one is refused (select_merge_reporters), so the list is empty
+        # then; the None check states that to the type checker. Overrides alone
+        # are enough to enable and aim one.
+        if off_host_reporters and not parsed_formats and operator_config is not None:
+            off_host_context = PluginContext(
+                source_dir=Path.cwd(),
+                output_dir=output_dir_path,
+                work_dir=output_dir_path.joinpath("work"),
+                config=operator_config,
+                ignore_suppressions=ignore_suppressions,
+            )
+            merged = ReportPhase(
+                plugins=off_host_reporters,
+                plugin_context=off_host_context,
+                progress_display=LiveProgressDisplay(show_progress=False),
+                asharp_model=merged,
+            ).execute(
+                report_dir=output_dir_path.joinpath("reports"),
+                cli_output_formats=None,
+                aggregated_results=merged,
+                python_based_plugins_only=False,
+            )
+    except ReportPathRefused as exc:
+        # Refused before any reporter wrote: a link at the reports directory or at
+        # a report file, or a report file name outside it. Printed like the other
+        # refusals here, without a traceback.
+        print(f"[red]Refusing to write reports: {escape_markup(str(exc))}[/red]")
+        raise typer.Exit(1)
 
+    report_sarif_after = report_sarif_identity(output_dir_path)
     exit_code = _merged_exit_code(
         merged,
         output_dir_path,
-        min_severity,
+        MinSeverity(min_severity).value,
         fail_on_findings,
         fail_on_incomplete_scanners,
+        report_sarif_written_this_run=(
+            report_sarif_after is not None and report_sarif_after != report_sarif_before
+        ),
     )
     _print_merge_summary(merged, merged_file, exit_code)
     if exit_code != 0:
         raise typer.Exit(exit_code)
+
+
+def _section(config: Optional[AshConfig], reporter_class: type) -> Optional[Any]:
+    if config is None:
+        return None
+    try:
+        return config.get_plugin_config(
+            plugin_type="reporter", plugin_name=plugin_config_key(reporter_class)
+        )
+    except Exception:  # noqa: BLE001 -- an unknown reporter has no section
+        return None
+
+
+def select_merge_reporters(
+    reporter_classes: Sequence[Type[ReporterPluginBase[Any]]],
+    shard_config: Optional[AshConfig],
+    operator_config: Optional[AshConfig],
+) -> Tuple[
+    List[Type[ReporterPluginBase[Any]]], List[Type[ReporterPluginBase[Any]]], List[str]
+]:
+    """Split ``ash merge``'s reporters into local and off-host ones, and say what was ignored.
+
+    A reporter that sends findings off the host runs only when ``operator_config``
+    sets ``enabled: true`` in its section (``off_host_reporter_refused``).
+    ``operator_config`` is the operator's ``--config`` with ``--config-overrides``
+    applied, after the reporter rule (``reporter_trust``) has replaced what the
+    ``--config`` file set for such a reporter, because the shards do not record
+    which tree was scanned and the file may be that tree's own. So only the
+    overrides turn one on, whatever the reporter's own default for ``enabled`` is:
+    a file's ``enabled`` is dropped when no override sets it.
+    The configuration the shards recorded is ignored for it, in both directions:
+    a shard's ``enabled: true`` does not run it and a shard's ``enabled: false``
+    does not stop it. Where the shards' value disagrees with the operator's
+    decision, a notice says it was ignored. ``--config-overrides`` are on each
+    shard's record before this runs (``apply_operator_overrides``), so a value an
+    override sets is the operator's and is not reported. Every recorded
+    configuration carries every reporter's ``enabled``, its default included, so a
+    value that agrees cannot be told from a default and is not reported.
+
+    Returns the local reporters, the off-host reporters that run, and the notices.
+    """
+    local: List[Type[ReporterPluginBase[Any]]] = []
+    off_host: List[Type[ReporterPluginBase[Any]]] = []
+    notices: List[str] = []
+    for reporter_class in reporter_classes:
+        if getattr(reporter_class, "sends_off_host", False) is not True:
+            local.append(reporter_class)
+            continue
+        name = plugin_config_key(reporter_class)
+        refused = off_host_reporter_refused(
+            reporter_class, _section(operator_config, reporter_class)
+        )
+        shard_section = _section(shard_config, reporter_class)
+        shard_enabled = (
+            shard_section.get("enabled") if isinstance(shard_section, dict) else None
+        )
+        if isinstance(shard_enabled, bool) and shard_enabled is refused:
+            notices.append(
+                f"Ignoring 'enabled: {str(shard_enabled).lower()}' for reporter "
+                f"'{name}' in the configuration the shards recorded: it sends "
+                "findings off the host, so only the operator's --config-overrides "
+                f"decide whether it runs. It {'does not run' if refused else 'runs'}."
+            )
+        if refused:
+            continue
+        off_host.append(reporter_class)
+    return local, off_host, notices
 
 
 def _relocate_colliding_output_dir(output_dir: Path) -> Path:
@@ -1322,8 +3154,10 @@ def _relocate_colliding_output_dir(output_dir: Path) -> Path:
     at exit 0, which is what a clean scan looks like. To reproduce, disable the
     ancestor guard in ``apply_suppressions_to_sarif`` and run
     ``TestMergeCli::test_an_output_dir_equal_to_the_cwd_is_relocated``. That function
-    now declines the exclusion in this configuration and says so, but declining a
-    guard is a second-best outcome -- relocating means the guard keeps working.
+    declines the exclusion in this configuration and says so, and ``ash merge``
+    does not apply the exclusion at all (each shard applied its own, see
+    :func:`apply_aggregated_suppressions`). Relocating keeps the merge's
+    reports out of the directory it treats as the source.
 
     Equal-to OR an ancestor-of, where ``ash scan`` checks only equality.
     ``--output-dir ..`` from a subdirectory reaches the same state without the paths
@@ -1352,7 +3186,7 @@ def _relocate_colliding_output_dir(output_dir: Path) -> Path:
     print(
         f"[bold yellow]output-dir has been adjusted to the following to avoid "
         f"collisions and potential impact to the reported tree: "
-        f"{Path(relocated).as_posix()}[/bold yellow]"
+        f"{escape_markup(Path(relocated).as_posix())}[/bold yellow]"
     )
     return relocated
 
@@ -1378,11 +3212,11 @@ def _resolve_require_scanner_completion(
     the two are equal rather than asserting either value, so it catches a change to
     one without the other in either direction.
 
-    Called before coverage has been verified, so the shards are in whatever order
-    ``--results`` listed them and any of them may be unstamped. Every shard of one
-    run carries the same config, so the first that carries one is as good as any;
-    reading them all would only matter for a set that is about to be refused for
-    disagreeing anyway.
+    Called before coverage has been verified, with the shards in index order
+    (:func:`_in_index_order`), so the first that carries a config is the
+    lowest-indexed shard's, whose config the merged report keeps. Shards that
+    disagree on this setting are refused before this is called
+    (:func:`verify_verdict_settings_agree`), unless the flag decides it.
     """
     if cli_value is not None:
         return cli_value
@@ -1399,6 +3233,7 @@ def _merged_exit_code(
     min_severity: str,
     fail_on_findings: Optional[bool],
     fail_on_incomplete_scanners: Optional[bool] = None,
+    report_sarif_written_this_run: Optional[bool] = None,
 ) -> int:
     """Compute the verdict for the union using the scan's own exit-code rules.
 
@@ -1439,7 +3274,11 @@ def _merged_exit_code(
         merged.ash_config, "fail_on_incomplete_scanners", None
     )
     return _compute_exit_code(
-        merged, options, config_fail_on_findings, config_fail_on_incomplete
+        merged,
+        options,
+        config_fail_on_findings,
+        config_fail_on_incomplete,
+        report_sarif_written_this_run=report_sarif_written_this_run,
     )
 
 
@@ -1454,7 +3293,7 @@ def _print_merge_summary(
     print(
         f"\n[cyan]=== ASH Merge: {len(indices)} of {count} shards recombined ===[/cyan]"
     )
-    print(f"Merged results: {merged_file.as_posix()}")
+    print(f"Merged results: {escape_markup(merged_file.as_posix())}")
     print(
         f"Scanners: {len(merged.scanner_results)} | "
         f"Findings: {stats.total} | Actionable: {stats.actionable} | "
@@ -1471,6 +3310,7 @@ def _print_merge_summary(
         # more here than in a single scan: the operator has n CI jobs and no other
         # way to tell which one to look at.
         from automated_security_helper.interactions.run_ash_scan import (
+            incomplete_converters,
             incomplete_scanners,
         )
 
@@ -1486,5 +3326,26 @@ def _print_merge_summary(
                 f"in the merged scan did not evaluate everything they were given"
                 f"[/bold red]"
             )
+            # The names are the shards': shown, and the line broken where one
+            # starts it with "::". Printed as Text, once shown: escape_markup
+            # shows a value's controls itself, and run over shown text it doubled
+            # each escape's backslash.
             for name, status in incomplete:
-                print(f"  [red]{name}: {status}[/red]")
+                line = _shown_lines(f"  {_shown(name)}: {_shown(status)}")
+                print(Text(line, style="red"))
+        # _merged_exit_code counts these too, so the summary names them: a
+        # merge that fails for an archive over a limit or one that could not be
+        # read otherwise prints only the counts. Their reasons hold file names
+        # from the scanned tree, so they are printed as inert text.
+        converters = incomplete_converters(merged)
+        if converters:
+            print(
+                f"[bold red]ERROR (1) Exiting because conversion in the merged scan "
+                f"was incomplete: {len(converters)} converter(s) did not process "
+                f"the files they were given[/bold red]"
+            )
+            # A row is (name, reason, kinds): read by field, not unpacked. Shown
+            # and printed as Text, as the scanner lines above are.
+            for row in converters:
+                line = _shown_lines(f"  {_shown(row.name)}: {_shown(row.reason)}")
+                print(Text(line, style="red"))

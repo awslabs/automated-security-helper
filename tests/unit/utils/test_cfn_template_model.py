@@ -1,14 +1,27 @@
 """Tests for cfn_template_model utilities."""
 
+import json
 import logging
+import sys
+from types import SimpleNamespace
 
 import pytest
+import yaml
 
+from automated_security_helper.utils import cfn_template_model
 from automated_security_helper.utils.cfn_template_model import (
     CloudFormationResource,
     CloudFormationTemplateModel,
     CloudFormationTemplateModelError,
+    _could_be_a_template,
+    _has_top_level_resources,
+    _load_template_yaml,
+    _root_is_a_sequence,
+    _top_level_resources_in_events,
     get_model_from_template,
+    get_model_from_template_text,
+    holds_cloudformation_template,
+    unevaluable_template_reason,
 )
 
 # Resource type names CloudFormation documents as legal and this model used to reject.
@@ -192,3 +205,254 @@ class TestGetModelFromTemplate:
 
         with pytest.raises(CloudFormationTemplateModelError):
             get_model_from_template(template_file)
+
+
+def _template_holding(deep: object) -> dict:
+    """A template whose one resource's ``Properties.Deep`` is *deep*: 4 levels above it."""
+    return {
+        "Resources": {
+            "Bucket": {"Type": "AWS::S3::Bucket", "Properties": {"Deep": deep}}
+        }
+    }
+
+
+def _nested(kind: str, levels: int) -> object:
+    """*levels* levels of lists, or of objects, the innermost empty."""
+    value: object = [] if kind == "sequence" else {}
+    for _ in range(levels - 1):
+        value = [value] if kind == "sequence" else {"a": value}
+    return value
+
+
+def _decision(text: str) -> tuple:
+    """What the template parser answers for *text*: the resources, or the error."""
+    try:
+        model = get_model_from_template_text(text, "stack.json")
+    except Exception as error:
+        return type(error).__name__, str(error)
+    return "model", None if model is None else sorted(model.Resources)
+
+
+#: A key longer than the 1,024 characters YAML allows a simple key, so YAML refuses
+#: the JSON it is in for a reason other than tabs.
+LONG_KEY = "k" * 2000
+
+
+class TestHowDeepATemplateIsRead:
+    @pytest.mark.parametrize(
+        "kind,levels,expected",
+        [
+            pytest.param("mapping", 50, "model", id="mappings-50"),
+            pytest.param(
+                "mapping", 350, "TemplateDocumentError", id="mappings-350-past-yaml"
+            ),
+            pytest.param("sequence", 410, "model", id="sequences-410-past-400"),
+        ],
+    )
+    def test_a_tab_indented_json_template_is_decided_as_with_spaces(
+        self, kind, levels, expected
+    ):
+        """The same template, the same answer, whichever it is indented with.
+
+        YAML refuses a tab before it reaches the depth, and JSON decided: mappings
+        nested from about 330 levels (the YAML loader's limit for them) to 400 were
+        scanned with tabs and a failed target with spaces, and sequences from 401 to
+        about 490 the other way round.
+        """
+        document = _template_holding(_nested(kind, levels))
+        tabs = json.dumps(document, indent="\t")
+        spaces = json.dumps(document, indent=" ")
+
+        assert _decision(spaces)[0] == expected, _decision(spaces)
+        assert _decision(tabs) == _decision(spaces)
+
+    @pytest.mark.parametrize(
+        "levels,expected",
+        [
+            pytest.param(400, ("model", ["Bucket"]), id="400"),
+            pytest.param(
+                401,
+                ("TemplateDocumentError", "it is nested past 400 levels"),
+                id="401",
+            ),
+        ],
+    )
+    def test_json_yaml_refuses_for_another_reason_is_read_to_400_levels(
+        self, levels, expected
+    ):
+        """JSON_NESTING_LIMIT: past it, json.loads's own limit would decide, which is
+        994 levels on Python 3.10 and 3.11 and ten or twenty times that later on."""
+        document = {LONG_KEY: 1, **_template_holding(_nested("sequence", levels - 4))}
+        text = json.dumps(document)
+        with pytest.raises(yaml.YAMLError):
+            _load_template_yaml(text)
+
+        assert _decision(text) == expected
+
+    def test_a_json_read_past_the_recursion_limit_is_nested_past_400_levels(
+        self, monkeypatch
+    ):
+        """json.loads raises RecursionError past 994 levels on Python 3.10 and 3.11;
+        later versions read on, so the error is raised here for every version."""
+
+        def too_deep(text, *args, **kwargs):
+            raise RecursionError("maximum recursion depth exceeded")
+
+        monkeypatch.setattr(cfn_template_model, "json", SimpleNamespace(loads=too_deep))
+        text = json.dumps({LONG_KEY: 1, **_template_holding([])})
+
+        assert _decision(text) == (
+            "TemplateDocumentError",
+            "it is nested past 400 levels",
+        )
+
+    @pytest.mark.parametrize(
+        "lists,counted",
+        [
+            pytest.param(999, False, id="1000-levels-read-to-the-end"),
+            pytest.param(1000, True, id="1001-levels-stop"),
+        ],
+    )
+    def test_the_event_read_stops_past_1000_levels(self, lists, counted):
+        """Under a mapping root the structural read stops past 1,000 levels and counts
+        the file; at 1,000 it reads on, here to a document with no Resources. One
+        level a line, where the read is cheap: on one line it grows with about the
+        square of the depth, and a hostile file 5,000 levels deep would hold each
+        scanner 11 to 23.5 s."""
+        text = '{"Deep":\n' + "[\n" * lists + "]\n" * lists + "}\n"
+
+        assert _top_level_resources_in_events(text) is counted
+
+    @pytest.mark.parametrize(
+        "text,is_a_sequence",
+        [
+            pytest.param("[" * 100000, True, id="deep-flow-sequence"),
+            pytest.param("- a\n- b\n", True, id="block-sequence"),
+            pytest.param("--- !!seq\n- a\n", True, id="tagged"),
+            pytest.param("[a, b]: value\n", False, id="flow-sequence-as-a-key"),
+            pytest.param('{"Resources": {}}', False, id="mapping"),
+            pytest.param("just text", False, id="scalar"),
+            pytest.param("[\n\t1]", False, id="unreadable-before-its-first-node"),
+        ],
+    )
+    def test_the_root_kind_is_read_from_the_first_node(self, text, is_a_sequence):
+        """A sequence root is not a template, and is answered without a parse; a
+        flow sequence used as a key opens a mapping, so a first character is not
+        enough."""
+        assert _root_is_a_sequence(text) is is_a_sequence
+        if is_a_sequence:
+            assert _decision(text) == ("model", None)
+
+    def test_a_damaged_sequence_root_with_a_marker_is_no_template(self, tmp_path):
+        """Each reader answers no for it, the marker in its text notwithstanding.
+
+        It does not parse and it says ``AWSTemplateFormatVersion``, which made it a
+        possibly damaged template: MISSING without the tool, and "could not parse"
+        with it. Its root is a sequence, which no template has.
+        """
+        text = DAMAGED_SEQUENCE_ROOT
+        with pytest.raises(yaml.YAMLError):
+            yaml.safe_load(text)
+        assert _root_is_a_sequence(text)
+
+        assert _could_be_a_template(text) is False
+        assert _has_top_level_resources(text) is False
+        assert _decision(text) == ("model", None)
+        candidate = tmp_path / "stack.yaml"
+        candidate.write_text(text, encoding="utf-8")
+        assert holds_cloudformation_template([candidate], tmp_path) is False
+
+    @pytest.mark.parametrize(
+        "reader",
+        [
+            pytest.param(lambda text: _decision(text), id="the-template-parser"),
+            pytest.param(_could_be_a_template, id="could-be-a-template"),
+            pytest.param(_has_top_level_resources, id="the-structure-read"),
+        ],
+    )
+    def test_a_sequence_root_is_answered_without_a_composer_parse(
+        self, monkeypatch, reader
+    ):
+        """Each reader decides a deep sequence root at its first node. Run to the
+        recursion limit first, each composer parse of it took about 1.5 s on Python
+        3.10, and a decision made five."""
+        import yaml.composer
+
+        composed = []
+        compose = yaml.composer.Composer.get_single_node
+
+        def counting(loader):
+            composed.append(type(loader).__name__)
+            return compose(loader)
+
+        monkeypatch.setattr(yaml.composer.Composer, "get_single_node", counting)
+
+        reader("[" * 100000)
+
+        assert composed == []
+
+    def test_json_yaml_refuses_nested_past_400_levels_is_passed_over(self, tmp_path):
+        """The documented limit of JSON_NESTING_LIMIT: past it such a template is
+        not one ASH could not evaluate, since only a JSON read could see its
+        structure, and how deep JSON reads depends on the Python version."""
+        text = json.dumps(
+            {LONG_KEY: 1, **_template_holding(_nested("sequence", 401 - 4))}
+        )
+        candidate = tmp_path / "stack.json"
+        candidate.write_text(text, encoding="utf-8")
+        assert _decision(text)[0] == "TemplateDocumentError"
+
+        assert unevaluable_template_reason(candidate, tmp_path, text) is None
+
+    @pytest.mark.parametrize("kind", ["sequence", "mapping"])
+    @pytest.mark.parametrize(
+        "where,levels,failed",
+        [
+            pytest.param("first", 1010, False, id="key-first-past-1000"),
+            pytest.param("after", 990, False, id="key-after-under-1000"),
+            pytest.param("after", 1010, True, id="key-after-past-1000"),
+            pytest.param("inside", 1010, True, id="key-inside-past-1000"),
+        ],
+    )
+    def test_where_yaml_meets_the_long_key_decides_past_1000_levels(
+        self, tmp_path, kind, where, levels, failed
+    ):
+        """The exception to the documented limit: nested past EVENT_DEPTH_BOUND
+        before YAML reaches the long key, the event read stops at the bound first,
+        and the file counts as a failed target, as any file nested that deep does.
+        Meeting the key first, or under the bound, it is passed over."""
+        if where == "first":
+            document = {LONG_KEY: 1, **_template_holding(_nested(kind, levels - 4))}
+        elif where == "after":
+            document = {**_template_holding(_nested(kind, levels - 4)), LONG_KEY: 1}
+        else:
+            deep = {LONG_KEY: 1}
+            for _ in range(levels - 5):
+                deep = [deep] if kind == "sequence" else {"a": deep}
+            document = _template_holding(deep)
+        # json.dumps spends one recursion level per nesting level, and the
+        # documents here sit at the read's own bound, past what is left of
+        # the default budget under the runner's frames on some interpreters.
+        # The room is the encoder's alone; the read under test keeps its own
+        # limits.
+        limit = sys.getrecursionlimit()
+        sys.setrecursionlimit(limit + 4 * levels)
+        try:
+            text = json.dumps(document)
+        finally:
+            sys.setrecursionlimit(limit)
+        candidate = tmp_path / "stack.json"
+        candidate.write_text(text, encoding="utf-8")
+
+        reason = unevaluable_template_reason(candidate, tmp_path, text)
+
+        assert (reason is not None) is failed, reason
+
+
+#: A template damaged so no reader parses it, whose root is a sequence: an unclosed
+#: mapping after a CloudFormation marker.
+DAMAGED_SEQUENCE_ROOT = (
+    "- AWSTemplateFormatVersion: '2010-09-09'\n"
+    "  Resources: {\n"
+    "    Bucket: {Type: AWS::S3::Bucket\n"
+)

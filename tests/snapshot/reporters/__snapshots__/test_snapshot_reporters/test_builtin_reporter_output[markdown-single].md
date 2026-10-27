@@ -1,44 +1,19 @@
-# ASH Security Scan Report
+# ASH security scan report
 
-- **Report generated**: 2026-01-15T12:00:42+00:00
-- **Time since scan**: 0 minutes
+> [!WARNING]
+> **Scan incomplete**
+>
+> 6 actionable findings. Some inputs or scanners were not evaluated.
+>
+> **6 actionable** · 4 below threshold · 1 suppressed · 6/9 scanners completed
+>
+> Next action: Review findings, resolve coverage gaps, and scan again.
 
-## Scan Metadata
-
-- **Project**: ASH
-- **Scan executed**: 2026-01-15T12:00:00+00:00
-- **ASH version**: <ASH_VERSION>
+Project: ASH · Scan executed: 2026-01-15T12:00:00+00:00
 
 ## Summary
 
-### Scanner Results
-
-The table below shows findings by scanner, with status based on severity thresholds and dependencies:
-
-- **Severity levels**:
-  - **Suppressed (S)**: Findings that have been explicitly suppressed and don't affect scanner status
-  - **Critical (C)**: Highest severity findings that require immediate attention
-  - **High (H)**: Serious findings that should be addressed soon
-  - **Medium (M)**: Moderate risk findings
-  - **Low (L)**: Lower risk findings
-  - **Info (I)**: Informational findings with minimal risk
-- **Actionable**: Number of findings at or above the threshold severity level that require attention
-- **Result**:
-  - **PASSED** = No findings at or above threshold
-  - **FAILED** = Findings at or above threshold
-  - **MISSING** = Required dependencies not available
-  - **SKIPPED** = Scanner explicitly disabled
-  - **ERROR** = Scanner execution error
-- **Threshold**: The minimum severity level that will cause a scanner to fail
-  - Thresholds: ALL, LOW, MEDIUM, HIGH, CRITICAL
-  - Source: Values in parentheses indicate where the threshold is set:
-    - `global` (global_settings section in the ASH_CONFIG used)
-    - `config` (scanner config section in the ASH_CONFIG used)
-    - `scanner` (default configuration in the plugin, if explicitly set)
-- **Statistics calculation**:
-  - All statistics are calculated from the final aggregated SARIF report
-  - Suppressed findings are counted separately and do not contribute to actionable findings
-  - Scanner status is determined by comparing actionable findings to the threshold
+### Scanner results
 
 | Scanner | Suppressed | Critical | High | Medium | Low | Info | Actionable | Result | Threshold |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
@@ -52,105 +27,146 @@ The table below shows findings by scanner, with status based on severity thresho
 | semgrep | 0 | 0 | 0 | 0 | 1 | 1 | 0 | PASSED | MEDIUM (global) |
 | syft | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASSED | MEDIUM (global) |
 
+<details>
+<summary>How to read scanner results</summary>
+
+**Severity levels:** Critical, High, Medium, Low, Info. Suppressed findings are counted separately.
+
+**Actionable** counts findings at or above each scanner's threshold.
+
+**Result:** PASSED = no actionable findings; FAILED = threshold exceeded; MISSING = dependencies unavailable; SKIPPED = disabled; ERROR = execution error.
+
+**Threshold** shows the minimum severity and its source: `global`, `config`, or `scanner`.
+
+**Statistics calculation:** final aggregated SARIF, with suppressed findings excluded from actionable counts.
+
+</details>
+
 ### Incomplete coverage
 
-These scanners could not evaluate part of their input. The findings they did report are real, but the set is known to be partial:
+Targets left unevaluated:
 
 - **cfn-nag**: evaluated 0 of 1 target(s); 1 could not be evaluated
 
-### Top 4 Hotspots
+**Scanners needing attention:** cfn-nag, npm-audit. Check their dependencies and execution logs.
 
-Files with the highest number of security findings:
+### Top 4 hotspots
 
-| Finding Count | File Location |
+Files with the most actionable findings.
+
+| Finding count | File location |
 | ---: | --- |
 | 2 | infra/main.tf |
 | 2 | requirements.txt |
 | 1 | app/app.py |
 | 1 | Dockerfile |
 
-<h2>Detailed Findings</h2>
+## Detailed findings
+
+Showing 6 of 6 actionable findings, highest severity first.
 
 <details>
-<summary>Show 6 actionable findings</summary>
+<summary>1. CRITICAL · CVE-2018-18074-requests · requirements.txt:1</summary>
 
-### Finding 1: B602
+### Finding 1: CVE-2018-18074-requests
 
-- **Severity**: HIGH
-- **Scanner**: bandit
-- **Rule ID**: B602
-- **Location**: app/app.py:9
+- Severity: CRITICAL
+- Scanner: grype
+- Rule ID: CVE-2018-18074-requests
+- Location: requirements.txt:1
 
-**Description**:
+A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requirements.txt
+
+</details>
+
+<details>
+<summary>2. HIGH · B602 · app/app.py:9</summary>
+
+### Finding 2: B602
+
+- Severity: HIGH
+- Scanner: bandit
+- Rule ID: B602
+- Location: app/app.py:9
+
 subprocess call with shell=True identified, security issue.
 
-**Code Snippet**:
+Code snippet:
+
 ```
 return subprocess.run(f"pg_dump orders --where id={customer_id}", shell=True)
 ```
 
----
+</details>
 
-### Finding 2: CKV_AWS_20
+<details>
+<summary>3. HIGH · CKV_AWS_20 · infra/main.tf:6-9</summary>
 
-- **Severity**: HIGH
-- **Scanner**: checkov
-- **Rule ID**: CKV_AWS_20
-- **Location**: infra/main.tf:6-9
+### Finding 3: CKV\_AWS\_20
 
-**Description**:
+- Severity: HIGH
+- Scanner: checkov
+- Rule ID: CKV\_AWS\_20
+- Location: infra/main.tf:6-9
+
 S3 Bucket has an ACL defined which allows public READ access.
 
----
+</details>
 
-### Finding 3: CKV_AWS_18
+<details>
+<summary>4. MEDIUM · CKV_DOCKER_8 · Dockerfile:5</summary>
 
-- **Severity**: MEDIUM
-- **Scanner**: checkov
-- **Rule ID**: CKV_AWS_18
-- **Location**: infra/main.tf:2-4
+### Finding 4: CKV\_DOCKER\_8
 
-**Description**:
-Ensure the S3 bucket has access logging enabled
+- Severity: MEDIUM
+- Scanner: checkov
+- Rule ID: CKV\_DOCKER\_8
+- Location: Dockerfile:5
 
----
-
-### Finding 4: CKV_DOCKER_8
-
-- **Severity**: MEDIUM
-- **Scanner**: checkov
-- **Rule ID**: CKV_DOCKER_8
-- **Location**: Dockerfile:5
-
-**Description**:
 Ensure the last USER is not root
 
----
+</details>
 
-### Finding 5: CVE-2018-18074-requests
+<details>
+<summary>5. MEDIUM · CKV_AWS_18 · infra/main.tf:2-4</summary>
 
-- **Severity**: CRITICAL
-- **Scanner**: grype
-- **Rule ID**: CVE-2018-18074-requests
-- **Location**: requirements.txt:1
+### Finding 5: CKV\_AWS\_18
 
-**Description**:
-A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requirements.txt
+- Severity: MEDIUM
+- Scanner: checkov
+- Rule ID: CKV\_AWS\_18
+- Location: infra/main.tf:2-4
 
----
+Ensure the S3 bucket has access logging enabled
+
+</details>
+
+<details>
+<summary>6. MEDIUM · CVE-2023-32681-requests · requirements.txt:1</summary>
 
 ### Finding 6: CVE-2023-32681-requests
 
-- **Severity**: MEDIUM
-- **Scanner**: grype
-- **Rule ID**: CVE-2023-32681-requests
-- **Location**: requirements.txt:1
+- Severity: MEDIUM
+- Scanner: grype
+- Rule ID: CVE-2023-32681-requests
+- Location: requirements.txt:1
 
-**Description**:
 A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt
 
 </details>
 
----
+<details>
+<summary>Scan metadata</summary>
+
+## Scan metadata
+
+- Project: ASH
+- Scan executed: 2026-01-15T12:00:00+00:00
+- Report generated: 2026-01-15T12:00:42+00:00
+- ASH version: <ASH_VERSION>
+
+</details>
 
 *Report generated by [Automated Security Helper (ASH)](https://github.com/awslabs/automated-security-helper) at 2026-01-15T12:00:42+00:00*
+
+Build with <3 at Amazon Web Services

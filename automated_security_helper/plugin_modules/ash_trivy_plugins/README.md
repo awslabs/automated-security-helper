@@ -40,13 +40,14 @@ trivy --version
 
 ### Basic Configuration
 
-Add to your `.ash/.ash.yaml`:
+Add to your ASH config file (`.ashrc.yaml` in a new project):
 
 ```yaml
 scanners:
   trivy-repo:
     enabled: true
-    severity_threshold: "MEDIUM"
+    options:
+      severity_threshold: "MEDIUM"
 ```
 
 ### Run Trivy Scan
@@ -85,21 +86,29 @@ Available scanner types:
 scanners:
   trivy-repo:
     enabled: true
-    severity_threshold: "HIGH"
     options:
+      severity_threshold: "HIGH"
       scanners: ["vuln", "secret"]
       license_full: true          # Deep license scanning (default: true)
       ignore_unfixed: true        # Only show fixed vulnerabilities (default: true)
       disable_telemetry: true     # Disable usage analytics (default: true)
-      ignore_file: /etc/ash/trivyignore  # Passed as --ignorefile; must be outside the scanned tree
-      secret_config_file: /etc/ash/trivy-secret.yaml  # Passed as --secret-config; same rule
+      ignore_file: /etc/ash/trivyignore  # Passed as trivy --ignorefile; must be outside the scanned tree
+      secret_config_file: /etc/ash/trivy-secret.yaml  # Passed as trivy --secret-config; same rule
 ```
 
-trivy-repo always passes `--ignorefile` and `--secret-config`, so a `.trivyignore` or
+trivy-repo always passes `trivy --config` and `trivy --module-dir`: an empty config file and an
+empty modules directory of ASH's, unless `config_file` and `module_dir` are set
+through `--config-overrides` or a config file outside every git checkout and the
+scanned directory, for paths outside the scanned tree. Without `config_file`,
+`TRIVY_CONFIG` names the config when it is a file outside the scanned tree; a
+relative path in it is taken from the working directory ASH runs in.
+
+trivy-repo always passes `trivy --ignorefile` and `trivy --secret-config`, so a `.trivyignore` or
 `trivy-secret.yaml` committed to the scanned repository is not read. Without the
 options (or `TRIVY_IGNOREFILE` / `TRIVY_SECRET_CONFIG`), trivy gets files that set
-nothing. Under `--sandbox`, an operator file outside the system paths also has to be
-in `sandbox.extra_read_paths`.
+nothing, which ASH writes in a directory outside the scanned tree and removes when
+the scan ends. Under `--sandbox`, an operator file outside the system paths also has
+to be in `sandbox.extra_read_paths`.
 
 ## Usage Examples
 
@@ -120,8 +129,8 @@ scanners:
 scanners:
   trivy-repo:
     enabled: true
-    severity_threshold: "LOW"
     options:
+      severity_threshold: "LOW"
       scanners: ["secret"]
 ```
 
@@ -179,8 +188,18 @@ trivy image --download-db-only
 ```
 
 **Permission errors**:
+
+trivy-repo keeps its scan cache in memory (`--cache-backend=memory`), so an
+offline or sandboxed scan, which does not update the database itself, works from a
+cache directory it may only read, such as one shared between jobs or baked into an
+image. Downloading or updating the database, which an unsandboxed online scan does
+when it is due, needs the cache directory to be writable. That directory is
+`TRIVY_CACHE_DIR` when set, else
+`$XDG_CACHE_HOME/trivy` or `~/.cache/trivy` on Linux, `~/Library/Caches/trivy`
+on macOS, and `%LocalAppData%\trivy` on Windows.
+
 ```bash
-# Ensure Trivy cache directory is writable
+# Ensure the cache directory is writable before updating the database
 ls -la ~/.cache/trivy/
 ```
 

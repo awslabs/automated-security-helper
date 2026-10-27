@@ -17,6 +17,7 @@ the suite.
 """
 
 import logging
+import time
 
 import pytest
 
@@ -30,6 +31,19 @@ from automated_security_helper.core.scanner_inventory import (
     describe_scanner,
     list_scanner_inventory,
 )
+
+
+def _assert_the_process_clock_still_runs() -> None:
+    """The probe's clock is patched, and ``time.monotonic`` is not.
+
+    Patching the time module's own function would stop the clock for every thread
+    in this worker, including code other tests run.
+    """
+    start = time.monotonic()
+    time.sleep(0.01)
+    assert time.monotonic() > start, (
+        "time.monotonic() stopped advancing while the probe's clock was patched"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -568,7 +582,8 @@ class TestProbeToolVersion:
         def _now():
             return clock["t"]
 
-        monkeypatch.setattr(scanner_inventory._time, "monotonic", _now)
+        monkeypatch.setattr(scanner_inventory, "_monotonic", _now)
+        _assert_the_process_clock_still_runs()
 
         class _Result:
             def __init__(self, returncode, stdout="", stderr=""):
@@ -603,7 +618,8 @@ class TestProbeToolVersion:
         )
         calls = []
         clock = {"t": 0.0}
-        monkeypatch.setattr(scanner_inventory._time, "monotonic", lambda: clock["t"])
+        monkeypatch.setattr(scanner_inventory, "_monotonic", lambda: clock["t"])
+        _assert_the_process_clock_still_runs()
 
         class _Result:
             returncode = 1
@@ -674,3 +690,28 @@ class TestDescribeScannerProbeFallback:
         assert entry["dependencies_satisfied"] is None
         assert entry["version"] is None
         assert recorder == []  # could not determine reachability; no probe
+
+
+def test_concurrent_inventory_keeps_the_order_it_was_given(monkeypatch):
+    """check_installation describes the scanners side by side; the order holds."""
+    import threading
+    import time
+
+    from automated_security_helper.core import scanner_inventory
+
+    classes = [type(f"Scanner{n}", (), {}) for n in range(4)]
+    threads = set()
+
+    def describe(cls, context, default_config):
+        threads.add(threading.get_ident())
+        # The first scanner finishes last, so a result list built in completion
+        # order would come back reversed.
+        time.sleep(0.05 * (len(classes) - classes.index(cls)))
+        return {"name": cls.__name__}
+
+    monkeypatch.setattr(scanner_inventory, "describe_scanner", describe)
+
+    listed = scanner_inventory.list_scanner_inventory(lambda: classes, concurrent=True)
+
+    assert [entry["name"] for entry in listed] == [c.__name__ for c in classes]
+    assert len(threads) > 1, "the scanners were not described concurrently"

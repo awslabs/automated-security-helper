@@ -2,36 +2,39 @@ version: 0.2
 
 env:
   variables:
-    ASH_REPO_BRANCH: v3.0.0-beta
+    # The ASH release to install. `cz bump` moves this to each new release.
+    ASH_VERSION: v3.7.0
     ASH_MODE: container
     ASH_REPO_CLONE_URL: https://github.com/awslabs/automated-security-helper.git
     COLUMNS: '140'
-  exported-variables:
-    - ASH_MODE
-    - ASH_REPO_CLONE_URL
-    - ASH_REPO_BRANCH
-    - COLUMNS
 
 phases:
   pre_build:
     commands:
-      - echo "Installing ash"
-      - pip install git+${ASH_REPO_CLONE_URL}@${ASH_REPO_BRANCH}
+      - echo "Installing ASH ${ASH_VERSION}"
+      - pip install "git+${ASH_REPO_CLONE_URL}@${ASH_VERSION}"
   build:
     commands:
-      - ash --mode container --no-progress
+      # CodeBuild runs as root, which builds the ci stage (the image that runs as root).
+      - ash --mode container --build-target ci --no-progress --output-dir .ash/ash_output
 
+  # Runs whether or not the scan passed, so a build that fails on findings
+  # still prints its summary.
   post_build:
     commands:
-      - ash report
+      - ash report --output-dir .ash/ash_output
 
+# Paths are named rather than globbed from the repository root: the scan writes
+# under .ash/, and the artifact and the report group read exactly that directory.
 artifacts:
+  base-directory: .ash/ash_output
   files:
-    - '**/ash_output/**'
+    - '**/*'
   name: ash-output-$(date +%Y-%m-%d)
 
 reports:
   junit-security-findings:
     file-format: JUNITXML
+    base-directory: .ash/ash_output/reports
     files:
-      - '**/reports/*.junit.xml'
+      - ash.junit.xml

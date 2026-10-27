@@ -9,19 +9,32 @@ rather than image-build-time settings on one of them.
 
 Defaults match the AgentCore container contract (streamable-http on 0.0.0.0:8000
 at POST /mcp, stateless), because that is the one target that cannot express
-anything else. The other three targets set these variables explicitly.
+anything else. The other three targets set these variables explicitly. The two
+trust declarations, ASH_MCP_TRUST_UPSTREAM_HOST_CHECK and
+ASH_MCP_TRUST_UPSTREAM_SESSION_ID, are the exception: each states something
+about the platform in front that this file cannot check, so both default to
+false and the AgentCore module sets them.
 
 Why stateless defaults to true: AgentCore injects its own ``Mcp-Session-Id``
 header on every request, including the first. A stateful MCP server rejects a
 session id it never issued with 404 "Session not found"; a stateless server
 accepts it and returns 200. The platform contract states the server must accept
 the platform-provided session id rather than reject it.
+
+Why ASH_MCP_TRUST_UPSTREAM_SESSION_ID defaults to false: a stateless server
+issues no session, so it takes the header as the caller's session only when told
+that the platform in front issues and authenticates it. That is a statement
+about the deployment this file cannot check, so the AgentCore modules set it and
+every other target leaves it off. Without it, source delivery and the scan
+registry tools refuse on a stateless server.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import shutil
+import subprocess  # nosec B404 - runs this image's own `ash mcp --help`
 import sys
 
 DEFAULT_TRANSPORT = "streamable-http"
@@ -29,6 +42,11 @@ DEFAULT_HOST = "0.0.0.0"  # noqa: S104 - the AgentCore contract requires this bi
 DEFAULT_PORT = "8000"
 DEFAULT_MOUNT_PATH = "/mcp"
 DEFAULT_STATELESS = "true"
+DEFAULT_TRUST_UPSTREAM_SESSION_ID = "false"
+DEFAULT_TRUST_UPSTREAM_HOST_CHECK = "false"
+
+#: Bind names for which ash checks Host and Origin itself (its own origin only).
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
 FALSE_VALUES = {"0", "false", "no", "off"}
@@ -59,6 +77,96 @@ def _env_bool(name: str, default: str) -> bool:
     raise AssertionError("unreachable")  # pragma: no cover
 
 
+HEADER_VALUE_ENV = "ASH_MCP_AUTH_HEADER_VALUE"
+HEADER_VALUE_FD_ENV = "ASH_MCP_AUTH_HEADER_VALUE_FD"
+
+
+def _take_header_value() -> str:
+    """The MCP auth header value, removed from this process's environment.
+
+    ash-container-init hands a value from Secrets Manager over in an inherited
+    in-memory file, named by ASH_MCP_AUTH_HEADER_VALUE_FD; that one is read and its
+    descriptor closed. An operator may instead set ASH_MCP_AUTH_HEADER_VALUE.
+    Both variables are removed either way, so ``ash mcp`` and everything it starts
+    get neither: a config file may read any ``ASH_*`` variable through
+    ``${ASH_...}``, and one that read this value would copy it into the effective
+    config, logs and reports. The descriptor wins when both are set, as the
+    secret did when ash-container-init exported it.
+    """
+    direct = os.environ.pop(HEADER_VALUE_ENV, None)
+    fd_text = os.environ.pop(HEADER_VALUE_FD_ENV, None)
+    if fd_text is None or fd_text.strip() == "":
+        return (direct or "").strip()
+    fd = int(fd_text) if fd_text.strip().isdigit() else -1
+    if fd < 3:
+        # 0, 1 and 2 are stdin, stdout and stderr, never the hand-over.
+        _fail(
+            f"{HEADER_VALUE_FD_ENV}={fd_text!r} is not a descriptor "
+            "ash-container-init opened"
+        )
+    try:
+        with open(fd, "rb") as handle:
+            if handle.seekable():
+                handle.seek(0)
+            data = handle.read()
+        return data.decode("utf-8").strip()
+    except (OSError, UnicodeDecodeError) as exc:
+        _fail(
+            f"could not read the MCP auth header value from {HEADER_VALUE_FD_ENV}={fd}: "
+            f"{exc}"
+        )
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _ash_mcp_supports(flag: str) -> bool:
+    """Whether this image's ``ash mcp`` accepts ``flag``; AshVersion decides that.
+
+    The probe runs with colour off and a wide terminal, and ANSI codes are stripped
+    before the match. typer forces a terminal when GITHUB_ACTIONS, FORCE_COLOR or
+    PY_COLORS is set, and rich then styles an option name in pieces, so the plain
+    name is not in the raw output and every option read as unsupported. The
+    CodeCommit gate probes ``ash scan --help`` the same way, for the same reason.
+    """
+    probe_env = {**os.environ, "COLUMNS": "200", "NO_COLOR": "1"}
+    probe_env.pop("FORCE_COLOR", None)
+    try:
+        result = subprocess.run(  # nosec B603 B607 - fixed argv, the image's ash
+            ["ash", "mcp", "--help"],
+            env=probe_env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return flag in _ANSI_ESCAPE.sub("", result.stdout + result.stderr)
+
+
+def _hand_over(value: str) -> int:
+    """An in-memory file holding ``value`` that ``ash mcp`` inherits across exec.
+
+    For ``ash mcp --auth-header-value-fd``, which reads it once and closes it, so
+    the value is on no command line (``/proc/<pid>/cmdline`` is readable by every
+    local user, and from the host by anyone who can list its processes). memfd
+    for the reason ash-container-init uses one: not a file on the container's
+    storage, and not a pipe, whose capacity bounds what can be written before
+    anything reads it.
+    """
+    try:
+        fd = os.memfd_create("ash-mcp-auth-header-value", 0)
+    except (AttributeError, OSError) as exc:
+        _fail(f"could not create an in-memory file for the MCP auth header value: {exc}")
+    data = value.encode("utf-8")
+    written = 0
+    while written < len(data):
+        written += os.write(fd, data[written:])
+    os.set_inheritable(fd, True)
+    return fd
+
+
 def _split_hosts(raw: str) -> list[str]:
     """Split a Host allowlist on commas and whitespace, dropping empties."""
     separated = raw.replace(",", " ")
@@ -66,7 +174,9 @@ def _split_hosts(raw: str) -> list[str]:
 
 
 def build_argv() -> list[str]:
-    transport = _env("ASH_MCP_TRANSPORT", DEFAULT_TRANSPORT)
+    # The same variable is ash's own override of caller trust, which ash reads
+    # in any case; the flag needs the canonical spelling.
+    transport = _env("ASH_MCP_TRANSPORT", DEFAULT_TRANSPORT).lower()
 
     argv = [
         "ash",
@@ -87,9 +197,15 @@ def build_argv() -> list[str]:
     if transport == "streamable-http":
         stateless = _env_bool("ASH_MCP_STATELESS_HTTP", DEFAULT_STATELESS)
         argv.append("--stateless-http" if stateless else "--no-stateless-http")
+        # ash refuses the declaration on a server that issues its own sessions,
+        # so it is emitted for stateless streamable-http only.
+        if stateless and _env_bool(
+            "ASH_MCP_TRUST_UPSTREAM_SESSION_ID", DEFAULT_TRUST_UPSTREAM_SESSION_ID
+        ):
+            argv.append("--trust-upstream-session-id")
 
     header_name = _env("ASH_MCP_AUTH_HEADER_NAME", "")
-    header_value = _env("ASH_MCP_AUTH_HEADER_VALUE", "")
+    header_value = _take_header_value()
     if header_name and not header_value:
         _fail(
             "ASH_MCP_AUTH_HEADER_NAME is set but no value was resolved. Set "
@@ -103,13 +219,48 @@ def build_argv() -> list[str]:
         )
     if header_name:
         argv += ["--auth-header-name", header_name]
-        argv += ["--auth-header-value", header_value]
+        if _ash_mcp_supports("--auth-header-value-fd"):
+            argv += ["--auth-header-value-fd", str(_hand_over(header_value))]
+        else:
+            # An AshVersion older than the option: the only form it takes.
+            print(
+                "ash-mcp-serve: WARNING: this image's ash mcp has no "
+                "--auth-header-value-fd, so the auth header value is passed on its "
+                "command line, where other local users can read it. Deploy an "
+                "AshVersion whose ash mcp accepts --auth-header-value-fd.",
+                file=sys.stderr,
+            )
+            argv += ["--auth-header-value", header_value]
 
     # Repeatable flag. Passing the known proxy or load balancer hostname keeps
     # the MCP SDK's DNS-rebinding protection on: without it, protection is
     # active only when --host is loopback, which it never is behind a proxy.
-    for host in _split_hosts(_env("ASH_MCP_ALLOWED_HOSTS", "")):
+    allowed_hosts = _split_hosts(_env("ASH_MCP_ALLOWED_HOSTS", ""))
+    for host in allowed_hosts:
         argv += ["--allowed-host", host]
+
+    # ash refuses a non-loopback --host with no --allowed-host unless it is told
+    # that something in front of it checks Host and Origin. Off by default, so an
+    # image run without a Host allowlist refuses to start rather than serving
+    # any Host. The AgentCore module sets it true: that platform restricts Host
+    # itself and cannot be given an allowlist in advance. Never emitted for a
+    # loopback bind, where ash checks its own origin, and never with an
+    # allowlist, which says the opposite.
+    host = _env("ASH_MCP_HOST", DEFAULT_HOST)
+    if (
+        transport != "stdio"
+        and not allowed_hosts
+        and host not in LOOPBACK_HOSTS
+        and _env_bool(
+            "ASH_MCP_TRUST_UPSTREAM_HOST_CHECK", DEFAULT_TRUST_UPSTREAM_HOST_CHECK
+        )
+    ):
+        argv.append("--trust-upstream-host-check")
+
+    # Unset keeps ash's own default (24 hours).
+    ttl = _env("ASH_MCP_SESSION_WORKSPACE_TTL", "")
+    if ttl and transport != "stdio":
+        argv += ["--session-workspace-ttl", ttl]
 
     return argv
 

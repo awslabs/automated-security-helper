@@ -96,25 +96,29 @@ variable "min_severity" {
   type        = string
   default     = "low"
 
-  # Restricted to the values ASH's ladder actually ranks. ASH does not validate
-  # this option itself -- it does `_SEVERITY_RANK.get(min_severity.lower(), 1)`,
-  # so an unrecognized value silently becomes rank 1, which is "low". A typo would
-  # therefore produce a working pipeline gating at a threshold nobody chose. This
-  # validation is what turns that into an error.
+  # Restricted to the values ASH's ladder actually ranks. ASH 3.7.0 and 3.7.1 do
+  # not validate this option themselves -- they do
+  # `_SEVERITY_RANK.get(min_severity.lower(), 1)`, so an unrecognized value
+  # silently becomes rank 1, which is "low", and a typo produces a working
+  # pipeline at a threshold nobody chose. ASH releases after 3.7.1 refuse any
+  # value other than critical, high, medium, low or none as a usage error (exit
+  # 5), which fails every run of the merge action. Either way, this validation is
+  # what turns the typo into an error at plan time.
   #
-  # Worth knowing which way that fails: rank 1 is "low", the strictest setting, so
-  # the silent substitution errs toward failing builds rather than passing them. A
-  # fat-fingered "hihg" gets a pipeline that fails on medium findings with no
-  # explanation -- irritating and hard to diagnose, but it cannot quietly weaken a
-  # gate. That is why this is a correctness-and-clarity fix rather than a
-  # vulnerability.
+  # Worth knowing which way that fails on 3.7.0 and 3.7.1: rank 1 is "low", the strictest
+  # setting, so the silent substitution errs toward failing builds rather than
+  # passing them. A fat-fingered "hihg" gets a pipeline that fails on medium
+  # findings with no explanation -- irritating and hard to diagnose, but it cannot
+  # quietly weaken a gate. That is why this is a correctness-and-clarity fix
+  # rather than a vulnerability.
   #
-  # "info" is deliberately not accepted: ASH has no such rank, so it would be
-  # silently reinterpreted as "low". "none" is not accepted either, because rank 0
-  # skips the severity filter path entirely rather than meaning "everything".
+  # "info" is deliberately not accepted: ASH has no such rank, so 3.7.0 and 3.7.1
+  # would silently reinterpret it as "low" and releases after 3.7.1 refuse it. "none" is not
+  # accepted either, because rank 0 skips the severity filter path entirely rather
+  # than meaning "everything".
   validation {
     condition     = contains(["critical", "high", "medium", "low"], lower(var.min_severity))
-    error_message = "min_severity must be one of: critical, high, medium, low. ASH ranks no other value and would silently treat it as \"low\"."
+    error_message = "min_severity must be one of: critical, high, medium, low. ASH ranks no other value: 3.7.0 and 3.7.1 silently treat one as \"low\", and releases after 3.7.1 refuse it."
   }
 }
 

@@ -3,8 +3,9 @@
 
 import logging
 import os
-from pathlib import Path
-from typing import Dict, Optional
+import re
+from pathlib import Path, PurePath
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from automated_security_helper.utils.severity_ladder import (
     SEVERITY_THRESHOLDS,
@@ -15,18 +16,212 @@ ASH_ASSETS_DIR = Path(__file__).parent.parent.joinpath("assets")
 ASH_INSTALLED_REVISION_PATH = ASH_ASSETS_DIR.joinpath("ASH_INSTALLED_REVISION")
 ASH_DOCS_URL = "https://awslabs.github.io/automated-security-helper"
 ASH_REPO_URL = "https://github.com/awslabs/automated-security-helper"
-ASH_REPO_LATEST_REVISION = (
-    ASH_INSTALLED_REVISION_PATH.read_text().strip()
-    if ASH_INSTALLED_REVISION_PATH.exists()
-    else "v3.0.0-beta"
-)
+
+
+def _installed_revision(path: Path) -> str:
+    """The commit the package was built from, as hatch_build.py recorded it.
+
+    Without the asset (a tree that was never built) nothing is recorded, which
+    reads the same as the build's own "unknown-commit", and never as a real tag
+    that a container build would then install. A path that cannot even be
+    checked or read (a stat or read the OS refuses) reads as absent too: this
+    runs at import time, ``Path.exists()`` can propagate the refused stat's
+    OSError (measured: 3.10 through 3.13 raise PermissionError, 3.14 answers
+    False), and ``read_text()`` raises it on every interpreter, so without
+    the handler an uncheckable install location kills ``import ash``. The
+    handler is live on every supported version, not a versioned shim.
+    """
+    try:
+        return path.read_text().strip() if path.exists() else "unknown-commit"
+    except OSError:
+        return "unknown-commit"
+
+
+ASH_REPO_LATEST_REVISION = _installed_revision(ASH_INSTALLED_REVISION_PATH)
 
 ASH_WORK_DIR_NAME = "converted"
-ASH_BIN_PATH = (
-    Path(os.environ["ASH_BIN_PATH"])
-    if os.environ.get("ASH_BIN_PATH", None) is not None
-    else Path.home().joinpath(".ash", "bin")
-)
+#: The ``skipped_reason`` of a scanner a ``--python-only`` run leaves out. One
+#: spelling, because ``ash merge`` reads it back to tell a scanner the flag left out
+#: from one no shard was asked to run.
+PYTHON_ONLY_SKIPPED_REASON = "not a Python-only scanner, and --python-only is set"
+
+
+def is_anchored(path: str, pathmod: Any = os.path) -> bool:
+    """Whether ``path`` names a location without reference to the cwd.
+
+    ``isabs`` alone is not enough on Windows: before Python 3.13 ``\\tools`` counts
+    as absolute there, but it is rooted on whichever drive is current. A drive
+    letter or UNC share is required as well.
+    """
+    if not pathmod.isabs(path):
+        return False
+    if pathmod.__name__ == "ntpath":
+        return bool(pathmod.splitdrive(path)[0])
+    return True
+
+
+#: The (variable, value) pairs from the environment already warned about in this
+#: process.
+_warned_relative_values: Set[Tuple[str, str]] = set()
+
+
+def warn_relative_value_once(variable: str, value: str, message: str) -> None:
+    """Log ``message`` the first time ``variable``'s relative ``value`` is ignored in
+    this process.
+
+    Keyed by the variable as well as the value: the same value in two variables is
+    two settings to fix, and each one's warning names it.
+    """
+    key = (variable, value)
+    if key in _warned_relative_values:
+        return
+    _warned_relative_values.add(key)
+    from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+
+    ASH_LOGGER.warning(message, extra=NO_MARKUP)
+
+
+def usable_home() -> Optional[Path]:
+    """The home directory, when it names its location by itself; else None.
+
+    The one place ASH decides whether there is a home directory: every path it
+    builds under ``~`` comes from here, through :func:`expand_home` and
+    :func:`xdg_directory` where those fit
+    (tests/unit/core/test_home_paths_go_through_usable_home.py checks).
+
+    On POSIX it is HOME when HOME is set, not empty, and absolute. When HOME is
+    unset it is the passwd entry's home directory, if that is absolute, as
+    ``os.path.expanduser`` falls back too: the system's user database is outside
+    the scanned repository's control. A HOME that is set wins over the passwd
+    entry, so an empty HOME, which makes ``~`` the filesystem root, and a relative
+    one, which names a directory under the working directory (usually the
+    repository being scanned), give None, as does an unset HOME with no absolute
+    passwd home. On Windows it is the home directory ``os.path.expanduser`` finds
+    (USERPROFILE, or HOMEDRIVE and HOMEPATH), when that has a drive or share.
+    """
+    if os.name == "nt":
+        home = os.path.expanduser("~")
+        return Path(home) if home != "~" and is_anchored(home) else None
+    value = os.environ.get("HOME")
+    if value is None:
+        try:
+            import pwd
+
+            value = pwd.getpwuid(os.getuid()).pw_dir
+        except (ImportError, KeyError, AttributeError, OSError):
+            return None
+    if not value or not is_anchored(value):
+        return None
+    return Path(value)
+
+
+def expand_home(value: str) -> Optional[str]:
+    """``value`` with a leading ``~`` expanded to :func:`usable_home`.
+
+    ``~`` alone and ``~/...`` (``~\\...`` too on Windows) need the home directory,
+    and give None when there is no usable one: the caller decides whether that
+    drops the value, refuses, or keeps it as written. Any other value, ``~user``
+    included, is returned as ``os.path.expanduser`` returns it.
+    """
+    separators = ("/", "\\") if os.name == "nt" else ("/",)
+    if value == "~" or value.startswith(tuple("~" + sep for sep in separators)):
+        home = usable_home()
+        if home is None:
+            warn_if_home_unusable()
+            return None
+        return str(home) + value[1:]
+    return os.path.expanduser(value)
+
+
+def xdg_directory(variable: str, *under_home: str) -> Optional[Path]:
+    """An XDG base directory: ``variable``'s value, or ``~/<under_home>``.
+
+    The value is used only when it is absolute: the XDG Base Directory
+    specification says a relative path in one of these variables is invalid and is
+    ignored. The default under the home directory is None when there is no usable
+    home (:func:`usable_home`).
+    """
+    value = os.environ.get(variable, "")
+    if value and is_anchored(value):
+        return Path(value)
+    home = usable_home()
+    if home is None:
+        warn_if_home_unusable()
+        return None
+    return home.joinpath(*under_home)
+
+
+def warn_if_home_unusable() -> None:
+    """Say, once per value, that nothing under ``~`` is used for an unusable HOME."""
+    if usable_home() is not None:
+        return
+    if os.name == "nt":
+        variable, described = "USERPROFILE", "not an absolute path"
+    else:
+        variable = "HOME"
+        value = os.environ.get(variable)
+        described = (
+            "not set, and the passwd entry names no absolute home directory"
+            if value is None
+            else "empty"
+            if not value
+            else f"the relative path {value!r}"
+        )
+    warn_relative_value_once(
+        variable,
+        os.environ.get(variable, ""),
+        f"{variable} is {described}, so ASH uses nothing under ~: no tools in "
+        "~/.ash/bin, no install receipts, no caches, and no scanner sandbox. A "
+        "relative home would name a directory under the working directory, usually "
+        f"the repository being scanned. Set {variable} to an absolute path.",
+    )
+
+
+def home_bin_path() -> Optional[Path]:
+    """``~/.ash/bin``, when there is a usable home directory (:func:`usable_home`)."""
+    home = usable_home()
+    return None if home is None else home.joinpath(".ash", "bin")
+
+
+def is_blank_bin_path(value: "str | None") -> bool:
+    """True when ``value`` names no directory: unset, empty, or only blanks.
+
+    Path("") is the working directory and Path(" ") a directory named " " under
+    it, so either made the install write into the repository it ran in and every
+    lookup search it. Path() also drops a trailing separator, which made "  /" the
+    relative "  ". So a value is blank when it is only whitespace or when every
+    component Path() keeps is: "  /", " /" and "\\t/" are blank. "/" and "." name
+    a directory, and so does " /x", a relative path, so they are not blank. Tool
+    lookup does not search a relative ASH_BIN_PATH (subprocess_utils.find_executable),
+    and ``ash dependencies install`` makes a relative bin path absolute.
+    """
+    if not value or not value.strip():
+        return True
+    parts = PurePath(value).parts
+    return bool(parts) and not any(part.strip() for part in parts)
+
+
+def ash_bin_path_from_environment() -> "str | None":
+    """ASH_BIN_PATH as set, or None when it is unset or blank (is_blank_bin_path).
+
+    The one reading of the variable.
+    """
+    value = os.environ.get("ASH_BIN_PATH")
+    return None if is_blank_bin_path(value) else value
+
+
+def _bin_path_at_import() -> Optional[Path]:
+    """ASH_BIN_PATH as set (:func:`ash_bin_path_from_environment`), else
+    ``~/.ash/bin`` when there is a usable home directory (:func:`home_bin_path`),
+    else None: ASH then has no bin directory, and tools are found through PATH
+    alone. An empty or relative HOME gives no ``~/.ash/bin``, since it would name
+    the filesystem root's or a directory under the working directory.
+    """
+    from_environment = ash_bin_path_from_environment()
+    return Path(from_environment) if from_environment else home_bin_path()
+
+
+ASH_BIN_PATH: Optional[Path] = _bin_path_at_import()
 #: Used when ``ASH_DEFAULT_SEVERITY_LEVEL`` is unset or names no threshold. MEDIUM
 #: is what ASH has always shipped, so an unusable value behaves as though the
 #: variable were absent rather than moving the gate somewhere new.
@@ -113,6 +308,16 @@ ASH_RC_FILE_NAMES = [
     "ashrc.json",
 ]
 
+# The name every ASH command that creates a config file gives it: `ash config
+# init` and `ash config wizard` with no --config, and `ash inspect findings` when
+# no config exists yet. Discovery reads ASH_RC_FILE_NAMES and [tool.ash] after
+# ASH_CONFIG_FILE_NAMES, and its warning calls the older names deprecated (#313),
+# so a new file gets a name from ASH_RC_FILE_NAMES. Of those, the first YAML one:
+# these commands write YAML and refuse TOML. Existing files under the older names
+# keep loading, and keep winning over this one when both exist, which is why the
+# commands refuse to create it next to another source.
+ASH_DEFAULT_CONFIG_FILE_NAME = ".ashrc.yaml"
+
 # A pyproject.toml is a config source only when it has a [tool.ash] table.
 ASH_PYPROJECT_FILE_NAME = "pyproject.toml"
 
@@ -134,6 +339,15 @@ ASH_CONFIG_SOURCES_DESCRIPTION = (
 # where depth alone would not.
 ASH_CONFIG_EXTENDS_MAX_DEPTH = 10
 ASH_CONFIG_EXTENDS_MAX_FILES = 50
+
+# The most ASH reads from one config file: 1 MiB. A config is text a person edits;
+# ASH's own .ash/.ash.yaml is about 160 KiB, so this is six times that. The bound
+# stops a file, or a device at a config name, from being read into memory without
+# limit, and it bounds what parsing one costs: a flat 15 MiB YAML list took about
+# 230 s and 4.3 GiB to resolve, where 1 MiB takes a fraction of that. It does not
+# bound YAML aliases, which expand after parsing; the config loaders refuse those
+# (see load_config_yaml in config/ash_config.py).
+ASH_CONFIG_MAX_FILE_BYTES = 1024 * 1024
 
 # The environment variable names an ASH config file may interpolate.
 #
@@ -182,8 +396,13 @@ ASH_CONFIG_EXTENDS_MAX_FILES = 50
 # ----------------
 # Every entry names *where* to send a report, never *what to authenticate with*.
 # ``tests/unit/config/test_config_env_interpolation.py`` asserts that, so an
-# entry ending in KEY, TOKEN, SECRET, PASSWORD or CREDENTIAL fails the suite.
+# entry ending in KEY, TOKEN, SECRET, PASSWORD, CREDENTIAL or HEADER_VALUE fails
+# the suite.
 # An operator needing another name renames it with the ``ASH_`` prefix.
+#
+# A config file an MCP client delivered is outside this bound altogether: it may
+# not use ``!ENV`` at all, and is refused if it does. See "Environment
+# variables" in ``config/config_sources.py``.
 ASH_CONFIG_ENV_VAR_PREFIX = "ASH_"
 
 ASH_CONFIG_ENV_VAR_ALLOWLIST = [
@@ -191,6 +410,210 @@ ASH_CONFIG_ENV_VAR_ALLOWLIST = [
     "AWS_PROFILE",
     "AWS_REGION",
 ]
+
+# ``ASH_`` names a config file may not interpolate whatever they hold: a name
+# that ends, compared case-insensitively, in one of these suffixes, and the
+# names listed after them. The prefix admits every ``ASH_`` variable in the
+# process, including ones an operator or a wrapper exports for a credential:
+# ``ASH_MCP_AUTH_HEADER_VALUE`` is the documented one, which ash-mcp-serve and
+# ash-container-init take out of the environment before ASH starts because a
+# config could read it. A reference to one of these names is left as written,
+# as a reference to an unlisted name is.
+ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES = (
+    "_KEY",
+    "_TOKEN",
+    "_SECRET",
+    "_PASSWORD",
+    "_CREDENTIAL",
+    "_CREDENTIALS",
+    "_HEADER_VALUE",
+)
+ASH_CONFIG_ENV_VAR_SECRET_NAMES = ("ASH_MCP_AUTH_HEADER_VALUE",)
+
+
+def is_readable_environment_name(name: str) -> bool:
+    """Whether a config file may read the environment variable *name*.
+
+    The one name rule: a name beginning with ``ASH_CONFIG_ENV_VAR_PREFIX`` or
+    listed in ``ASH_CONFIG_ENV_VAR_ALLOWLIST``, compared exactly as written.
+    The config loader's resolution and the container runner's list of values to
+    hide both call it, so the two cannot drift.
+    """
+    return (
+        name.startswith(ASH_CONFIG_ENV_VAR_PREFIX)
+        or name in ASH_CONFIG_ENV_VAR_ALLOWLIST
+    )
+
+
+#: Variable-name words that name what to authenticate with, never where to
+#: send a report. The allowlist above holds no such name, but any ``ASH_``
+#: name is readable, so ``ASH_API_TOKEN`` is a name a config can read. The set
+#: is wider than the five singular forms the allowlist test bars (KEY, TOKEN,
+#: SECRET, PASSWORD, CREDENTIAL): a name outside those forms can still carry a
+#: secret (``ASH_X_CREDENTIALS``, ``ASH_X_DB_PASS``).
+#:
+#: Over-masking damages a report; under-masking prints a secret, so the rule
+#: errs toward matching where a name is about a secret. :func:`is_secret_shaped_environment_name`
+#: reads every entry two ways: the name ends with it (``GITHUBTOKEN``,
+#: ``MONKEY``), and the entry is a run of whole ``_``/``-`` separated segments
+#: followed only by trailing qualifiers (``API_KEY_PROD``, ``DB_PASSWORD_2``).
+#: A name whose later segments say something else (``AUTH_ENABLED``,
+#: ``PASS_THRESHOLD``: a flag or a limit named after the word, not the word's
+#: value) is not matched by that reading. The one exception to the ends-with
+#: reading is the explicit denylist ``SECRET_SHAPED_FALSE_POSITIVE_SEGMENTS``
+#: below.
+SECRET_SHAPED_NAME_SUFFIXES = (
+    "KEY",
+    "KEYS",
+    "TOKEN",
+    "TOKENS",
+    "SECRET",
+    "SECRETS",
+    "PASSWORD",
+    "PASSWORDS",
+    "CREDENTIAL",
+    "CREDENTIALS",
+    "PASS",
+    "PASSES",
+    "PASSWD",
+    "PASSWDS",
+    "PWD",
+    "PWDS",
+    "PAT",
+    "PATS",
+    "AUTH",
+    "AUTHS",
+    "PASSPHRASE",
+    "PASSPHRASES",
+)
+
+#: The names that are not secret-shaped although they end with a listed word.
+#: Each is a whole segment, compared by equality, never by substring or suffix,
+#: and each is listed with the measurement that put it here: a name an earlier
+#: review measured as a false positive of the plain ends-with test.
+#:
+#: - ``COMPAT``: ends with ``PAT``
+#: - ``BYPASS``: ends with ``PASS``
+#: - ``COMPASS``: ends with ``PASS``
+#: - ``OLDPWD``: ends with ``PWD`` (the shell's previous directory)
+#:
+#: A name whose last segment equals one of these is not matched by the
+#: ends-with reading (``ASH_COMPAT``); ``BYPASS_TOKEN`` and ``MYCOMPASS_TOKEN``
+#: stay strict because their last segment is ``TOKEN``. The compare also reads
+#: the segment's plural and digit-qualified spellings (``BYPASSES``,
+#: ``BYPASS2``): the plural suffix or digit run is stripped before the
+#: equality test, rather than listing every such spelling as its own member.
+#: The list grows only with a new measurement and the maintainers' approval.
+SECRET_SHAPED_FALSE_POSITIVE_SEGMENTS = ("COMPAT", "BYPASS", "COMPASS", "OLDPWD")
+
+
+#: A trailing qualifier: what a name may append after its secret word without
+#: changing what the word says the name holds. A digit run, a version mark,
+#: or a deployment-stage word. The segment-run reading accepts a match only
+#: when every segment after the run is one of these, so ``ASH_API_KEY_PROD``
+#: is secret-shaped and ``ASH_AUTH_ENABLED`` (a flag named after the word, not
+#: the word's value) is not.
+_TRAILING_QUALIFIER_SEGMENT = re.compile(r"\d+|V\d+|PROD|STAGING|DEV|TEST")
+
+#: A qualifier glued straight onto a secret word inside one segment, read
+#: after the segment's trailing digits are stripped, so ``V2`` reads ``V``
+#: here and a bare digit run is already gone.
+_GLUED_QUALIFIER = re.compile(r"V|PROD|STAGING|DEV|TEST")
+
+#: A segment's trailing digit run: ``KEY2`` and ``PASSWORD1`` carry the same
+#: words as ``KEY`` and ``PASSWORD``.
+_TRAILING_DIGITS = re.compile(r"\d+$")
+
+
+def _canonical_segment(segment: str) -> str:
+    """*segment* with its trailing digits stripped, then with a glued trailing
+    qualifier stripped where the remainder is a listed secret word, so
+    ``KEY2`` reads ``KEY`` and ``TOKENPROD`` reads ``TOKEN``. Any other
+    segment comes back digit-stripped only (``ENABLED``, ``PASSPORT``)."""
+    stripped = _TRAILING_DIGITS.sub("", segment)
+    for entry in SECRET_SHAPED_NAME_SUFFIXES:
+        rest = stripped[len(entry) :]
+        if stripped.startswith(entry) and rest and _GLUED_QUALIFIER.fullmatch(rest):
+            return entry
+    return stripped
+
+
+def _is_false_positive_segment(segment: str) -> bool:
+    """Whether *segment* is denylisted, read with its plural spellings:
+    ``BYPASSES`` and ``COMPATS`` are the plurals of denylisted segments, so a
+    trailing ``ES`` or ``S`` is stripped before the equality test when the
+    remainder is a member."""
+    if segment in SECRET_SHAPED_FALSE_POSITIVE_SEGMENTS:
+        return True
+    return any(
+        segment.endswith(plural)
+        and segment[: -len(plural)] in SECRET_SHAPED_FALSE_POSITIVE_SEGMENTS
+        for plural in ("ES", "S")
+    )
+
+
+def is_secret_shaped_environment_name(name: str) -> bool:
+    """Whether *name* is secret-shaped, read case-insensitively.
+
+    An entry of ``SECRET_SHAPED_NAME_SUFFIXES`` matches in two ways. The name
+    ends with it, glued or not (``GITHUBTOKEN``, ``MYPASSWORD``,
+    ``AWSSECRETACCESSKEY``, ``MONKEY``). Or its own segments, split on ``_``
+    and ``-``, appear contiguously and in order with only trailing qualifiers
+    after them -- a digit run, a version mark, or a deployment-stage word
+    (``PROD``, ``STAGING``, ``DEV``, ``TEST``) -- so a trailing qualifier does
+    not hide the word (``ASH_API_KEY_PROD``, ``ASH_DB_PASSWORD_2``,
+    ``ASH_TOKEN_STAGING``), while a name whose later segments say something
+    else (``ASH_AUTH_ENABLED``, ``ASH_PASS_THRESHOLD``: a flag or a limit
+    named after the word, not the word's value) is not matched by this
+    reading. A bare name equal to an entry (``PWD``) matches.
+
+    Both readings see each segment with its trailing digits stripped
+    (``ASH_API_KEY2``, ``ASH_DB_PASSWORD1``) and with a glued trailing
+    qualifier stripped where the remainder is a listed word
+    (``ASH_TOKENPROD``).
+
+    The ends-with reading is skipped when the name's last segment equals, as
+    written or with a trailing digit run or plural ``ES``/``S`` stripped, one
+    of ``SECRET_SHAPED_FALSE_POSITIVE_SEGMENTS`` (``COMPAT``, ``BYPASS``,
+    ``COMPASS``, ``OLDPWD``), so those names and their plural or
+    digit-qualified spellings (``ASH_BYPASSES``, ``ASH_BYPASS2``) are not
+    matched. Those are the only names a plain ends-with test matched and this
+    one does not. Equality only: ``BYPASS_TOKEN`` and ``MYCOMPASS_TOKEN`` are
+    matched.
+    """
+    upper = name.upper()
+    segments = _name_segments(name)
+    canonical = [_canonical_segment(segment) for segment in segments]
+    joined = "_".join(canonical)
+    last_is_denylisted = bool(segments) and (
+        _is_false_positive_segment(segments[-1])
+        or _is_false_positive_segment(canonical[-1])
+    )
+    if not last_is_denylisted and any(
+        upper.endswith(suffix) or joined.endswith(suffix)
+        for suffix in SECRET_SHAPED_NAME_SUFFIXES
+    ):
+        return True
+    for suffix in SECRET_SHAPED_NAME_SUFFIXES:
+        wanted = _name_segments(suffix)
+        width = len(wanted)
+        if not width:
+            continue
+        for start in range(len(canonical) - width + 1):
+            if canonical[start : start + width] != wanted:
+                continue
+            if all(
+                _TRAILING_QUALIFIER_SEGMENT.fullmatch(segment)
+                for segment in segments[start + width :]
+            ):
+                return True
+    return False
+
+
+def _name_segments(name: str) -> List[str]:
+    """*name* upper-cased and split into its non-empty ``_``/``-`` segments."""
+    return [segment for segment in re.split(r"[_-]+", name.upper()) if segment]
+
 
 # Dependency manifests, split by who writes them. The split is the whole point of
 # these two lists and must not be undone -- see the failure mode at the bottom.
@@ -418,16 +841,56 @@ KNOWN_SCANNABLE_EXTENSIONS = [
 ]
 VALID_SEVERITY_VALUES = frozenset({"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"})
 
+#: The command line could not be used, so nothing ran: an unknown command, option
+#: or argument, a missing required option, an option value ASH does not accept, or
+#: options that cannot be combined. Its own code because click's default for these
+#: is 2, which is ASH's code for actionable findings, so a CI gate read a mistyped
+#: flag as a scan that found problems. Every command reaches it through this name:
+#: click's errors are mapped in cli/main.py, and ASH's own refusals of an invocation
+#: exit with it directly.
+ASH_EXIT_USAGE_ERROR = 5
+
+#: A scan stopped by Ctrl-C, in any mode: 128 + SIGINT, the shell's convention. Not in
+#: ASH_EXIT_CODES below, which lists the outcomes a scan reports; an interrupted scan
+#: reports none.
+ASH_EXIT_INTERRUPTED = 130
+
+#: A scan stopped by SIGTERM: 128 + SIGTERM, the code the default disposition would
+#: have exited with, so a supervisor that sent the signal reads the same verdict it
+#: always has -- the difference is that the scan's own stop path ran first
+#: (core/cancellation.py, "SIGTERM on the CLI"). Not in ASH_EXIT_CODES, for
+#: ASH_EXIT_INTERRUPTED's reason: a terminated scan reports no outcome.
+ASH_EXIT_TERMINATED = 143
+
+#: The code one command, `ash dependencies install`, exits with for a --tool it cannot
+#: select (a name no plugin has, or a plugin of a type --plugin-type leaves out), and
+#: for a --plugin-type that is none of converter, scanner and reporter. The CLI
+#: reference documents 2 for them; the command's other usage errors exit
+#: ASH_EXIT_USAGE_ERROR. Every place that names this code reads it here, so moving it
+#: is a one-line change. ASH_EXIT_CODES below is a scan's own table and does not carry
+#: it: the ash://exit-codes resource lists it as that command's own entry
+#: (cli/mcp_server.py), in ASH_EXIT_BAD_SELECTION_MEANING's words, which are the CLI
+#: reference's for the command's row.
+ASH_EXIT_BAD_SELECTION = 2
+ASH_EXIT_BAD_SELECTION_MEANING = (
+    "a --tool name that matches no plugin, or names a plugin of a type that "
+    "--plugin-type leaves out; or a --plugin-type that is none of converter, "
+    "scanner and reporter"
+)
+
 ASH_EXIT_CODES: Dict[int, str] = {
     0: "success",
     1: "scan errors / scanner failures",
-    2: "actionable findings above threshold",
-    3: "invalid config",
+    2: "actionable findings at or above threshold",
+    # A config ASH cannot use, or an input it refuses before it scans, such as a
+    # linked output directory or a container mount path the runner cannot take.
+    3: "invalid config or refused input",
     # 4 is workspace-mode only. It is deliberately NOT an overload of 2: a
     # workspace definition error means nothing was scanned, whereas 2 means a
     # scan completed and found something. See models/workspace.py for why the
     # RFC's original assignment of 2 was not used.
     4: "workspace definition or policy error",
+    ASH_EXIT_USAGE_ERROR: "usage error",
 }
 
 

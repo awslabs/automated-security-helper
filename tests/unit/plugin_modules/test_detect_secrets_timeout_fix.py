@@ -91,4 +91,45 @@ def test_scan_timeout_does_not_hang(detect_secrets_scanner, tmp_path, monkeypatc
     # It should return a SARIF report, not False or an exception
     assert result is not False, "scan() should return a report, not False"
     # And the timeout is what ended it, not the worker finishing early.
-    assert any("timed out after 1s" in e for e in scanner.errors), scanner.errors
+    assert any("timed out after '1' s" in e for e in scanner.errors), scanner.errors
+
+
+def test_scan_timeout_line_carries_no_environment_value(
+    detect_secrets_scanner, tmp_path, monkeypatch
+):
+    """The limit can be ``${VAR}``-sourced, and the line is kept in the record.
+
+    A short number redacts only where the message quotes it whole, so the
+    quoted-token form above is what makes this possible at all.
+    """
+    scanner = detect_secrets_scanner
+    scanner.config.options.scan_timeout = 1
+    scanner.context.config._environment_values = ["1"]
+
+    target_dir = tmp_path / "source"
+    target_dir.mkdir()
+    (target_dir / "app.py").write_text("x = 1")  # pragma: allowlist secret
+    scanner.context.source_dir = target_dir
+    scanner.context.output_dir = tmp_path / "output"
+    scanner.context.output_dir.mkdir()
+    scanner.dependencies_satisfied = True
+    monkeypatch.setattr(
+        DetectSecretsScanner,
+        "_worker_command",
+        staticmethod(hanging_worker_command(60)),
+    )
+
+    with (
+        patch.object(scanner, "_pre_scan", return_value=True),
+        patch.object(scanner, "_post_scan"),
+        patch.object(scanner, "_resolve_arguments"),
+        patch(
+            "automated_security_helper.plugin_modules.ash_builtin.scanners"
+            ".detect_secrets_scanner.scan_set",
+            return_value=[str(target_dir / "app.py")],
+        ),
+    ):
+        scanner.scan(target=target_dir, target_type="source")
+
+    line = next(e for e in scanner.errors if "detect-secrets scan timed out after" in e)
+    assert "1" not in line, line

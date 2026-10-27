@@ -59,7 +59,7 @@ flowchart TD
 1. **Discover.** On startup, `discover_plugins()` walks the Python module path looking for packages in the `ash_plugins` namespace. Any package exporting `ASH_SCANNERS`, `ASH_CONVERTERS`, or `ASH_REPORTERS` contributes its classes. Built-in plugins are loaded the same way.
 2. **Register.** The `@ash_scanner_plugin`, `@ash_converter_plugin`, and `@ash_reporter_plugin` decorators register classes with the central `ash_plugin_manager`.
 3. **Configure.** When a phase starts, each plugin class is instantiated with its config drawn from the resolved `AshConfig`. The config is looked up by plugin type and lowercased class name.
-4. **Filter.** A plugin is skipped if `config.enabled` is `False`, if `--python-based-plugins-only` is set and the plugin isn't Python-only, or if CLI flags (`--scanners`, `--exclude-scanners`) exclude it.
+4. **Filter.** A plugin is skipped if `config.enabled` is `False`, if `--python-based-plugins-only` is set and the plugin isn't Python-only, or if CLI flags (`--scanners`, `--exclude-scanners`) exclude it. For scanners these filters are applied before ASH looks for the scanner's tool, so a scanner a filter leaves out is `SKIPPED` whether or not its tool is installed. A selected scanner whose tool is not found is `MISSING`.
 5. **Execute.** Enabled scanners run in parallel via a `ThreadPoolExecutor` (default) or sequentially if `--strategy sequential`. Each scanner returns SARIF, which the phase merges into the aggregated results.
 6. **Collect.** Plugin status (succeeded, failed, skipped, disabled) is recorded on the aggregated results so reporters can surface coverage gaps.
 

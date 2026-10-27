@@ -94,6 +94,13 @@ _logger = ASH_LOGGER
 
 ASH_MCP_ALLOWED_ROOTS_ENV = "ASH_MCP_ALLOWED_ROOTS"
 
+#: The exit code a scan tool reports when :func:`validate_output_tree` refuses its
+#: output tree: 3, ASH's code for an input it will not use. The same from the
+#: single-directory tools and the workspace tools, because a link in the output
+#: tree is the same refusal whichever meets it, and not a workspace definition or
+#: policy error (4).
+OUTPUT_TREE_REFUSED_EXIT_CODE = 3
+
 # Directories refused when no allowlist is configured. A target is refused if it
 # is one of these or lives beneath one. Kept deliberately short: it covers host
 # configuration and kernel interfaces only.

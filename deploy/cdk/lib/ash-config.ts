@@ -82,10 +82,20 @@ export const ASH_PARAMETER_NAMES = {
 /**
  * The ASH git ref that every image build is pinned to.
  *
- * This is a git ref passed to `git clone --branch`, not a PyPI version: the
- * build clones the ASH repository and builds its Dockerfile, because ASH
- * publishes no container image to any public registry. Keep the `v` prefix —
- * ASH tags releases as `v3.7.0`.
+ * This is a git ref passed to `git fetch`, not a PyPI version: the build fetches
+ * that one ref of the ASH repository and builds its Dockerfile from it, because
+ * ASH publishes no container image to any public registry. A tag, a branch or a
+ * full commit SHA all work; an abbreviated SHA does not, because a fetch by commit
+ * needs the whole id. Keep the `v` prefix — ASH tags releases as `v3.7.0`.
+ *
+ * It names the release this tree is, and `cz bump` rewrites it, together with the
+ * committed templates' `AshVersion` default, at every release ([tool.commitizen]
+ * version_files in pyproject.toml). The stacks pass options that older releases
+ * lack, so the default has to be the release they ship in; between releases the
+ * copy on main still names the previous one. Do not edit it by hand to a newer
+ * tag: commitizen rewrites only the current version, so a value ahead of it is
+ * never maintained again. tests/unit/deploy/test_deploy_ash_cli_contract.py holds
+ * both properties.
  */
 export const DEFAULT_ASH_VERSION = 'v3.7.0';
 
@@ -150,6 +160,16 @@ export const SSM_STANDARD_TIER_MAX_BYTES = 4096;
  * The spelling is the Dockerfile's, not ours: `ARG OFFLINE="NO"` fans out into
  * `ASH_OFFLINE`, `OFFLINE_AT_BUILD_TIME` and friends inside the image. Passing
  * `true` here would build an image that quietly stayed online.
+ *
+ * WHAT IT DOES NOT DO: restrict the network. It decides where scanner data comes
+ * from, not where the workload can connect. The Fargate tasks keep TCP 443 egress
+ * through a NAT gateway, AgentCore runs in `PUBLIC` network mode, the CodeBuild
+ * projects have no VPC, and the gate has none unless `VpcId` is set. The
+ * description says so and points at VPC placement. Making offline mode restrict
+ * egress itself was rejected: it needs VPC endpoints (an hourly charge
+ * per endpoint per Availability Zone) and a network layout these templates cannot
+ * choose for an adopter, and the gate's opt-in VPC placement already exists for
+ * operators who want egress confined.
  */
 export function ashOfflineMode(scope: Stack): CfnParameter {
   return new CfnParameter(scope, ASH_PARAMETER_NAMES.ashOfflineMode, {
@@ -157,10 +177,9 @@ export function ashOfflineMode(scope: Stack): CfnParameter {
     default: 'NO',
     allowedValues: ['YES', 'NO'],
     description:
-      'Build the ASH image in offline mode, vendoring scanner rulesets and tools ' +
-      'into the image so scans need no network egress. Forwarded to the ASH ' +
-      "Dockerfile's OFFLINE build argument. Offline images are larger and slower " +
-      'to build.',
+      "Bake scanner rulesets, databases and tools into the image (the ASH Dockerfile's " +
+      'OFFLINE build argument) so scans do not fetch them. Does not restrict network ' +
+      'egress; VPC placement does. Larger, slower builds.',
   });
 }
 
@@ -172,8 +191,19 @@ export function ashOfflineMode(scope: Stack): CfnParameter {
  * The value is stored in an SSM parameter on the Advanced tier, which holds up
  * to 8 KB, so a config that outgrows the CloudFormation cap can be edited
  * directly in Parameter Store after deployment without touching the stack. The
- * container reads the parameter at start, so the next task or invocation picks
- * the change up.
+ * MCP containers read the parameter at start and the CodeCommit gate on every
+ * invocation, so the next task or pull request picks the change up.
+ *
+ * DEPLOY WITH SOMETHING, NOT EMPTY, TO EDIT LATER. The workloads are told the
+ * parameter's name only when this value was non-empty at deploy time (see
+ * `configParameterNameOrEmpty`), so a parameter edited after an empty deploy is
+ * read by nothing. The description therefore says to deploy a short document such
+ * as `{}` first.
+ *
+ * WHERE IT LANDS. The description names no file, because the targets differ: the
+ * MCP entrypoint and the pipeline builds write `ASH_MATERIALIZED_CONFIG_PATH` and
+ * point `ASH_CONFIG` at it; the gate writes a file per invocation and passes it
+ * with `--config`.
  *
  * TWO ALTERNATIVES WERE REJECTED. Splitting the YAML across a
  * `CommaDelimitedList` corrupts any document containing a comma, which is most
@@ -191,11 +221,10 @@ export function ashBaseConfigYaml(scope: Stack): CfnParameter {
     default: '',
     maxLength: CFN_PARAMETER_MAX_BYTES,
     description:
-      'Optional ASH configuration document (YAML). Stored in an SSM parameter and ' +
-      'written to .ash/.ash.yaml inside the container at start. Leave empty to use ' +
-      "ASH's built-in defaults. CloudFormation caps this at 4096 bytes; for a " +
-      'larger config, deploy empty and edit the SSM parameter afterwards (Advanced ' +
-      'tier, 8 KB).',
+      'Optional ASH configuration document (YAML), stored in an SSM parameter and given ' +
+      "to ASH as ASH_CONFIG (the gate passes it with --config). Empty: ASH's defaults. " +
+      'CloudFormation caps this at 4096 bytes; for more, deploy a short one such as {} ' +
+      'and edit the parameter afterwards (Advanced tier, 8 KB).',
   });
 }
 
@@ -206,7 +235,7 @@ export function ashVersion(scope: Stack): CfnParameter {
     default: DEFAULT_ASH_VERSION,
     minLength: 1,
     description:
-      'ASH git ref (tag, branch, or commit) to build the image from, for example ' +
+      'ASH git ref (tag, branch, or full commit SHA) to build the image from, for example ' +
       'v3.7.0. Pinning a tag makes the build reproducible; the scheduled rebuild ' +
       'still repulls base-image and OS patches for that same ASH revision.',
   });
@@ -625,7 +654,8 @@ export function kmsKeyArn(scope: Stack): CfnParameter {
  * Once attached, the function's egress is that group plus whatever the adopter's
  * network ACLs and route tables allow. It still has to reach what `scanEgressCidr`
  * lists, through a NAT gateway or interface endpoints the adopter provides, or
- * every scan fails.
+ * every scan fails: CodeCommit always, and Systems Manager when `AshBaseConfigYaml`
+ * is set, since the gate then reads that parameter on every invocation.
  */
 export function vpcSubnetIds(scope: Stack): CfnParameter {
   return new CfnParameter(scope, ASH_PARAMETER_NAMES.vpcSubnetIds, {
@@ -633,7 +663,8 @@ export function vpcSubnetIds(scope: Stack): CfnParameter {
     default: '',
     description:
       'Subnets for the scan function, with VpcId. Empty: no VPC. Set: an SG allowing ' +
-      '443 to ScanEgressCidr is created; your routes must reach CodeCommit and SSM.',
+      '443 to ScanEgressCidr is created; your routes must reach CodeCommit, and SSM ' +
+      'when AshBaseConfigYaml is set.',
   });
 }
 
@@ -663,9 +694,11 @@ export function ashVpcId(scope: Stack): CfnParameter {
  * narrow, because the right destination depends on how the adopter's VPC reaches
  * what the function calls:
  *
- * - CodeCommit, both the API and git over HTTPS (`git-codecommit`), and Systems
- *   Manager for the config parameter, a plain String parameter, so no KMS call.
- *   Those are the function's own calls. Pulling the image and delivering its logs
+ * - CodeCommit, both the API and git over HTTPS (`git-codecommit`), and, when
+ *   `AshBaseConfigYaml` is set, Systems Manager for the config parameter, a plain
+ *   String parameter, so no KMS call. Those are the function's own calls; the gate
+ *   reads the parameter on every invocation and calls nothing else in Systems
+ *   Manager. Pulling the image and delivering its logs
  *   are done by the Lambda service, not through the function's interfaces.
  * - With `AshOfflineMode=NO`, the default, the scanners also download their rules
  *   and vulnerability databases at scan time from public hosts outside AWS. No
@@ -699,8 +732,9 @@ export function scanEgressCidr(scope: Stack): CfnParameter {
     allowedPattern: '^$|^(\\d{1,3}\\.){3}\\d{1,3}/(\\d|[12]\\d|3[0-2])$',
     description:
       'Required with VpcId. IPv4 CIDR the scan function may reach on TCP 443: your VPC ' +
-      'CIDR for interface endpoints (codecommit, git-codecommit, ssm) with ' +
-      'AshOfflineMode=YES, or 0.0.0.0/0 for a NAT with online scanners.',
+      'CIDR for interface endpoints (codecommit, git-codecommit, and ssm when ' +
+      'AshBaseConfigYaml is set) with AshOfflineMode=YES, or 0.0.0.0/0 for a NAT with ' +
+      'online scanners.',
   });
 }
 

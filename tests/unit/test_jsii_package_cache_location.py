@@ -75,7 +75,18 @@ def _temp_roots(ash_conftest) -> list[Path]:
     return [r for r in dict.fromkeys(roots) if not _under(REPO_ROOT, r)]
 
 
-def test_live_cache_root_is_repo_local_and_not_in_a_temp_dir(ash_conftest):
+def _expected_override_root(override: str, developer_home: Path) -> Path:
+    """Where ASH_JSII_CACHE_DIR names: ``~`` is the developer's home, not the run's."""
+    if override == "~" or override.startswith(("~/", "~" + os.sep)):
+        named = developer_home / override[2:]
+    else:
+        named = Path(override).expanduser()
+    return named.resolve() / "jsii-package-cache"
+
+
+def test_live_cache_root_is_repo_local_and_not_in_a_temp_dir(
+    ash_conftest, developer_home
+):
     """The root this very process was configured with, as jsii will read it."""
     configured = os.environ.get("JSII_RUNTIME_PACKAGE_CACHE_ROOT")
     assert configured, "conftest did not pin JSII_RUNTIME_PACKAGE_CACHE_ROOT"
@@ -83,7 +94,7 @@ def test_live_cache_root_is_repo_local_and_not_in_a_temp_dir(ash_conftest):
 
     override = (os.environ.get("ASH_JSII_CACHE_DIR") or "").strip()
     if override:
-        assert root == Path(override).expanduser().resolve() / "jsii-package-cache"
+        assert root == _expected_override_root(override, developer_home)
     else:
         assert root == DEFAULT_ROOT
         for temp_root in _temp_roots(ash_conftest):
@@ -120,6 +131,19 @@ def test_override_is_honored_in_its_own_subdirectory(
     assert ash_conftest._jsii_package_cache_root() == (
         (tmp_path / "shared").resolve() / "jsii-package-cache"
     )
+
+
+def test_a_tilde_override_is_the_developers_home_not_the_runs(
+    monkeypatch, ash_conftest, developer_home
+):
+    """``ASH_JSII_CACHE_DIR=~/...`` names a cache that outlives the run.
+
+    The run moves HOME into its own temp directory and deletes it at the end, so a
+    ``~`` read from HOME put the cache there and every run extracted aws-cdk-lib again.
+    """
+    monkeypatch.setenv("ASH_JSII_CACHE_DIR", "~/jsii-shared")
+    root = ash_conftest._jsii_package_cache_root()
+    assert root == (developer_home / "jsii-shared").resolve() / "jsii-package-cache"
 
 
 def test_blank_override_falls_back_to_default(monkeypatch, ash_conftest):

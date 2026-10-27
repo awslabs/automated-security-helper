@@ -27,6 +27,8 @@ Nix mode supplies every scanner from a pinned flake, so nothing else needs insta
 
 ## Installation Options
 
+ASH is not published on PyPI under the name `automated-security-helper`, which belongs to an unrelated project there; install ASH from git, as the commands below do.
+
 ### Standard Installation
 
 #### 1. Using `uvx` (Recommended)
@@ -84,6 +86,11 @@ pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
 ash --help
 ```
 
+Install into an environment outside the repository you scan. A virtual environment
+inside it, such as the project's own `.venv`, is part of the scanned directory, so the
+scanners installed there are not run and are reported MISSING; see
+[Tools inside the scanned directory](advanced-usage.md#tools-inside-the-scanned-directory).
+
 #### 4. Clone the Repository
 
 For development or if you want to modify ASH:
@@ -122,11 +129,13 @@ ash scan --mode nix --source-dir . --output-dir .ash/ash_output
 
 Use it when you want the reproducibility of container mode without building an image. ASH publishes no container image, so `--mode container` requires every adopter to build one first. Nix mode needs no image and no registry.
 
-It also avoids a quieter problem. In local mode, a scanner whose binary is missing reports `MISSING`, contributes zero findings, and the run still writes a complete-looking report, so a scan can under-report without saying so. Nix mode supplies all ten scanners, and if Nix itself is absent it fails with an explanation rather than falling back to local mode.
+It also avoids a quieter problem. In local mode, a scanner whose binary is missing reports `MISSING`, contributes zero findings, and the run still writes a complete-looking report, so a scan can under-report without saying so. Nix mode supplies all sixteen builtin scanners, and if Nix itself is absent it fails with an explanation rather than falling back to local mode.
 
 ### How it works
 
 Like container mode, this is an outer wrapper: ASH re-executes itself inside `nix develop` and the inner run is an ordinary local scan. A development shell changes `PATH` but not the filesystem, so no path translation is involved.
+
+Before it enters the shell, ASH reads the config file the inner scan will use (`--config`, the file `ASH_CONFIG` names, or the one found in the source directory) the way a local scan reads it, with `--config-overrides` applied. One the scan would refuse, because it is missing, not a regular file, unreadable, not valid YAML, JSON or TOML, or not a valid config, or because an override does not parse or sets a value the config does not accept, refuses the run with exit 3 and the message a local scan prints, before the shell starts and before the previous run's output is cleared. Options of a scanner or reporter plugin are checked by the inner scan, which loads the plugin.
 
 The shell sets `ASH_OFFLINE=YES` for the inner run. Several scanners prefer to install their own tools with `uv tool install`, and without this they would fetch copies that shadow the pinned ones, leaving a report that describes versions the flake never supplied.
 

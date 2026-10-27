@@ -20,7 +20,7 @@
     'exit_code': 3,
     'host_output_after_container': '''
                    ERROR    Container execution failed with code 3
-                   ERROR    The container exited with 3 (invalid config), which means nothing was scanned. Only 0, 1, 2 are verdicts ASH reaches from a results file, so there is nothing in the output directory to read back.
+                   ERROR    The container exited with 3 (invalid config or refused input), which means nothing was scanned. Only 0, 1, 2 are verdicts ASH reaches from a results file, so there is nothing in the output directory to read back.
   
     ''',
   })
@@ -33,24 +33,27 @@
       
       === ASH Scan Completed in <DURATION>: Next Steps ===
       View detailed findings...
-        - SARIF: '<TMP>/out/reports/ash.sarif'
-        - JUnit: '<TMP>/out/reports/ash.junit.xml'
-        - ASH aggregated results JSON available at: '<TMP>/out/ash_aggregated_results.json'
+        - SARIF: 'out/reports/ash.sarif'
+        - JUnit: 'out/reports/ash.junit.xml'
+        - ASH aggregated results JSON available at: 'out/ash_aggregated_results.json'
       
       === Actionable findings detected! ===
       To investigate...
         1. Open one of the summary reports for a user-friendly table of the findings:
-          - HTML report of all findings: '<TMP>/out/reports/ash.html'
-          - Markdown summary: '<TMP>/out/reports/ash.summary.md'
-          - Text summary: '<TMP>/out/reports/ash.summary.txt'
+          - HTML report of all findings: 'out/reports/ash.html'
+          - Markdown summary: 'out/reports/ash.summary.md'
+          - Text summary: 'out/reports/ash.summary.txt'
         2. Use ash report to view a short text summary of the scan in your terminal
         3. Use ash inspect findings to explore the findings interactively
-        4. Review scanner-specific reports and outputs in the '<TMP>/out/scanners' directory
+        4. Review scanner-specific reports and outputs in the 'out/scanners' directory
       
       === ASH Exit Codes ===
-        0: Success - No actionable findings or not configured to fail on findings
-        1: Error during execution
-        2: Actionable findings detected when configured with `fail_on_findings: true`. Default is True. Current value: True
+        0: success
+        1: scan errors / scanner failures
+        2: actionable findings at or above threshold (fail_on_findings is true; default true)
+        3: invalid config or refused input
+        4: workspace definition or policy error
+        5: usage error
       ERROR (2) Exiting due to 1 actionable findings found in ASH scan
   
     ''',
@@ -58,8 +61,8 @@
 # ---
 # name: test_powershell_wrapper_default_runner_discovery
   dict({
+    'error_message': '',
     'exit_code': 0,
-    'first_error_line': '',
   })
 # ---
 # name: test_powershell_wrapper_scan_of_the_fixture
@@ -71,7 +74,7 @@
 # ---
 # name: test_powershell_wrapper_without_a_runner
   dict({
+    'error_message': "Unable to resolve an OCI_RUNNER: 'no-such-oci-runner' was not found. Install one, or name it with -OCIRunner or OCI_RUNNER.",
     'exit_code': 1,
-    'first_error_line': 'Invoke-ASH: Unable to resolve an OCI_RUNNER -- exiting',
   })
 # ---

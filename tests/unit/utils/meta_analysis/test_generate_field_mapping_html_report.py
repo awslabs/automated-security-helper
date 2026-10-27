@@ -1,13 +1,11 @@
 """Unit tests for generate_field_mapping_html_report.py."""
 
-from unittest.mock import patch, mock_open
-
 from automated_security_helper.utils.meta_analysis.reporting import (
     generate_html_report,
 )
 
 
-def test_generate_html_report():
+def test_generate_html_report(tmp_path):
     """Test generate_html_report function."""
     # Create test data with the expected structure
     data = {
@@ -55,18 +53,14 @@ def test_generate_html_report():
         ],
     }
 
-    # Mock file writing more specifically to avoid system file calls
-    with patch(
-        "automated_security_helper.utils.meta_analysis.reporting.open",
-        mock_open(),
-    ) as mock_file:
-        # Call function
-        result = generate_html_report(data, "test_report.html")
+    report = tmp_path / "test_report.html"
 
-        # Should return None (writes to file)
-        assert result is None
+    result = generate_html_report(data, str(report))
 
-        # Verify file was opened for writing
-        mock_file.assert_called_once_with(
-            "test_report.html", mode="w", encoding="utf-8"
-        )
+    # Should return None (writes to file)
+    assert result is None
+
+    # The report is written there, as HTML naming the scanner
+    html = report.read_text(encoding="utf-8")
+    assert html.rstrip().endswith("</html>")
+    assert "test_scanner" in html

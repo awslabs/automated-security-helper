@@ -349,13 +349,12 @@ class TestDefaultRegistry:
 
 
 class TestSessionFieldDefaults:
-    def test_optional_fields_default_to_none(self, registry: MCPSessionRegistry):
+    def test_the_model_holds_no_binding_fields(self, registry: MCPSessionRegistry):
+        """A client's directory and profile live in source_delivery and
+        profile_registry, so the session has no field that could say otherwise."""
         s = registry.get_or_create("conn-a")
-        assert s.source_dir is None
-        assert s.config is None
-        assert s.profile_name is None
-        assert s.patch_ops is None
         assert s.id == "conn-a"
+        assert set(MCPSession.model_fields) == {"id", "workspace_root", "created_at"}
 
     def test_created_at_is_set(self, registry: MCPSessionRegistry):
         s = registry.get_or_create("conn-a")

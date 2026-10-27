@@ -1,8 +1,14 @@
 # Trivy Plugin
 
+> ASH also has a builtin trivy scanner, `trivy`, which runs `trivy fs` with only the
+> `vuln` scanner by default and is on in every scan. See
+> [Trivy filesystem scanner](../builtin/trivy.md). Listing this module for `trivy-repo`
+> therefore runs trivy twice, and each finding is reported once per scanner; set
+> `scanners.trivy.enabled: false` to keep only `trivy-repo`.
+
 **Description**: The Trivy plugin integrates Aquasec's Trivy CLI tool to provide comprehensive repository scanning for vulnerabilities, misconfigurations, secrets, and license issues. This plugin extends ASH's security scanning capabilities with Trivy's advanced detection algorithms and extensive vulnerability database.
 
-**Repository**: Built-in ASH plugin (part of core distribution)
+**Repository**: Ships with ASH; loaded only when listed in `ash_plugin_modules`
 
 **Author**: ASH Development Team
 
@@ -22,7 +28,7 @@ The ASH Trivy plugin provides seamless integration with Trivy's repository scann
 
 ### Trivy CLI Installation
 
-The Trivy plugin requires the Trivy CLI to be installed and available in your system PATH.
+`ash dependencies install` installs the pinned trivy release (v0.75.0, checked against the SHA256 in `automated_security_helper/utils/tool_downloads.py`) that both `trivy` and `trivy-repo` run, and the ASH container image ships it. A trivy you install yourself, as below, is used when it is on `PATH`; ASH is tested against the pinned version.
 
 #### Installation Options
 
@@ -74,7 +80,7 @@ trivy version
 
 ### Basic Configuration
 
-Add the Trivy plugin to your `.ash/.ash.yaml` configuration:
+Add the Trivy plugin to your ASH config file (`.ashrc.yaml` in a new project):
 
 ```
 ash_plugin_modules:
@@ -100,10 +106,20 @@ scanners:
 | Option               | Type      | Default                                      | Description                                                             |
 | -------------------- | --------- | -------------------------------------------- | ----------------------------------------------------------------------- |
 | `scanners`           | List[str] | `["vuln", "misconfig", "secret", "license"]` | Types of scans to perform                                               |
-| `severity_threshold` | str       | `"MEDIUM"`                                   | Minimum severity level to report (UNKNOWN, LOW, MEDIUM, HIGH, CRITICAL) |
-| `ignore_unfixed`     | bool      | `false`                                      | Ignore vulnerabilities without available fixes                          |
-| `license_full`       | bool      | `false`                                      | Enable full license scanning (more comprehensive but slower)            |
-| `disable_telemetry`  | bool      | `true`                                       | Disable Trivy telemetry data collection                                 |
+| `severity_threshold` | str       | `null`                                       | Minimum severity that fails the scan (`ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`); `null` uses the global threshold. Findings below it are still reported; ASH does not pass it as `trivy --severity` |
+| `ignore_unfixed`     | bool      | `true`                                       | Ignore vulnerabilities without available fixes                          |
+| `license_full`       | bool      | `true`                                       | Enable full license scanning (more comprehensive but slower)            |
+| `disable_telemetry`  | bool      | `true`                                       | Disable Trivy telemetry data collection. Only `--config-overrides` or a config file outside every git checkout and the scanned directory can set it to `false`; any config can set it to `true` |
+| `config_file`        | str       | `null`                                       | A trivy config file, passed as `trivy --config`; see below              |
+| `module_dir`         | str       | `null`                                       | A directory of trivy modules, passed as `trivy --module-dir`; see below |
+| `ignore_file`        | str       | `null`                                       | A trivy ignore file, passed as `trivy --ignorefile`; see below          |
+| `secret_config_file` | str       | `null`                                       | A trivy secret-scanning config, passed as `trivy --secret-config`; see below |
+| `offline`            | bool      | `false`                                      | Run offline even when ASH does not; ASH's offline mode applies regardless |
+| `scan_timeout`       | int       | `1800`                                       | Seconds ASH lets trivy run; ASH does not pass `trivy --timeout`, so trivy's own 5-minute default still applies |
+
+trivy-repo always passes `trivy --config` and `trivy --module-dir`, so trivy does not load a `trivy.yaml` from the directory it runs in. `config_file` and `module_dir` are honored only when set through `--config-overrides` or a config file outside every git checkout and the scanned directory (one that is not [repository-written](../../configuration-guide.md#settings-a-repositorys-config-cannot-choose)), and only for paths outside the scanned tree, which a path written inside the tree and led out of it by a symbolic link there is not; otherwise they are ignored with a warning. A relative path is taken from the directory of the ASH config file that sets it, or from the working directory for `--config-overrides`, not from the source directory (see [Relative paths in the operator's settings](../../configuration-guide.md#relative-paths-in-the-operators-settings)). A configured path that does not exist fails the scan. Unset or ignored, `--config` names `TRIVY_CONFIG` when that is a file outside the scanned tree (a relative path in it is taken from the working directory ASH runs in), and otherwise an empty config ASH ships; `--module-dir` names an empty directory ASH creates outside the scanned tree for each scanner run and removes when the run ends.
+
+`ignore_file` and `secret_config_file` follow the same rule, a relative path included. Unset or refused, trivy-repo uses `TRIVY_IGNOREFILE` or `TRIVY_SECRET_CONFIG` from the environment for a file outside the scanned tree (a relative path in either is taken from the working directory ASH runs in), and otherwise an empty file ASH writes outside the scanned tree, so a `.trivyignore` or `trivy-secret.yaml` in the scanned repository does not remove findings or disable secret rules.
 
 ### Scanner Types
 
@@ -138,7 +154,7 @@ ash --target /path/to/project --scanners trivy-repo
 ### Vulnerability-Only Scan
 
 ```yaml
-# .ash/.ash.yaml
+# ASH config file (.ashrc.yaml in a new project)
 scanners:
   trivy-repo:
     enabled: true
@@ -155,7 +171,7 @@ ash --scanners trivy-repo
 ### Comprehensive Security Scan
 
 ```yaml
-# .ash/.ash.yaml
+# ASH config file (.ashrc.yaml in a new project)
 scanners:
   trivy-repo:
     enabled: true
@@ -168,7 +184,7 @@ scanners:
 ### Integration with Other Scanners
 
 ```yaml
-# .ash/.ash.yaml
+# ASH config file (.ashrc.yaml in a new project)
 scanners:
   # Combine Trivy with other ASH scanners
   trivy-repo:
@@ -192,6 +208,14 @@ scanners:
 
 The Trivy plugin integrates with ASH's unified reporting system, producing results in SARIF format that can be converted to various output formats.
 
+trivy-repo accepts only exit code 0 as a completed run. trivy exits 0 whether or not
+it found anything and 1 on an error, so a run that exits 1 is recorded `ERROR` and its
+results file is not graded. ASH passes `--exit-code=0`, which outranks an `exit-code`
+setting in your trivy config or in `TRIVY_EXIT_CODE`, so a run with findings still
+exits 0 and is reported; a `trivy.yaml` in the scanned directory is not read at all.
+ASH decides the scan's exit code from the findings. See
+[A Scanner Is ERROR With an Exit Code It Does Not Accept](../../troubleshooting.md#a-scanner-is-error-with-an-exit-code-it-does-not-accept).
+
 ### Available Output Formats
 
 - **SARIF**: Machine-readable results for CI/CD integration
@@ -203,7 +227,7 @@ The Trivy plugin integrates with ASH's unified reporting system, producing resul
 ### Example Output Configuration
 
 ```yaml
-# .ash/.ash.yaml
+# ASH config file (.ashrc.yaml in a new project)
 reporters:
   sarif:
     enabled: true
@@ -928,7 +952,7 @@ with open('.security-baseline/baseline-suppressions.yaml', 'w') as f:
     yaml.dump({'global_settings': {'suppressions': suppressions}}, f, default_flow_style=False)
 
 print(f"Generated {len(suppressions)} baseline suppressions")
-print("Review .security-baseline/baseline-suppressions.yaml and merge approved suppressions into .ash/.ash.yaml")
+print("Review .security-baseline/baseline-suppressions.yaml and merge approved suppressions into your ASH config file (.ashrc.yaml in a new project)")
 EOF
 ```
 
@@ -1074,8 +1098,10 @@ EOF
    # Download database separately
    trivy image --download-db-only --cache-dir /shared/trivy-cache
    
-   # Use cached database
+   # Use cached database, with ASH offline: online, ASH updates the database
+   # before the scan and fails without network
    export TRIVY_CACHE_DIR=/shared/trivy-cache
+   export ASH_OFFLINE=YES
    ash --scanners trivy-repo
    ```
 
@@ -1231,11 +1257,12 @@ EOF
          reason: "Third-party code"
    ```
 
-3. **Custom Ignore Files**: Use Trivy's ignore functionality
+3. **Custom Ignore Files**: A `.trivyignore` in the scanned repository is not read.
+   Use ASH suppressions, or an operator ignore file outside the scanned tree:
    ```bash
-   # Create .trivyignore file
-   echo "CVE-2023-12345" > .trivyignore
-   echo "GHSA-abcd-1234" >> .trivyignore
+   echo "CVE-2023-12345" > /etc/ash/trivyignore
+   ash --scanners trivy-repo \
+     --config-overrides 'scanners.trivy-repo.options.ignore_file=/etc/ash/trivyignore'
    ```
 
 ### Debug Mode and Logging
@@ -1348,7 +1375,7 @@ trivy version
 ash --version
 
 # Configuration
-cat .ash/.ash.yaml
+cat .ashrc.yaml  # your ASH config file; `ash config validate` prints which one a scan uses
 
 # Recent logs
 tail -50 .ash/ash_output/scanners/trivy-repo/*/ash.log
@@ -1388,10 +1415,17 @@ jobs:
           ash --scanners trivy-repo --reporters sarif,html
       
       - name: Upload Results
+        # Also when ASH exits non-zero on findings: without a status function
+        # GitHub skips this step after any failed step.
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v3
         with:
           name: security-results
-          path: .ash/ash_output/
+          # Not the whole output directory: scanners/ and converted/ hold each
+          # tool's raw output, which is not masked.
+          path: |
+            .ash/ash_output/reports
+            .ash/ash_output/ash_aggregated_results.json
 ```
 
 #### GitLab CI
@@ -1407,7 +1441,8 @@ security-scan:
     reports:
       sast: .ash/ash_output/reports/ash_aggregated_results.sarif
     paths:
-      - .ash/ash_output/
+      - .ash/ash_output/reports
+      - .ash/ash_output/ash_aggregated_results.json
 ```
 
 ### Pre-commit Hook
@@ -1435,7 +1470,9 @@ Trivy supports extensive configuration through environment variables:
 export TRIVY_CACHE_DIR=/custom/cache/path
 export TRIVY_DB_REPOSITORY=custom-db-repo
 export TRIVY_TIMEOUT=10m
-export TRIVY_OFFLINE_SCAN=true
+# Offline scans: set ASH_OFFLINE=YES (or options.offline: true). TRIVY_OFFLINE_SCAN
+# alone does not stop the database update ASH runs before an online scan.
+export ASH_OFFLINE=YES
 
 # Network and proxy
 export HTTP_PROXY=http://proxy.company.com:8080
@@ -1477,14 +1514,37 @@ rsync -av /shared/trivy-cache/ airgapped-server:/opt/trivy-cache/
 
 # 3. Configure offline scanning
 export TRIVY_CACHE_DIR=/opt/trivy-cache
-export TRIVY_OFFLINE_SCAN=true
+export ASH_OFFLINE=YES
 ash --scanners trivy-repo
 ```
+
+In offline mode (`--offline`, `ASH_OFFLINE`, or `options.offline: true`) ASH passes
+`--skip-db-update`, `--skip-java-db-update`, `--offline-scan` and `--skip-check-update`,
+and sets `TRIVY_SKIP_VERSION_CHECK=true` and `TRIVY_DISABLE_TELEMETRY=true`: trivy's
+version check and telemetry contact check.trivy.dev, and `--skip-check-update` covers
+only the checks bundle. Variables rather than flags, because a trivy too old to know
+the flags refuses the command, while it ignores the variables.
+
+Online and offline, ASH passes `--config`: the operator's `config_file`, else
+`TRIVY_CONFIG` when that names a file outside the scanned tree, otherwise an empty
+config ASH ships, so a `trivy.yaml` in the scanned repository is never read. Its
+settings can reach the network (a VEX repository, client/server mode) or change
+what is reported. A relative path in `TRIVY_CONFIG` is taken from the working
+directory ASH runs in, as one in `TRIVY_IGNOREFILE` or `TRIVY_SECRET_CONFIG` is,
+not from the source directory.
+
+Offline, trivy's Terraform checks do not run. trivy downloads the source of every
+`module` block it evaluates (a registry module from registry.terraform.io, a `git::`
+source with the host's `git`, an `https://` archive), whatever offline flags it is
+given, so ASH passes `--misconfig-scanners` with the installed trivy's default list
+minus `terraform`, read from `trivy repository --help`. When that list cannot be read,
+the `misconfig` scanner is left out of the offline scan, with a warning. checkov
+still checks Terraform offline.
 
 The copied database has to be current. After the scan ASH reads its `UpdatedAt`
 (from `trivy version --format json`) and exits 1 once it is more than 24 hours old,
 which is trivy's own rule: the published database sets `NextUpdate` 24 hours after
-`UpdatedAt`, and trivy online replaces it after that. Offline, `--skip-db-update`
+`UpdatedAt`, and trivy online replaces it after that. Offline, `trivy --skip-db-update`
 bypasses that rule, so ASH applies it instead. Repeat steps 1 and 2 to refresh the
 database, or pass `--allow-stale-content-db` (config: `content_db_staleness: warn`)
 to scan with an older one and have the reports say so.
@@ -1494,7 +1554,7 @@ to scan with an older one and have the reports say so.
 #### Rule-Based Suppressions
 
 ```yaml
-# .ash/.ash.yaml
+# ASH config file (.ashrc.yaml in a new project)
 global_settings:
   suppressions:
     # Suppress specific CVEs
@@ -1521,13 +1581,32 @@ global_settings:
 #### Dynamic Suppressions
 
 ```bash
-# Generate suppressions from previous scan
-ash --scanners trivy-repo --reporters json > results.json
-python scripts/generate_suppressions.py results.json > suppressions.yaml
+# Scan, then turn each finding not already suppressed into a suppression entry
+ash scan --scanners trivy-repo --output-formats sarif
+jq '[.runs[].results[]
+     | select((.suppressions // []) | length == 0)
+     | {rule_id: .ruleId,
+        path: .locations[0].physicalLocation.artifactLocation.uri,
+        reason: "Baseline finding: review it before the suppression expires",
+        expiration: (now + 90 * 86400 | strftime("%Y-%m-%d"))}]
+    | unique' .ash/ash_output/reports/ash.sarif > suppressions.json
 
-# Apply generated suppressions
-cat suppressions.yaml >> .ash/.ash.yaml
+# Review suppressions.json, then append the entries to global_settings.suppressions
+# in your ASH config file, 200 at a time: on Linux one command-line argument holds
+# at most 128 KiB, and a single --set with a few hundred entries is refused with
+# "Argument list too long".
+jq -c '. as $all | range(0; length; 200) | $all[.:. + 200]' suppressions.json |
+  while read -r part; do
+    ash config update --set "global_settings.suppressions+=$part"
+  done
 ```
+
+Appending YAML to the config file (`cat suppressions.yaml >> .ashrc.yaml`) does
+not work: it adds a second top-level `global_settings`, YAML keeps only the last
+one, and every other global setting in the file is dropped. `ash config update`
+keeps them, and writes each entry with only the fields it sets. It rewrites the
+whole file, without its comments, and refuses a file that reads environment
+variables (`!ENV` or `${VAR:default}`); add the entries to such a file by hand.
 
 ### Multi-Environment Configuration
 
@@ -1613,7 +1692,7 @@ touch .last_scan
 #### Resource Management
 
 ```yaml
-# .ash/.ash.yaml - Optimized for large repositories
+# ASH config file (.ashrc.yaml in a new project) - Optimized for large repositories
 scanners:
   trivy-repo:
     enabled: true

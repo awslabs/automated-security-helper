@@ -32,6 +32,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
     NpmAuditScannerConfigOptions,
 )
 from automated_security_helper.utils import offline_mode_validator
+from tests.utils.env_assertions import differing_names
 
 # npm severity -> SARIF level. critical/high both map to error and low/info both
 # map to note, so six inputs produce three outcomes. That collapse is npm's own
@@ -156,6 +157,25 @@ YARN_CLEAN_AUDIT = (
     '"moderate":0,"high":0,"critical":0},"dependencies":1,"devDependencies":0,'
     '"optionalDependencies":0,"totalDependencies":1}}\n'
 )
+# What `pnpm audit --json` prints for a clean project (captured from a real
+# run): an npm-v1 document keyed `advisories`, not npm's `vulnerabilities`. An
+# npm-shaped document is not a pnpm report.
+PNPM_CLEAN_AUDIT = {
+    "advisories": {},
+    "metadata": {
+        "vulnerabilities": {
+            "info": 0,
+            "low": 0,
+            "moderate": 0,
+            "high": 0,
+            "critical": 0,
+        },
+        "dependencies": 1,
+        "devDependencies": 0,
+        "optionalDependencies": 0,
+        "totalDependencies": 1,
+    },
+}
 
 
 def is_audit_call(call):
@@ -377,10 +397,15 @@ def test_package_json_without_any_lock_file_is_not_audited(
 def test_lock_file_selects_the_matching_package_manager(
     scanner, npm_on_path, node_project, subprocess_double, lock_name, expected_binary
 ):
-    """Each lock file dialect is audited with its own tool."""
+    """Each lock file dialect is audited with its own tool, and the stub
+    answers in that tool's own report shape."""
     node_project(lock_name=lock_name)
     subprocess_double.side_effect = emits(
-        YARN_CLEAN_AUDIT if expected_binary == "yarn" else audit_json()
+        {
+            "npm": audit_json(),
+            "yarn": YARN_CLEAN_AUDIT,
+            "pnpm": PNPM_CLEAN_AUDIT,
+        }[expected_binary]
     )
 
     scanner.scan(target=scanner.context.work_dir, target_type="converted")
@@ -389,35 +414,70 @@ def test_lock_file_selects_the_matching_package_manager(
     assert command == [expected_binary, "audit", "--json"]
 
 
+@pytest.mark.parametrize(
+    "lock_name", ["package-lock.json", "pnpm-lock.yaml", "yarn.lock"]
+)
 def test_audit_runs_in_the_lock_files_own_directory(
-    scanner, npm_on_path, node_project, subprocess_double
+    scanner, npm_on_path, node_project, subprocess_double, lock_name
 ):
-    """pnpm and yarn only find their lock file when cwd is its parent."""
-    nested = node_project(directory=scanner.context.work_dir / "packages" / "api")
-    subprocess_double.side_effect = emits(audit_json())
+    """pnpm and yarn only find their lock file in their working directory.
+
+    Each runs in a private copy of the lock file's directory, holding the manifest
+    and the lockfile and no settings file of the repository's (see
+    test_npm_audit_project_rc_ignored.py), read here when the tool is started,
+    since the copy is removed after.
+    """
+    nested = node_project(
+        directory=scanner.context.work_dir / "packages" / "api", lock_name=lock_name
+    )
+    inner = emits(
+        {
+            "package-lock.json": audit_json(),
+            "yarn.lock": YARN_CLEAN_AUDIT,
+            "pnpm-lock.yaml": PNPM_CLEAN_AUDIT,
+        }[lock_name]
+    )
+    started = []
+
+    def recording(self, command, **kwargs):
+        if "audit" in command:
+            cwd = Path(kwargs["cwd"])
+            started.append(
+                (cwd, {p.name: p.read_text() for p in cwd.iterdir() if p.is_file()})
+            )
+        return inner(self, command, **kwargs)
+
+    subprocess_double.side_effect = recording
 
     scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
-    assert audit_calls(subprocess_double)[-1].kwargs["cwd"] == nested
+    ((cwd, files),) = started
+    assert cwd != nested
+    assert files == {
+        "package.json": (nested / "package.json").read_text(),
+        lock_name: (nested / lock_name).read_text(),
+    }
 
 
 @pytest.mark.parametrize(
     "missing_binary, lock_name", [("yarn", "yarn.lock"), ("pnpm", "pnpm-lock.yaml")]
 )
-def test_a_missing_yarn_or_pnpm_is_warned_about_and_skipped(
+def test_a_missing_yarn_or_pnpm_is_a_failed_target_naming_the_lockfile(
     scanner,
     monkeypatch,
     node_project,
     subprocess_double,
-    caplog,
     missing_binary,
     lock_name,
 ):
-    """An absent alternative package manager skips that lock file, loudly.
+    """An absent alternative package manager is an audit that did not happen.
 
-    This is deliberately not a pytest skip: the scanner's job here is to warn
-    and carry on, and a skipped test would hide a regression that turned this
-    into a crash or a silent pass.
+    The lockfile is a failed target, so dependencies nobody checked do not read as
+    a clean audit.
+    It is named in the errors, so with no other lockfile the executor records
+    ERROR, and the findings of lockfiles that were audited are kept
+    (test_npm_audit_absent_package_manager.py). The scan neither crashes on the
+    missing binary nor tries to start it.
     """
     node_project(lock_name=lock_name)
     monkeypatch.setattr(
@@ -426,17 +486,14 @@ def test_a_missing_yarn_or_pnpm_is_warned_about_and_skipped(
         lambda name: None if name == missing_binary else "npm-stub",
     )
 
-    with caplog.at_level(logging.WARNING):
-        report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
+    assert report is not False
     assert audit_calls(subprocess_double) == []
-    assert report.runs[0].results == []
-    assert any(
-        f"{missing_binary} is not installed" in record.message
-        for record in caplog.records
-    ), (
-        f"expected a missing-{missing_binary} warning; got {[r.message for r in caplog.records]}"
-    )
+    assert (scanner.targets_attempted, scanner.targets_failed) == (1, 1)
+    message = " ".join(scanner.errors)
+    assert f"{missing_binary} is not installed" in message, message
+    assert lock_name in message, message
 
 
 def test_a_missing_npm_does_not_take_the_skip_path(
@@ -456,14 +513,18 @@ def test_a_missing_npm_does_not_take_the_skip_path(
 # ---------------------------------------------------------------------------
 
 
-def test_offline_mode_adds_the_offline_flag_and_disables_corepack_network(
+def test_offline_mode_runs_no_audit_and_records_the_lockfile(
     plugin_context, npm_on_path, node_project, subprocess_double, monkeypatch
 ):
-    """Offline runs must not let corepack reach out for a package manager.
+    """Offline npm audit cannot reach the advisory service and reports nothing, so
+    it is not run (so corepack cannot reach out for a package manager either), the
+    lockfile is recorded as not audited, and scan() returns False (MISSING).
 
-    COREPACK_ENABLE_DOWNLOAD_PROMPT=0 only stops corepack asking; it still
-    downloads. COREPACK_ENABLE_NETWORK=0 is what makes it use the cached
-    version instead.
+    npm audits by asking the registry for advisories, and offline it reads none:
+    ``npm audit --json --offline`` on a lockfile pinning a package with published
+    advisories prints ``"vulnerabilities": {}`` and exits 0 (npm 10.9.4). The
+    dependency check refuses offline, and a populated npm cache does not change
+    that (the offline-precondition stub reports one).
     """
     monkeypatch.setattr(
         offline_mode_validator, "validate_npm_audit_offline_mode", lambda: (True, [])
@@ -477,44 +538,51 @@ def test_offline_mode_adds_the_offline_flag_and_disables_corepack_network(
     node_project()
     subprocess_double.side_effect = emits(audit_json())
 
-    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+    result = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
-    kwargs = audit_calls(subprocess_double)[-1].kwargs
-    assert kwargs["command"] == ["npm", "audit", "--json", "--offline"]
-    assert kwargs["env"]["COREPACK_ENABLE_NETWORK"] == "0"
+    assert audit_calls(subprocess_double) == []
+    assert [entry["path"] for entry in scanner.inputs_not_scanned] == [
+        "package-lock.json"
+    ]
+    assert "offline" in (scanner.dependency_unavailable_reason or "")
+    assert result is False
 
 
-def test_offline_flag_set_after_config_built_reaches_npm(
+def test_offline_mode_set_after_config_built_still_skips_the_audit(
     plugin_context, npm_on_path, node_project, subprocess_double, monkeypatch
 ):
     """``ash scan --offline`` in local mode sets ASH_OFFLINE after configs exist.
 
     The option used to default to ``is_offline_mode()`` at construction, and
-    ``ScannerConfigSegment`` constructs its defaults at import, so this order ran
-    ``npm audit`` without ``--offline``. See
+    ``ScannerConfigSegment`` constructs its defaults at import, so this order once
+    ran ``npm audit`` without ``--offline``. Offline is read when the scanner is
+    asked, so this order refuses the audit too. See
     tests/unit/plugin_modules/test_offline_resolved_at_scan_time.py.
     """
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
-    monkeypatch.setattr(
-        offline_mode_validator, "validate_npm_audit_offline_mode", lambda: (True, [])
-    )
     config = NpmAuditScannerConfig()
     monkeypatch.setenv("ASH_OFFLINE", "YES")
     scanner = NpmAuditScanner(context=plugin_context, config=config)
     node_project()
     subprocess_double.side_effect = emits(audit_json())
 
-    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+    result = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
-    kwargs = audit_calls(subprocess_double)[-1].kwargs
-    assert kwargs["command"] == ["npm", "audit", "--json", "--offline"]
-    assert kwargs["env"]["COREPACK_ENABLE_NETWORK"] == "0"
+    assert audit_calls(subprocess_double) == []
+    assert result is False
 
 
 def test_online_mode_passes_no_env_override(
     scanner, npm_on_path, node_project, subprocess_double, monkeypatch
 ):
-    """Control for the offline test: online runs inherit the parent env."""
+    """Control for the offline test: online runs inherit the parent env.
+
+    Inherit it unchanged except for YARN_IGNORE_PATH, which keeps a yarn from
+    running the repository's yarn-path (test_npm_audit_project_rc_ignored.py):
+    nothing offline, and nothing of the caller's replaced.
+    """
+    from automated_security_helper.utils.process_env import snapshot_environ
+
     # ASH's offline mode outranks the option, so this control needs ASH online.
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     node_project()
@@ -524,13 +592,20 @@ def test_online_mode_passes_no_env_override(
 
     kwargs = audit_calls(subprocess_double)[-1].kwargs
     assert "--offline" not in kwargs["command"]
-    assert kwargs["env"] is None
+    inherited = {k: v for k, v in snapshot_environ().items() if k != "YARN_IGNORE_PATH"}
+    passed = {k: v for k, v in kwargs["env"].items() if k != "YARN_IGNORE_PATH"}
+    # By names: a failure would print the values of every variable that differs.
+    assert differing_names(passed, inherited) == []
+    assert kwargs["env"]["YARN_IGNORE_PATH"] == "1"
 
 
-def test_failed_offline_validation_warns_but_the_scan_continues(
-    plugin_context, npm_on_path, node_project, subprocess_double, monkeypatch, caplog
+def test_offline_without_an_npm_cache_is_refused_the_same_way(
+    plugin_context, npm_on_path, node_project, subprocess_double, monkeypatch
 ):
-    """A failing offline precondition is a warning, not an abort."""
+    """The npm cache never decided it: offline is refused with or without one.
+
+    No audit runs offline, so no clean report from one counts as a result.
+    """
     monkeypatch.setattr(
         offline_mode_validator,
         "validate_npm_audit_offline_mode",
@@ -545,16 +620,40 @@ def test_failed_offline_validation_warns_but_the_scan_continues(
     node_project()
     subprocess_double.side_effect = emits(audit_json())
 
+    result = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert result is False
+    assert audit_calls(subprocess_double) == []
+
+
+def test_offline_mode_warns_which_lockfile_was_not_audited(
+    plugin_context, npm_on_path, node_project, subprocess_double, monkeypatch, caplog
+):
+    """Offline the scan goes on without the audit, and the warning names what was
+    not audited and how to leave npm-audit out."""
+    monkeypatch.setattr(
+        offline_mode_validator, "validate_npm_audit_offline_mode", lambda: (True, [])
+    )
+    scanner = NpmAuditScanner(
+        context=plugin_context,
+        config=NpmAuditScannerConfig(
+            options=NpmAuditScannerConfigOptions(offline=True)
+        ),
+    )
+    node_project()
+    subprocess_double.side_effect = emits(audit_json())
+
     with caplog.at_level(logging.WARNING):
         report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert any(
-        "offline mode validation failed, but continuing" in record.message
+        "Offline, npm-audit audits nothing" in record.message
+        and "package-lock.json" in record.message
+        and "--exclude-scanners npm-audit" in record.message
         for record in caplog.records
-    )
-    # The scan still ran and still produced its finding.
-    assert len(audit_calls(subprocess_double)) == 1
-    assert len(report.runs[0].results) == 1
+    ), [record.message for record in caplog.records]
+    assert audit_calls(subprocess_double) == []
+    assert report is False
 
 
 # ---------------------------------------------------------------------------
@@ -738,31 +837,36 @@ def test_results_are_persisted_as_json_and_sarif(
     ]
 
 
-def test_no_audit_output_returns_an_empty_report_without_writing_files(
+def test_an_audit_that_prints_nothing_fails_without_writing_files(
     scanner, npm_on_path, node_project, subprocess_double
 ):
-    """An audit that emits nothing yields the empty-report branch."""
+    """Exit 0 with nothing on stdout means no advisory was checked against the
+    lockfile: the scan fails naming it, instead of yielding an empty report
+    that read as a clean audit, and no results file is written."""
     node_project()
     subprocess_double.return_value = {"stdout": "", "stderr": "", "returncode": 0}
 
-    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+    with pytest.raises(ScannerError) as excinfo:
+        scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert len(audit_calls(subprocess_double)) == 1
-    assert report.runs[0].results == []
-    assert report.runs[0].tool.driver.name == "npm-audit"
+    assert "package-lock.json" in str(excinfo.value), str(excinfo.value)
     assert not (Path(scanner.results_dir) / "converted" / "results.json").exists()
 
 
-def test_unparseable_audit_output_is_warned_about_and_skipped(
+def test_unparseable_audit_output_is_warned_about_and_fails(
     scanner, npm_on_path, node_project, subprocess_double, caplog
 ):
+    """Output that is not the tool's format is logged as a parse warning, and
+    the lockfile counts as never evaluated: the scan fails naming it, instead
+    of skipping it into an empty report that read as a clean audit."""
     node_project()
     subprocess_double.side_effect = emits("npm ERR! code ENOLOCK")
 
-    with caplog.at_level(logging.WARNING):
-        report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+    with caplog.at_level(logging.WARNING), pytest.raises(ScannerError) as excinfo:
+        scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
-    assert report.runs[0].results == []
+    assert "package-lock.json" in str(excinfo.value), str(excinfo.value)
     assert any(
         "Failed to parse npm audit output" in record.message
         for record in caplog.records
@@ -911,3 +1015,30 @@ def test_no_vulnerabilities_key_yields_an_empty_run(scanner):
 
     assert report.runs[0].results == []
     assert report.runs[0].tool.driver.rules == []
+
+
+def test_a_clean_audit_whose_code_is_a_severity_bitmask_is_successful(scanner):
+    """yarn classic exits a bitmask of the severity levels its audit found
+    (1|2|4|8|16, so 0-31), and npm audit exits 0 or 1, so any code in that
+    band from a run that evaluated every attempted target is a successful
+    execution -- the code is findings, not failure (the base accepted set
+    {0, 1} graded a HIGH-only audit's 8 as False). A code past
+    the band, ASH's spawn-failure marker, and a signal death still are not:
+    no audit returns them, and the audit that produced no report is already
+    a failed target in the counters."""
+    scanner.targets_attempted = 1
+    scanner.targets_failed = 0
+    scanner.exit_code = 8
+    assert scanner._sarif_execution_successful() is True
+    scanner.exit_code = 31
+    assert scanner._sarif_execution_successful() is True
+    scanner.exit_code = 32
+    assert scanner._sarif_execution_successful() is False
+    scanner.exit_code = 127
+    assert scanner._sarif_execution_successful() is False
+    scanner.exit_code = -9
+    assert scanner._sarif_execution_successful() is False
+    # A failed target outranks any accepted code.
+    scanner.exit_code = 8
+    scanner.targets_failed = 1
+    assert scanner._sarif_execution_successful() is False

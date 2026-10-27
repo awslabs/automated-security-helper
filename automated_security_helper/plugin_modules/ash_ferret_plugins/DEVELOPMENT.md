@@ -232,7 +232,7 @@ def validate_no_unsupported_options(cls, data: Any) -> Any:
 
 | Feature | ASH Flag | Notes |
 |---------|----------|-------|
-| Suppressions | `.ash/suppressions.yaml` | ASH manages centrally |
+| Suppressions | `global_settings.suppressions` in the ASH config file | ASH manages centrally |
 | Output directory | `--output-dir` | Uses `.ash/ash_output/scanners/ferret-scan/` |
 | Offline mode | `ASH_OFFLINE=true` | Respects environment variable |
 
@@ -542,6 +542,20 @@ unsupported) — but note the substring branch means a short token like `test` o
 can over-exclude any path containing it. The plugin joins all patterns into a single
 comma-separated `--exclude` value (e.g., `--exclude .venv,.git,*.pyc`).
 
+The substring branch is why the plugin's exclusion of a link that leaves the scanned
+tree (`_link_exclude_patterns`) refuses the target when another walked file's path
+contains the link's pattern: on 2.4.x, the pattern for a link `conf.py` would also
+leave out `conf.py.bak` and everything below `conf.py.d/`.
+
+It is also why the global ignore paths are not passed as written. A bare `.` or
+`api` would leave out every path holding it. `_ignore_exclude_patterns` passes the
+paths ASH itself ignores (`ignored_entries`, which matches each ignore path as ASH
+does when it drops findings): a file as its escaped full path, and a fully ignored
+directory as its escaped full path followed by `/*`, the output-directory form. A
+pattern another walked file that nothing ignores holds is left out rather than
+widened, and so is a path with a comma; ferret-scan reads those files and ASH drops
+their findings. The configured `exclude_patterns` are passed as written.
+
 ### 10. CLI Args Override the Bundled Config's Defaults (`--exclude`, `--recursive`)
 
 Correction (verified against ferret-scan v2.4.5): an earlier version of this note claimed
@@ -555,8 +569,8 @@ backwards.** ferret-scan's CLI flags take precedence over the config file's `def
 #                                            bundled config's defaults set recursive:false
 ```
 
-So ASH's `exclude_patterns` (and the `global_ignore_paths` the plugin folds into
-`--exclude`) are **honoured regardless of `use_default_config`** — a security-relevant
+So ASH's `exclude_patterns` (and the paths the global ignore paths ignore, which the
+plugin adds to `--exclude`; section 9) are **honoured regardless of `use_default_config`** — a security-relevant
 guarantee: ignore paths are respected. Setting `use_default_config: false` is **not**
 required for excludes to work.
 
@@ -722,12 +736,16 @@ Add entries under `global_settings.suppressions` in **both** `.ash/.ash.yaml` an
 ```yaml
 global_settings:
   suppressions:
-    - path: automated_security_helper/plugin_modules/ash_ferret_plugins/DEVELOPMENT.md
+    - path: docs/example.md
       rule_id: SECRET-SECRET-KEYWORD
-      line_start: 501
-      line_end: 501
+      line_start: 42
+      line_end: 42
       reason: Documentation example showing the SECRET-SECRET-KEYWORD detection pattern.
 ```
+
+The path and line numbers are an illustration. Use the path of your file and the line
+its content is on now; give both `line_start` and `line_end`, because a `line_start`
+with no `line_end` covers every later line to the end of the file.
 
 Fields:
 - `path`: Relative path to the file (supports fnmatch patterns)
@@ -737,8 +755,10 @@ Fields:
 - `expiration`: Optional expiry date (e.g., `"2026-06-01"`)
 
 When you add or move a suppression, update the `line_start`/`line_end` values if
-the target content shifts. The validation script (check #10) verifies that all
-SECRET-SECRET-KEYWORD hits in ferret plugin files have matching suppressions.
+the target content shifts. The validation script (check #10) verifies that every
+SECRET-SECRET-KEYWORD hit its pattern finds in ferret plugin files is covered by an
+entry that has `line_start`. It does not check that a pinned range still points at
+its line; see "Keeping Suppressions in Sync" below.
 
 ### Test Data Generator (`scripts/generate_test_docx.py`)
 
@@ -760,7 +780,15 @@ and the ferret-scan `exclude_patterns` config.
 
 When editing files that have line-specific suppressions, verify the line numbers
 are still correct in **both** config files. The validation script's check #10
-(`SUPPRESSION-COVERAGE`) will catch suppressions that have drifted out of alignment.
+(`SUPPRESSION-COVERAGE`) does not look at where a range points: it fails a keyword
+hit that only entries without `line_start` cover. For the line-pinned
+`SECRET-SECRET-KEYWORD` entries in `.ash_community_plugins.yaml`,
+`tests/unit/test_ci_ferret_self_scan_pins.py` fails when the line an entry was
+written for is outside its range, and names the line to use. A new line-pinned
+entry needs a row in that test, holding a fragment of its line. The test reads only
+`.ash_community_plugins.yaml`; a pinned entry in `.ash/.ash.yaml` is not checked.
+`SECRET-SECRET-KEYWORD` is a detect-secrets rule id, and detect-secrets is off in the
+community config, so the test keeps these entries accurate in case it is turned on.
 
 ### Pre-Push Validation Script (`scripts/validate_ferret_plugin.py`)
 
@@ -783,7 +811,7 @@ The script checks for:
 | `EXCLUDE-MULTIPLE-ARGS` | Looping over exclude patterns to append individual `--exclude` args instead of joining into one comma-separated value |
 | `FERRET-IN-ASH-YAML` | ferret-scan registered in `.ash.yaml` instead of `.ash_community_plugins.yaml` (it's a community plugin) |
 | `CONFIG-OVERRIDE-EXCLUDES` | *(removed 2026-09-14 — false premise; ferret-scan CLI args override the bundled config's defaults, so excludes are honoured regardless of `use_default_config`. See gotcha §10.)* |
-| `SUPPRESSION-COVERAGE` | SECRET-SECRET-KEYWORD hits in ferret plugin files must have matching suppressions with `line_start`/`line_end` in `.ash_community_plugins.yaml` |
+| `SUPPRESSION-COVERAGE` | A SECRET-SECRET-KEYWORD hit in ferret plugin files covered only by `.ash_community_plugins.yaml` entries without `line_start` (it does not check where a pinned range points) |
 
 These checks mirror what CI's `--ignore-suppressions` scan will flag. Passing this
 script locally means no surprises on the PR.
@@ -961,7 +989,7 @@ cat .ash/ash_output/scanners/ferret-scan/source/ferret-scan.sarif | jq '[.runs[0
 # Enable ferret-scan's own debug output (independent of ASH logging)
 uv run ash scan --source-dir tests/test_data/scanners/ferret-scan \
     --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins \
-    -o ferret_debug=true 2>&1
+    --config-overrides 'scanners.ferret-scan.options.ferret_debug=true' 2>&1
 # Expected: ferret-scan debug output showing preprocessing and validation flow
 ```
 
@@ -971,7 +999,7 @@ uv run ash scan --source-dir tests/test_data/scanners/ferret-scan \
 # Enable ferret-scan's own verbose output (independent of ASH logging)
 uv run ash scan --source-dir tests/test_data/scanners/ferret-scan \
     --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins \
-    -o ferret_verbose=true 2>&1
+    --config-overrides 'scanners.ferret-scan.options.ferret_verbose=true' 2>&1
 # Expected: ferret-scan verbose output with detailed finding info
 ```
 
@@ -1011,7 +1039,11 @@ scanners:
 EOF
 
 uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --config /tmp/test-ash-config.yaml 2>&1
-# Expected: Error message about unsupported 'debug' option, suggesting ferret_debug
+echo "exit=$?"
+# Expected: exit=3, before any scanner runs, with
+#   scanners.ferret-scan.options (scanner 'ferret-scan'): Value error, Unsupported
+#   option 'debug' in ferret-scan plugin configuration. Use 'ferret_debug: true'
+#   instead. ...
 rm /tmp/test-ash-config.yaml
 ```
 
@@ -1019,7 +1051,7 @@ rm /tmp/test-ash-config.yaml
 
 ```bash
 mkdir -p /tmp/empty-test-dir
-uv run ash scan --source-dir /tmp/empty-test-dir --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins --no-aggregated-results 2>&1
+uv run ash scan --source-dir /tmp/empty-test-dir --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins 2>&1
 # Expected: ferret-scan completes with 0 findings, SARIF has results: [] (empty array), no crash
 rmdir /tmp/empty-test-dir
 ```
@@ -1027,9 +1059,9 @@ rmdir /tmp/empty-test-dir
 #### 9a. Missing Directory Handling
 
 ```bash
-uv run ash scan --source-dir /tmp/this-does-not-exist --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins --no-aggregated-results 2>&1
-# Expected: ASH framework throws FileNotFoundError (os.chdir fails before plugin runs)
-# This is an ASH-level issue, not a plugin concern
+uv run ash scan --source-dir /tmp/this-does-not-exist --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins 2>&1
+# Expected: ASH refuses before any plugin runs: "Source directory does not exist",
+# exit 5 (a usage error). This is an ASH-level check, not a plugin concern
 ```
 
 #### 10. Missing Binary Handling
@@ -1147,7 +1179,7 @@ snyk-code, trivy-repo). This plugin follows the same contract.
 |---|---|---|
 | `SarifReport` | Happy path — validated SARIF results | Full processing: path sanitization, suppressions, metrics extraction |
 | `True` | Nothing to scan (empty dir, no scannable files) | Falls through all `isinstance` checks; container keeps defaults (no error, no findings) |
-| `False` | `_pre_scan()` failed or dependencies not satisfied | Falsy → logs "plugin is missing dependencies", sets `ScannerStatus.MISSING` |
+| `False` | `_pre_scan()` failed or dependencies not satisfied | Falsy → logs a WARNING, "Scanner {name} found its dependencies unavailable on the {target_type} files, marking as MISSING: {reason}", and sets `ScannerStatus.MISSING` on that target, with `missing_dependency_reason()` as its `missing_reason` |
 | `None` | Results file missing or unparseable output | Sets `status = "failed"` with error "Scanner returned None" |
 | raw `dict` | JSON parsed but SARIF validation failed — fallback | Checks for `"status": "failed"`, then tries `severity_counts` or `findings` extraction |
 | `raise ScannerError` | Fatal/unrecoverable failure | Caught by exception handler → structured error dict with stack trace |
@@ -1209,8 +1241,10 @@ fully scanned — coverage cut short by a timeout/budget, or the file could not 
 ## ASH Integration Registration
 
 When adding this plugin to an ASH installation (or contributing it upstream), three
-files outside the plugin directory must be updated. Both the Snyk and Trivy community
-plugins follow this same pattern.
+files outside the plugin directory must be updated. The Trivy community plugin follows
+this same pattern. The Snyk plugin is not in `.ash/.ash_community_plugins.yaml`: that
+file is inside the scanned tree, and such a file cannot load a plugin package that
+sends the scanned source off the host, so CI passes it with `--ash-plugin-modules`.
 
 ### 1. Register in `.ash/.ash_community_plugins.yaml`
 
@@ -1218,7 +1252,6 @@ Add the plugin module to `ash_plugin_modules`:
 
 ```yaml
 ash_plugin_modules:
-  - automated_security_helper.plugin_modules.ash_snyk_plugins
   - automated_security_helper.plugin_modules.ash_trivy_plugins
   - automated_security_helper.plugin_modules.ash_ferret_plugins   # <-- add
 ```
@@ -1248,6 +1281,13 @@ scanners:
 > built-in defaults plus the explicit ASH options above, rather than loading the bundled
 > validator/profile patterns. (It is **not** needed for excludes — CLI `--exclude` and
 > `--recursive` win over the config's defaults regardless; see gotcha §10.)
+>
+> `.ash/.ash_community_plugins.yaml` is inside the scanned tree, and from such a file
+> `use_default_config` and `profile` are ignored with a warning, because they choose
+> which part of ferret-scan's config is used (`config/tool_config_trust.py`). The CI
+> scans therefore also pass
+> `--config-overrides scanners.ferret-scan.options.use_default_config=false`, and the
+> line in the file only records the intent.
 
 > **Why simple directory names in `exclude_patterns`**: Ferret-scan's `--exclude`
 > matches with `filepath.Match` glob plus a substring fallback; the `**` globstar is

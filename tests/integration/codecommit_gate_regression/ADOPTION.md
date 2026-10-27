@@ -1,7 +1,7 @@
 # Adoption record
 
 This fixture was written standalone, outside the repository, so it did not have to
-be committed while the fix lanes were in flight. It landed here alongside the
+be committed while the fixes were in flight. It landed here alongside the
 `fail_on_incomplete_scanners` change, which is the fix its `known_defect` block
 tracks.
 

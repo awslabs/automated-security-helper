@@ -124,6 +124,23 @@
     'timestamp': None,
   })
 # ---
+# name: test_error_response_for_each_category[plugin_module_refused][response]
+  dict({
+    'context': dict({
+      'error_category': 'plugin_module_refused',
+    }),
+    'error': 'example plugin_module_refused error',
+    'error_category': 'plugin_module_refused',
+    'error_type': 'MCPResourceError',
+    'operation': 'example_operation',
+    'success': False,
+    'suggestions': list([
+      'Review the ash_plugin_modules entries in the config file or the config content sent',
+      'Remove the entries a scan refuses',
+    ]),
+    'timestamp': None,
+  })
+# ---
 # name: test_error_response_for_each_category[resource_exhausted][response]
   dict({
     'context': dict({
@@ -338,7 +355,7 @@
 # name: test_text_resource[exit-codes][contents]
   list([
     dict({
-      'content': '{"0": "success", "1": "scan errors / scanner failures", "2": "actionable findings above threshold", "3": "invalid config", "4": "workspace definition or policy error"}',
+      'content': '{"0": "success", "1": "scan errors / scanner failures", "2": "actionable findings at or above threshold", "3": "invalid config or refused input", "4": "workspace definition or policy error", "5": "usage error", "commands": {"ash dependencies install": {"2": "a --tool name that matches no plugin, or names a plugin of a type that --plugin-type leaves out; or a --plugin-type that is none of converter, scanner and reporter"}}}',
       'mime_type': 'text/plain',
     }),
   ])
@@ -349,14 +366,25 @@
       'content': '''
         ASH (Automated Security Helper) Usage Guide
         
-        ASH is a security scanning orchestrator that runs multiple security tools:
+        ASH is a security scanning orchestrator that runs multiple security tools.
         
-        🔍 **What ASH Scans For:**
-        • Python security issues (Bandit)
-        • Multi-language security patterns (Semgrep)
-        • Hardcoded secrets and credentials (detect-secrets)
-        • Infrastructure as Code issues (Checkov)
-        • CDK security problems (cdk-nag)
+        🔍 **Built-in scanners:**
+        • actionlint
+        • bandit
+        • cdk-nag
+        • cfn-guard
+        • cfn-lint
+        • cfn-nag
+        • checkov
+        • detect-secrets
+        • gitleaks
+        • grype
+        • npm-audit
+        • opengrep
+        • semgrep
+        • syft
+        • trivy
+        • zizmor
         
         📁 **Supported File Types:**
         • Python (.py)
@@ -367,10 +395,9 @@
         • And many more...
         
         ⚙️ **Local Mode Benefits:**
-        • Fast execution (Python-only scanners)
         • No Docker required
         • Good for development and CI/CD
-        • Covers most common security issues
+        • A scanner runs only when its tool is installed; list_scanners says which are
         
         🎯 **Best Practices:**
         • Run scans early and often
@@ -392,12 +419,26 @@
         ASH version <ASH_VERSION>
         
         ASH is installed and ready to perform security scans in local mode.
-        Local mode includes these scanners:
-        • Bandit (Python security issues)
-        • Semgrep (Multi-language security patterns)
-        • detect-secrets (Hardcoded secrets detection)
-        • Checkov (Infrastructure as Code security)
-        • cdk-nag (CDK security issues)
+        Built-in scanners:
+        • actionlint
+        • bandit
+        • cdk-nag
+        • cfn-guard
+        • cfn-lint
+        • cfn-nag
+        • checkov
+        • detect-secrets
+        • gitleaks
+        • grype
+        • npm-audit
+        • opengrep
+        • semgrep
+        • syft
+        • trivy
+        • zizmor
+        
+        A scanner runs only when its tool is installed. Call the list_scanners tool for
+        each scanner's version and whether its dependencies are met.
   
       ''',
       'mime_type': 'text/plain',

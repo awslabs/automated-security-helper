@@ -1,0 +1,232 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Fixture for StarResourceAccessPolicyRule (automated_security_helper/assets/appsec_cfn_rules).
+  A principal in a policy can be a Ref to a parameter, an Fn::Sub that names one, an
+  Fn::ImportValue or an Fn::GetAtt. ASH passes no parameter values, so cfn-model 0.6.6
+  hands the rule a Ref and an import as a Hash, applies no Default, and leaves the ${...}
+  of an Fn::Sub in the text. The rule used to read a principal only when it was the String
+  "*" or a list holding it, so a parameter whose Default is "*" was not reported, while
+  ResourcePolicyStarAccessVerbPolicyRule already read the same parameter in an action.
+
+  The rule now reads a parameter the way the verb rule does: its Default, split at commas,
+  and every entry of its AllowedValues. It fills each ${Name} of an Fn::Sub that is a
+  parameter of the template. A principal it cannot read is not checked, and the rule writes
+  one warning line to stderr naming the resource and the shape. That covers an import, a
+  Ref to a parameter with no text to read (no Default, a Default that is an SSM key, an
+  empty Default), and an Fn::Sub with a name that is not a parameter with text when the
+  text around it could still make the whole principal "*". It does not cover an Fn::GetAtt
+  or a Ref to a resource of the template, which name something the template creates, or an
+  Fn::Sub whose text around the names cannot be "*", such as an ARN with the account id.
+
+  The action is es:ESHttpGet on every statement, so ResourcePolicyStarAccessVerbPolicyRule
+  reports nothing on this template and the two rules can be told apart.
+
+  Reported by the rule: PrincipalRefDefaultStar, PrincipalRefAllowedStar (the Default is
+  scoped, and the star is one of the AllowedValues), PrincipalRefListStar (the star is the
+  second entry of a list), PrincipalWholeRef (the principal itself is the Ref) and
+  PrincipalSubStar.
+  Not reported: PrincipalRefScoped, PrincipalSubAccount, PrincipalGetAtt,
+  PrincipalImportValue, PrincipalRefNoDefault, PrincipalRefSsm and PrincipalSubUnreadStar.
+  Warned about as unread: PrincipalImportValue, PrincipalRefNoDefault, PrincipalRefSsm and
+  PrincipalSubUnreadStar.
+
+Parameters:
+  OpenPrincipal:
+    Type: String
+    Default: "*"
+  ScopedPrincipal:
+    Type: String
+    Default: "arn:aws:iam::123456789012:root"
+  ChosenPrincipal:
+    Type: String
+    Default: "arn:aws:iam::123456789012:root"
+    AllowedValues:
+      - "arn:aws:iam::123456789012:root"
+      - "*"
+  NoDefaultPrincipal:
+    Type: String
+  SsmPrincipal:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /ash/fixture/principal
+
+Resources:
+  AccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: "es.amazonaws.com"
+            Action: "sts:AssumeRole"
+
+  PrincipalRefDefaultStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-principal-ref-default-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                Ref: OpenPrincipal
+            Action: "es:ESHttpGet"
+            Resource: "*"
+
+  PrincipalRefAllowedStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-principal-ref-allowed-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                Ref: ChosenPrincipal
+            Action: "es:ESHttpGet"
+            Resource: "*"
+
+  PrincipalRefListStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-principal-ref-list-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - Ref: ScopedPrincipal
+                - Ref: OpenPrincipal
+            Action: "es:ESHttpGet"
+            Resource: "*"
+
+  PrincipalWholeRef:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-principal-whole-ref
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Ref: OpenPrincipal
+            Action: "es:ESHttpGet"
+            Resource: "*"
+
+  PrincipalSubStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-principal-sub-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                Fn::Sub: "${OpenPrincipal}"
+            Action: "es:ESHttpGet"
+            Resource: "*"
+
+  PrincipalRefScoped:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-principal-ref-scoped
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                Ref: ScopedPrincipal
+            Action: "es:ESHttpGet"
+            Resource: "*"
+
+  PrincipalSubAccount:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-principal-sub-account
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                Fn::Sub: "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "es:ESHttpGet"
+            Resource: "*"
+
+  PrincipalGetAtt:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-principal-get-att
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                Fn::GetAtt:
+                  - AccessRole
+                  - Arn
+            Action: "es:ESHttpGet"
+            Resource: "*"
+
+  PrincipalImportValue:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-principal-import-value
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                Fn::ImportValue: "SharedPrincipalExport"
+            Action: "es:ESHttpGet"
+            Resource: "*"
+
+  PrincipalRefNoDefault:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-principal-ref-no-default
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                Ref: NoDefaultPrincipal
+            Action: "es:ESHttpGet"
+            Resource: "*"
+
+  PrincipalRefSsm:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-principal-ref-ssm
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                Ref: SsmPrincipal
+            Action: "es:ESHttpGet"
+            Resource: "*"
+
+  PrincipalSubUnreadStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-principal-sub-unread-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                Fn::Sub: "${NoDefaultPrincipal}"
+            Action: "es:ESHttpGet"
+            Resource: "*"

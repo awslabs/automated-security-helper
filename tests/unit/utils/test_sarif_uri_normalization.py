@@ -107,6 +107,17 @@ class TestUriNormalization:
     def test_backslash_uri_normalized_to_forward_slash(
         self, test_source_dir, test_output_dir
     ):
+        """A URI written with Windows separators for a file in the tree matches a
+        suppression written with "/". Sanitizing runs first, as in a scan
+        (scanner_executor): it reads the backslashes as separators because the
+        slash spelling names the file, on POSIX too. Unsanitized, a backslash
+        under a POSIX root is part of a file name (test_sanitized_uri_backslash.py).
+        """
+        from automated_security_helper.utils.sarif_utils import sanitize_sarif_paths
+
+        target = test_source_dir / "tests" / "unit" / "converters"
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "test_converters.py").write_text("x = 1\n")
         abs_prefix = str(test_source_dir.resolve())
         sarif = _make_sarif_with_uri(
             f"{abs_prefix}\\tests\\unit\\converters\\test_converters.py"
@@ -114,7 +125,9 @@ class TestUriNormalization:
         ctx = _make_context(
             test_source_dir, test_output_dir, "tests/unit/converters/test_converters.py"
         )
-        result = apply_suppressions_to_sarif(sarif, ctx)
+        result = apply_suppressions_to_sarif(
+            sanitize_sarif_paths(sarif, test_source_dir), ctx
+        )
         assert result.runs[0].results[0].suppressions is not None
         assert len(result.runs[0].results[0].suppressions) == 1
 

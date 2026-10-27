@@ -29,8 +29,20 @@ shows the description comparison responds to a real difference, so a passing
 parity test is evidence rather than a tautology.
 """
 
+import pytest
+
 from automated_security_helper.cli import mcp_tools
 from automated_security_helper.core import scanner_inventory
+from tests.utils.tool_guard import stub_tool_probes
+
+
+@pytest.fixture(autouse=True)
+def _no_tool_probe(monkeypatch):
+    """The inventory runs every scanner's dependency check, which ran ``uv tool list``
+    and ``uv tool run --offline ... --version`` for bandit, checkov, detect-secrets
+    and semgrep; these tests compare two descriptions of it, and answer the probes as
+    a host without uv would."""
+    stub_tool_probes(monkeypatch)
 
 
 class _StubConfig:
@@ -220,7 +232,20 @@ class TestCliUsesTheSameIsolatedInventoryPath:
         }
         assert set(expected) == {"alpha", "beta", "zeta"}
 
-        with patch("automated_security_helper.cli.plugin.load_plugins") as mock_load:
+        from automated_security_helper.plugins import ash_plugin_manager
+
+        # `plugin list` lists what is registered, so the CLI's own set is given
+        # through the registry; load_plugins is stubbed so nothing else loads.
+        with (
+            patch("automated_security_helper.cli.plugin.load_plugins") as mock_load,
+            patch.object(
+                ash_plugin_manager,
+                "plugin_modules",
+                side_effect=lambda plugin_type, *a, **k: (
+                    list(cli_classes) if plugin_type == "scanner" else []
+                ),
+            ),
+        ):
             mock_load.return_value = {
                 "scanners": list(cli_classes),
                 "converters": [],

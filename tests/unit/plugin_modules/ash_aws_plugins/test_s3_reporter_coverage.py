@@ -87,13 +87,13 @@ def test_s3_reporter_validate_missing_config(mock_boto3):
 
 
 @patch("automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter.boto3")
-def test_s3_reporter_report_json_format(mock_boto3):
+def test_s3_reporter_report_json_format(mock_boto3, tmp_path):
     """Test S3Reporter report method with JSON format."""
     # Create mock context
     mock_context = PluginContext(
-        source_dir=Path("/test/source"),
-        output_dir=Path("/test/output"),
-        work_dir=Path("/test/work"),
+        source_dir=tmp_path / "source",
+        output_dir=tmp_path / "output",
+        work_dir=tmp_path / "work",
         config=get_default_config(),
     )
 
@@ -118,16 +118,7 @@ def test_s3_reporter_report_json_format(mock_boto3):
     mock_model.metadata.generated_at = "20250101-120000"
     mock_model.to_simple_dict.return_value = {"test": "data"}
 
-    # Mock file operations - we need to mock the specific path operations
-    mock_path = MagicMock()
-    mock_path.parent.mkdir = MagicMock()
-
-    with (
-        patch("builtins.open", mock_open()) as mock_file,
-        patch.object(Path, "mkdir") as mock_mkdir,
-    ):
-        # Call report
-        result = reporter.report(mock_model)
+    result = reporter.report(mock_model)
 
     # Verify S3 client was called
     mock_s3_client.put_object.assert_called_once()
@@ -136,9 +127,9 @@ def test_s3_reporter_report_json_format(mock_boto3):
     assert "ash-report-20250101-120000.json" in kwargs["Key"]
     assert kwargs["ContentType"] == "application/json"
 
-    # Verify file operations - mkdir should be called on the parent directory
-    mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
-    mock_file.assert_called_once()
+    # The local copy, in a reports directory the reporter created, holds the upload
+    local_copy = tmp_path / "output" / "reports" / "s3-report.json"
+    assert local_copy.read_text(encoding="utf-8") == kwargs["Body"]
 
     # Verify result
     assert "s3://" in result
@@ -146,13 +137,13 @@ def test_s3_reporter_report_json_format(mock_boto3):
 
 
 @patch("automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter.boto3")
-def test_s3_reporter_report_yaml_format(mock_boto3):
+def test_s3_reporter_report_yaml_format(mock_boto3, tmp_path):
     """Test S3Reporter report method with YAML format."""
     # Create mock context
     mock_context = PluginContext(
-        source_dir=Path("/test/source"),
-        output_dir=Path("/test/output"),
-        work_dir=Path("/test/work"),
+        source_dir=tmp_path / "source",
+        output_dir=tmp_path / "output",
+        work_dir=tmp_path / "work",
         config=get_default_config(),
     )
 
@@ -177,13 +168,7 @@ def test_s3_reporter_report_yaml_format(mock_boto3):
     mock_model.metadata.generated_at = "20250101-120000"
     mock_model.to_simple_dict.return_value = {"test": "data"}
 
-    # Mock file operations - we need to mock the specific path operations
-    with (
-        patch("builtins.open", mock_open()) as mock_file,
-        patch.object(Path, "mkdir") as mock_mkdir,
-    ):
-        # Call report
-        result = reporter.report(mock_model)
+    result = reporter.report(mock_model)
 
     # Verify S3 client was called
     mock_s3_client.put_object.assert_called_once()
@@ -192,9 +177,9 @@ def test_s3_reporter_report_yaml_format(mock_boto3):
     assert "ash-report-20250101-120000.yaml" in kwargs["Key"]
     assert kwargs["ContentType"] == "application/yaml"
 
-    # Verify file operations - mkdir should be called on the parent directory
-    mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
-    mock_file.assert_called_once()
+    # The local copy, in a reports directory the reporter created, holds the upload
+    local_copy = tmp_path / "output" / "reports" / "s3-report.yaml"
+    assert local_copy.read_text(encoding="utf-8") == kwargs["Body"]
 
     # Verify result
     assert "s3://" in result

@@ -1,0 +1,301 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Fixture for ResourcePolicyStarAccessVerbPolicyRule (automated_security_helper/assets/appsec_cfn_rules).
+  An action in a policy can be written as an intrinsic function, and the rule reads each
+  action as text. The rule used to call downcase on every action, so an action that
+  reached it as a Hash made it raise, and under --isolate-custom-rule-exceptions that
+  dropped the rule's result for every resource in the template.
+
+  What reaches the rule depends on the function. ASH passes no parameter values, and with
+  none cfn-model 0.6.6 resolves Fn::Sub to a String (its text, with the ${...} left in
+  place) and Fn::If to a String (the first branch, because every declared condition is
+  true). It hands Fn::ImportValue on as a Hash, as it does Fn::GetAtt, Fn::Transform,
+  Fn::Cidr and a Ref to a parameter, and it does not apply a parameter's Default. So
+  SubAction and IfAction reach the rule as text, and ImportValueAction, the Ref
+  resources and ListIntrinsicThenBareStar reach it as a Hash.
+
+  The rule reads the Default of a Ref to a parameter itself, and splits it at commas, so
+  a list parameter is read entry by entry. When the parameter lists AllowedValues, every
+  allowed value is read as well, because a deployer may choose any of them. An action it
+  cannot read at all is not checked, and the rule writes one warning line to stderr for
+  it, naming the resource and the shape. That covers an import, a Ref to a parameter with
+  no Default, a Ref to a parameter of an SSM type (its Default is the name of an SSM
+  parameter, not the action), and a Ref to a parameter whose Default is empty or holds
+  only commas.
+
+  The intrinsic domains come first on purpose, so a rule that raises on one has not yet
+  looked at any other resource. The principal is one account on every statement, so
+  StarResourceAccessPolicyRule reports nothing on this template and the two rules can be
+  told apart.
+
+  Reported by the rule: ServiceStarAfterIntrinsic, BareStarAfterIntrinsic,
+  ListIntrinsicThenBareStar (a "*" after an import is still read), RefDefaultStar,
+  RefDefaultListStar and RefAllowedStar (its Default is scoped, and the star is one of
+  its AllowedValues).
+  Not reported: SubAction, IfAction, ImportValueAction, ScopedAfterIntrinsic,
+  RefDefaultScoped, RefAllowedScoped, RefNoDefaultAction, RefSsmAction and
+  RefEmptyDefault. SubAction and IfAction are written so that neither a rule that skips
+  them nor one that reads their text would report them, and ImportValueAction has no text
+  to read. RefAllowedScoped is the control for RefAllowedStar: it lists AllowedValues,
+  none of them a star.
+  Warned about as unread: ImportValueAction, ListIntrinsicThenBareStar (its import),
+  RefNoDefaultAction, RefSsmAction (the Default of an SSM parameter type is a key name),
+  and RefEmptyDefault, once for its empty Default and once for its comma-only Default.
+
+Parameters:
+  Method:
+    Type: String
+    Default: Get
+  OpenAction:
+    Type: String
+    Default: "*"
+  OpenActionList:
+    Type: CommaDelimitedList
+    Default: "es:ESHttpGet,*"
+  ScopedAction:
+    Type: String
+    Default: "es:ESHttpGet"
+  NoDefaultAction:
+    Type: String
+  SsmAction:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /ash/fixture/action
+  EmptyAction:
+    Type: String
+    Default: ""
+  CommaOnlyAction:
+    Type: CommaDelimitedList
+    Default: ","
+  ChosenAction:
+    Type: String
+    Default: "es:ESHttpGet"
+    AllowedValues:
+      - "es:ESHttpGet"
+      - "*"
+  ScopedChoice:
+    Type: String
+    Default: "es:ESHttpGet"
+    AllowedValues:
+      - "es:ESHttpGet"
+      - "es:ESHttpHead"
+
+Conditions:
+  UseHead:
+    Fn::Equals:
+      - Ref: Method
+      - Head
+
+Resources:
+  SubAction:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-sub-action
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - Fn::Sub: "es:ESHttp${Method}"
+            Resource: "*"
+
+  IfAction:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-if-action
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - Fn::If:
+                  - UseHead
+                  - "es:ESHttpHead"
+                  - "es:ESHttpGet"
+            Resource: "*"
+
+  ImportValueAction:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-import-value-action
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - Fn::ImportValue: "SharedActionExport"
+            Resource: "*"
+
+  RefNoDefaultAction:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-ref-no-default-action
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              Ref: NoDefaultAction
+            Resource: "*"
+
+  RefDefaultStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-ref-default-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              Ref: OpenAction
+            Resource: "*"
+
+  RefDefaultListStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-ref-default-list-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              Ref: OpenActionList
+            Resource: "*"
+
+  RefDefaultScoped:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-ref-default-scoped
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - Ref: ScopedAction
+            Resource: "*"
+
+  RefSsmAction:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-ref-ssm-action
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              Ref: SsmAction
+            Resource: "*"
+
+  RefEmptyDefault:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-ref-empty-default
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - Ref: EmptyAction
+              - Ref: CommaOnlyAction
+            Resource: "*"
+
+  RefAllowedStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-ref-allowed-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              Ref: ChosenAction
+            Resource: "*"
+
+  RefAllowedScoped:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-ref-allowed-scoped
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              Ref: ScopedChoice
+            Resource: "*"
+
+  ServiceStarAfterIntrinsic:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-service-star-after-intrinsic
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action: "es:*"
+            Resource: "*"
+
+  BareStarAfterIntrinsic:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-bare-star-after-intrinsic
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action: "*"
+            Resource: "*"
+
+  ListIntrinsicThenBareStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-list-intrinsic-then-bare-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - Fn::ImportValue: "SharedActionExport"
+              - "*"
+            Resource: "*"
+
+  ScopedAfterIntrinsic:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-scoped-after-intrinsic
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - "es:ESHttpGet"
+              - "es:ESHttpHead"
+            Resource: "*"

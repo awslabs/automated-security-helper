@@ -39,8 +39,32 @@
 #
 # tests/unit/schemas/test_sarif_enum_defaults.py walks every model in this module
 # and fails on any enum-member default, so a regeneration is caught here.
+#
+# Also deliberate: SarifReport, Run, Result, Invocation and PropertyBag, the
+# models validated on their own, set hide_input_in_errors=True, so a refused
+# value (scanned code, or a secret it holds) is not quoted in the error's text.
+# tests/unit/models/test_validation_errors_hide_input.py fails for a model
+# validated on its own that does not.
+#
+# SECOND DEVIATION: every model here derives from RecordModel
+# (utils/undecodable_text.py), not BaseModel, so a file name that is not UTF-8 is
+# held in its record form (each lone surrogate as the six characters \udcNN) and
+# the report can be written as JSON and read back. The generator emits
+# BaseModel; tests/unit/models/test_record_models_hold_names_as_text.py walks
+# every model in this module and fails on one that does not derive from it.
 
 from __future__ import annotations
+
+from automated_security_helper.utils.severity_ladder import MISSING_SARIF_LEVEL
+from automated_security_helper.utils.undecodable_text import (
+    RecordModel,
+    text_of_undecodable,
+    undecodable_of_text,
+)
+from automated_security_helper.utils.uri_separators import (
+    root_text,
+    sanitized_uri_text,
+)
 
 import re
 
@@ -50,7 +74,7 @@ import json
 from pathlib import Path, PurePosixPath
 from typing import Dict, List, Literal, Optional, Union
 
-from pydantic import AnyUrl, BaseModel, ConfigDict, Field, RootModel
+from pydantic import AnyUrl, ConfigDict, Field, RootModel
 
 
 class Version(str, Enum):
@@ -133,9 +157,11 @@ class Content(str, Enum):
     nonLocalizedData = "nonLocalizedData"
 
 
-class PropertyBag(BaseModel):
+class PropertyBag(RecordModel):
     model_config = ConfigDict(
         extra="allow",
+        # DELIBERATE DEVIATION: see the module comment.
+        hide_input_in_errors=True,
     )
 
     tags: Optional[List[str]] = Field(
@@ -152,7 +178,7 @@ class DeprecatedGuid(RootModel):
     )
 
 
-class ReportingConfiguration(BaseModel):
+class ReportingConfiguration(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
         use_enum_values=True,
@@ -181,7 +207,7 @@ class ReportingConfiguration(BaseModel):
     )
 
 
-class ToolComponentReference(BaseModel):
+class ToolComponentReference(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -205,7 +231,7 @@ class ToolComponentReference(BaseModel):
     )
 
 
-class Address(BaseModel):
+class Address(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -253,7 +279,7 @@ class Address(BaseModel):
     )
 
 
-class LogicalLocation(BaseModel):
+class LogicalLocation(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -290,7 +316,7 @@ class LogicalLocation(BaseModel):
     )
 
 
-class Message1(BaseModel):
+class Message1(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -309,7 +335,7 @@ class Message1(BaseModel):
     )
 
 
-class Message2(BaseModel):
+class Message2(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -334,7 +360,7 @@ class Message(RootModel):
     )
 
 
-class MultiformatMessageString(BaseModel):
+class MultiformatMessageString(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -349,7 +375,7 @@ class MultiformatMessageString(BaseModel):
     )
 
 
-class Rectangle(BaseModel):
+class Rectangle(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -379,7 +405,7 @@ class Rectangle(BaseModel):
     )
 
 
-class ReportingDescriptorReference1(BaseModel):
+class ReportingDescriptorReference1(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -405,7 +431,7 @@ class ReportingDescriptorReference1(BaseModel):
     )
 
 
-class ReportingDescriptorReference2(BaseModel):
+class ReportingDescriptorReference2(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -431,7 +457,7 @@ class ReportingDescriptorReference2(BaseModel):
     )
 
 
-class ReportingDescriptorReference3(BaseModel):
+class ReportingDescriptorReference3(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -468,7 +494,7 @@ class ReportingDescriptorReference(RootModel):
     )
 
 
-class ReportingDescriptorRelationship(BaseModel):
+class ReportingDescriptorRelationship(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -489,7 +515,7 @@ class ReportingDescriptorRelationship(BaseModel):
     )
 
 
-class RunAutomationDetails(BaseModel):
+class RunAutomationDetails(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -518,7 +544,7 @@ class RunAutomationDetails(BaseModel):
     )
 
 
-class TranslationMetadata(BaseModel):
+class TranslationMetadata(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -549,7 +575,7 @@ class TranslationMetadata(BaseModel):
     )
 
 
-class ArtifactContent(BaseModel):
+class ArtifactContent(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -571,7 +597,7 @@ class ArtifactContent(BaseModel):
     )
 
 
-class ArtifactLocation(BaseModel):
+class ArtifactLocation(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -597,7 +623,7 @@ class ArtifactLocation(BaseModel):
     )
 
 
-class ConfigurationOverride(BaseModel):
+class ConfigurationOverride(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -616,7 +642,7 @@ class ConfigurationOverride(BaseModel):
     )
 
 
-class Edge(BaseModel):
+class Edge(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -640,7 +666,7 @@ class Edge(BaseModel):
     )
 
 
-class EdgeTraversal(BaseModel):
+class EdgeTraversal(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -664,7 +690,7 @@ class EdgeTraversal(BaseModel):
     )
 
 
-class ExternalPropertyFileReference1(BaseModel):
+class ExternalPropertyFileReference1(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -688,7 +714,7 @@ class ExternalPropertyFileReference1(BaseModel):
     )
 
 
-class ExternalPropertyFileReference2(BaseModel):
+class ExternalPropertyFileReference2(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -719,7 +745,7 @@ class ExternalPropertyFileReference(RootModel):
     )
 
 
-class ExternalPropertyFileReferences(BaseModel):
+class ExternalPropertyFileReferences(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -807,7 +833,7 @@ class ExternalPropertyFileReferences(BaseModel):
     )
 
 
-class GraphTraversal1(BaseModel):
+class GraphTraversal1(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -844,7 +870,7 @@ class GraphTraversal1(BaseModel):
     )
 
 
-class GraphTraversal2(BaseModel):
+class GraphTraversal2(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -887,7 +913,7 @@ class GraphTraversal(RootModel):
     )
 
 
-class LocationRelationship(BaseModel):
+class LocationRelationship(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -910,7 +936,7 @@ class LocationRelationship(BaseModel):
     )
 
 
-class Region(BaseModel):
+class Region(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -972,7 +998,7 @@ class Region(BaseModel):
     )
 
 
-class Replacement(BaseModel):
+class Replacement(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -990,7 +1016,7 @@ class Replacement(BaseModel):
     )
 
 
-class ReportingDescriptor(BaseModel):
+class ReportingDescriptor(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1053,7 +1079,7 @@ class ReportingDescriptor(BaseModel):
     )
 
 
-class SpecialLocations(BaseModel):
+class SpecialLocations(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1068,7 +1094,7 @@ class SpecialLocations(BaseModel):
     )
 
 
-class ToolComponent(BaseModel):
+class ToolComponent(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1189,7 +1215,7 @@ class ToolComponent(BaseModel):
     )
 
 
-class VersionControlDetails(BaseModel):
+class VersionControlDetails(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1221,7 +1247,7 @@ class VersionControlDetails(BaseModel):
     )
 
 
-class WebRequest(BaseModel):
+class WebRequest(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1255,7 +1281,7 @@ class WebRequest(BaseModel):
     )
 
 
-class WebResponse(BaseModel):
+class WebResponse(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1290,7 +1316,7 @@ class WebResponse(BaseModel):
     )
 
 
-class Artifact(BaseModel):
+class Artifact(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1351,7 +1377,7 @@ class Artifact(BaseModel):
     )
 
 
-class ArtifactChange(BaseModel):
+class ArtifactChange(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1370,7 +1396,7 @@ class ArtifactChange(BaseModel):
     )
 
 
-class Attachment(BaseModel):
+class Attachment(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1397,7 +1423,7 @@ class Attachment(BaseModel):
     )
 
 
-class Fix(BaseModel):
+class Fix(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1417,7 +1443,7 @@ class Fix(BaseModel):
     )
 
 
-class PhysicalLocation1(BaseModel):
+class PhysicalLocation1(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1439,7 +1465,7 @@ class PhysicalLocation1(BaseModel):
     )
 
 
-class PhysicalLocation2(BaseModel):
+class PhysicalLocation2(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1468,7 +1494,7 @@ class PhysicalLocation(RootModel):
     )
 
 
-class ResultProvenance(BaseModel):
+class ResultProvenance(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1507,7 +1533,7 @@ class ResultProvenance(BaseModel):
     )
 
 
-class Tool(BaseModel):
+class Tool(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1524,7 +1550,7 @@ class Tool(BaseModel):
     )
 
 
-class Location(BaseModel):
+class Location(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1561,7 +1587,7 @@ class Location(BaseModel):
     )
 
 
-class Node(BaseModel):
+class Node(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1582,7 +1608,7 @@ class Node(BaseModel):
     )
 
 
-class StackFrame(BaseModel):
+class StackFrame(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1608,7 +1634,7 @@ class StackFrame(BaseModel):
     )
 
 
-class Suppression(BaseModel):
+class Suppression(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1636,7 +1662,7 @@ class Suppression(BaseModel):
     )
 
 
-class Graph(BaseModel):
+class Graph(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1660,7 +1686,7 @@ class Graph(BaseModel):
     )
 
 
-class Stack(BaseModel):
+class Stack(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1679,7 +1705,7 @@ class Stack(BaseModel):
     )
 
 
-class ThreadFlowLocation(BaseModel):
+class ThreadFlowLocation(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1741,7 +1767,7 @@ class ThreadFlowLocation(BaseModel):
     )
 
 
-class Exception(BaseModel):
+class Exception(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1766,7 +1792,7 @@ class Exception(BaseModel):
     )
 
 
-class Notification(BaseModel):
+class Notification(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1809,7 +1835,7 @@ class Notification(BaseModel):
     )
 
 
-class ThreadFlow(BaseModel):
+class ThreadFlow(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1840,7 +1866,7 @@ class ThreadFlow(BaseModel):
     )
 
 
-class CodeFlow(BaseModel):
+class CodeFlow(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -1859,9 +1885,11 @@ class CodeFlow(BaseModel):
     )
 
 
-class Invocation(BaseModel):
+class Invocation(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
+        # DELIBERATE DEVIATION: see the module comment.
+        hide_input_in_errors=True,
     )
 
     commandLine: Optional[str] = Field(
@@ -1966,10 +1994,12 @@ class Invocation(BaseModel):
     )
 
 
-class Result(BaseModel):
+class Result(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
         use_enum_values=True,
+        # DELIBERATE DEVIATION: see the module comment.
+        hide_input_in_errors=True,
     )
 
     ruleId: Optional[str] = Field(
@@ -1992,8 +2022,12 @@ class Result(BaseModel):
     kind: Optional[Kind] = Field(
         "fail", description="A value that categorizes results by evaluation state."
     )
+    # MISSING_SARIF_LEVEL ("warning"), SARIF 2.1.0's default (3.27.10) and the
+    # one every grader reads a missing level as. It was "error", so a result
+    # that stated no level was CRITICAL in memory and LOW at the gate.
     level: Optional[Level] = Field(
-        "error", description="A value specifying the severity level of the result."
+        MISSING_SARIF_LEVEL,
+        description="A value specifying the severity level of the result.",
     )
     message: Message = Field(
         ...,
@@ -2107,7 +2141,7 @@ class Result(BaseModel):
     )
 
 
-class Conversion(BaseModel):
+class Conversion(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -2128,7 +2162,7 @@ class Conversion(BaseModel):
     )
 
 
-class ExternalProperties(BaseModel):
+class ExternalProperties(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -2233,9 +2267,11 @@ class ExternalProperties(BaseModel):
     )
 
 
-class Run(BaseModel):
+class Run(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
+        # DELIBERATE DEVIATION: see the module comment.
+        hide_input_in_errors=True,
     )
 
     tool: Tool = Field(
@@ -2374,11 +2410,13 @@ _DRIVE_PREFIXED_ROOT = re.compile(r"^/[A-Za-z]:")
 _DRIVE_ROOT = re.compile(r"^[A-Za-z]:/")
 
 
-class SarifReport(BaseModel):
+class SarifReport(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
         use_enum_values=True,
         serialize_by_alias=True,
+        # DELIBERATE DEVIATION: see the module comment.
+        hide_input_in_errors=True,
     )
 
     field_schema: str = Field(
@@ -2445,13 +2483,21 @@ class SarifReport(BaseModel):
                      Results whose first location maps to a path not in this set
                      are dropped. Results with no location are always retained.
             source_dir: The source directory used to normalize absolute URIs to
-                     relative paths for comparison.
+                     relative paths for comparison. A string is read by its
+                     shape: one spelled ``//x/y`` is taken as a UNC root
+                     (``utils/uri_separators.is_windows_root``), so callers
+                     pass a ``Path``, whose own flavor decides.
 
         Mutates self in place. A no-op if the report has no runs.
         """
         if not self.runs:
             return
-        source_posix = PurePosixPath(str(source_dir).replace("\\", "/"))
+        # A URI holds a file name that is not UTF-8 in its record form (each lone
+        # surrogate as \udcNN, utils/undecodable_text.py), and a listed name may
+        # hold the surrogate: both are compared in the record form. The URI is read
+        # back as the name first, so its escapes are not taken for separators.
+        recorded_set = {text_of_undecodable(str(name)) for name in file_set}
+        source_posix = PurePosixPath(root_text(source_dir))
         for run in self.runs:
             if not run.results:
                 continue
@@ -2473,12 +2519,17 @@ class SarifReport(BaseModel):
                 # result host-dependent: on Windows, Path("/tmp/src/x.py").is_absolute()
                 # is False (no drive), so a Linux-produced SARIF processed on Windows
                 # would skip normalisation entirely and drop every result.
-                candidate_str = uri.replace("\\", "/")
+                candidate_str = undecodable_of_text(uri)
                 if candidate_str.startswith("file://"):
                     candidate_str = candidate_str[len("file://") :]
                     # file:///C:/x -> /C:/x ; drop the slash that precedes a drive.
                     if _DRIVE_PREFIXED_ROOT.match(candidate_str):
                         candidate_str = candidate_str[1:]
+                # A backslash is a separator only in a drive-letter or UNC path,
+                # or under a Windows source_dir; elsewhere it is part of a POSIX
+                # file name, which file_set holds as written
+                # (utils/uri_separators.py).
+                candidate_str = sanitized_uri_text(candidate_str, source_dir)
                 candidate = PurePosixPath(candidate_str)
                 is_rooted = candidate_str.startswith("/") or bool(
                     _DRIVE_ROOT.match(candidate_str)
@@ -2490,14 +2541,14 @@ class SarifReport(BaseModel):
                         rel_str = candidate.as_posix()
                 else:
                     rel_str = candidate.as_posix()
-                if rel_str in file_set:
+                if text_of_undecodable(rel_str) in recorded_set:
                     filtered.append(result)
             run.results = filtered
 
     def attach_scanner_details(
         self,
         scanner_name: str,
-        scanner_version: str = None,
+        scanner_version: str | None = None,
         invocation_details: dict = None,
     ) -> "SarifReport":
         """
