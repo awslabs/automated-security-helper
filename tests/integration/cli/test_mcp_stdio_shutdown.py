@@ -548,18 +548,23 @@ def test_an_invalid_operator_config_refuses_to_start_with_exit_3(tmp_path):
     env = _env(tmp_path)
     env["ASH_CONFIG"] = str(operator_config)
     stderr_path = tmp_path / "server.stderr"
+    # stdin is EOF from the start: a server that wrongly starts serving reads
+    # the EOF, exits, and fails the status assertion below, instead of waiting
+    # on stdin for a client that never writes. communicate bounds the wait by
+    # the cold-start allowance and reads stdout to its end, so a slow start is
+    # not reported as a wrong exit status.
     with stderr_path.open("wb") as stderr:
         process = subprocess.Popen(
             [sys.executable, "-c", PLAIN_SERVER],
-            stdin=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=stderr,
             cwd=str(project),
             env=env,
         )
     try:
-        status = _wait_for_exit(process)
-        served = process.stdout.read()
+        served, _ = process.communicate(timeout=STARTUP_TIMEOUT_SECONDS)
+        status = process.returncode
     finally:
         if process.poll() is None:
             process.kill()

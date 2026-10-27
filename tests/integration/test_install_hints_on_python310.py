@@ -19,9 +19,10 @@ What it does
 It builds a wheel shaped like hatchling's (METADATA, WHEEL and RECORD, no
 ``top_level.txt``) from the package under test and its real metadata, installs it
 into a fresh Python 3.10 environment without dependencies, then installs only the
-packages the hint code imports, at the versions this environment has. The
-``direct_url.json`` the installer wrote is replaced by the one uv writes for a git
-install, so the hints must name that commit.
+packages the hint code imports, at the versions this environment has, plus tomli,
+which the package's import chain needs on 3.10 alone, at the constraint ASH's own
+metadata declares for it. The ``direct_url.json`` the installer wrote is replaced
+by the one uv writes for a git install, so the hints must name that commit.
 
 Needs uv and a Python 3.10 that uv can find or download; it fails, rather than
 skipping, when either is missing.
@@ -33,7 +34,6 @@ import base64
 import hashlib
 import json
 import os
-import re
 import subprocess
 import sys
 import zipfile
@@ -41,6 +41,8 @@ from importlib.metadata import distribution, version
 from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 import automated_security_helper
 
@@ -58,7 +60,7 @@ IMPORTED_DEPENDENCIES = ("rich", "importlib-metadata")
 #: Python, does not install: version_management reads pyproject.toml with tomli
 #: below 3.11 (tomllib from 3.11), and pyproject.toml declares tomli under a
 #: python_full_version marker, so ``version("tomli")`` has no answer here.
-#: Installed at the requirement ASH's own metadata declares instead.
+#: Installed at the requirement ASH's own metadata declares for 3.10 instead.
 DECLARED_DEPENDENCIES = ("tomli",)
 
 PROBE = """
@@ -113,17 +115,38 @@ def _build_wheel(dest: Path) -> Path:
     return wheel
 
 
-def _declared_requirement(name: str) -> str:
-    """The version constraint ASH's own metadata declares for ``name``.
+#: The environment the 3.10 install is for, as its markers see it: the base
+#: install of ASH (no extra) on Python 3.10.
+_PYTHON_310_ENVIRONMENT = {
+    "python_version": "3.10",
+    "python_full_version": "3.10.0",
+    "extra": "",
+}
 
-    The marker is dropped: the install below is for the 3.10 environment, where
-    the marker holds, and the requirement's own constraint is what pins it.
+
+def _declared_requirement(name: str) -> str:
+    """The version constraint ASH's own metadata declares for ``name`` on 3.10.
+
+    Each ``Requires-Dist`` entry is parsed, its name compared in canonical form
+    (so ``tomli-w`` is not ``tomli``), and its marker evaluated for the 3.10
+    environment, so an entry of an extra, or of another Python, is not the one
+    installed. The marker itself is dropped from what is returned: the install
+    is for the 3.10 environment, where it holds, and the constraint is what pins.
     """
-    for requirement in distribution("automated-security-helper").requires or ():
-        declared = requirement.split(";", 1)[0].strip()
-        if re.match(rf"{re.escape(name)}\b", declared, re.IGNORECASE):
-            return declared
-    raise AssertionError(f"ASH's metadata declares no dependency named {name}")
+    wanted = canonicalize_name(name)
+    for entry in distribution("automated-security-helper").requires or ():
+        requirement = Requirement(entry)
+        if canonicalize_name(requirement.name) != wanted:
+            continue
+        if requirement.marker is not None and not requirement.marker.evaluate(
+            _PYTHON_310_ENVIRONMENT
+        ):
+            continue
+        requirement.marker = None
+        return str(requirement)
+    raise AssertionError(
+        f"ASH's metadata declares no dependency named {name} for Python 3.10"
+    )
 
 
 def _run(python: Path, *args: str, cwd: Path | None = None) -> str:
