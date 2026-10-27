@@ -79,12 +79,21 @@ def _copy(profile, pid, host=None):
     return copy
 
 
+def _written_copy(profile):
+    """The writer, called as the runner calls it: the planned name handed in
+    (``_snapshot_profile_for_scan`` requires ``snapshot_path``)."""
+    scan_id = str(uuid.uuid4())
+    return mcp_tools._snapshot_profile_for_scan(
+        profile, scan_id, snapshot_path=mcp_tools._scan_snapshot_path(profile, scan_id)
+    )
+
+
 def test_where_this_host_has_no_identity_its_own_unnamed_copy_goes_at_once(
     tmp_path, monkeypatch, gone_pid, said
 ):
     profile = _profile(tmp_path)
     monkeypatch.setattr(mcp_tools, "_this_host_token", lambda: None)
-    mine = mcp_tools._snapshot_profile_for_scan(profile, str(uuid.uuid4()))
+    mine = _written_copy(profile)
     another_process_with_no_identity = _copy(profile, gone_pid)
 
     mcp_tools._sweep_stale_scan_snapshots(profile)
@@ -101,7 +110,7 @@ def test_the_record_not_the_pid_or_the_identity_places_a_copy_with_no_token(
     at the sweep. Neither the pid nor the identity is the evidence."""
     profile = _profile(tmp_path)
     monkeypatch.setattr(mcp_tools, "_this_host_token", lambda: None)
-    mine = mcp_tools._snapshot_profile_for_scan(profile, str(uuid.uuid4()))
+    mine = _written_copy(profile)
     planted = _copy(profile, os.getpid())
     monkeypatch.setattr(mcp_tools, "_this_host_token", lambda: ELSEWHERE)
 

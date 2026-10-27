@@ -64,6 +64,15 @@ def _copies_beside(profile):
     return sorted(profile.parent.glob(".ash-scan-*"))
 
 
+def _written_copy(profile):
+    """The writer, called as the runner calls it: the planned name handed in
+    (``_snapshot_profile_for_scan`` requires ``snapshot_path``)."""
+    scan_id = str(uuid.uuid4())
+    return mcp_tools._snapshot_profile_for_scan(
+        profile, scan_id, snapshot_path=mcp_tools._scan_snapshot_path(profile, scan_id)
+    )
+
+
 def _the_delete_of_a_scan_copy_fails(monkeypatch):
     """Make ``Path.unlink`` refuse a scan copy while ``state["failing"]`` is set.
 
@@ -110,6 +119,13 @@ def _a_session_with_a_bound_profile(tmp_path, monkeypatch, session_id):
     profile.write_text("project_name: a-held-profile\n", encoding="utf-8")
     assert config_is_client_supplied(delivered)
     assert not config_is_client_supplied(profile)
+    # The delivered config is checked against the bound profile's runtime-
+    # override policy, read from the registered profile of that name
+    # (profile_registry.session_profile_entry fails closed on an unregistered
+    # one), so the profile is registered under the name the binding carries.
+    profile_registry.set_profile_registry(
+        profile_registry.register_profiles([f"held={profile}"])
+    )
     profile_registry.bind_session_config(
         session_id, config=AshConfig(), profile_name="held", config_path=str(profile)
     )
@@ -161,6 +177,7 @@ def _a_scan_runs_to_its_end(tmp_path, monkeypatch, session_id):
             asyncio.run(start_and_wait())
     finally:
         profile_registry.clear_session_state(session_id)
+        profile_registry.clear_profile_registry()
     return profile, written
 
 
@@ -174,7 +191,7 @@ def test_a_copy_the_writer_could_not_delete_is_still_this_servers_own(
     deletes = _the_delete_of_a_scan_copy_fails(monkeypatch)
 
     with pytest.raises(mcp_tools.ProfileSnapshotUnavailable):
-        mcp_tools._snapshot_profile_for_scan(profile, str(uuid.uuid4()))
+        _written_copy(profile)
 
     # Controls: the copy was written and the delete was tried and refused.
     left = _copies_beside(profile)
@@ -227,7 +244,7 @@ def test_a_copy_written_with_a_token_is_own_when_the_sweep_cannot_read_identity(
     tmp_path, monkeypatch
 ):
     profile = _profile(tmp_path)
-    mine = mcp_tools._snapshot_profile_for_scan(profile, str(uuid.uuid4()))
+    mine = _written_copy(profile)
     assert scan_copy_writer_host(mine.name) is not None, "control: no token"
     monkeypatch.setattr(mcp_tools, "_this_host_token", lambda: None)
 
@@ -241,7 +258,7 @@ def test_a_copy_written_without_a_token_is_own_when_the_sweep_reads_identity(
 ):
     profile = _profile(tmp_path)
     monkeypatch.setattr(mcp_tools, "_this_host_token", lambda: None)
-    mine = mcp_tools._snapshot_profile_for_scan(profile, str(uuid.uuid4()))
+    mine = _written_copy(profile)
     assert scan_copy_writer_host(mine.name) is None, "control: the copy has a token"
     monkeypatch.setattr(mcp_tools, "_this_host_token", lambda: READABLE)
 
@@ -264,7 +281,7 @@ def test_a_copy_is_registered_from_its_creation_until_it_is_discarded(tmp_path):
 
 def test_a_cell_that_writes_a_copy_and_never_discards_it(tmp_path):
     """Half of a pair: this cell leaves a name in the record on purpose."""
-    mcp_tools._snapshot_profile_for_scan(_profile(tmp_path), str(uuid.uuid4()))
+    _written_copy(_profile(tmp_path))
 
     assert config_sources._LIVE_SCAN_COPIES, "control: the writer recorded nothing"
 
@@ -300,7 +317,7 @@ def test_on_windows_a_copy_held_open_is_swept_once_the_handle_closes(
 
     try:
         with pytest.raises(mcp_tools.ProfileSnapshotUnavailable):
-            mcp_tools._snapshot_profile_for_scan(profile, str(uuid.uuid4()))
+            _written_copy(profile)
         left = _copies_beside(profile)
         assert len(left) == 1, "control: the held copy was deleted"
     finally:
