@@ -1482,9 +1482,11 @@ def test_a_git_link_another_user_left_in_a_directory_others_can_write_does_not_c
 
 
 #: What a runtime older than .NET 7 lacks, written into a copy of the helpers: the
-#: mode bits of an item (File.GetUnixFileMode, and the UnixMode text) and its owner
-#: (User). Each pair is replaced once, so a change to the helpers that moves one of
-#: them fails the first assertion below instead of leaving a cell that stubs nothing.
+#: mode bits of an item (File.GetUnixFileMode, and the UnixMode text). Each pair is
+#: replaced once, so a change to the helpers that moves one of them fails the first
+#: assertion below instead of leaving a replacement that changes nothing. The owner
+#: is read from the item's UnixStat (Get-AshOwnerId), never from its User name, and
+#: is taken away on its own by ``_helpers_that_know_no_owner_ids``.
 _ABSENT_PERMISSION_APIS = (
     (
         "[System.IO.File]::GetUnixFileMode($Path)",
@@ -1494,7 +1496,6 @@ _ABSENT_PERMISSION_APIS = (
         "$item.PSObject.Properties['UnixMode']",
         "$item.PSObject.Properties['UnixModeAbsent']",
     ),
-    ("$item.PSObject.Properties['User']", "$item.PSObject.Properties['UserAbsent']"),
 )
 
 
@@ -1524,9 +1525,10 @@ def test_a_runtime_that_gives_no_permissions_asks_ls_and_id(
     others_can_write, pwsh, recording_docker, checkout, tmp_path
 ):
     """PowerShell 7.0 to 7.2 run on a .NET without File.GetUnixFileMode, and their
-    items may carry neither UnixMode nor User. The wrapper then reads the mode of
-    the .git entry's directory and the owners from ``ls -ldn`` and ``id -u``, as
-    ./ash does, instead of refusing a checkout it could judge."""
+    items may carry no UnixMode. The wrapper then reads the mode of the .git entry's
+    directory from ``ls -ldn``, as ./ash does, instead of refusing a checkout it
+    could judge; the owners come from the items' UnixStat, or from ``ls`` and ``id``
+    when that is absent too (the owner-id tests below)."""
     helpers = _helpers_of_a_runtime_that_gives_no_permissions(tmp_path)
     _link_ls_and_id_into(recording_docker)
     ops = tmp_path / "ops"
