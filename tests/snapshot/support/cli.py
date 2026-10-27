@@ -173,9 +173,12 @@ def displayed_cwd(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     the path, but the box was padded to the real path's length first, so the border
     lands in a different column on every machine. A display-only cwd of fixed length
     keeps the geometry the same everywhere. Relative file access still goes to the
-    real working directory, because only ``os.getcwd`` is replaced. Register
-    DISPLAYED_CWD with ``snapshot_normalizer.add_root`` so its Windows spelling
-    (backslashes) snapshots like the POSIX one.
+    real working directory, because only ``os.getcwd`` is replaced. A directory made
+    through the displayed absolute path (``os.path.abspath`` reads ``os.getcwd``) is
+    made at the same place under the real working directory, so no test needs a
+    writable ``/workspace``. Register DISPLAYED_CWD with
+    ``snapshot_normalizer.add_root`` so its Windows spelling (backslashes)
+    snapshots like the POSIX one.
 
     ``os.getcwd`` returns the native spelling (``\\workspace\\demo-project`` on
     Windows), as the real one does. From Python 3.13 ``Path.absolute()`` relies on
@@ -186,8 +189,19 @@ def displayed_cwd(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     import pathlib
 
     native_cwd = str(pathlib.PurePath(DISPLAYED_CWD))
+    real_cwd = pathlib.Path(os.getcwd())
+    real_mkdir = pathlib.Path.mkdir
+
+    def mkdir_below_the_real_cwd(self, *args, **kwargs):
+        try:
+            below = pathlib.PurePath(self).relative_to(native_cwd)
+        except ValueError:
+            return real_mkdir(self, *args, **kwargs)
+        return real_mkdir(real_cwd / below, *args, **kwargs)
+
     with monkeypatch.context() as mp:
         mp.setattr(os, "getcwd", lambda: native_cwd)
+        mp.setattr(pathlib.Path, "mkdir", mkdir_below_the_real_cwd)
         accessor = getattr(pathlib, "_NormalAccessor", None)  # Python 3.10 only
         if accessor is not None and hasattr(accessor, "getcwd"):
             mp.setattr(accessor, "getcwd", staticmethod(lambda: native_cwd))

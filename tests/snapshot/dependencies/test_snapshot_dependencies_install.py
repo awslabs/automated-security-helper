@@ -80,17 +80,18 @@ def project_dir(
     project = tmp_path / "demo-project"
     project.mkdir()
     monkeypatch.chdir(project)
-    # The bin path is printed absolute, in the panel and in every install command
-    # that names it; displayed_cwd keeps its length, and so the wrapping, the same
-    # on every machine.
+    # The bin path is printed absolute in every install command that names it (the
+    # panel shows it as given); displayed_cwd keeps the absolute form's length, and so
+    # the wrapping, the same on every machine.
     for spelling in (PurePosixPath(DISPLAYED_CWD), PureWindowsPath(DISPLAYED_CWD)):
         snapshot_normalizer.add_root(spelling, "WORKSPACE")
     # install_dependencies writes os.environ["ASH_BIN_PATH"] itself; setting it here
     # first means monkeypatch restores the real value afterwards. The absolute form
-    # of the --bin-path the tests pass, so the run ends without the ASH_BIN_PATH
-    # hint: it quotes a Windows path differently from a POSIX one, and
+    # of the --bin-path the tests pass, as the command computes it under
+    # displayed_cwd, so the run ends without the ASH_BIN_PATH hint: it quotes a
+    # Windows path differently from a POSIX one, and
     # tests/unit/cli/test_dependencies_bin_path.py checks it.
-    monkeypatch.setenv("ASH_BIN_PATH", str(project / "bin"))
+    monkeypatch.setenv("ASH_BIN_PATH", str(Path(DISPLAYED_CWD, "bin")))
     # cfn-nag's Windows check reads it; pinned unset so the warning is the same on
     # a developer machine with a Ruby DevKit as on CI.
     monkeypatch.delenv("RI_DEVKIT", raising=False)

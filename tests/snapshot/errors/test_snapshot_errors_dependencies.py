@@ -10,12 +10,9 @@ any one of those lines shows up wherever the suite runs.
 
 from __future__ import annotations
 
-from pathlib import PurePosixPath, PureWindowsPath
-
 import pytest
 
 from automated_security_helper.cli import dependencies
-from tests.snapshot.support.cli import DISPLAYED_CWD, displayed_cwd
 
 
 @pytest.mark.parametrize(
@@ -26,9 +23,7 @@ from tests.snapshot.support.cli import DISPLAYED_CWD, displayed_cwd
         pytest.param("windows", "amd64", id="windows-amd64"),
     ],
 )
-def test_unknown_tool(
-    run_cli, snapshot, snapshot_normalizer, monkeypatch, tmp_path, platform_name, arch
-):
+def test_unknown_tool(run_cli, snapshot, monkeypatch, tmp_path, platform_name, arch):
     # The two lookups the message is built from, and not platform.system itself:
     # patching that would make every other part of the process act as if it ran on
     # that OS too.
@@ -38,12 +33,9 @@ def test_unknown_tool(
     # monkeypatch first means the export is undone after the test. Absolute, as
     # the export is: a lookup ignores a relative ASH_BIN_PATH, with a warning.
     monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
-    # The panel prints the bin path absolute; displayed_cwd keeps its length, and so
-    # the panel's width, the same on every machine.
-    for spelling in (PurePosixPath(DISPLAYED_CWD), PureWindowsPath(DISPLAYED_CWD)):
-        snapshot_normalizer.add_root(spelling, "WORKSPACE")
-    with displayed_cwd(monkeypatch):
-        result = run_cli(
-            ["dependencies", "install", "--bin-path", "bin", "--tool", "gryp"]
-        )
+    # The panel shows --bin-path as given ("bin"), so its width does not depend on the
+    # working directory. No display-only cwd: the command creates the bin directory at
+    # os.path.abspath(--bin-path), which reads os.getcwd(), so a patched cwd would
+    # send that mkdir outside the test's tmp_path.
+    result = run_cli(["dependencies", "install", "--bin-path", "bin", "--tool", "gryp"])
     assert result == snapshot
