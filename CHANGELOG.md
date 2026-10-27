@@ -222,7 +222,7 @@
   actionlint, cfn-guard, gitleaks or trivy, which are native binaries. Under
   `--sandbox` each gets what it declares, listed in
   `docs/content/docs/scanner-sandbox.md`. See
-  [Built-in Scanners](docs/content/docs/plugins/builtin/scanners.md).
+  [Built-in Scanners](docs/content/reference/scanners.md).
   - actionlint 1.7.12 on `.github/workflows` files, skipping `node_modules`,
     `.venv` and `venv` as zizmor does. Script
     injection from untrusted event data and hard-coded container credentials are
@@ -2655,7 +2655,7 @@
   `scanners.detect-secrets.options.scan_settings.filters_used` of your own config:
   `{path: detect_secrets.filters.common.is_ignored_due_to_verification_policies,
   min_level: 2}`. detect-secrets reads `min_level` and the scan fails without it. See
-  [Secret verification](docs/content/docs/configuration-guide.md#secret-verification).
+  [Secret verification](docs/content/concepts/scanning-untrusted-code.md).
 
 - **A finding in a file whose name holds a backslash gets a new `id` and Security Hub
   `Id`, once.** The identity key wrote every backslash in a path as `/`, so on Linux
@@ -3059,7 +3059,7 @@
   `.ash/ash_output` is, and the test was a string prefix, so a sibling such as
   `<src>-out` counted as inside too (`Invoke-ASH` matched a substring anywhere in the
   path). The output directory has its own mount at `/out`, so `/src` is now read-only
-  in every case. See [Running a scan in a container](docs/content/docs/cli-reference.md#running-a-scan-in-a-container).
+  in every case. See [Running a scan in a container](docs/content/how-to/run-in-a-container.md#scan-in-container-mode).
 - **CI variables no longer select the root `ci` image stage.** `ash --mode container`
   and `ash build-image` built and ran the `ci` stage, which runs as root, whenever
   `CI`, `IsCI`, `ISCI` or `CODEBUILD_BUILD_ID` was set to anything (`CI=false` and an
@@ -3300,7 +3300,7 @@
   exit 3. A
   `config_base_gate` passed to `run_ash_scan` with container or nix mode is refused,
   because the ASH those modes run would read the config without it. See
-  [Running a scan in a container](docs/content/docs/cli-reference.md#running-a-scan-in-a-container).
+  [Running a scan in a container](docs/content/how-to/run-in-a-container.md#scan-in-container-mode).
 - **Container mode refuses a mounted path that `--mount` cannot carry.** A comma, a
   double quote, a carriage return or a line feed in the source or output directory, the
   config file or a file it extends, or the workspace policy now refuses the run with
@@ -3358,7 +3358,7 @@
   writable by every user in the `ci` stage, now with the sticky bit. Files an
   installer left writable by every user elsewhere in the image (uv's lock files at 666,
   some gems' files under `/var/lib/gems` at 777) lose group and other write too. See
-  [Who can write to the image's directories](docs/content/docs/building-your-own-image.md#who-can-write-to-the-images-directories).
+  [Who can write to the image's directories](docs/content/how-to/run-in-a-container.md#mounts).
 - **`--log-level` is passed to the scan inside the container.** It was dropped; only
   the levels the host also expresses as `--debug`, `--verbose` or `--simple` got
   through, so `--log-level ERROR`, `QUIET` or `TRACE` left the inner scan at INFO.
@@ -3456,7 +3456,7 @@
   while a scan of the session runs is refused, and `set_source_git` and
   `set_source_zip_finalize` both report it with
   `error_type: SourceDeliveryBusyError`. See
-  [Config files in delivered source](docs/content/docs/mcp/streamable-http.md#config-files-in-delivered-source).
+  [Config files in delivered source](docs/content/how-to/mcp-server.md#what-a-delivered-config-cannot-set).
 
 - **A config file reached through a symlink is judged by the link as well as by
   the file it reaches.** The file a delivered tree's `.ash/.ash.yaml` links to,
@@ -3507,7 +3507,7 @@
   refuse the patched copy for a mapping key the server's config already has, so
   a patched profile that repeats the operator's keys is not refused for them; a
   key in any other delivered file is checked as before. See
-  [A patched value is the client's](docs/content/docs/mcp/streamable-http.md#a-patched-value-is-the-clients).
+  [A patched value is the client's](docs/content/how-to/mcp-server.md#what-a-delivered-config-cannot-set).
 
 - **A delivered config's exclusions in a scanner's own options are reported,
   not applied.** An entry it adds to bandit's `excluded_paths`, checkov's
@@ -3890,7 +3890,7 @@
   `content_db_staleness_offline_image_default: true` where the operator's value is
   false: it is set back to false with a warning, and `false` applies from any
   config. `ash merge` still takes these keys from the shards. See
-  [Failing on a stale content database](docs/content/docs/configuration-guide.md#failing-on-a-stale-content-database).
+  [Failing on a stale content database](docs/content/how-to/troubleshoot.md#a-content-database-is-stale).
 
 - **ASH no longer follows symlinks out of the scanned tree when it reads tree files
   into its own output.** This covers converter inputs (archives and notebooks), the
@@ -4269,7 +4269,7 @@
   success sets. A run ASH itself failed to carry out (an error in its own runner,
   not the tool's) is recorded as 127, like a tool that could not start, where it had
   been 1, which most scanners accept. The accepted codes per scanner, with their sources, are in
-  [A Scanner Is ERROR With an Exit Code It Does Not Accept](docs/content/docs/troubleshooting.md#a-scanner-is-error-with-an-exit-code-it-does-not-accept).
+  [A Scanner Is ERROR With an Exit Code It Does Not Accept](docs/content/how-to/troubleshoot.md#a-scanner-is-error-with-an-exit-code-it-does-not-accept).
 
   The same rule now holds for the scanners that run their tool outside the template:
   trivy-repo, syft, ferret-scan and snyk-code. trivy-repo and syft accept only 0, where

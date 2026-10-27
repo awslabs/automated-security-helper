@@ -1357,6 +1357,6 @@ Add ferret-scan to the "Available Community Plugins" list:
 ## Related Resources
 
 - [ferret-scan GitHub Repository](https://github.com/awslabs/ferret-scan)
-- [ASH Plugin Development Guide](../../../docs/content/docs/plugins/development-guide.md)
-- [ASH Scanner Plugin Architecture](../../../docs/content/docs/plugins/scanner-plugins.md)
+- [ASH Plugin Development Guide](../../../docs/content/plugins/write-a-scanner.md)
+- [ASH Scanner Plugin Architecture](../../../docs/content/plugins/write-a-scanner.md)
 - [SARIF Specification](https://sarifweb.azurewebsites.net/)
