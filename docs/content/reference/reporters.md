@@ -45,10 +45,10 @@ These are loaded only when the configuration's `ash_plugin_modules` names their 
 <!-- doctest: options of=reporters -->
 | Reporter | File extension | Enabled by default | Provided by |
 |----------|----------------|--------------------|-------------|
-| [`aws-security-hub`](#aws-security-hub) | `.aws-security-hub.asff.json` | yes | plugin module `ash_aws_plugins` |
-| [`bedrock-summary-reporter`](#bedrock-summary-reporter) | `.bedrock.summary.md` | yes | plugin module `ash_aws_plugins` |
-| [`cloudwatch-logs`](#cloudwatch-logs) | `.cwlog.json` | yes | plugin module `ash_aws_plugins` |
-| [`s3`](#s3) | `.s3.json` | yes | plugin module `ash_aws_plugins` |
+| [`aws-security-hub`](#aws-security-hub) | `.aws-security-hub.asff.json` | no | plugin module `ash_aws_plugins` |
+| [`bedrock-summary-reporter`](#bedrock-summary-reporter) | `.bedrock.summary.md` | no | plugin module `ash_aws_plugins` |
+| [`cloudwatch-logs`](#cloudwatch-logs) | `.cwlog.json` | no | plugin module `ash_aws_plugins` |
+| [`s3`](#s3) | `.s3.json` | no | plugin module `ash_aws_plugins` |
 
 ## `csv`
 
@@ -292,7 +292,7 @@ Sends security findings to AWS Security Hub in ASFF format.
 
 - Class: `automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_reporter.SecurityHubReporter`
 - Provided by: plugin module `ash_aws_plugins`, loaded when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_aws_plugins`
-- Enabled by default: yes
+- Enabled by default: no
 - File extension: `.aws-security-hub.asff.json`
 - Runs with `--python-only`: yes
 
@@ -311,7 +311,7 @@ Generates a summary of security findings using Amazon Bedrock.
 
 - Class: `automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter.BedrockSummaryReporter`
 - Provided by: plugin module `ash_aws_plugins`, loaded when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_aws_plugins`
-- Enabled by default: yes
+- Enabled by default: no
 - File extension: `.bedrock.summary.md`
 - Runs with `--python-only`: yes
 
@@ -333,17 +333,17 @@ Options, under `reporters.bedrock-summary-reporter.options`. A key not listed he
 | <a id="reporters.bedrock-summary-reporter.options.add_table_of_contents"></a>`add_table_of_contents` | boolean | `true` | Whether to add a table of contents to the report. |
 | <a id="reporters.bedrock-summary-reporter.options.enable_caching"></a>`enable_caching` | boolean | `true` | Whether to cache Bedrock responses to avoid duplicate API calls. |
 | <a id="reporters.bedrock-summary-reporter.options.output_markdown"></a>`output_markdown` | boolean | `true` | Whether to output the report as a markdown file. |
-| <a id="reporters.bedrock-summary-reporter.options.output_file"></a>`output_file` | string | `ash.bedrock.summary.md` | Filename for the main output markdown report. |
-| <a id="reporters.bedrock-summary-reporter.options.max_retries"></a>`max_retries` | integer | `3` | Maximum number of retries for Bedrock API calls. |
-| <a id="reporters.bedrock-summary-reporter.options.base_delay"></a>`base_delay` | number | `1.0` | Base delay in seconds between retries (will be increased exponentially). |
-| <a id="reporters.bedrock-summary-reporter.options.max_delay"></a>`max_delay` | number | `60.0` | Maximum delay in seconds between retries. |
+| <a id="reporters.bedrock-summary-reporter.options.output_file"></a>`output_file` | string | `ash.bedrock.summary.md` | Filename for the main output markdown report, a file name in the reports directory. |
+| <a id="reporters.bedrock-summary-reporter.options.max_retries"></a>`max_retries` | integer, at most 10 | `3` | Maximum number of retries for Bedrock API calls. |
+| <a id="reporters.bedrock-summary-reporter.options.base_delay"></a>`base_delay` | number, at most 60 | `1.0` | Base delay in seconds between retries (will be increased exponentially). |
+| <a id="reporters.bedrock-summary-reporter.options.max_delay"></a>`max_delay` | number, at most 60 | `60.0` | Maximum delay in seconds between retries. |
 | <a id="reporters.bedrock-summary-reporter.options.enable_fallback_models"></a>`enable_fallback_models` | boolean | `true` | Whether to try fallback models if the primary model fails. |
-| <a id="reporters.bedrock-summary-reporter.options.output_executive_file"></a>`output_executive_file` | string | `bedrock-executive.md` | Filename for the executive summary markdown report. |
-| <a id="reporters.bedrock-summary-reporter.options.output_technical_file"></a>`output_technical_file` | string | `bedrock-technical.md` | Filename for the technical analysis markdown report. |
+| <a id="reporters.bedrock-summary-reporter.options.output_executive_file"></a>`output_executive_file` | string | `bedrock-executive.md` | Filename for the executive summary markdown report, a file name in the reports directory. |
+| <a id="reporters.bedrock-summary-reporter.options.output_technical_file"></a>`output_technical_file` | string | `bedrock-technical.md` | Filename for the technical analysis markdown report, a file name in the reports directory. |
 | <a id="reporters.bedrock-summary-reporter.options.include_code_snippets"></a>`include_code_snippets` | boolean | `false` | Whether to include code snippets in the report. |
 | <a id="reporters.bedrock-summary-reporter.options.summary_style"></a>`summary_style` | one of `executive`, `technical`, `detailed` | `executive` | Style of summary to generate: executive (high-level), technical (detailed), or detailed (comprehensive). |
 | <a id="reporters.bedrock-summary-reporter.options.custom_prompt"></a>`custom_prompt` | string or null | `null` | Custom prompt to prepend to all Bedrock requests for more tailored analysis. |
-| <a id="reporters.bedrock-summary-reporter.options.exclude_scanner_types"></a>`exclude_scanner_types` | list of string | `["SECRET"]` | List of scanner types to exclude from detailed analysis (e.g., 'SECRET'). |
+| <a id="reporters.bedrock-summary-reporter.options.exclude_scanner_types"></a>`exclude_scanner_types` | list of string | `["SECRET"]` | Scanner tool types whose findings are counted but not sent to the model (e.g., 'SECRETS'). A finding's type is its scanner's tool type, looked up from the scanner's name, or a tool_type:: tag on the finding; 'SECRET' and 'SECRETS' both name the secrets type. A finding whose type cannot be determined is sent without its code snippets. |
 | <a id="reporters.bedrock-summary-reporter.options.actionable_only"></a>`actionable_only` | boolean | `true` | Whether to include only actionable findings (not suppressed, above severity threshold). |
 | <a id="reporters.bedrock-summary-reporter.options.include_sections"></a>`include_sections` | list of string | `["executive_summary", "risk_assessment", "technical_analysis", "remediation_guide", "compliance_impact"]` | List of sections to include in the report. |
 | <a id="reporters.bedrock-summary-reporter.options.exclude_sections"></a>`exclude_sections` | list of string | `[]` | List of sections to exclude from the report. |
@@ -359,7 +359,7 @@ Formats results and publishes to CloudWatch Logs.
 
 - Class: `automated_security_helper.plugin_modules.ash_aws_plugins.cloudwatch_logs_reporter.CloudWatchLogsReporter`
 - Provided by: plugin module `ash_aws_plugins`, loaded when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_aws_plugins`
-- Enabled by default: yes
+- Enabled by default: no
 - File extension: `.cwlog.json`
 - Runs with `--python-only`: yes
 
@@ -371,9 +371,9 @@ Options, under `reporters.cloudwatch-logs.options`. A key not listed here is acc
 | <a id="reporters.cloudwatch-logs.options.aws_region"></a>`aws_region` | string or null, matches `(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}` | from `AWS_REGION`, else from `AWS_DEFAULT_REGION`, else `null` | AWS region for CloudWatch Logs |
 | <a id="reporters.cloudwatch-logs.options.log_group_name"></a>`log_group_name` | string or null | from `ASH_CLOUDWATCH_LOG_GROUP_NAME`, else `null` | CloudWatch Logs group name to publish results to |
 | <a id="reporters.cloudwatch-logs.options.log_stream_name"></a>`log_stream_name` | string | `ASHScanResults` | CloudWatch Logs stream name to publish results to |
-| <a id="reporters.cloudwatch-logs.options.max_retries"></a>`max_retries` | integer | `3` | Maximum number of retry attempts for CloudWatch API calls |
-| <a id="reporters.cloudwatch-logs.options.base_delay"></a>`base_delay` | number | `1.0` | Base delay in seconds between retry attempts |
-| <a id="reporters.cloudwatch-logs.options.max_delay"></a>`max_delay` | number | `60.0` | Maximum delay in seconds between retry attempts |
+| <a id="reporters.cloudwatch-logs.options.max_retries"></a>`max_retries` | integer, at most 10 | `3` | Maximum number of retry attempts for CloudWatch API calls |
+| <a id="reporters.cloudwatch-logs.options.base_delay"></a>`base_delay` | number, at most 60 | `1.0` | Base delay in seconds between retry attempts |
+| <a id="reporters.cloudwatch-logs.options.max_delay"></a>`max_delay` | number, at most 60 | `60.0` | Maximum delay in seconds between retry attempts |
 
 ## `s3`
 
@@ -381,7 +381,7 @@ Formats results and uploads to an S3 bucket.
 
 - Class: `automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter.S3Reporter`
 - Provided by: plugin module `ash_aws_plugins`, loaded when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_aws_plugins`
-- Enabled by default: yes
+- Enabled by default: no
 - File extension: `.s3.json`
 - Runs with `--python-only`: yes
 
@@ -395,6 +395,6 @@ Options, under `reporters.s3.options`. A key not listed here is accepted and kep
 | <a id="reporters.s3.options.bucket_name"></a>`bucket_name` | string or null | from `ASH_S3_BUCKET_NAME`, else `null` | Name of the S3 bucket to store reports |
 | <a id="reporters.s3.options.key_prefix"></a>`key_prefix` | string | `ash-reports/` | Prefix for S3 object keys |
 | <a id="reporters.s3.options.file_format"></a>`file_format` | one of `json`, `yaml` | `json` | Format to use for the report file |
-| <a id="reporters.s3.options.max_retries"></a>`max_retries` | integer | `3` | Maximum number of retry attempts for S3 operations |
-| <a id="reporters.s3.options.base_delay"></a>`base_delay` | number | `1.0` | Base delay in seconds between retry attempts |
-| <a id="reporters.s3.options.max_delay"></a>`max_delay` | number | `60.0` | Maximum delay in seconds between retry attempts |
+| <a id="reporters.s3.options.max_retries"></a>`max_retries` | integer, at most 10 | `3` | Maximum number of retry attempts for S3 operations |
+| <a id="reporters.s3.options.base_delay"></a>`base_delay` | number, at most 60 | `1.0` | Base delay in seconds between retry attempts |
+| <a id="reporters.s3.options.max_delay"></a>`max_delay` | number, at most 60 | `60.0` | Maximum delay in seconds between retry attempts |
