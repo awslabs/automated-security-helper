@@ -70,11 +70,6 @@ UNUSUAL_NAMES = [
     pytest.param("tab\there", id="tab"),
 ]
 
-#: Every test below creates each name as a directory, so the three a Windows file
-#: system cannot hold (the glob characters, the backslash and the tab) are skipped
-#: there and run everywhere else.
-UNUSUAL_NAMES = created_on_disk(_NAMES_LEGAL_ON_POSIX)
-
 _SCRUBBED_ENV = (
     "CI",
     "IsCI",

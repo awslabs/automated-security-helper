@@ -84,13 +84,6 @@ def _scan(*args: str):
     )
 
 
-def _words(output: str) -> str:
-    """The output with its line breaks folded into spaces: the console wraps the log
-    line at its width, and the break can fall inside a phrase or between a flag's
-    neighbors."""
-    return " ".join(output.split())
-
-
 def test_the_mark_an_older_image_does_not_know(container, tmp_path):
     checkout = tmp_path / "repo"
     mark_git_checkout(checkout)
