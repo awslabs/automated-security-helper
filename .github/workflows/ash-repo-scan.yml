@@ -181,6 +181,117 @@ jobs:
             while [[ "${text}" == *'##['* ]]; do text="${text//'##['/'# #['}"; done
             printf '%s' "${text}"
           }
+          __wcs_clock() {
+            __wcs_now="${EPOCHREALTIME:-}"
+            __wcs_now="${__wcs_now//[!0-9]/}"
+            if [ -z "${__wcs_now}" ]; then
+              __wcs_now=$((SECONDS * 1000000))
+            fi
+          }
+          __wcs_end_group() {
+            local __wcs_now="" __wcs_until=""
+            if [ -z "${__wcs_pid}" ]; then
+              return 0
+            fi
+            __wcs_clock
+            __wcs_until=$((__wcs_now + $1 * 100000))
+            while kill -0 -- "-${__wcs_pid}" 2>/dev/null && [ "${__wcs_now}" -lt "${__wcs_until}" ]; do
+              sleep 0.1
+              __wcs_clock
+            done
+            if ! kill -0 -- "-${__wcs_pid}" 2>/dev/null; then
+              return 0
+            fi
+            kill -s KILL -- "-${__wcs_pid}" 2>/dev/null || true
+            __wcs_until=$((__wcs_now + 500000))
+            while kill -0 -- "-${__wcs_pid}" 2>/dev/null && [ "${__wcs_now}" -lt "${__wcs_until}" ]; do
+              sleep 0.1
+              __wcs_clock
+            done
+            return 1
+          }
+          __wcs_on_signal() {
+            if [ -z "${__wcs_pid}" ] && [ "${!:-}" != "${__wcs_before}" ]; then
+              __wcs_pid="${!:-}"
+            fi
+            if [ -n "${__wcs_pid}" ]; then
+              kill -s "$1" -- "-${__wcs_pid}" 2>/dev/null || kill -s "$1" "${__wcs_pid}" 2>/dev/null || true
+            fi
+            if [ "$1" = TERM ]; then
+              __wcs_end_group 10 || __wcs_left=1
+              if [ -n "${__wcs_open}" ]; then
+                printf '\n::%s::\n' "${__wcs_token}"
+              fi
+              if [ -n "${__wcs_left}" ]; then
+                printf '%s\n' "::error::processes the command started did not end in time, so they were sent SIGKILL and the step fails"
+              fi
+              exit 143
+            fi
+            __wcs_interrupted="$2"
+          }
+          __wcs_exec() {
+            if command -v setsid >/dev/null 2>&1; then
+              exec setsid -w "$@"
+            fi
+            exec perl -MPOSIX -e 'my $s = POSIX::setsid(); exit 127 unless defined $s && $s >= 0; exec { $ARGV[0] } @ARGV; exit 127' -- "$@"
+          }
+          with_commands_stopped() {
+            if [ "${BASH_SUBSHELL:-0}" -gt 0 ]; then
+              printf '%s\n' "::error::with_commands_stopped must run in the step's own shell, the one process the runner signals on a cancel, not in a subshell, a pipeline, a command substitution or a background job. For ( cd DIR && ... ), use env -C DIR, or cd at the top level" >&2
+              kill -s TERM "$$" 2>/dev/null || true
+              return 1
+            fi
+            local __wcs_out="" __wcs_var="" __wcs_file="" __wcs_token __wcs_status=0
+            local __wcs_pid="" __wcs_interrupted="" __wcs_open="" __wcs_left="" __wcs_before="${!:-}"
+            case "${1:-}" in
+              --stdout) __wcs_out="$2"; shift 2 ;;
+              --capture) __wcs_var="$2"; shift 2 ;;
+            esac
+            __wcs_token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+            if [ "${#__wcs_token}" -ne 32 ]; then
+              printf '%s\n' "::error::no random token could be read for stop-commands, so the command did not run"
+              return 1
+            fi
+            if [ -n "${__wcs_var}" ]; then
+              __wcs_file="$(mktemp "${RUNNER_TEMP:-/tmp}/ash-wcs.XXXXXX")" || return 1
+              __wcs_out="${__wcs_file}"
+            fi
+            trap '__wcs_on_signal INT 130' INT
+            trap '__wcs_on_signal QUIT 131' QUIT
+            trap '__wcs_on_signal TERM 143' TERM
+            __wcs_open=1
+            printf '::stop-commands::%s\n' "${__wcs_token}"
+            if [ -z "${__wcs_interrupted}" ]; then
+              if [ -n "${__wcs_out}" ]; then
+                (trap - INT QUIT TERM; __wcs_exec "$@") 2>&1 > "${__wcs_out}" <&0 &
+              else
+                (trap - INT QUIT TERM; __wcs_exec "$@") 2>&1 <&0 &
+              fi
+              __wcs_pid=$!
+              wait "${__wcs_pid}" || __wcs_status=$?
+            fi
+            if [ -n "${__wcs_interrupted}" ] && [ -n "${__wcs_pid}" ]; then
+              wait "${__wcs_pid}" 2>/dev/null || true
+            fi
+            __wcs_end_group 50 || __wcs_left=1
+            printf '\n::%s::\n' "${__wcs_token}"
+            __wcs_open=""
+            trap - INT QUIT TERM
+            if [ -n "${__wcs_left}" ]; then
+              printf '%s\n' "::error::processes the command started did not end in time, so they were sent SIGKILL and the step fails"
+              if [ "${__wcs_status}" -eq 0 ]; then
+                __wcs_status=1
+              fi
+            fi
+            if [ -n "${__wcs_interrupted}" ]; then
+              exit "${__wcs_interrupted}"
+            fi
+            if [ -n "${__wcs_file}" ]; then
+              printf -v "${__wcs_var}" '%s' "$(cat "${__wcs_file}")"
+              rm -f -- "${__wcs_file}"
+            fi
+            return "${__wcs_status}"
+          }
           EOF
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0

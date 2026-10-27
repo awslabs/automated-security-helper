@@ -47,10 +47,34 @@ HELPER_TEXT = (
     "  printf '%s' \"${text}\"\n"
     "}\n"
 )
+#: How the definer's `run:` opens: the heredoc starts with one_line as HELPER_TEXT
+#: writes it, and with_commands_stopped and its helpers follow in the same file.
+DEFINER_OPENING = "cat > \"${RUNNER_TEMP}/ash-one-line.sh\" <<'EOF'\n" + HELPER_TEXT
+
+
+def _scan_definer_run() -> str:
+    """The definer's whole `run:` as the scan workflow writes it.
+
+    The scan job's definer is the one copy of the text (with_commands_stopped is too
+    long to pin here); every other job's definer must equal it, and the tests hold
+    its opening to HELPER_TEXT.
+    """
+    path = REPO_ROOT / ".github" / "workflows" / "run-ash-security-scan.yml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    for step in (data.get("jobs") or {}).get("ash", {}).get("steps") or []:
+        if isinstance(step, dict) and step.get("name") == DEFINER_NAME:
+            run = str(step.get("run") or "")
+            if not run.startswith(DEFINER_OPENING):
+                raise AssertionError(
+                    f"{path.name}: the {DEFINER_NAME!r} step does not open with "
+                    "HELPER_TEXT"
+                )
+            return run
+    raise AssertionError(f"{path.name}: no step named {DEFINER_NAME!r} in job ash")
+
+
 #: The definer's whole `run:`, the same in every job that has one.
-DEFINER_RUN = (
-    "cat > \"${RUNNER_TEMP}/ash-one-line.sh\" <<'EOF'\n" + HELPER_TEXT + "EOF\n"
-)
+DEFINER_RUN = _scan_definer_run()
 #: The file the definer writes under RUNNER_TEMP.
 HELPER_FILE = "ash-one-line.sh"
 #: How a step loads the helper the definer wrote.
