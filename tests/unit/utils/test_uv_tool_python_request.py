@@ -13,6 +13,7 @@ The other half of the contract matters as much: a plugin that does not override
 the hook must call the runner exactly as before, with no new argument at all.
 """
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -107,7 +108,10 @@ def test_version_probe_passes_python_and_keys_its_memo_on_it(runner):
             == "3.2.0"
         )
         cmd = mock_run.call_args[0][0]
-        assert cmd[:5] == ["uv", "tool", "run", "--python", ">=3.10,<3.14"]
+        # spawn_run resolves a bare `uv` to the absolute path of the uv it found, so
+        # the program is checked by name and the arguments after it exactly.
+        assert Path(cmd[0]).stem == "uv"
+        assert cmd[1:5] == ["tool", "run", "--python", ">=3.10,<3.14"]
         # A probe without the request is a different environment: probed again.
         runner.get_tool_version("guarddog", "guarddog==3.2.0")
         assert mock_run.call_count == 2
