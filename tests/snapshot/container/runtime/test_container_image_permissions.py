@@ -42,14 +42,17 @@ from typing import Dict, List
 
 import pytest
 
+from tests.utils.runner_state import developer_runner_env
+
 pytestmark = [pytest.mark.container_runtime]
 
 # The ``ci`` stage's tag, which every leg running this module builds with an explicit
 # ``--build-target ci``; see test_snapshot_container_runtime.py.
 IMAGE = os.environ.get("ASH_IMAGE_NAME") or "automated-security-helper:ci"
+RUNNER = os.environ.get("OCI_RUNNER") or "docker"
 RUNNER_PREFIX = [
     *shlex.split(os.environ.get("OCI_RUNNER_WRAPPER", "")),
-    os.environ.get("OCI_RUNNER") or "docker",
+    RUNNER,
 ]
 
 ROOT_OWNED = (
@@ -95,9 +98,13 @@ find /ash /.ash /deps/.semgrep /deps/.opengrep -xdev ! -type l ! -uid 0 \
 
 
 def _run_in_image(script: str, *, as_root: bool = False) -> subprocess.CompletedProcess:
+    # A podman reads its image store from XDG_DATA_HOME, which tests/conftest.py moves
+    # into the session's private home; the runner is given the developer's, where the
+    # leg built the image (tests/utils/runner_state.py).
     user = ["--user", "0:0"] if as_root else []
     return subprocess.run(  # nosec B603 - runner and image come from the CI leg
         [*RUNNER_PREFIX, "run", "--rm", *user, IMAGE, "sh", "-c", script],
+        env={**os.environ, **developer_runner_env(RUNNER)},
         capture_output=True,
         text=True,
         encoding="utf-8",

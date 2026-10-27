@@ -19,6 +19,11 @@ tag of the ``ci`` stage: every leg that runs this module builds its image with
 do not select it). ``pwsh`` must be on PATH for the PowerShell wrapper
 tests; it is on the hosted Linux runners these legs use.
 
+A podman reads its image store from XDG_DATA_HOME, and tests/conftest.py moves that into
+the session's private home, so every test here that runs the runner adds the developer's
+XDG_DATA_HOME and XDG_CONFIG_HOME to the runner's environment
+(tests/utils/runner_state.py). docker and finch are given nothing.
+
 A scan through the image prints the inner ASH's whole log first, and that log
 carries timings and tool-install chatter that differ on every run. What the user
 reads as the result is what the host prints after the container exits, so for
@@ -68,7 +73,10 @@ BAD_CONFIG = "project_name: bad\nglobal_settings:\n  severity_threshold: NOT_A_L
 
 
 def _in_image(*command: str) -> dict:
-    """Run ``command`` inside the image, with the snapshot terminal's environment."""
+    """Run ``command`` inside the image, with the snapshot terminal's environment.
+
+    The runner itself gets the developer's image store if it is podman.
+    """
     env_args = [
         arg
         for name, value in pinned_terminal_env().items()
@@ -76,6 +84,7 @@ def _in_image(*command: str) -> dict:
     ]
     result = subprocess.run(  # nosec B603 - runner and image come from the CI leg
         [*RUNNER_PREFIX, "run", "--rm", *env_args, IMAGE, *command],
+        env={**os.environ, **developer_runner_env(RUNNER)},
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -130,6 +139,18 @@ def _wide(monkeypatch):
     monkeypatch.setenv("COLUMNS", "1000")
 
 
+@pytest.fixture
+def runner_store_in_environ(monkeypatch):
+    """Give a podman that ASH starts in this process the developer's image store.
+
+    For the test that runs ``ash scan --mode container`` through ``run_cli``: ASH
+    starts the runner with this process's environment and takes no other, so the
+    variables are set here, for this test only.
+    """
+    for name, value in developer_runner_env(RUNNER).items():
+        monkeypatch.setenv(name, value)
+
+
 def test_ash_version_in_image(snapshot):
     assert _in_image("ash", "--version") == snapshot
 
@@ -140,6 +161,7 @@ def test_build_image_help_in_image(text_snapshot):
     assert result["stdout"] == text_snapshot("txt")
 
 
+@pytest.mark.usefixtures("runner_store_in_environ")
 def test_container_scan_of_the_fixture(
     run_cli, snapshot, fixture_repo, project_build_files_in_cwd
 ):
