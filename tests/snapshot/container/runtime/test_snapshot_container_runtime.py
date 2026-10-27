@@ -50,6 +50,7 @@ import pytest
 
 from tests.snapshot.support.normalize import REPO_ROOT, pinned_terminal_env
 from tests.utils.pwsh_env import QUIET_PWSH, inherited_env, scratch_home
+from tests.utils.runner_state import developer_runner_env
 
 pytestmark = [
     pytest.mark.container_runtime,
