@@ -1209,30 +1209,34 @@ def stamp_run_record(results_path: Path, record: Dict[str, Any]) -> bool:
 
     try:
         path = Path(results_path)
-        with (
-            open(path, "r", encoding="utf-8") as source,
-            open_for_atomic_write(path) as target,
-        ):
-            # In pieces of at most _STAMP_READ_LIMIT, so a long header line is
-            # copied without being held whole, and a file that is not one write()
-            # wrote is given up on without reading its SARIF line whole.
-            at_line_start = True
-            while True:
-                piece = source.readline(_STAMP_READ_LIMIT)
-                if not piece:
-                    raise _NotWritten
-                if at_line_start:
-                    if piece == _EMPTY_CHECKPOINTS_LINE:
-                        target.write(
-                            f"{json.dumps('validation_checkpoints')}: "
-                            f"{json.dumps([record])},\n"
-                        )
-                        break
-                    if piece.startswith('"sarif": '):
+        # The staging file replaces ``path`` when this block ends, and Windows will
+        # not replace a file that this process still holds open. So ``source`` is
+        # opened inside the block and closed before it ends. A file that is not
+        # there is given up on first, so the guard creates nothing for it.
+        if not path.exists() and not path.is_symlink():
+            return False
+        with open_for_atomic_write(path) as target:
+            with open(path, "r", encoding="utf-8") as source:
+                # In pieces of at most _STAMP_READ_LIMIT, so a long header line is
+                # copied without being held whole, and a file that is not one
+                # write() wrote is given up on without reading its SARIF line whole.
+                at_line_start = True
+                while True:
+                    piece = source.readline(_STAMP_READ_LIMIT)
+                    if not piece:
                         raise _NotWritten
-                target.write(piece)
-                at_line_start = piece.endswith("\n")
-            shutil.copyfileobj(source, target)
+                    if at_line_start:
+                        if piece == _EMPTY_CHECKPOINTS_LINE:
+                            target.write(
+                                f"{json.dumps('validation_checkpoints')}: "
+                                f"{json.dumps([record])},\n"
+                            )
+                            break
+                        if piece.startswith('"sarif": '):
+                            raise _NotWritten
+                    target.write(piece)
+                    at_line_start = piece.endswith("\n")
+                shutil.copyfileobj(source, target)
         return True
     except (_NotWritten, OSError, TypeError, ValueError):
         return False
