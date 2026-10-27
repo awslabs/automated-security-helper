@@ -39,7 +39,7 @@ on:
   # The 91 is derived from a census rather than being one -- see the note on the
   # required-checks job for which link in that chain was actually measured. Every job
   # figure in these notes predates the unit-test shards, which took that job from 25 legs
-  # to 200 (+175) and added the unit-coverage job (+1).
+  # to 200 (+175) and added the unit-coverage job, one leg per OS family (+4).
   #
   # Both counts are job counts, from
   # `gh api .../actions/runs/<run>/jobs --paginate --jq '.jobs[].name' | wc -l`
@@ -480,13 +480,13 @@ jobs:
   #
   # The 80% total-coverage gate cannot run per shard, since a shard covers part of the
   # package. Each shard uploads its coverage data, and the `unit-coverage` job below
-  # combines the data of one combination and applies the gate to it. A shard that did not
-  # upload makes that job fail instead of passing on a subset.
+  # combines the data of one OS family at Python 3.12 and applies the gate to it. A shard
+  # that did not upload makes that job fail instead of passing on a subset.
   #
   # Each entry of the shard axis is its own literal and carries the total it was cut for
   # (`3of8`), so no second number has to agree with the list. A shard dropped from the
-  # list is caught by unit-coverage for the combination it gates, and by
-  # tests/unit/test_unit_test_shards.py for all of them.
+  # list is caught by unit-coverage for the OS families it gates, and by
+  # tests/unit/test_unit_test_shards.py for all of the combinations.
   unit-test:
     name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})"
     runs-on: ${{ matrix.os }}
@@ -552,16 +552,21 @@ jobs:
           python-version: ${{ matrix.python-version }}
           shard: ${{ matrix.shard }}
 
-  # Applies the 80% total-coverage gate to the sharded unit-test run.
+  # Applies the 80% total-coverage gate to the sharded unit-test run, once per OS family.
   #
-  # One combination, ubuntu-latest on Python 3.12, the one that already rendered the
-  # coverage summary: it combines that combination's eight shards' data and fails below 80%.
-  # The unsharded run applied the gate in every one of the 25 combinations, so this narrows
-  # it to one. Combining needs the shards' data files to name the same source paths, which
-  # holds for one runner image and does not hold across operating systems, so the other
-  # combinations' coverage is measured and uploaded by their shards and gated nowhere.
-  # Extending the gate to them means normalizing paths before the combine, which was not
-  # done here.
+  # Each leg combines the eight shards of one runner type on Python 3.12 and fails below 80%.
+  # The unsharded run applied the gate in every one of the 25 OS and Python combinations;
+  # this keeps it for each OS family at one Python version, which is where the platform
+  # specific code paths differ. The other Python versions' coverage is measured and
+  # uploaded by their shards and gated nowhere. macos-14 has no leg of its own: it is the
+  # same architecture as macos-latest.
+  #
+  # Each leg runs on the same kind of runner as the shards it combines. Coverage data
+  # records absolute source paths, and a runner of one image has one workspace path
+  # (/home/runner/work/... on Linux, /Users/runner/work/... on macOS, D:\a\... on Windows),
+  # so the combine finds every source file where the shard recorded it and no path
+  # remapping is needed. Combining across operating systems would need it, and is not done.
+  # A path that did not match would fail `coverage report` with "No source for code".
   #
   # `!cancelled()` and not the default `success()`: when a shard fails on a test, its
   # coverage data is still uploaded, and this job should still say whether the combination
@@ -569,13 +574,17 @@ jobs:
   # to gate. tests/unit/test_required_checks_census.py requires every gated job with
   # `needs` to carry one of the two.
   unit-coverage:
-    name: unit-coverage
+    name: "unit-coverage (${{ matrix.os }})"
     needs: unit-test
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -588,18 +597,24 @@ jobs:
       - name: Install dependencies
         shell: bash
         run: uv sync
-      - name: Download the Linux Python 3.12 shard results
+      # The architecture label sits between the OS and the Python version in the artifact
+      # name and is derived by the runner, so the pattern leaves it as a wildcard; the
+      # script rebuilds the exact name from RUNNER_ARCH and checks the shards against it.
+      - name: Download this OS's Python 3.12 shard results
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: test-results-ubuntu-latest-x86_64-py3.12-shard*
+          pattern: test-results-${{ matrix.os }}-*-py3.12-shard*
           path: shard-results
       - name: Combine the shards' coverage and apply the threshold
         shell: bash
+        env:
+          MATRIX_OS: ${{ matrix.os }}
         run: |
           uv run python .github/scripts/combine-unit-coverage.py --self-test
           uv run python .github/scripts/combine-unit-coverage.py \
             --results-dir shard-results \
-            --prefix test-results-ubuntu-latest-x86_64-py3.12 \
+            --os "${MATRIX_OS}" \
+            --python-version 3.12 \
             --fail-under 80 \
             --summary "$GITHUB_STEP_SUMMARY"
 
@@ -1907,7 +1922,7 @@ jobs:
   # The 116 and the 91 below predate the unit-test shards. The job went from 25 legs to 200
   # (eight shards in each of the 25 combinations, +175), and each shard publishes its own
   # `PyTest - ...` check run, so the check-run figure grows by the same 175; unit-coverage
-  # added one job.
+  # added four jobs, one per OS family.
   #
   # The 91 is arithmetic on a measured anchor, and the chain is worth keeping because each link
   # is a different kind of claim. Run 35370310502 reported `total_count` 168 with 168 rows

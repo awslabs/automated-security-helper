@@ -342,8 +342,8 @@ In the Unified CI workflow the unit suite is split into eight shards per operati
 Python version, because one job cannot finish it inside the job timeout. A shard runs every
 eighth test file (`.github/scripts/select-test-shard.py`), measures coverage without a
 threshold and uploads its coverage data. The `unit-coverage` job applies the 80% to the
-combined data of the Linux Python 3.12 shards and fails if any shard is missing. To run one
-shard locally:
+combined data of each operating system's Python 3.12 shards (Linux x86_64, Linux arm64,
+macOS and Windows) and fails if any shard is missing. To run one shard locally:
 
 ```bash
 uv run python .github/scripts/select-test-shard.py --shard 3of8 --output test-results/shard-files.txt

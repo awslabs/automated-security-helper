@@ -18,12 +18,18 @@ per artifact, and does what the unsharded "Run PyTest" step did in one process:
 4. ``coverage report --fail-under=<threshold>``, whose exit status is this script's.
 
 The set is named by the artifact name up to the shard suffix, which the run-unit-tests
-action builds from the operating system, the architecture and the Python version.
+action builds from the operating system, the architecture and the Python version. This
+script rebuilds that name from ``--os``, ``--python-version`` and the runner's own
+``RUNNER_ARCH``, so it must run on the same kind of runner as the shards it combines.
+That is also what makes path remapping unnecessary: coverage data records absolute source
+paths, and a runner of the same image has the same workspace path, so the combine finds
+every source file where the shard recorded it. A path that did not match would make
+``coverage report`` fail with "No source for code", not pass.
 
 Usage::
 
     combine-unit-coverage.py --results-dir shard-results \\
-        --prefix test-results-ubuntu-latest-x86_64-py3.12 --fail-under 80 \\
+        --os ubuntu-latest --python-version 3.12 --fail-under 80 \\
         --summary "$GITHUB_STEP_SUMMARY"
     combine-unit-coverage.py --self-test
 
@@ -34,6 +40,7 @@ Exit codes: 0 success, 1 shards missing or malformed, 2 coverage below the thres
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -41,6 +48,20 @@ from pathlib import Path
 
 DATA_FILE = "coverage.data"
 _SHARD_SUFFIX = re.compile(r"-shard([1-9][0-9]*)of([1-9][0-9]*)$")
+
+#: GitHub's closed set of ``runner.arch`` values and the labels the run-unit-tests action
+#: puts in an artifact name. tests/unit/test_unit_test_shards.py holds the two to each other.
+ARCH_LABELS = {"X64": "x86_64", "ARM64": "arm64", "X86": "i686", "ARM": "armv7l"}
+
+
+def artifact_prefix(os_name: str, python_version: str, runner_arch: str) -> str:
+    """The artifact name a shard of this OS, Python and architecture uploads under."""
+    label = ARCH_LABELS.get(runner_arch)
+    if label is None:
+        raise ValueError(
+            f"RUNNER_ARCH is {runner_arch!r}, which is not one of {sorted(ARCH_LABELS)}"
+        )
+    return f"test-results-{os_name}-{label}-py{python_version}"
 
 
 def check_shards(names: list[str], prefix: str) -> list[str]:
@@ -104,6 +125,29 @@ def self_test() -> list[str]:
             failures.append(
                 f"{label}: expected {'problems' if should_fail else 'none'}, got {problems}"
             )
+    named = [
+        ("ubuntu-latest", "3.12", "X64", "test-results-ubuntu-latest-x86_64-py3.12"),
+        (
+            "ubuntu-24.04-arm",
+            "3.12",
+            "ARM64",
+            "test-results-ubuntu-24.04-arm-arm64-py3.12",
+        ),
+        ("macos-latest", "3.12", "ARM64", "test-results-macos-latest-arm64-py3.12"),
+        ("windows-latest", "3.12", "X64", "test-results-windows-latest-x86_64-py3.12"),
+    ]
+    for os_name, version, arch, want in named:
+        got = artifact_prefix(os_name, version, arch)
+        if got != want:
+            failures.append(
+                f"artifact_prefix({os_name}, {arch}) is {got!r}, not {want!r}"
+            )
+    try:
+        artifact_prefix("ubuntu-latest", "3.12", "RISCV")
+    except ValueError:
+        pass
+    else:
+        failures.append("an unknown RUNNER_ARCH was accepted")
     return failures
 
 
@@ -117,8 +161,9 @@ def main(argv: list[str] | None = None) -> int:
         "--results-dir", help="directory holding one subdirectory per artifact"
     )
     parser.add_argument(
-        "--prefix", help="artifact name up to, not including, -shard<i>of<n>"
+        "--os", help="the runs-on value of the shards, e.g. macos-latest"
     )
+    parser.add_argument("--python-version", help="the Python version of the shards")
     parser.add_argument(
         "--fail-under", type=float, help="minimum total coverage, percent"
     )
@@ -136,18 +181,31 @@ def main(argv: list[str] | None = None) -> int:
             print("combine-unit-coverage self-test: ok")
         return 1 if failures else 0
 
-    if not args.results_dir or not args.prefix or args.fail_under is None:
+    if (
+        not args.results_dir
+        or not args.os
+        or not args.python_version
+        or args.fail_under is None
+    ):
         # Not parser.error(): argparse exits 2 there, which is coverage's own status for
         # a run below the threshold.
         print(
-            "combine-unit-coverage: --results-dir, --prefix and --fail-under are required",
+            "combine-unit-coverage: --results-dir, --os, --python-version and "
+            "--fail-under are required",
             file=sys.stderr,
         )
         return 64
+    try:
+        prefix = artifact_prefix(
+            args.os, args.python_version, os.environ.get("RUNNER_ARCH", "")
+        )
+    except ValueError as error:
+        print(f"combine-unit-coverage: {error}", file=sys.stderr)
+        return 64
 
     results = Path(args.results_dir)
-    shard_dirs = sorted(p for p in results.glob(f"{args.prefix}-shard*") if p.is_dir())
-    problems = check_shards([p.name for p in shard_dirs], args.prefix)
+    shard_dirs = sorted(p for p in results.glob(f"{prefix}-shard*") if p.is_dir())
+    problems = check_shards([p.name for p in shard_dirs], prefix)
     data_files = []
     for shard_dir in shard_dirs:
         data = shard_dir / DATA_FILE
@@ -185,7 +243,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         if table.returncode == 0:
             with open(args.summary, "a", encoding="utf-8") as handle:
-                handle.write("## Code coverage\n\n" + table.stdout + "\n")
+                handle.write(
+                    f"## Code coverage ({args.os}, Python {args.python_version})\n\n"
+                    + table.stdout
+                    + "\n"
+                )
 
     report = _coverage(
         "report", f"--data-file={combined}", f"--fail-under={args.fail_under:g}"
