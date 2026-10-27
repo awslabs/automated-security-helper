@@ -16,7 +16,7 @@ global_settings:
     - path: pyproject.toml
       rule_id: API_KEY_OR_SECRET
       reason: "False positive — hatch build config paths contain strings that match secret patterns"
-    # === ferret-scan API_KEY_OR_SECRET: unquoted-assignment false positives ===
+    # === ferret-scan API_KEY_OR_SECRET, unquoted-assignment false positives ===
     # ferret-scan v2.3.3 added unquoted keyword-assignment detection to the SECRETS
     # validator, so an ordinary identifier whose NAME is a secret keyword (session,
     # token, secret, ...) sitting next to an assignment now reads as API_KEY_OR_SECRET
@@ -871,7 +871,7 @@ global_settings:
         rather than spelled out, because spelling it contiguously makes this
         reason itself a keyword finding -- the same trap the hex entry in
         .ash/.ash.yaml records, and the reason this file previously failed the
-        Windows scan. Its value is not a credential: mcpEnvironment in
+        Windows scan. Its value is not a credential. mcpEnvironment in
         deploy/cdk/lib/ash-runtime-config.ts sets it from the auth secret's ARN
         behind an Fn::If, and the entrypoint generated
         by deploy/cdk/lib/ash-container-scripts.ts calls GetSecretValue on that ARN
@@ -1048,6 +1048,53 @@ global_settings:
         confirmed from the SPDX license page. The package is minimatch 10.2.5,
         vendored under aws-cdk-lib; the separate top-level minimatch 3.1.5 is ISC and
         is covered by the entry above.
+    # === ferret-scan hits in documents, rendered templates and test files ===
+    # One entry per rule and file, never a directory. The reasons describe the
+    # pattern instead of quoting a line, because a quoted line would make this file
+    # trip the same rule.
+    - rule_id: API_KEY_OR_SECRET
+      path: automated_security_helper/plugin_modules/ash_ferret_plugins/spec/2026-09-13-ferret-scan-plugin-v2-update-analysis.md
+      reason: >-
+        False positive. These design notes quote, in prose, the type annotation that
+        causes this false positive in ferret-scan.
+    - rule_id: API_KEY_OR_SECRET
+      path: docs/content/docs/troubleshooting.md
+      reason: >-
+        False positive. A documentation example that sets an environment variable
+        named for a scanner's app credential to a placeholder phrase. No value is held.
+    - rule_id: API_KEY_OR_SECRET
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        False positive. The flagged lines are CloudFormation logical ids and references
+        to them (a hash-suffixed id for the MCP auth header resource). The template holds
+        names, not values.
+    - rule_id: API_KEY_OR_SECRET
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        False positive. The flagged lines are CloudFormation logical ids and references
+        to them (a hash-suffixed id for the MCP auth header resource). The template holds
+        names, not values.
+    - rule_id: API_KEY_OR_SECRET
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        False positive. The flagged lines are CloudFormation logical ids and references
+        to them (a hash-suffixed id for the MCP auth header resource). The template holds
+        names, not values.
+    - rule_id: API_KEY_OR_SECRET
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        False positive. The flagged lines are CloudFormation logical ids and references
+        to them (a hash-suffixed id for the MCP auth header resource, route table ids).
+        The template holds names, not values.
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/integration/codecommit_gate_regression/assert_case.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/config/test_config_alias_round_trip.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/utils/test_secret_masking.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
   ignore_paths:
     - path: "**/.venv/**"
       reason: Virtual environment, not committed, only 3p content
