@@ -40,7 +40,7 @@ from rich.text import Text
 # module for no behavior change -- and tests/unit/cli/mcp/test_stdout_jsonrpc_safety.py
 # reasons about this exact import form. It is utils/console.py's print, not rich's:
 # its console checks each line it writes off a terminal, so none reads as a CI command.
-from automated_security_helper.utils.console import echo, global_console
+from automated_security_helper.utils.console import echo, global_console, secho
 from automated_security_helper.utils.console import print  # noqa: A004
 from automated_security_helper.utils.terminal_text import (
     as_written,
@@ -3948,7 +3948,7 @@ def _refuse_symlinked_output_dir(opts: ScanOptions) -> None:
     if opts.mode == RunMode.container:
         refusal = container_output_dir_refusal(opts.source_dir, opts.output_dir)
         if refusal is not None:
-            typer.secho(str(refusal), fg=typer.colors.RED)
+            secho(str(refusal), fg=typer.colors.RED)
             raise OutputDirRefusedExit(refusal.found, str(refusal)) from refusal
     from automated_security_helper.utils.output_dir_links import (
         OutputDirLinkRefused,
@@ -4969,7 +4969,7 @@ def _run_container_mode(
             _workspace_relative_file(opts),
         )
         if refusal is not None:
-            typer.secho(refusal, fg=typer.colors.RED)
+            secho(refusal, fg=typer.colors.RED)
             sys.exit(3)
         # The build inputs too: IDs that are not numbers, a revision the build cannot
         # take, and a non-root build as UID or GID 0, which is the default outcome on
@@ -4996,7 +4996,7 @@ def _run_container_mode(
                 host_gid=host_ids[1],
             )
             if build_refusal is not None:
-                typer.secho(build_refusal[1], fg=typer.colors.RED)
+                secho(build_refusal[1], fg=typer.colors.RED)
                 sys.exit(build_refusal[0])
         # Only when a scan is actually being asked for. --no-run builds an image and
         # stops; it never claims to have scanned anything, so it has no business

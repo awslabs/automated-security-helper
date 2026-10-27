@@ -537,7 +537,7 @@ def get_genai_guide(
         replace_without_following(output_file, guide_content)
     except OutputDirLinkRefused as refused:
         # The family's base, a symlink or a file another name refers to alike.
-        typer.echo(f"Error: {refused}", err=True)
+        echo(f"Error: {refused}", err=True)
         raise typer.Exit(1)
 
     # ASCII only: the file is already written, and a console that cannot encode a

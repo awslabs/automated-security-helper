@@ -4953,7 +4953,7 @@ def run_ash_container(
     )
     if build_refusal is not None:
         code, message = build_refusal
-        typer.secho(message, fg=typer.colors.RED)
+        secho(message, fg=typer.colors.RED)
         return _not_started(
             create_completed_process(
                 args=[], returncode=code, stdout="", stderr=message

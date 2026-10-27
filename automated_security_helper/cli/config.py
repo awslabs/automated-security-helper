@@ -163,7 +163,9 @@ def _config_path_or_discovered(config: str | None, source_dir: Path) -> Path | N
     try:
         return find_config_file(source_dir)
     except ASHConfigValidationError as e:
-        secho(f"❌ {e}", fg=typer.colors.RED)
+        # Labeled as `ash plugin list` labels the same refusal, and one line:
+        # the refusal names the caller's path.
+        secho(shown_on_one_line(f"❌ Invalid configuration: {e}"), fg=typer.colors.RED)
         raise typer.Exit(INVALID_CONFIG_EXIT_CODE)
 
 
@@ -706,6 +708,16 @@ def get(
         show_progress=False,
         use_color=color,
     )
+    if config_path is not None and not config_path.strip():
+        # A blank path argument names no file; discovering one in its place
+        # would print a configuration the caller did not name. (An empty
+        # --config or ASH_CONFIG is unset, as click treats it.)
+        secho(
+            "❌ Invalid configuration: the config file path is empty. Name a "
+            "config file, or omit the path to use the one found in the directory.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(INVALID_CONFIG_EXIT_CODE)
     config_path = _named_config(ctx, config_path, config)
     if config_path is not None and not Path(config_path).exists():
         _refuse_missing_config(config_path)
@@ -1687,10 +1699,13 @@ def wizard(
         raise typer.Exit(1)
     if os.path.lexists(config_path) and not is_regular_file(config_path):
         # A link to nothing, a directory: not "no config yet", and writing the
-        # answers would go through the link to wherever it points.
-        typer.secho(
-            f"Invalid configuration: {config_path} exists but is not a regular "
-            "file, so the wizard will not write it.",
+        # answers would pass through the link to wherever it points. One line:
+        # the path is the caller's text.
+        secho(
+            shown_on_one_line(
+                f"Invalid configuration: {config_path} exists but is not a regular "
+                "file, so the wizard will not write it."
+            ),
             fg=typer.colors.RED,
         )
         raise typer.Exit(3)
