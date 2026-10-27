@@ -260,7 +260,7 @@ class TestARunReleasesWhatItsObjectsHeld:
         lingering: list = []
         seen_during: list = []
 
-        def scan(opts, _start):
+        def scan(opts, _start, _outer_load=None, _reads=None):
             # A context the scan leaves behind, as a reference cycle would.
             lingering.append(_context(tmp_path, Path(opts.output_dir)))
             seen_during.append(set(fs_guard.registered_roots()))
