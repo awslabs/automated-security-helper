@@ -139,7 +139,11 @@ def test_upload_reads_what_the_scan_writes(scan, upload):
     (by_name,) = [s for s in downloads if "name" in s["with"]]
     (by_id,) = [s for s in downloads if "artifact-ids" in s["with"]]
     assert len(downloads) == 2
-    assert by_name["with"]["name"] == artifact_step["with"]["name"]
+    # Both name the artifact-name input: the scan job through its input check's
+    # output (every string input is read that way there), the upload workflow as
+    # its own input.
+    assert artifact_step["with"]["name"] == "${{ steps.inputs.outputs.artifact_name }}"
+    assert by_name["with"]["name"] == "${{ inputs.artifact-name }}"
     assert by_id["with"]["artifact-ids"] == "${{ inputs.artifact-id }}"
     # The artifact root is the scan's output-dir, so the report sits at the same
     # relative path the scan workflow's own upload step reads. The step uploads two

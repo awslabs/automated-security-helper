@@ -93,7 +93,9 @@ def test_the_scan_replaces_an_earlier_attempts_artifact_and_hands_out_its_id():
     job = scan["jobs"]["ash"]
     (upload,) = _steps_using(job, UPLOAD_ARTIFACT)
 
-    assert upload["with"]["name"] == "${{ inputs.artifact-name }}"
+    # The artifact-name input, as the scan job's input check wrote it: every string
+    # input is read as the check's output there, never as given.
+    assert upload["with"]["name"] == "${{ steps.inputs.outputs.artifact_name }}"
     assert upload.get("id"), "the upload step needs an id for its artifact-id output"
     assert job["outputs"]["artifact-id"] == (
         f"${{{{ steps.{upload['id']}.outputs.artifact-id }}}}"
