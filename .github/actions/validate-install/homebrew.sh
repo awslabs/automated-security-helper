@@ -131,9 +131,31 @@ say "precommit-mode scan: exit 0"
 # pins this list.
 rc=0
 (cd "$clean" && "$ash_bin" scan --output-dir "$WORK/out-default") || rc=$?
+
+# ASH does not print a scanner's own stderr when it refuses the scanner's result, so a
+# scanner in ERROR leaves the job log with a summary and no cause. This prints what the
+# scanner wrote, and what the host knew about memory, for the run that failed.
+scanner_diagnostics() {
+  echo "::group::scanner logs under $WORK/out-default"
+  for log in "$WORK"/out-default/scanners/*/*/*.stderr.log; do
+    [ -s "$log" ] || continue
+    printf -- '-- %s (last 80 lines)\n' "$log"
+    tail -n 80 "$log"
+  done
+  echo "::endgroup::"
+  echo "::group::host memory and kernel kill messages"
+  free -m || true
+  ulimit -a || true
+  (sudo -n dmesg 2>/dev/null || dmesg 2>/dev/null) | grep -i -E 'out of memory|oom|killed process|segfault|SIGSYS|audit.*seccomp' | tail -n 20 || true
+  echo "::endgroup::"
+}
+
 missing="$("$PYTHON" "$REPO/.github/actions/validate-install/check-scanner-statuses.py" \
   "$WORK/out-default/ash_aggregated_results.json" --may-be-missing cfn-nag,gitleaks,grype,opengrep,syft,trivy)" ||
-  fail "a default scan recorded a scanner the formula provides for as neither PASSED, FAILED nor SKIPPED (see above)"
+  {
+    scanner_diagnostics
+    fail "a default scan recorded a scanner the formula provides for as neither PASSED, FAILED nor SKIPPED (see above)"
+  }
 expected=0
 [ -z "$missing" ] || expected=1
 [ "$rc" -eq "$expected" ] || fail "a default scan of a clean directory exited $rc with MISSING: ${missing:-none}; expected $expected"
