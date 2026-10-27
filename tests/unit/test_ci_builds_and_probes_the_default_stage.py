@@ -81,7 +81,8 @@ def test_a_job_builds_the_default_stage_and_probes_it():
     assert build < probe
     probe_step = job["steps"][probe]
     assert "--run-container-snapshots" in _words(probe_step)
-    assert (probe_step.get("env") or {}).get("OCI_RUNNER") == "docker"
+    runner = (probe_step.get("env") or {}).get("OCI_RUNNER")
+    assert runner == "docker", sorted(probe_step.get("env") or {})
 
 
 def test_it_runs_on_pull_requests_and_answers_to_the_gate():

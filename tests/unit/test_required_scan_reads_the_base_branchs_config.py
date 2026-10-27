@@ -680,7 +680,7 @@ class TestOtherScansKeepTheCheckoutsConfig:
         assert run is None
         for name, call in _ash_invocations(repo, context, inputs, steps):
             assert _config_argument(call["argv"]) is None, (name, call["argv"])
-            assert call["env"]["ASH_CONFIG"] in (None, ""), (name, call["env"])
+            assert call["env"]["ASH_CONFIG"] in (None, ""), (name, sorted(call["env"]))
 
     def test_workflow_dispatch_reads_the_dispatched_refs_config(self):
         """No config-ref, and not the string `false` an `a && b` would render."""

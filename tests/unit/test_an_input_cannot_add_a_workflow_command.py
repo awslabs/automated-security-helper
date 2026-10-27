@@ -430,7 +430,8 @@ class TestTheCheckedValueIsTheValueUsed:
         _, job = _scan_workflow()
         (step,) = [s for s in job["steps"] if s.get("name") == step_name]
         expected = f"${{{{ steps.{ga.INPUT_CHECK_STEP_ID}.outputs.{output} }}}}"
-        assert (step.get("env") or {}).get(variable) == expected, step.get("env")
+        used = (step.get("env") or {}).get(variable)
+        assert used == expected, sorted(step.get("env") or {})
 
     def test_the_report_job_reads_the_scan_jobs_checked_outputs(self):
         workflow, job = _scan_workflow()
