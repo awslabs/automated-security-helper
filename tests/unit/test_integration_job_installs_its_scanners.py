@@ -35,6 +35,7 @@ Whether PyPI serves the install on the runner; the step fails the job if it does
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from typing import Any
 
@@ -68,12 +69,17 @@ def _job() -> tuple[ga.Workflow, dict[str, Any]]:
     return workflow, workflow.jobs[JOB_ID]
 
 
+#: `tests/integration` as a pytest argument of its own. The job's separate docs
+#: examples step runs `tests/integration/docs`, which is not this path.
+_SUITE_PATH = re.compile(r"tests/integration(?=[\s\\]|$)")
+
+
 def _suite_index(steps: list[dict[str, Any]]) -> int:
     found = [
         i
         for i, step in enumerate(steps)
         if "pytest" in str(step.get("run") or "")
-        and "tests/integration" in str(step.get("run") or "")
+        and _SUITE_PATH.search(str(step.get("run") or ""))
     ]
     assert len(found) == 1, "expected one step that runs the integration suite"
     return found[0]
