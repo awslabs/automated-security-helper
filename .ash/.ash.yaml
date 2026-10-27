@@ -109,18 +109,19 @@ global_settings:
     # The hex-high-entropy heuristic fires on 40- and 32-hex fixture constants.
     # Nearly all are the deliberately sequential "0123456789abcdef..." (zero
     # entropy to a reader, high entropy to the detector); two are a sample git
-    # commit id. Per-file entries, each naming the flagged value, per the bandit
-    # section's one-path precedent.
+    # commit id. Per-file entries, each describing the flagged value, per the bandit
+    # section's one-path precedent. The reasons below describe a flagged value
+    # where quoting it would make this file match the same rule it suppresses.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: deploy/cdk-constructs/test/git-ref.test.ts
       reason: >-
-        'eddfeecf9adb672023ab7998688d54199b0a0441' is a sample git commit id the
-        GitRef test parses; a commit id is a public content address, not a secret.
+        The flagged value is a sample 40-hex git commit id that the GitRef test
+        parses; a commit id is a public content address, not a secret. The reason
+        does not repeat the value, so this file does not flag itself.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/unit/deploy/test_deploy_constructs_ash_ref_is_checked.py
       reason: >-
-        The same sample commit id as git-ref.test.ts
-        ("eddfeecf9adb672023ab7998688d54199b0a0441"), fed to the ref check under
+        The same sample commit id as git-ref.test.ts, fed to the ref check under
         test. A public content address, not a secret.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/integration/test_install_hints_on_python310.py
@@ -198,32 +199,36 @@ global_settings:
     - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
       path: tests/integration/docs/ci_runners/provenance.py
       reason: >-
-        The flagged string is the repository path
-        "automated_security_helper/assets/ASH_INSTALLED_REVISION", a filename
-        whose character mix trips the base64 heuristic. A path, not a secret.
+        The flagged string is the repository path of the installed-revision asset
+        under automated_security_helper/assets/, a filename whose character mix
+        trips the base64 heuristic. A path, not a secret. The reason does not
+        quote the path, so this file does not flag itself.
     - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
       path: tests/unit/test_docs_ci_runner_provenance.py
       reason: >-
-        The same flagged string as provenance.py above: the repository path
-        "automated_security_helper/assets/ASH_INSTALLED_REVISION".
+        The same flagged string as provenance.py above: the repository path of
+        the installed-revision asset.
     - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
       path: tests/unit/cli/mcp/test_set_source_git_host_allowlist.py
       reason: >-
-        "https://user:pw@git.example.com:8443/r.git" is a parametrized fixture URL
-        on a reserved example domain, exercising how the host allowlist parses
-        userinfo. Not a credential.
+        The flagged value is a parametrized fixture https URL on a reserved
+        example domain with a port and a placeholder user and password in its
+        userinfo, exercising how the host allowlist parses userinfo. Not a
+        credential. The reason describes the URL instead of quoting it, so this
+        file does not flag itself.
     - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
       path: tests/unit/cli/mcp/test_set_source_git_host_is_the_one_ssh_dials.py
       reason: >-
-        "ssh://other.example:2222%2f@allowed.example/repo" is an adversarial
-        fixture URL built to prove the host check is not confused by an encoded
-        slash in userinfo. Not a credential.
+        The flagged value is an adversarial fixture ssh URL, on a reserved example
+        domain, built to prove the host check is not confused by an encoded slash
+        in the userinfo. Not a credential.
     - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
       path: tests/unit/utils/test_ash_install.py
       reason: >-
-        "https://user:token@github.example/ash.git" is the input of the
-        URL-redaction parametrization -- the test asserts the userinfo is STRIPPED
-        to "https://github.example/ash.git". The literal exists to prove redaction.
+        The flagged value is a fixture https URL with a placeholder user and token
+        in its userinfo: the input of the URL-redaction parametrization. The test
+        asserts the userinfo is STRIPPED from the URL, so the literal exists to
+        prove redaction.
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/scanner_names.py
       reason: >-
@@ -263,9 +268,12 @@ global_settings:
     - rule_id: SECRET-SECRET-KEYWORD
       path: tests/unit/converters/test_archive_plain_gzip_and_lfs_pointers.py
       reason: >-
-        "password = 'hunter{n}'" and '{"api_key": "placeholder"}' are planted
-        archive member contents the converter tests round-trip so a later scan
-        stage has something to find. Planted fixtures, not credentials.
+        The flagged lines are planted archive member contents: a password-named
+        assignment with a numbered placeholder value and a JSON object with an
+        api-key-named field holding a placeholder. The converter tests round-trip
+        them so a later scan stage has something to find. Planted fixtures, not
+        credentials. The reason describes them instead of quoting them, so this
+        file does not flag itself.
     - rule_id: SECRET-SECRET-KEYWORD
       path: tests/unit/deploy/test_deploy_mcp_entrypoint_secret_off_the_command_line.py
       reason: >-
