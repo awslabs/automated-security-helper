@@ -22,12 +22,14 @@ import time
 
 import pytest
 
-from automated_security_helper.utils.sandbox import landlock_exec
-from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, KillAfter
+# Before the import: landlock_exec calls ctypes.CDLL(None) when it is imported,
+# which raises TypeError on Windows, so a marker applied after the import never
+# gets to skip the module there.
+if sys.platform != "linux":
+    pytest.skip("the wrapper uses prctl and /proc, Linux only", allow_module_level=True)
 
-pytestmark = pytest.mark.skipif(
-    sys.platform != "linux", reason="the wrapper uses prctl and /proc, Linux only"
-)
+from automated_security_helper.utils.sandbox import landlock_exec  # noqa: E402
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, KillAfter  # noqa: E402
 
 #: The shortest grace after SIGTERM the wrapper is to fit inside.
 GRACE_SECONDS = 0.5
