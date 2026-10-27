@@ -574,18 +574,6 @@ global_settings:
       reason: >-
         False positive. A module constant named for a fake client session, the
         same shape as the entries for the other MCP tests above.
-    - path: tests/unit/plugin_modules/ash_builtin/test_detect_secrets_scanner_behavior.py
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. The flagged constant is a made-up 40-character git commit
-        id used as a fixture revision, the same shape as the entries above. The
-        line already carries the detect-secrets allowlist marker.
-    - path: tests/unit/utils/test_ash_install.py
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. The flagged constant is a made-up 40-character git commit
-        id used as a fixture revision. The line already carries the detect-secrets
-        allowlist marker.
     - path: tests/unit/test_pinned_tool_github_lookup.py
       rule_id: API_KEY_OR_SECRET
       reason: >-
@@ -1684,19 +1672,6 @@ global_settings:
         prove redaction. The reason does not repeat the assignment, so this file
         does not flag itself.
     # === bandit in tests and one log line (kept in step with .ash/.ash.yaml) ===
-    - rule_id: B103
-      path: tests/unit/assets/test_install_pinned_tool.py
-      reason: >-
-        os.lchmod(link, 0o777) builds the hazard under test: a group/world-writable
-        SYMLINK inside a tool bundle, which the installer must refuse. The test
-        skips itself when the platform cannot produce that mode. The permissive
-        mask is the fixture, not a default.
-    - rule_id: B103
-      path: tests/unit/utils/test_tool_config_dir.py
-      reason: >-
-        os.chmod(tree.outside, 0o777) makes the shared directory world-writable so
-        the test can assert write_tool_config REFUSES to write there (pytest.raises
-        OSError matching TMPDIR). The unsafe mode is the input of a refusal test.
     - rule_id: B104
       path: automated_security_helper/cli/mcp/__init__.py
       reason: >-
@@ -1705,29 +1680,6 @@ global_settings:
         mirrors the display default uvicorn itself logs; the socket was bound
         elsewhere, where tests/unit/cli/test_mcp_non_loopback_bind_is_refused.py
         asserts a non-loopback bind is refused without the explicit opt-in.
-    - rule_id: B104
-      path: tests/unit/cli/test_mcp_loopback_accepts_only_its_own_origin.py
-      reason: >-
-        Tests OF host binding: "0.0.0.0" is the value under test in origin-check
-        assertions, not a careless default.
-    - rule_id: B104
-      path: tests/unit/cli/test_mcp_non_loopback_bind_is_refused.py
-      reason: >-
-        The file exists to assert a non-loopback bind is REFUSED;
-        NON_LOOPBACK_HOSTS lists "0.0.0.0" and friends as the refused inputs. A
-        refusal test cannot avoid naming the address it refuses.
-    - rule_id: B104
-      path: tests/unit/cli/test_mcp_upstream_host_check.py
-      reason: >-
-        The same disposition: "0.0.0.0" is the fixture host in assertions about
-        the upstream Host-header check. The address is the value under test.
-    - rule_id: B301
-      path: tests/unit/utils/test_link_refusal_family.py
-      reason: >-
-        pickle.loads(pickle.dumps(refusal)) round-trips an exception THIS test
-        just built, asserting the refusal family survives the worker-to-parent
-        handoff whole. The bytes never leave the process; nothing untrusted is
-        loaded.
     - rule_id: B314
       path: tests/integration/docs/ci_runners/reports.py
       reason: >-
