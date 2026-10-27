@@ -142,9 +142,7 @@ def _run(
             scanner_class, "_run_subprocess", autospec=True, side_effect=answered
         ),
         patch.object(scanner_class, "content_databases_in_use", return_value=[]),
-        patch.object(
-            scanner_class, "resolve_deferred_tool_version", return_value=None
-        ),
+        patch.object(scanner_class, "resolve_deferred_tool_version", return_value=None),
     ):
         scanner = scanner_class(context=context)
         executor = ScannerExecutor(

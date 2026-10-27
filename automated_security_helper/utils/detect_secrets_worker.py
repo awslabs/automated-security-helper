@@ -130,6 +130,7 @@ def _scan_files(collection: Any, paths: List[str]) -> None:
     for secret in scan.scan_file(os.path.join(collection.root, filename)):
         collection[filename].add(secret)
 
+
 #: Set to "1" in the worker's environment when requests are refused; see above.
 REFUSE_HTTP_ENV = "ASH_DETECT_SECRETS_REFUSE_HTTP"
 
