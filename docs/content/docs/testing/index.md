@@ -334,6 +334,18 @@ ASH_REQUIRE_CDK_EXTRA=1 ASH_REQUIRE_SYMBOLS_EXTRA=1 uv run pytest \
 The threshold is for the full suite. A partial run with `--cov-fail-under` fails on the code
 it did not exercise.
 
+In the Unified CI workflow the unit suite is split into eight shards per operating system and
+Python version, because one job cannot finish it inside the job timeout. A shard runs every
+eighth test file (`.github/scripts/select-test-shard.py`), measures coverage without a
+threshold and uploads its coverage data. The `unit-coverage` job applies the 80% to the
+combined data of the Linux Python 3.12 shards and fails if any shard is missing. To run one
+shard locally:
+
+```bash
+uv run python .github/scripts/select-test-shard.py --shard 3of8 --output test-results/shard-files.txt
+uv run pytest @test-results/shard-files.txt --no-cov
+```
+
 ## Parallel Test Execution
 
 ### Configuration

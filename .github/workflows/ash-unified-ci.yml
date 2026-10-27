@@ -548,6 +548,7 @@ jobs:
         # the name on an artifact is a statement the runner made about itself. Removing the
         # include changes no leg count: every entry matched an existing `os` axis value and only
         # added a key, so the matrix was 25 cells with it and is 25 cells without it.
+        # The shard axis then multiplies each of those 25 by eight.
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
