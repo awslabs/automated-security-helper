@@ -154,6 +154,93 @@ global_settings:
         Nine digits is the shape the SSN detector looks for; each is a size in
         bytes, and the converter's source sets the per-member default as
         256 * 1024 * 1024.
+    # === ferret-scan API_KEY_OR_SECRET: prose, templates, scanner-name tables and fixtures ===
+    # Same detector and same cause as the identifier blocks above. Each entry is
+    # scoped to one file; none uses a directory glob, so a hardcoded credential
+    # added to any other file is still reported. Templates carry no line numbers
+    # because cdk synth regenerates them. Reasons describe the flagged text instead
+    # of quoting it, so this file does not flag itself.
+    - path: CHANGELOG.md
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. The flagged line is changelog prose explaining that a scanner
+        dependency check contacts AWS with the host's credentials. It names the
+        concept and holds no credential value.
+    - path: automated_security_helper/plugin_modules/ash_ferret_plugins/spec/2026-09-13-ferret-scan-plugin-v2-update-analysis.md
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. Two lines of this design note quote, as prose examples, the
+        typed model field that triggered the original ferret-scan incident: a field
+        named for a session object in a generated schema. The note documents the
+        false positive and holds no credential value.
+    - path: deploy/cdk/templates/AshAgentCore.template.json
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. Three lines are the CloudFormation logical id of the MCP auth
+        header secret resource, once as the resource declaration and twice as Ref
+        expressions in an IAM policy and a task definition. A logical id is a name;
+        the secret value is created and resolved at deploy time and is never written
+        to the template.
+    - path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. The flagged line is the CloudFormation logical id that
+        declares the MCP auth header secret resource. A name, not a value; the
+        secret value is created at deploy time.
+    - path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. The flagged line is the CloudFormation logical id that
+        declares the MCP auth header secret resource. A name, not a value; the
+        secret value is created at deploy time.
+    - path: tests/integration/codecommit_gate_regression/assert_case.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. The flagged line is a key in the expected scanner-status
+        table: the name of the secrets scanner mapped to an ERROR status and a
+        dependencies flag. A scanner name, not a credential.
+    - path: tests/unit/cli/mcp/test_clone_limits_and_delivery_interlocks.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. Same shape as test_scan_directory_start_failures.py: a
+        module constant named for a fake MCP session.
+    - path: tests/unit/cli/mcp/test_delivered_config_env.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. Same shape as test_scan_directory_start_failures.py: a
+        module constant named for a fake client session.
+    - path: tests/unit/config/test_config_alias_round_trip.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. The flagged line is a key in a config dictionary under test:
+        the name of the secrets scanner mapped to an options object that sets a
+        severity threshold. A scanner name and a severity word, not a credential.
+    - path: tests/unit/plugin_modules/ash_builtin/test_detect_secrets_scanner_behavior.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. The flagged constant is a sequential placeholder 40-hex git
+        commit id used as a fixture revision; it names no real commit. The line
+        already carries the inline marker detect-secrets honors; ferret-scan does
+        not, hence this entry.
+    - path: tests/unit/test_pinned_tool_github_lookup.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. The flagged constant is a made-up token string whose text
+        spells out that it belongs to a unit test. The comment above it says the
+        test only asserts the value is absent from the output; it unlocks nothing.
+    - path: tests/unit/utils/test_ash_install.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. The flagged constant is a sequential placeholder 40-hex git
+        commit id used as a fixture revision; it names no real commit.
+    - path: tests/unit/utils/test_secret_masking.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. Five lines are inputs to the secret-masking helpers: a
+        made-up password phrase and the placeholder access key published in AWS's
+        own documentation, in a bandit-message wrapper or on its own. The tests
+        assert these values are masked in the output, so the literals exist to prove
+        redaction. No real credential; each line is already marked for detect-secrets.
     # === ferret-scan API_KEY_OR_SECRET: pinned release checksums ===
     # Separate from the block above and for a different reason. Those are identifiers
     # whose NAMES match a secret keyword; this one is a table of values that genuinely
