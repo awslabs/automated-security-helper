@@ -25,6 +25,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -74,11 +75,22 @@ def git_env(tmp_path, monkeypatch) -> Dict[str, Any]:
     return {"env": calls[0]["env"], "cmd": calls[0]["cmd"], "server_home": server_home}
 
 
-def test_ssh_offers_no_identity_and_checks_host_keys_strictly(git_env) -> None:
+def test_ssh_offers_no_identity_and_checks_host_keys_strictly(
+    git_env, tmp_path
+) -> None:
     ssh = shutil.which("ssh")
     assert ssh, "ssh is required to read the settings ssh would use"
     command = shlex.split(git_env["env"]["GIT_SSH_COMMAND"])
     assert Path(command[0]).name == "ssh"
+    nothing = os.devnull
+    if sys.platform == "win32":
+        # ssh on Windows does not read "nul" as a file, so `-G` printed no
+        # settings at all. Ask it with an empty file where the command names
+        # the null device, and expect that file back.
+        empty = tmp_path / "empty-ssh-file"
+        empty.write_text("", encoding="utf-8")
+        nothing = str(empty)
+        command = [part.replace(os.devnull, nothing) for part in command]
 
     printed = _REAL_RUN(
         [ssh, *command[1:], "-G", "git.example.invalid"],
@@ -95,7 +107,7 @@ def test_ssh_offers_no_identity_and_checks_host_keys_strictly(git_env) -> None:
     assert settings.get("identityfile") == ["none"], settings.get("identityfile")
     assert settings.get("identityagent") == ["none"]
     assert settings.get("stricthostkeychecking") == ["true"]
-    assert settings.get("userknownhostsfile") == [os.devnull]
+    assert settings.get("userknownhostsfile") == [nothing]
     assert settings.get("batchmode") == ["yes"]
     assert "proxycommand" not in settings and "proxyjump" not in settings
 
