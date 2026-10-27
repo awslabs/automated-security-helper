@@ -2223,7 +2223,7 @@ def get_changed_files(
 
     git = _git_executable()
     if git is None:
-        ASH_LOGGER.warning("git was not found on PATH; falling back to full scan")
+        ASH_LOGGER.warning(f"{GIT_NOT_INSTALLED}; reporting every finding")
         return None
     try:
         # -z and core.quotepath=false, because git otherwise quotes a name holding a
