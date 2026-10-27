@@ -87,6 +87,7 @@ from automated_security_helper.utils.output_dir_links import (
     OUTPUT_WORKING_DIRS,
     OutputDirLinkRefused,
     ignore_output_dir_in_git,
+    is_link,
     refuse_linked_output_dir,
 )
 from automated_security_helper.utils.report_path_links import (
@@ -571,6 +572,19 @@ class ASHScanOrchestrator(BaseModel):
         # nothing. Every step after it asks git or changes the output directory, so
         # a command line ASH refuses does neither: it starts no `git ls-files`
         # for the committed-files check and deletes no previous results.
+        #
+        # One exception, an output directory that is itself a link: the engine's
+        # context registers the directory it writes below and refuses a link there
+        # (base/plugin_context.py, _guard_output_dir), as a pydantic
+        # ValidationError, which no entry point reads as a refusal. Such a run is
+        # refused whatever the engine would say, so for it the committed check and
+        # the link refusal run first, in that order: a link the repository
+        # committed is refused as the committed entry it is, with exit 3 and its
+        # path, as the CLI and the MCP tools refuse it (core/committed_output.py),
+        # and one git does not track as a link (_refuse_linked_output_dir).
+        if is_link(self.output_dir):
+            self._refuse_committed_results_paths()
+            self._refuse_linked_output_dir()
         self._build_engine(config)
         self._refuse_committed_results_paths()
 
