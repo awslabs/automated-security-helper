@@ -71,6 +71,17 @@ def gate():
     return module
 
 
+def _own_repository(root: Path) -> Path:
+    """Make ``root`` a git repository of its own and return it.
+
+    The gate lists its docs with git (``collect_md_files``), so a planted tree has to
+    be one for the listing to read it. Nothing is staged or committed: the listing
+    includes untracked files that are not ignored.
+    """
+    subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+    return root
+
+
 # Registered check name -> the test here that proves it can fail.
 NON_VACUITY_COVERAGE = {
     "Reporter list in docs matches code": "test_reporter_check_can_fail_in_both_directions",
@@ -721,6 +732,7 @@ def test_a_checkout_under_an_excluded_directory_name_still_collects_its_docs(
     for rel, text in _make.items():
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
         (root / rel).write_text(text, encoding="utf-8")
+    _own_repository(root)
     monkeypatch.setattr(gate, "REPO_ROOT", root)
     files = {path.relative_to(root).as_posix() for path in gate.collect_md_files()}
     assert files == {"README.md", "docs/page.md"}
@@ -746,6 +758,7 @@ def test_an_empty_corpus_is_a_failure_not_a_pass(gate, tmp_path, monkeypatch):
     """Zero files makes every corpus check vacuous; it must fail, loudly."""
     root = tmp_path / "no-docs"
     (root / "src").mkdir(parents=True)
+    _own_repository(root)
     monkeypatch.setattr(gate, "REPO_ROOT", root)
     with pytest.raises(RuntimeError, match="no markdown"):
         gate.collect_md_files()
@@ -771,6 +784,7 @@ def test_the_md_corpus_excludes_generated_interface_artifacts(
         (directory / "index.md.template").write_text(
             "# Generated copy without a Markdown sibling\n", encoding="utf-8"
         )
+    _own_repository(tmp_path)
     monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
 
     assert {
