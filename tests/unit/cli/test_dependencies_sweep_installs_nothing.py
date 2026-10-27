@@ -29,6 +29,7 @@ from typing import ClassVar
 
 import pytest
 
+from automated_security_helper.base.uv_tool_mixin import deferred_tool_version_probes
 from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
     BanditScanner,
 )
@@ -70,13 +71,20 @@ def test_the_sweeps_check_installs_nothing(sandbox, tmp_path):
     A flagged plugin with a real install path, under stand-ins that record
     every call: the sweep's resolution answers False for the absent tool, with
     zero installs and zero downloads recorded.
+
+    Constructed inside ``deferred_tool_version_probes``, the scan phase's shape:
+    bandit probes its version while constructed, with ``uv tool run --from
+    <spec> bandit --version``, and constructed bare that probe runs online and
+    is the one download the recorder would see. Deferred, the check runs it
+    itself (``resolve_deferred_tool_version``), in check-only mode, ``--offline``.
     """
     from automated_security_helper.cli.dependencies import (
         _declares_off_path_resolution,
         _scan_can_run,
     )
 
-    scanner = _FlaggedBandit(context=_context(tmp_path))
+    with deferred_tool_version_probes():
+        scanner = _FlaggedBandit(context=_context(tmp_path))
     # The shape the sweep's gate asks about, not just any scanner.
     assert _declares_off_path_resolution(scanner) is True
 
