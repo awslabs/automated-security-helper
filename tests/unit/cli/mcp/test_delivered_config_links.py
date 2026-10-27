@@ -32,6 +32,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from unittest.mock import AsyncMock, patch
