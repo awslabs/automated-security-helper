@@ -29,6 +29,7 @@ from automated_security_helper.interactions.run_ash_container import (
 )
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import create_completed_process
+from tests.utils.windows_file_names import created_on_disk
 
 #: Each character the mount syntax cannot carry, in a directory name.
 UNREPRESENTABLE = [
@@ -37,6 +38,13 @@ UNREPRESENTABLE = [
     pytest.param("x\ny", id="line-feed"),
     pytest.param("x\ry", id="carriage-return"),
 ]
+
+#: The same names for the tests that create each one as a directory or a link. A
+#: Windows file system cannot hold a double quote, a line feed or a carriage return
+#: in a file name, so those three are skipped there; the tests that only pass the
+#: name as a string (an output directory that does not exist, the command builder)
+#: use UNREPRESENTABLE and run everywhere.
+UNREPRESENTABLE_ON_DISK = created_on_disk(UNREPRESENTABLE)
 
 
 @pytest.fixture(autouse=True)
@@ -79,7 +87,7 @@ def _refused(result) -> None:
     assert "--mount" in result.stderr
 
 
-@pytest.mark.parametrize("name", UNREPRESENTABLE)
+@pytest.mark.parametrize("name", UNREPRESENTABLE_ON_DISK)
 @pytest.mark.parametrize("build", [True, False], ids=["build", "no-build"])
 def test_a_source_directory_the_mount_cannot_carry_is_refused(
     name, build, commands, tmp_path
@@ -113,7 +121,7 @@ def test_an_output_directory_the_mount_cannot_carry_is_refused(
     _refused(result)
 
 
-@pytest.mark.parametrize("name", UNREPRESENTABLE)
+@pytest.mark.parametrize("name", UNREPRESENTABLE_ON_DISK)
 def test_a_config_file_the_mount_cannot_carry_is_refused(name, commands, tmp_path):
     (tmp_path / "src").mkdir()
     holder = tmp_path / name
@@ -151,7 +159,7 @@ def test_a_base_in_the_config_chain_the_mount_cannot_carry_is_refused(
     _refused(result)
 
 
-@pytest.mark.parametrize("name", UNREPRESENTABLE)
+@pytest.mark.parametrize("name", UNREPRESENTABLE_ON_DISK)
 def test_a_container_path_the_mount_cannot_carry_is_refused(name, commands, tmp_path):
     """The base's own path is ordinary; the entry reaches it through a link whose
     name holds the character, and the entry as written is its container path."""

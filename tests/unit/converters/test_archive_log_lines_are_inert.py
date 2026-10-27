@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import io
 import logging
+import sys
 import zipfile
 from pathlib import Path
 from typing import Dict, List
@@ -79,6 +80,11 @@ def assert_inert(record: logging.LogRecord) -> None:
     assert getattr(record, "markup", None) is False, message
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows file names cannot hold an escape character, and the archive's own"
+    " name is the one the log line escapes",
+)
 def test_refused_member_lines_escape_names_and_turn_markup_off(
     test_plugin_context, monkeypatch, ash_records
 ):
@@ -99,6 +105,11 @@ def test_refused_member_lines_escape_names_and_turn_markup_off(
     assert "[bold]styled[/bold].zip" in messages
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows file names cannot hold an escape character, and the archive's own"
+    " name is the one the log line escapes",
+)
 def test_a_failed_input_line_escapes_the_name_and_turns_markup_off(
     test_plugin_context, monkeypatch, ash_records
 ):

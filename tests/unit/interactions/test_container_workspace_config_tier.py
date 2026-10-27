@@ -135,7 +135,10 @@ def test_a_config_in_the_workspaces_own_checkout_is_refused(
     assert result.returncode == 3, result.stderr
     assert not rac.container_was_started(result)
     assert commands == []
-    assert str(config) in result.stderr
+    # The refusal names --config as written, through repr (run_ash_container.py,
+    # the "is the scanned repository's" message), so a Windows path shows each
+    # backslash doubled.
+    assert repr(str(config)) in result.stderr
     assert FIX in result.stderr
 
 

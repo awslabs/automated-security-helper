@@ -42,8 +42,11 @@ def root(tmp_path, monkeypatch) -> Path:
 
 def _age(path: Path) -> None:
     stamp = time.time() - OLD
+    # Windows cannot set a link's own times (os.utime has no follow_symlinks
+    # there); nothing aged here is a link, so following is the same call.
+    follow = os.utime not in os.supports_follow_symlinks
     for item in [*path.rglob("*"), path]:
-        os.utime(item, (stamp, stamp), follow_symlinks=False)
+        os.utime(item, (stamp, stamp), follow_symlinks=follow)
 
 
 def test_directories_ash_did_not_create_survive(root) -> None:

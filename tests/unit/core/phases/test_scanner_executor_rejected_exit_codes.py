@@ -295,6 +295,11 @@ class TestAToolKilledByASignalIsAnError:
     reports it, ``128 + N``, which no scanner accepts.
     """
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Windows has no signals: os.kill ends a process with the number as "
+        "its plain exit code, so no child is ever killed by a signal there",
+    )
     @pytest.mark.parametrize(
         "success_codes, signum",
         [

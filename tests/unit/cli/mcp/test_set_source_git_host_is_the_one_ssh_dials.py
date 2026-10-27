@@ -84,11 +84,14 @@ def _recorded(record: Path) -> List[List[str]]:
     return [json.loads(line) for line in record.read_text().splitlines() if line]
 
 
-def _host_ssh_dials(destination: str) -> str:
+def _host_ssh_dials(destination: str, config: Path) -> str:
     ssh = shutil.which("ssh")
     assert ssh, "ssh is required to read the host ssh would connect to"
+    # An empty file, not os.devnull: Windows OpenSSH does not read "nul" as a
+    # config file and prints nothing, so no hostname.
+    config.write_text("", encoding="utf-8")
     printed = subprocess.run(
-        [ssh, "-F", os.devnull, "-G", destination],
+        [ssh, "-F", str(config), "-G", destination],
         capture_output=True,
         text=True,
         check=False,
@@ -127,7 +130,8 @@ def test_ssh_dials_the_host_the_allowlist_was_checked_against(
     assert calls, f"git never ran ssh for an accepted url: {result}"
     for argv in calls:
         # git passes [options...] <destination> <remote command>.
-        assert _host_ssh_dials(argv[-2]) == checked, (url, argv)
+        config = ssh_calls.with_name("empty-ssh-config")
+        assert _host_ssh_dials(argv[-2], config) == checked, (url, argv)
 
 
 @pytest.mark.parametrize(

@@ -393,8 +393,27 @@ def other_traffic(monkeypatch) -> List[Tuple[str, Any]]:
     """
     reporters_dir = str(Path(importlib.import_module(_AWS_PLUGINS).__file__).parent)
     made: List[Tuple[str, Any]] = []
+    real_connect = socket.socket.connect
+
+    def opens_an_event_loop() -> bool:
+        """Whether this connect is an asyncio event loop joining its own self-pipe.
+
+        On Windows, creating an event loop makes ``socket.socketpair`` connect a
+        client socket to a listener on a loopback port that the same call opened.
+        That joins two ends of one pipe inside the process and sends nothing, so
+        it is let through and not recorded. Only a connect made from that
+        function of the standard library's ``socket`` module is; every other
+        connect, to a loopback port too, is refused and recorded below.
+        """
+        return any(
+            frame.name == "_fallback_socketpair"
+            and Path(frame.filename).name == "socket.py"
+            for frame in traceback.extract_stack()
+        )
 
     def refused_connect(self, address, *args, **kwargs):
+        if opens_an_event_loop():
+            return real_connect(self, address, *args, **kwargs)
         made.append(("connect", address))
         raise ConnectionRefusedError(f"connection to {address!r} refused by the test")
 

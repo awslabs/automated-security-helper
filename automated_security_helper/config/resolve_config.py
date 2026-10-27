@@ -1,4 +1,3 @@
-import errno
 import hashlib
 import json
 import os
@@ -46,6 +45,7 @@ from automated_security_helper.config.config_sources import (
     discover_config_source,
     discovery_warnings,
     env_refused_for,
+    is_symlink_loop,
     log_config_discovery,
     read_config_file,
     resolve_config_document,
@@ -171,7 +171,7 @@ def _config_file_not_loadable(config_path: Path) -> ASHConfigSourceError:
             )
         return ASHConfigFileNotFoundError(f"Configuration file not found: {where}")
     except OSError as exc:
-        if exc.errno == errno.ELOOP:
+        if is_symlink_loop(exc):
             return ASHConfigSourceError(
                 f"Configuration file {where} is a symbolic link that leads back to "
                 "itself, so it cannot be read."

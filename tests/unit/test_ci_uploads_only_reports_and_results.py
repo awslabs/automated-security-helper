@@ -141,7 +141,7 @@ def _uploads(path: Path) -> list[tuple[int, str]]:
 
 def _ash_output_uploads() -> list[tuple[str, int, str]]:
     return [
-        (str(path.relative_to(REPO_ROOT)), line, value)
+        (path.relative_to(REPO_ROOT).as_posix(), line, value)
         for path in SOURCES
         if path.is_file()
         for line, value in _uploads(path)

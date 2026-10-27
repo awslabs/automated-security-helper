@@ -40,7 +40,9 @@ def _assert_the_process_clock_still_runs() -> None:
     in this worker, including code other tests run.
     """
     start = time.monotonic()
-    time.sleep(0.01)
+    # Longer than Windows' monotonic tick of about 15.6 ms, which a 10 ms sleep
+    # can fit inside.
+    time.sleep(0.05)
     assert time.monotonic() > start, (
         "time.monotonic() stopped advancing while the probe's clock was patched"
     )

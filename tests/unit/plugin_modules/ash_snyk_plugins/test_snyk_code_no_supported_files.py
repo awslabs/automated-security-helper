@@ -164,7 +164,9 @@ def test_the_converted_target_after_an_exit_three_source_reports_its_findings(
 
     def run(command, *args, **kwargs):
         command = [str(part) for part in command]
-        if source in command:
+        # Compared as paths: the argument is spelled with the platform's separator
+        # or with forward slashes, and Windows treats the two as one path.
+        if any(Path(part) == Path(source) for part in command):
             return {"returncode": 3, "stdout": "", "stderr": "no supported files"}
         for part in command:
             if part.startswith("--sarif-file-output="):

@@ -201,8 +201,13 @@ def _results_paths(command, results_dir: Path):
 
     Covers ``--output PATH``, ``--output=PATH``, snyk's ``--sarif-file-output=PATH``
     and syft's ``--output FORMAT=PATH``.
+
+    A path is compared as a path, not as a string: the scanners put a results file
+    in the command with forward slashes (``D:/a/.../out.sarif``) while
+    ``results_dir`` is a ``WindowsPath`` that prints with backslashes, so a string
+    prefix test finds nothing on Windows and the stand-in tool writes no file.
     """
-    root = str(results_dir)
+    root = Path(results_dir)
     paths = []
     for index, part in enumerate(str(p) for p in command):
         values = []
@@ -212,9 +217,9 @@ def _results_paths(command, results_dir: Path):
         elif inline and flag in _OUTPUT_FLAGS:
             values.append(inline)
         for value in values:
-            if not value.startswith(root) and "=" in value:
+            if not Path(value).is_relative_to(root) and "=" in value:
                 value = value.split("=", 1)[1]
-            if value.startswith(root):
+            if Path(value).is_relative_to(root):
                 paths.append(Path(value))
     return paths
 
@@ -231,6 +236,12 @@ def _rows(plugin_context, monkeypatch, name: str, runs, earlier_run_code=None):
     goes through ``_run_subprocess`` does.
     """
     scanner = _scanner_class(name)(context=plugin_context)
+    # semgrep and opengrep are disabled by default on Windows (their config sets
+    # ``enabled`` from the platform), and a disabled scanner never reaches its
+    # tool: the executor logs "is not enabled" and the row has no result. Which
+    # exit codes a scanner accepts does not depend on the platform default, so the
+    # scanner is enabled here, as an operator's ``enabled: true`` would do.
+    scanner.config.enabled = True
     captured = {}
     targets = [{"path": plugin_context.source_dir, "type": "source"}]
     by_type = {"source": runs[0]}

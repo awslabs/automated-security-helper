@@ -115,7 +115,9 @@ class TestConfigGetRefusesUnparseableFiles:
     def _assert_refused(self, result, path):
         assert result.exit_code == 3, result.output
         assert "Invalid configuration: could not parse" in result.output
-        assert str(path) in result.output
+        # The file is named as the platform spells it, or with forward slashes as
+        # the JSON parse error does.
+        assert str(path) in result.output or Path(path).as_posix() in result.output
         # The defaults were not printed in its place.
         assert "global_settings" not in result.output
 

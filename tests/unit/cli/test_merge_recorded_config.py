@@ -634,7 +634,9 @@ class TestTheOperatorsBase:
         named = [
             m
             for m in harness.ignoring()
-            if str(operator) in m and "ash merge's --config-overrides instead" in m
+            # The warning names the file with forward slashes on every platform.
+            if operator.as_posix() in m
+            and "ash merge's --config-overrides instead" in m
         ]
         assert len(named) == 1, harness.warnings
         for key in (

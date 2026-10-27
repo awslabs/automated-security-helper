@@ -580,6 +580,12 @@ def test_every_cache_default_cache_dir_names_is_mounted(
     monkeypatch, tmp_path, tool, xdg, platform
 ):
     """Wherever the refresh writes and the check reads, the sandboxed scan can read."""
+    if xdg and platform == "linux" and tool == "trivy" and sys.platform == "win32":
+        # default_cache_dir judges XDG_CACHE_HOME with the simulated platform's
+        # rules: a POSIX path must start with "/". A Windows tmp_path ("D:\...")
+        # does not, so trivy falls back to the temp directory and there is no
+        # XDG directory on this host to mount; the case cannot exist here.
+        pytest.skip("a POSIX XDG_CACHE_HOME cannot name a directory on Windows")
     home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))

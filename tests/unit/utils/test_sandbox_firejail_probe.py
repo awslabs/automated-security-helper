@@ -48,6 +48,15 @@ EXISTING_SANDBOX_WARNING = (
 UNCONFINED = "without a sandbox"
 
 
+def _program(name: str) -> str:
+    """Where the fake host keeps ``name``: /usr/bin/<name>, anchored to a drive on Windows.
+
+    ASH takes a sandbox program only from a path that does not depend on the working
+    directory (subprocess_utils._is_anchored), and ``/usr/bin/x`` has no drive there.
+    """
+    return os.path.abspath(f"/usr/bin/{name}")
+
+
 class FakeFirejail:
     """Answers every ``subprocess.run`` call the way a firejail would."""
 
@@ -92,7 +101,7 @@ def linux_host(monkeypatch):
 
     def which(name, *args, **kwargs):
         if name in ("firejail", "readlink"):
-            return f"/usr/bin/{name}"
+            return _program(name)
         return real_which(name, *args, **kwargs)
 
     monkeypatch.setattr(backends.shutil, "which", which)
@@ -190,10 +199,10 @@ class TestFirejailProbe:
         # The confinement check, then a run through the Unix-socket filter, which
         # has to happen without --private because ASH's interpreter may be in $HOME.
         argv, socket_filter = fake.calls
-        assert socket_filter[0] == "/usr/bin/firejail"
+        assert socket_filter[0] == _program("firejail")
         assert "--socket-filter" in socket_filter
         assert "--private" not in socket_filter
-        assert argv[0] == "/usr/bin/firejail"
+        assert argv[0] == _program("firejail")
         for flag in (
             "--noprofile",
             "--private-dev",

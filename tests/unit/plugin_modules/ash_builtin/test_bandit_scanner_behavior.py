@@ -18,6 +18,7 @@ dead code.
 """
 
 import logging
+import sys
 from pathlib import Path
 
 import pytest
@@ -562,6 +563,11 @@ def test_execute_scan_writes_converted_results_to_their_own_directory(scanner):
     assert results_file == Path(scanner.results_dir) / "converted" / "bandit.sarif"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="bandit's walk does not join paths with '/' on Windows, so the scanner "
+    "adds no ignored-path entries to --exclude there (_ignore_excludes)",
+)
 def test_global_ignore_paths_reach_the_exclude_argument(scanner):
     """Globally ignored paths are excluded from the bandit invocation.
 
@@ -588,6 +594,11 @@ def test_global_ignore_paths_reach_the_exclude_argument(scanner):
     assert not any(entry.endswith("app.py") for entry in entries)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="bandit's walk does not join paths with '/' on Windows, so the scanner "
+    "adds no ignored-path entries to --exclude there (_ignore_excludes)",
+)
 def test_the_exclude_argument_is_assembled_at_resolution(scanner):
     """One --exclude in argv, built for the scan, and the options left alone.
 

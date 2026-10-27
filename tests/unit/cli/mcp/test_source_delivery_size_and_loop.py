@@ -65,6 +65,13 @@ def fake_git(
     reset_default_registry_for_tests()
 
     def install(*, size: int, hang: bool) -> None:
+        if sys.platform == "win32":
+            # The stand-in is an extensionless script with a shebang line.
+            # CreateProcess starts only PE images, and the lookup prefers the
+            # real git.exe further down PATH, so the stand-in is never the git
+            # the delivery runs; the real git then clones the unresolvable
+            # example host and fails.
+            pytest.skip("a shebang stand-in for git cannot be started on Windows")
         script = bin_dir / "git"
         script.write_text(
             f"#!{sys.executable}\n"
