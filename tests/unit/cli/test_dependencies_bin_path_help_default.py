@@ -7,8 +7,10 @@ It used to show the absolute default, ``Path.home() / ".ash" / "bin"`` or the va
 of ASH_BIN_PATH, both read when the module is imported. A home directory of 36
 characters or more made rich wrap that line, so the help snapshots changed with the
 machine they ran on: the normalizer masks the home directory only after rich has
-drawn the panel. The default is now shown as written in the documentation, and the
-help notes that ASH_BIN_PATH replaces it.
+drawn the panel. The default is now shown as written in the documentation, in the
+parentheses typer puts around a descriptive default (``[default: (~/.ash/bin)]``, as
+tests/unit/cli/test_dependencies_bin_path_default.py also asserts), and the help
+notes that ASH_BIN_PATH replaces it.
 
 The help is rendered in a child process because the default is fixed at import.
 """
@@ -51,5 +53,5 @@ def test_the_help_default_is_the_same_for_any_home(tmp_path, home_name, bin_path
     )
     output = result.stdout
     assert result.returncode == 0, result.stderr
-    assert "[default: ~/.ash/bin]" in output, output
+    assert "[default: (~/.ash/bin)]" in output, output
     assert str(home) not in output, output
