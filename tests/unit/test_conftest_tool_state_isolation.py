@@ -9,7 +9,6 @@ leaving ``_ProcessWideToolState`` puts back what was there.
 """
 
 import importlib
-import subprocess
 import sys
 from unittest.mock import patch
 
@@ -48,8 +47,13 @@ def test_a_memoized_uv_is_not_available_is_rolled_back():
 
     with _ProcessWideToolState():
         uv_tool_runner.reset_uv_tool_runner()
-        # What the converter tests did: the stand-in cannot answer `uv --version`.
-        with patch.object(subprocess, "run", side_effect=IndexError("cmd[6]")):
+        # The one failed probe uv_availability memoizes: the executable is not
+        # there to run. The probe spawns through spawn_run, not subprocess.run,
+        # and a stand-in that fails any other way answers False for that call
+        # only, leaving the memo None.
+        with patch.object(
+            uv_tool_runner, "spawn_run", side_effect=FileNotFoundError("uv")
+        ):
             assert uv_tool_runner.get_uv_tool_runner().is_uv_available() is False
         assert uv_tool_runner.get_uv_tool_runner()._uv_available_cache is False
 
