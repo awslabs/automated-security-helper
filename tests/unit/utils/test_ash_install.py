@@ -662,8 +662,13 @@ class TestTheSymbolsHint:
         assert url in hint, hint
         assert f"`{symbols_extra_install_command()}`" in hint, hint
         assert find_bare_installs(hint) == []
-        page = REPO_ROOT / "docs" / "content" / "docs" / "suppressions.md"
-        assert "\n### Installing the extra\n" in page.read_text(encoding="utf-8")
+        # The docs rewrite moved the suppressions page to how-to/suppress-findings.md;
+        # docs/redirects.yml sends the old URL in the hint to it, and the section's
+        # explicit anchor keeps the fragment working.
+        page = REPO_ROOT / "docs" / "content" / "how-to" / "suppress-findings.md"
+        assert "\n### Installing the extra {#installing-the-extra}\n" in page.read_text(
+            encoding="utf-8"
+        )
 
 
 def _name_and_clauses(requirement: str) -> tuple[str, frozenset[str]]:
@@ -683,9 +688,10 @@ def test_the_suppressions_page_lists_the_packages_of_the_extra():
     It is a copy of the extra, so it is checked against the running
     distribution's metadata rather than trusted to stay current.
     """
-    page = REPO_ROOT / "docs" / "content" / "docs" / "suppressions.md"
+    page = REPO_ROOT / "docs" / "content" / "how-to" / "suppress-findings.md"
     text = page.read_text(encoding="utf-8")
-    section = text.split("### Installing the extra", 1)[1].split("\n### ", 1)[0]
+    section = text.split("### Installing the extra {#installing-the-extra}", 1)[1]
+    section = section.split("\n## ", 1)[0].split("\n### ", 1)[0]
     # The form the hint prints, with the interpreter as a placeholder.
     prefix = "<python> -m uv pip install --python <python> "
     pip_lines = [line for line in section.splitlines() if line.startswith(prefix)]
@@ -726,7 +732,7 @@ def test_no_docs_page_pins_the_symbols_extra_to_a_release_without_it():
     ]
     if FIRST_RELEASE_WITH_SYMBOLS is None:
         assert pins == [], pins
-        page = REPO_ROOT / "docs" / "content" / "docs" / "suppressions.md"
+        page = REPO_ROOT / "docs" / "content" / "how-to" / "suppress-findings.md"
         assert "next release" in page.read_text(encoding="utf-8")
     else:
         too_old = [
