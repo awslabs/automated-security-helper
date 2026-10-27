@@ -918,15 +918,6 @@ while (("$#")); do
       shift
       INSTALL_ASH_REVISION="$1"
       ;;
-    --config)
-      shift
-      CONFIG_GIVEN="YES"
-      CONFIG_PATH="$1"
-      ;;
-    --config=*)
-      CONFIG_GIVEN="YES"
-      CONFIG_PATH="${1#--config=}"
-      ;;
     --help | -h)
       python -m automated_security_helper.cli.main --help
       exit 0
