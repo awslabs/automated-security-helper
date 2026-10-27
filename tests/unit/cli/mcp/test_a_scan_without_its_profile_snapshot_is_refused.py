@@ -21,6 +21,7 @@ with only ``run_ash_scan`` replaced.
 import asyncio
 import contextlib
 import errno
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -31,6 +32,7 @@ import pytest
 
 from automated_security_helper.cli import mcp_tools
 from automated_security_helper.cli.mcp import profile_registry
+from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.resource_management.scan_registry import (
     MCScanStatus,
     ScanRegistry,
@@ -46,6 +48,51 @@ _MGMT = "automated_security_helper.core.resource_management.scan_management"
 _PROFILE_VALUE = "a-profile-value-read-from-the-environment"
 _REBOUND_VALUE = "a-rebound-value-read-from-the-environment"
 _PLANTED_STRERROR = "a-planted-strerror-the-reason-must-not-carry"
+
+
+def _register_profiles(entries):
+    """Register each ``name -> path`` as the operator's profile of that name.
+
+    The policy a delivered config is checked against is read from the
+    REGISTERED profile, never from the binding
+    (profile_registry.session_profile_entry), and a bound name no profile is
+    registered under refuses every config a client delivers ("is not
+    registered, so the runtime-override policy it sets cannot be read"). The
+    entry's config is the plain default the tests bind, so the policy is the
+    default one. The tests clear the registry when they end.
+    """
+    profile_registry.set_profile_registry(
+        {
+            name: profile_registry.ProfileEntry(
+                name=name,
+                path=Path(path),
+                config=AshConfig(),
+                path_sha256=hashlib.sha256(
+                    str(Path(path).resolve()).encode("utf-8")
+                ).hexdigest(),
+            )
+            for name, path in entries.items()
+        }
+    )
+
+
+def _bind_as_the_trusted_base(session_id, profile, profile_name="held"):
+    """Register the helper's profile and bind it as the scan's trusted base.
+
+    The runner copies the profile the binding's ``trusted_config_path`` names
+    (_run_scan_async reads resolve_session_trusted_config_path, never the
+    session's ``config_path``): bound without it, a delivered config runs with
+    no trusted base, no snapshot is taken, and no profile value joins the
+    redaction set.
+    """
+    _register_profiles({profile_name: profile})
+    profile_registry.bind_session_config(
+        session_id,
+        config=AshConfig(),
+        profile_name=profile_name,
+        config_path=str(profile),
+        trusted_config_path=str(profile),
+    )
 
 
 def _a_session_with_a_bound_profile(tmp_path, monkeypatch, session_id):
@@ -67,6 +114,9 @@ def _a_session_with_a_bound_profile(tmp_path, monkeypatch, session_id):
     (other / "second.ash.yaml").write_text(
         "project_name: ${ASH_REFUSAL_SWAP:unset}\n", encoding="utf-8"
     )
+    _bind_as_the_trusted_base(session_id, profile, profile_name="first")
+    # Both names the test binds are registered: the rebind below binds "second".
+    _register_profiles({"first": profile, "second": other / "second.ash.yaml"})
 
     def a_rebind_of_the_sessions_profile():
         config = load_config_file_for_run(other / "second.ash.yaml")[1]
@@ -220,6 +270,7 @@ def _the_scan_in_the_session(target, config_path, session_id, run):
             )
     finally:
         profile_registry.clear_session_state(session_id)
+        profile_registry.clear_profile_registry()
     return entry, str(logger.mock_calls), json.dumps(progress, default=str)
 
 
@@ -320,6 +371,7 @@ def test_a_planned_name_the_writer_refuses_resets_the_record_and_keeps_the_file(
     target, delivered, profile, config_dir = a_session_with_a_bound_profile(
         tmp_path / "ws", monkeypatch, session_id
     )
+    _bind_as_the_trusted_base(session_id, profile)
     registry = ScanRegistry()
     logger = MagicMock(spec=ASHLogger)
     scan_id = registry.register_scan(
@@ -343,8 +395,12 @@ def test_a_planned_name_the_writer_refuses_resets_the_record_and_keeps_the_file(
             patch.object(ras, "run_ash_scan", a_run_that_must_not_start),
             patch(f"{_TOOLS}.get_scan_registry", return_value=registry),
             patch(f"{_TOOLS}._logger", logger),
-            patch.object(
-                mcp_tools, "_forget_own_scan_copy", side_effect=forgotten.append
+            # The runner's discard is config_sources.discard_scan_copy, called
+            # through the module at discard time, so the module attribute is
+            # what the runner reaches.
+            patch(
+                "automated_security_helper.config.config_sources.discard_scan_copy",
+                side_effect=lambda path: forgotten.append(Path(path).name),
             ),
         ):
             asyncio.run(
@@ -359,6 +415,7 @@ def test_a_planned_name_the_writer_refuses_resets_the_record_and_keeps_the_file(
             )
     finally:
         profile_registry.clear_session_state(session_id)
+        profile_registry.clear_profile_registry()
     entry = registry.get_scan(scan_id)
 
     assert ran == [], "the refused scan still started"
@@ -414,6 +471,7 @@ def test_the_refusal_precedes_the_scans_clock(tmp_path, monkeypatch):
             )
     finally:
         profile_registry.clear_session_state(session_id)
+        profile_registry.clear_profile_registry()
     entry = registry.get_scan(scan_id)
 
     assert entry.status == MCScanStatus.FAILED, (entry.status, entry.error_message)

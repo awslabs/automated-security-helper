@@ -25,7 +25,9 @@ every value that resolution read.
 """
 
 import asyncio
+import hashlib
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -47,6 +49,32 @@ _MGMT = "automated_security_helper.core.resource_management.scan_management"
 _SID = "gates-session"
 _PROFILE_VALUE = "a-profile-value-read-from-the-environment"
 _BASE_VALUE = "a-base-value-the-profiles-chain-read"
+
+
+def _register_profiles(entries):
+    """Register each ``name -> path`` as the operator's profile of that name.
+
+    The policy a delivered config is checked against is read from the
+    REGISTERED profile, never from the binding
+    (profile_registry.session_profile_entry), and a bound name no profile is
+    registered under refuses every config a client delivers ("is not
+    registered, so the runtime-override policy it sets cannot be read"). The
+    entry's config is the plain default the tests bind, so the policy is the
+    default one. The tests clear the registry when they end.
+    """
+    profile_registry.set_profile_registry(
+        {
+            name: profile_registry.ProfileEntry(
+                name=name,
+                path=Path(path),
+                config=AshConfig(),
+                path_sha256=hashlib.sha256(
+                    str(Path(path).resolve()).encode("utf-8")
+                ).hexdigest(),
+            )
+            for name, path in entries.items()
+        }
+    )
 
 
 @pytest.mark.parametrize("chain", ["accepted", "refused"])
@@ -90,8 +118,16 @@ def test_the_set_and_the_scan_judge_the_profiles_chain_together(
     )
     assert config_is_client_supplied(delivered)
     assert not config_is_client_supplied(profile)
+    _register_profiles({"gates": profile})
+    # trusted_config_path: the registered profile's file is the trusted base
+    # the runner copies for a delivered config (_run_scan_async reads
+    # resolve_session_trusted_config_path, never the session's config_path).
     profile_registry.bind_session_config(
-        _SID, config=AshConfig(), profile_name="gates", config_path=str(profile)
+        _SID,
+        config=AshConfig(),
+        profile_name="gates",
+        config_path=str(profile),
+        trusted_config_path=str(profile),
     )
     assert profile_registry.resolve_session_config_path(_SID) == str(profile)
 
@@ -154,6 +190,7 @@ def test_the_set_and_the_scan_judge_the_profiles_chain_together(
             )
     finally:
         profile_registry.clear_session_state(_SID)
+        profile_registry.clear_profile_registry()
 
     if chain == "accepted":
         # Controls on the premise: the scan's own resolution accepted the
@@ -207,8 +244,13 @@ def test_the_snapshot_and_its_read_run_off_the_event_loop(tmp_path, monkeypatch)
     profile.write_text("project_name: held\n", encoding="utf-8")
     assert config_is_client_supplied(delivered)
     assert not config_is_client_supplied(profile)
+    _register_profiles({"held": profile})
     profile_registry.bind_session_config(
-        session_id, config=AshConfig(), profile_name="held", config_path=str(profile)
+        session_id,
+        config=AshConfig(),
+        profile_name="held",
+        config_path=str(profile),
+        trusted_config_path=str(profile),
     )
 
     idents: dict = {}
@@ -253,6 +295,7 @@ def test_the_snapshot_and_its_read_run_off_the_event_loop(tmp_path, monkeypatch)
             started = asyncio.run(start_and_wait_for_the_runner())
     finally:
         profile_registry.clear_session_state(session_id)
+        profile_registry.clear_profile_registry()
 
     if started.get("success") is not True:
         raise RuntimeError(("control: the scan did not start", started))

@@ -20,6 +20,7 @@ and then resolves its config exactly as the orchestrator would.
 """
 
 import asyncio
+import hashlib
 import json
 import threading
 from pathlib import Path
@@ -46,6 +47,32 @@ _MGMT = "automated_security_helper.core.resource_management.scan_management"
 _SID = "rebind-session"
 _PROFILE_VALUE = "a-profile-value-read-from-the-environment"
 _REBOUND_VALUE = "a-rebound-value-read-from-the-environment"
+
+
+def _register_profiles(entries):
+    """Register each ``name -> path`` as the operator's profile of that name.
+
+    The policy a delivered config is checked against is read from the
+    REGISTERED profile, never from the binding
+    (profile_registry.session_profile_entry), and a bound name no profile is
+    registered under refuses every config a client delivers ("is not
+    registered, so the runtime-override policy it sets cannot be read"). The
+    entry's config is the plain default the tests bind, so the policy is the
+    default one. The tests clear the registry when they end.
+    """
+    profile_registry.set_profile_registry(
+        {
+            name: profile_registry.ProfileEntry(
+                name=name,
+                path=Path(path),
+                config=AshConfig(),
+                path_sha256=hashlib.sha256(
+                    str(Path(path).resolve()).encode("utf-8")
+                ).hexdigest(),
+            )
+            for name, path in entries.items()
+        }
+    )
 
 
 def test_a_rebind_between_the_runner_start_and_the_scan_load_cannot_leak(
@@ -77,16 +104,23 @@ def test_a_rebind_between_the_runner_start_and_the_scan_load_cannot_leak(
     # path without any classification stand-in.
     assert config_is_client_supplied(delivered)
     assert not config_is_client_supplied(profile)
-    profile_registry.bind_session_config(
-        _SID, config=AshConfig(), profile_name="first", config_path=str(profile)
-    )
-    assert profile_registry.resolve_session_config_path(_SID) == str(profile)
-
     other = tmp_path / "operator"
     other.mkdir()
     (other / "second.ash.yaml").write_text(
         "project_name: ${ASH_REBIND_SWAP:unset}\n", encoding="utf-8"
     )
+    _register_profiles({"first": profile, "second": other / "second.ash.yaml"})
+    # trusted_config_path: the registered profile's file is the trusted base
+    # the runner copies for a delivered config (_run_scan_async reads
+    # resolve_session_trusted_config_path, never the session's config_path).
+    profile_registry.bind_session_config(
+        _SID,
+        config=AshConfig(),
+        profile_name="first",
+        config_path=str(profile),
+        trusted_config_path=str(profile),
+    )
+    assert profile_registry.resolve_session_config_path(_SID) == str(profile)
 
     def a_rebind_of_the_sessions_profile():
         config = load_config_file_for_run(other / "second.ash.yaml")[1]
@@ -154,6 +188,7 @@ def test_a_rebind_between_the_runner_start_and_the_scan_load_cannot_leak(
             )
     finally:
         profile_registry.clear_session_state(_SID)
+        profile_registry.clear_profile_registry()
 
     # The scan ran under the file the runner read: the rebound profile's value
     # never reached its config, and the value it did read is the one the
@@ -555,16 +590,20 @@ def test_a_rebind_while_the_scan_waits_for_the_session_lock_cannot_leak(
     profile.write_text("project_name: ${ASH_REBIND_PROFILE:unset}\n", encoding="utf-8")
     assert config_is_client_supplied(delivered)
     assert not config_is_client_supplied(profile)
-    profile_registry.bind_session_config(
-        _QSID, config=AshConfig(), profile_name="first", config_path=str(profile)
-    )
-    assert profile_registry.resolve_session_config_path(_QSID) == str(profile)
-
     other = tmp_path / "operator"
     other.mkdir()
     (other / "second.ash.yaml").write_text(
         "project_name: ${ASH_REBIND_SWAP:unset}\n", encoding="utf-8"
     )
+    _register_profiles({"first": profile, "second": other / "second.ash.yaml"})
+    profile_registry.bind_session_config(
+        _QSID,
+        config=AshConfig(),
+        profile_name="first",
+        config_path=str(profile),
+        trusted_config_path=str(profile),
+    )
+    assert profile_registry.resolve_session_config_path(_QSID) == str(profile)
 
     snapshot_taken = threading.Event()
     real_snapshot = mcp_tools._snapshot_profile_for_scan
@@ -663,6 +702,7 @@ def test_a_rebind_while_the_scan_waits_for_the_session_lock_cannot_leak(
             )
     finally:
         profile_registry.clear_session_state(_QSID)
+        profile_registry.clear_profile_registry()
 
     assert not rebinder.is_alive(), "the rebind thread never finished"
     if rebind_trouble:

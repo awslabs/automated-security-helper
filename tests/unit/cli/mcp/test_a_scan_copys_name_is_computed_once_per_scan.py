@@ -16,6 +16,7 @@ computation of the name is a different name.
 """
 
 import asyncio
+import hashlib
 import itertools
 from pathlib import Path
 from typing import Any, Dict, List
@@ -23,6 +24,7 @@ from unittest.mock import MagicMock, patch
 
 from automated_security_helper.cli import mcp_tools
 from automated_security_helper.cli.mcp import profile_registry
+from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.resource_management.scan_registry import (
     ScanRegistry,
 )
@@ -53,11 +55,56 @@ def _leftovers(config_dir: Path) -> List[str]:
     )
 
 
+def _register_profiles(entries):
+    """Register each ``name -> path`` as the operator's profile of that name.
+
+    The policy a delivered config is checked against is read from the
+    REGISTERED profile, never from the binding
+    (profile_registry.session_profile_entry), and a bound name no profile is
+    registered under refuses every config a client delivers ("is not
+    registered, so the runtime-override policy it sets cannot be read"). The
+    entry's config is the plain default the tests bind, so the policy is the
+    default one. The tests clear the registry when they end.
+    """
+    profile_registry.set_profile_registry(
+        {
+            name: profile_registry.ProfileEntry(
+                name=name,
+                path=Path(path),
+                config=AshConfig(),
+                path_sha256=hashlib.sha256(
+                    str(Path(path).resolve()).encode("utf-8")
+                ).hexdigest(),
+            )
+            for name, path in entries.items()
+        }
+    )
+
+
+def _bind_as_the_trusted_base(session_id, profile, profile_name="held"):
+    """Register the helper's profile and bind it as the scan's trusted base.
+
+    The runner copies the profile the binding's ``trusted_config_path`` names
+    (_run_scan_async reads resolve_session_trusted_config_path, never the
+    session's ``config_path``): bound without it, a delivered config runs with
+    no trusted base and no snapshot is taken.
+    """
+    _register_profiles({profile_name: profile})
+    profile_registry.bind_session_config(
+        session_id,
+        config=AshConfig(),
+        profile_name=profile_name,
+        config_path=str(profile),
+        trusted_config_path=str(profile),
+    )
+
+
 def _a_session_with_a_bound_profile(tmp_path, monkeypatch, session_id):
     """A real session sandbox with a delivered config and a bound profile."""
-    target, delivered, _profile, config_dir = a_session_with_a_bound_profile(
+    target, delivered, profile, config_dir = a_session_with_a_bound_profile(
         tmp_path / "ws", monkeypatch, session_id
     )
+    _bind_as_the_trusted_base(session_id, profile)
     return target, delivered, config_dir
 
 
@@ -123,6 +170,7 @@ def test_the_scan_loads_the_copy_the_runner_wrote_when_the_identity_flips(
             asyncio.run(start_and_wait_for_the_runner())
     finally:
         profile_registry.clear_session_state(session_id)
+        profile_registry.clear_profile_registry()
 
     # Controls: the scan ran, on a copy named for a scan.
     assert seen.get("trusted"), seen
