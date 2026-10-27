@@ -62,6 +62,8 @@ from typing import Any, Optional
 import pytest
 import yaml
 
+from tests.utils.workflow_one_line import write_helper
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCAN_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "run-ash-security-scan.yml"
 INSTALL_STEP = "Install actionlint, cfn-guard, gitleaks and trivy"
@@ -420,6 +422,9 @@ def _run(step: dict[str, Any], ctx: dict[str, Any], tmp_path: Path) -> dict[str,
     (stub / "uvx").write_text(_UVX_STUB, encoding="utf-8")
     (stub / "uvx").chmod(0o755)
     Path(ctx["runner"]["temp"]).mkdir(exist_ok=True)
+    # The job's definer runs before every install step, into the same RUNNER_TEMP;
+    # the steps load the one_line helper it writes.
+    write_helper(_steps(), Path(ctx["runner"]["temp"]))
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
     log = tmp_path / "uvx.log"
