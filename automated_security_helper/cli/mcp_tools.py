@@ -6243,6 +6243,7 @@ def mcp_set_source_git(
         INVALID_CLONE_DEPTH,
         SESSION_WORKSPACE_UNAVAILABLE,
         SOURCE_DELIVERY_BUSY,
+        CloneRefusedError,
         GitCommandError,
         GitTimeoutError,
         InvalidSessionIdError,
@@ -6359,6 +6360,15 @@ def mcp_set_source_git(
             "success": False,
             "error": raw_controls_on_one_line(str(e)),
             "error_type": CLONE_TIMED_OUT,
+        }
+    except CloneRefusedError as e:
+        # Every other clone refusal names its own error_type (a clone over the size
+        # limit, a tree that cannot be read), so it is returned as that type and
+        # not as a failed clone.
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(str(e)),
+            "error_type": e.error_type,
         }
     except SessionWorkspaceError as e:
         return refused(e, SESSION_WORKSPACE_UNAVAILABLE)
