@@ -141,6 +141,10 @@ class TestTheShardAxis:
         """Two legs with one name collide in the checks list and in artifacts."""
         assert "matrix.shard" in _workflow_job("unit-test")["name"]
 
+    def test_the_timeout_leaves_room_for_a_shard(self):
+        """A shard is an eighth of the suite; the old 20 minutes was sized for all of it."""
+        assert _workflow_job("unit-test")["timeout-minutes"] >= 30
+
 
 class TestTheShardFilter:
     def test_a_module_belongs_to_exactly_one_shard(self):
@@ -212,6 +216,12 @@ class TestTheShardFilter:
         text = ROOT_CONFTEST.read_text(encoding="utf-8")
         assert "from tests.utils.sharding import pytest_ignore_collect" in text
         assert "sharding.check_environment()" in text
+
+    def test_it_agrees_with_pytest_ini(self):
+        """The selector hard-codes what pytest.ini says; a change there must reach it."""
+        text = (REPO_ROOT / "pytest.ini").read_text(encoding="utf-8")
+        assert f"python_files = {SELECT.TEST_FILE_PATTERN}" in text
+        assert f"testpaths = {SELECT.TEST_ROOT}" in text
 
 
 class TestTheFilterInARealCollection:
@@ -353,6 +363,14 @@ class TestTheActionRunsAShard:
         assert not COMBINE.DATA_FILE.startswith("."), (
             "upload-artifact leaves out hidden files, so the data would never arrive"
         )
+
+    def test_a_shard_does_not_claim_the_whole_suite_report_file(self):
+        """The cdk-nag step and a whole-suite run write pytest.junit.xml."""
+        run = str(_action_step("Run PyTest shard")["run"])
+        assert "--junit-xml=test-results/pytest-shard.junit.xml" in run
+        report = _action_step("Publish PyTest JUnit Test Report")
+        assert report["with"]["report_paths"] == "test-results/*.junit.xml"
+        assert report["with"]["check_name"].endswith("shard ${{ inputs.shard }}")
 
     def test_the_report_step_publishes_a_shards_junit_file(self):
         """The shard writes its own junit path, and the report glob must reach it."""
