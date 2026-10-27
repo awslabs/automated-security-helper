@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Dict, List
 
@@ -443,13 +444,17 @@ def test_an_anchored_path_has_only_its_env_part_replaced(tmp_path, probe_env):
         "scanners:\n  bandit:\n    options:\n      config_file: ${ASH_PROBE_RELATIVE}\n",
     )
     config = resolve_config(config_path=path, source_dir=tmp_path / "tree")
-    directory = path.parent.resolve().as_posix()
+    directory = path.parent.resolve()
     # The control: the load took the relative path from the file's directory.
-    assert str(config.scanners.bandit.options.config_file) == (
-        f"{directory}/cfg/bandit.yaml"
+    assert (
+        Path(str(config.scanners.bandit.options.config_file))
+        == directory / "cfg" / "bandit.yaml"
     )
+    # The path is a Path once configured, so its prefix is written with this
+    # platform's separators (backslashes on Windows) and only the part the
+    # environment gave is put back.
     recorded = _recorded(config)["scanners"]["bandit"]["options"]["config_file"]
-    assert recorded == f"{directory}/${{ASH_PROBE_RELATIVE}}"
+    assert recorded == f"{directory}{os.sep}${{ASH_PROBE_RELATIVE}}"
 
 
 def test_a_patch_value_and_a_base_value_are_recorded_as_written(tmp_path, probe_env):

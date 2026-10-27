@@ -430,17 +430,32 @@ def _bare(written: str) -> str:
     return match.group(0) if match else _without_tag(written)
 
 
+def _ends_with_resolved(text: str, resolved: str) -> bool:
+    """Whether ``text`` ends with ``resolved``, a path's separators aside on Windows.
+
+    A relative path the load anchored is a ``Path`` once configured, and a
+    ``Path`` on Windows writes its separators as ``\\`` where the environment
+    value wrote ``/``. Each separator is one character either way, so the
+    prefix length is the same for both spellings.
+    """
+    if text.endswith(resolved):
+        return True
+    return os.sep == "\\" and text.replace("\\", "/").endswith(
+        resolved.replace("\\", "/")
+    )
+
+
 def _anchored(text: str, reference: EnvironmentReference) -> bool:
     """Whether ``text`` is what ``reference`` resolved to, or that after a path
     prefix the load put on it (a relative path anchored at the file's
-    directory): the prefix is empty or ends with ``/``, so a neighbor that
-    merely ends with the same characters is not the entry."""
+    directory): the prefix is empty or ends with a path separator, so a neighbor
+    that merely ends with the same characters is not the entry."""
     if text == reference.resolved:
         return True
-    if not text.endswith(reference.resolved):
+    if not _ends_with_resolved(text, reference.resolved):
         return False
     prefix = text[: len(text) - len(reference.resolved)]
-    return prefix.endswith("/")
+    return prefix.endswith(("/", os.sep))
 
 
 def _recorded_string(text: str, candidates: Sequence[EnvironmentReference]) -> str:
@@ -456,7 +471,7 @@ def _recorded_string(text: str, candidates: Sequence[EnvironmentReference]) -> s
         if text == reference.resolved:
             return reference.written
     for reference in candidates:
-        if text.endswith(reference.resolved):
+        if _ends_with_resolved(text, reference.resolved):
             # A path the load anchored: the file's text after a prefix.
             prefix = text[: len(text) - len(reference.resolved)]
             return prefix + _without_tag(reference.written)
