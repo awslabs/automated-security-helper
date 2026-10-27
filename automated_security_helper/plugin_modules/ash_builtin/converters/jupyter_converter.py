@@ -245,7 +245,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         super().model_post_init(context)
 
         # The probe runs nbconvert, so under a sandbox it runs sandboxed, as a
-        # scanner's version probe does. The scan phase defers it until the
+        # scanner's version probe does. The convert phase defers it until the
         # dependency check asks (uv_tool_mixin.deferred_tool_version_probes),
         # so the environment is resolved only when a notebook needs nbconvert.
         # The spec the probe resolves under is _uv_from_spec, the requirement

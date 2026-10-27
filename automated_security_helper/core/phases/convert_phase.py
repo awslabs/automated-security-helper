@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_config import plugin_config_key
+from automated_security_helper.base.uv_tool_mixin import deferred_tool_version_probes
 from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
@@ -408,8 +409,15 @@ class ConvertPhase(EnginePhase):
             try:
                 # Under a sandbox, what a converter runs while it is constructed and
                 # validated (nbconvert's version probe, its dependency check) runs
-                # sandboxed, as a scanner's probes do, and installs nothing.
-                with plugin_probe_scope(plugin_class, self.plugin_context):
+                # sandboxed, as a scanner's probes do, and installs nothing. The
+                # `uv tool run` version probe is deferred, as the scan phase defers
+                # a scanner's: the converter's dependency check resolves it only
+                # when the scan set holds something to convert, so a scan with no
+                # notebook asks uv nothing about nbconvert.
+                with (
+                    plugin_probe_scope(plugin_class, self.plugin_context),
+                    deferred_tool_version_probes(),
+                ):
                     plugin_instance = plugin_class(
                         context=self.plugin_context,
                         config=(
