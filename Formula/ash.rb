@@ -43,10 +43,18 @@ class Ash < Formula
     ENV["UV_PROJECT_ENVIRONMENT"] = venv.root.to_s
     ENV["UV_PYTHON_DOWNLOADS"] = "never"
     ENV["UV_NO_CONFIG"] = "1"
-    ENV["UV_CACHE_DIR"] = (buildpath/".uv-cache").to_s
     ENV["UV_LINK_MODE"] = "copy"
-    system "uv", "sync", "--frozen", "--no-dev", "--no-editable", "--extra", "cdk",
-           "--python", (venv.root/"bin/python").to_s
+    # uv's cache stays outside the source tree. ASH is built from buildpath, and
+    # hatchling walks the whole project root for the files it packages while uv is
+    # still writing and renaming temporary entries in its cache; a cache under
+    # buildpath made that walk fail (FileNotFoundError in hatchling's safe_walk on a
+    # directory that was gone between listing and stat). The cache is made under
+    # Homebrew's temporary directory and deleted when the block ends.
+    Dir.mktmpdir("ash-uv-cache-") do |cache|
+      ENV["UV_CACHE_DIR"] = cache
+      system "uv", "sync", "--frozen", "--no-dev", "--no-editable", "--extra", "cdk",
+             "--python", (venv.root/"bin/python").to_s
+    end
 
     # uv records the directory it built ASH from in the dist-info's direct_url.json.
     # That is this build directory, which Homebrew deletes after the install and
