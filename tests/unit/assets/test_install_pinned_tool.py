@@ -1786,7 +1786,9 @@ class TestAssertRootOnly:
             pytest.skip("symlinks need privileges here")
         if hasattr(os, "lchmod"):
             try:
-                os.lchmod(link, 0o777)
+                # The permissive mode is the fixture: the installer's permission
+                # check has to see a link that other users can write.
+                os.lchmod(link, 0o777)  # nosec B103
             except (NotImplementedError, OSError):
                 pass
         if not os.lstat(link).st_mode & 0o022:

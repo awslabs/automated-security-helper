@@ -24,6 +24,9 @@ from automated_security_helper.cli.mcp import (
 )
 from automated_security_helper.core.exceptions import ASHValidationError
 
+# Every all-interfaces host below is the non-loopback bind the opt-out exists
+# for, so the address is the condition under test. The trailing bandit markers
+# say that to B104.
 INITIALIZE = {
     "jsonrpc": "2.0",
     "id": 1,
@@ -68,7 +71,7 @@ def test_a_non_loopback_bind_starts_with_the_opt_out(startup, transport) -> None
     mcp_command(
         ctx=_Ctx(),
         transport=transport,
-        host="0.0.0.0",
+        host="0.0.0.0",  # nosec B104
         trust_upstream_host_check=True,
         quiet=True,
     )
@@ -82,7 +85,7 @@ def test_the_opt_out_app_serves_a_proxied_host() -> None:
     app = build_streamable_http_app(
         mount_path="/mcp",
         stateless_http=True,
-        host="0.0.0.0",
+        host="0.0.0.0",  # nosec B104
         trust_upstream_host_check=True,
     )
     with TestClient(app, base_url="http://ash-mcp.example.com") as client:
@@ -95,7 +98,7 @@ def test_the_opt_out_app_serves_a_proxied_host() -> None:
 def test_the_builders_refuse_the_opt_out_with_an_allowlist(build) -> None:
     with pytest.raises(ASHValidationError, match="contradict"):
         build(
-            host="0.0.0.0",
+            host="0.0.0.0",  # nosec B104
             allowed_hosts=["ash-mcp.example.com"],
             trust_upstream_host_check=True,
         )
@@ -106,7 +109,7 @@ def test_the_builders_refuse_the_opt_out_with_an_allowlist(build) -> None:
     [
         {
             "transport": "streamable-http",
-            "host": "0.0.0.0",
+            "host": "0.0.0.0",  # nosec B104
             "allowed_host": ["ash-mcp.example.com"],
             "trust_upstream_host_check": True,
         },

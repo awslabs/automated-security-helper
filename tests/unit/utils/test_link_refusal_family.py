@@ -91,7 +91,9 @@ class TestOneFamily:
     )
     def test_each_refusal_comes_back_whole_from_a_pickle(self, refusal):
         """A worker process hands its exception back to the parent pickled."""
-        back = pickle.loads(pickle.dumps(refusal))
+        # The bytes come from pickle.dumps of this test's own object, in this
+        # process; nothing untrusted is deserialized.
+        back = pickle.loads(pickle.dumps(refusal))  # nosec B301
 
         assert type(back) is type(refusal)
         assert str(back) == str(refusal)
