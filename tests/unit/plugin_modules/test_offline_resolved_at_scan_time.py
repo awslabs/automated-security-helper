@@ -261,7 +261,10 @@ def test_semgrep_offline_rules_reach_the_subprocess(
 
     scanner = SemgrepScanner(context=test_plugin_context, config=config)
 
-    assert scanner.extra_subprocess_env() == {"SEMGREP_RULES": f"{cache}/*"}
+    assert scanner.extra_subprocess_env() == {
+        "SEMGREP_ENABLE_VERSION_CHECK": "0",
+        "SEMGREP_RULES": f"{cache}/*",
+    }
 
 
 @pytest.mark.parametrize(
