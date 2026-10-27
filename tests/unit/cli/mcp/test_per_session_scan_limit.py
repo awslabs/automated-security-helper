@@ -70,12 +70,16 @@ def granted(tmp_path, monkeypatch) -> Path:
     sessions.reset_default_registry_for_tests()
 
 
-def _limit(tmp_path: Path, monkeypatch, value: int) -> None:
+def _limit(tmp_path: Path, monkeypatch, value: int, *, total: int = None) -> None:
+    """The operator's per-session limit, and the server-wide one when ``total``
+    is given (``max_concurrent_scans``, 0 for none), which the fourth scan of a
+    session with no limit of its own would otherwise meet."""
     config = tmp_path / "operator.yaml"
     config.write_text(
         "project_name: operator\n"
         "mcp-resource-management:\n"
-        f"  max_concurrent_scans_per_session: {value}\n",
+        f"  max_concurrent_scans_per_session: {value}\n"
+        + (f"  max_concurrent_scans: {total}\n" if total is not None else ""),
         encoding="utf-8",
     )
     monkeypatch.setenv("ASH_CONFIG", str(config))
@@ -196,7 +200,7 @@ def test_a_scan_that_does_not_start_leaves_no_count(
 
 
 def test_zero_turns_the_limit_off(tmp_path, monkeypatch, granted, held) -> None:
-    _limit(tmp_path, monkeypatch, 0)
+    _limit(tmp_path, monkeypatch, 0, total=0)
 
     async def main() -> List[Dict[str, Any]]:
         try:

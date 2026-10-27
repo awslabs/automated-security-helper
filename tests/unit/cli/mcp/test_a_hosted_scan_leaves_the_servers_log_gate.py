@@ -162,6 +162,9 @@ _DRIVER = reaching_the_stand_in(
             )
             payload = started.structured_content["result"]
             out["started"] = bool(payload.get("success"))
+            # A refused start names its refusal in the control's message.
+            out["error"] = payload.get("error")
+            out["error_type"] = payload.get("error_type")
             # An exception or a cancellation that escapes a scan task fails the
             # driver, which the test reads as a failed child.
             await _tasks.drain_clean(tasks=list(mcp_tools._scan_tasks))

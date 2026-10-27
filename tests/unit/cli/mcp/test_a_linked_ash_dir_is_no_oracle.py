@@ -163,7 +163,9 @@ def test_workspace_policy_discovery(roots, monkeypatch) -> None:
 
 
 @pytest.mark.parametrize("where", ["scan target", "workspace root"])
-def test_control_a_ash_linked_inside_the_roots_is_read(roots, where) -> None:
+def test_control_a_ash_linked_inside_the_roots_is_read(
+    roots, where, monkeypatch
+) -> None:
     """A ``.ash`` linked to a directory inside the roots is looked in."""
     from automated_security_helper.cli.mcp.sandbox import validate_discovered_config
     from automated_security_helper.cli.mcp.workspace import mcp_resolve_workspace
@@ -175,6 +177,10 @@ def test_control_a_ash_linked_inside_the_roots_is_read(roots, where) -> None:
         (roots["project"] / ".ash").symlink_to(inside, target_is_directory=True)
         assert validate_discovered_config(roots["project"], SESSION) is None
     else:
+        # A workspace policy is used only from a directory
+        # ASH_MCP_ALLOWED_CONFIG_ROOTS names (it sets suppressions and ignore
+        # paths for every project); the control reads one the operator keeps.
+        monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(roots["root"]))
         (inside / "ash-workspace.yaml").write_text(OUTSIDE_POLICY, encoding="utf-8")
         (roots["root"] / ".ash").symlink_to(inside, target_is_directory=True)
         response = asyncio.run(

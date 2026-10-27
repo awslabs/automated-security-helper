@@ -39,6 +39,11 @@ def blocked(tmp_path, monkeypatch) -> Path:
     blocker.write_text("not a directory\n", encoding="utf-8")
     monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(root))
     monkeypatch.delenv("ASH_MCP_TRANSPORT", raising=False)
+    # The clone host is checked before the workspace is made
+    # (mcp_tools.mcp_set_source_git refuses a host the operator did not list
+    # with clone_host_not_permitted), so the host is allowed here and the
+    # workspace is what refuses.
+    monkeypatch.setenv("ASH_MCP_GIT_ALLOWED_HOSTS", "git.example.com")
     return blocker
 
 
@@ -81,6 +86,7 @@ async def test_the_tool_answers_with_the_documented_type(tmp_path, monkeypatch):
     blocker.write_text("not a directory\n", encoding="utf-8")
     monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(root))
     monkeypatch.delenv("ASH_MCP_TRANSPORT", raising=False)
+    monkeypatch.setenv("ASH_MCP_GIT_ALLOWED_HOSTS", "git.example.com")
     ctx = MagicMock(spec=Context)
     ctx.headers = {}
 

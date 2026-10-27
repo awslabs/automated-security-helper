@@ -53,6 +53,9 @@ def root(tmp_path, monkeypatch) -> Path:
     workspace.mkdir()
     monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(workspace))
     monkeypatch.delenv("ASH_MCP_TRANSPORT", raising=False)
+    # delivered_session_count reads this process-wide record; a record another
+    # test left would count here.
+    monkeypatch.setattr(source_delivery, "_SESSION_SOURCE_DIRS", {})
     sessions.reset_default_registry_for_tests()
     sessions.reset_guard_refusal_warning_for_tests()
     sessions._ended_while_scanning.clear()

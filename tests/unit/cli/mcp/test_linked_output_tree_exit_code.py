@@ -190,10 +190,14 @@ def test_a_scan_target_with_a_broken_tool_ash_table_is_answered_not_raised(tmp_p
 
     response = asyncio.run(_scan_to_its_end())
 
-    # The start answers and backgrounds; grading the unloadable config is the
-    # scan's own job. What this pins is the boundary: no raise reaches the caller.
+    # The start answers: the scan-start config pre-check in cli/mcp_tools.py
+    # (its ASHConfigValidationError arm at the discovery read) refuses an
+    # unloadable discovered config as a response before any scan starts. What
+    # this pins is the boundary: no raise reaches the caller.
     assert isinstance(response, dict), response
-    assert response.get("success") is True, response
+    assert response.get("success") is False, response
+    assert response.get("error_type") == "MCPResourceError", response
+    assert "cannot be loaded" in response.get("error", ""), response
     assert response.get("scan_id"), response
     # The scan's own grade of the config it could not load: the entry ends
     # FAILED with the invalid-config code, never completed and never raised.
