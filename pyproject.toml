@@ -7,7 +7,7 @@ readme = "README.md"
 license = "Apache-2.0"
 classifiers = [ "Development Status :: 5 - Production/Stable", "Intended Audience :: Developers", "License :: OSI Approved :: Apache Software License", "Programming Language :: Python :: 3", "Programming Language :: Python :: 3.10", "Programming Language :: Python :: 3.11", "Programming Language :: Python :: 3.12", "Programming Language :: Python :: 3.13", "Programming Language :: Python :: 3.14",]
 dependencies = [
- "uv>=0.12.22,<0.13",
+ "uv>=0.13.4,<0.14",
  "requests>=2.34,<3.0.0",
  "attrs>=26.1,<27.0.0",
  "jsonschema>=4.26,<5.0.0",
@@ -186,7 +186,7 @@ dev = [
  # decorator patches botocore in the current interpreter only and cannot reach a
  # child, so those tests need a real HTTP endpoint. The extra is what pulls in
  # flask/flask-cors for moto.server.ThreadedMotoServer.
- "moto[server]>=5.2.3,<6",
+ "moto[server]>=5.2.4,<6",
  # Snapshot tests for everything ASH prints or writes (tests/snapshot). syrupy rather
  # than a hand-rolled golden helper because it already does the three things the
  # policy depends on: a missing or changed snapshot fails, only --snapshot-update

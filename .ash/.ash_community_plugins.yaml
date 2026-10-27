@@ -1,25 +1,6 @@
 # yaml-language-server: $schema=../automated_security_helper/schemas/AshConfig.json
 project_name: automated-security-helper
 fail_on_findings: true
-# === Time-boxed: upstream trivy-db publishing outage (expires 2026-10-11T00:00:00Z) ===
-# The scheduled "Trivy DB" publish workflow in aquasecurity/trivy-db has failed on every
-# run from 2026-10-07 12:09Z on (https://github.com/aquasecurity/trivy-db/actions), so the
-# newest published trivy-db was built 2026-10-07T07:38:55Z and is past its 24h bound on
-# every run of these legs. This entry holds trivy-db, and only trivy-db, to warn: the scan
-# still prints the stale-database warning and records it in every report, while grype-db
-# and the offline rulesets keep content_db_staleness: fail. It stops applying at 00:00 UTC
-# on its expiration date, and tests/unit/test_ci_content_db_staleness_overrides.py fails
-# from that moment until this entry is removed. This is this repository's CI config only;
-# ASH's own default is still content_db_staleness: fail with no overrides.
-content_db_staleness_overrides:
-  - database: trivy-db
-    policy: warn
-    expiration: "2026-10-11"
-    reason: >-
-      aquasecurity/trivy-db has published no database since 2026-10-07T07:38:55Z because
-      its scheduled publish workflow is failing upstream, so no refresh can bring trivy-db
-      inside its 24h bound. Time-boxed so the scan fails on a stale trivy-db again
-      without anyone having to remember to turn it back on.
 #ash_plugin_modules: []
 ash_plugin_modules:
   - automated_security_helper.plugin_modules.ash_snyk_plugins
@@ -35,7 +16,7 @@ global_settings:
     - path: pyproject.toml
       rule_id: API_KEY_OR_SECRET
       reason: "False positive — hatch build config paths contain strings that match secret patterns"
-    # === ferret-scan API_KEY_OR_SECRET: unquoted-assignment false positives ===
+    # === ferret-scan API_KEY_OR_SECRET, unquoted-assignment false positives ===
     # ferret-scan v2.3.3 added unquoted keyword-assignment detection to the SECRETS
     # validator, so an ordinary identifier whose NAME is a secret keyword (session,
     # token, secret, ...) sitting next to an assignment now reads as API_KEY_OR_SECRET
@@ -890,7 +871,7 @@ global_settings:
         rather than spelled out, because spelling it contiguously makes this
         reason itself a keyword finding -- the same trap the hex entry in
         .ash/.ash.yaml records, and the reason this file previously failed the
-        Windows scan. Its value is not a credential: mcpEnvironment in
+        Windows scan. Its value is not a credential. mcpEnvironment in
         deploy/cdk/lib/ash-runtime-config.ts sets it from the auth secret's ARN
         behind an Fn::If, and the entrypoint generated
         by deploy/cdk/lib/ash-container-scripts.ts calls GetSecretValue on that ARN
@@ -1067,6 +1048,53 @@ global_settings:
         confirmed from the SPDX license page. The package is minimatch 10.2.5,
         vendored under aws-cdk-lib; the separate top-level minimatch 3.1.5 is ISC and
         is covered by the entry above.
+    # === ferret-scan hits in documents, rendered templates and test files ===
+    # One entry per rule and file, never a directory. The reasons describe the
+    # pattern instead of quoting a line, because a quoted line would make this file
+    # trip the same rule.
+    - rule_id: API_KEY_OR_SECRET
+      path: automated_security_helper/plugin_modules/ash_ferret_plugins/spec/2026-09-13-ferret-scan-plugin-v2-update-analysis.md
+      reason: >-
+        False positive. These design notes quote, in prose, the type annotation that
+        causes this false positive in ferret-scan.
+    - rule_id: API_KEY_OR_SECRET
+      path: docs/content/docs/troubleshooting.md
+      reason: >-
+        False positive. A documentation example that sets an environment variable
+        named for a scanner's app credential to a placeholder phrase. No value is held.
+    - rule_id: API_KEY_OR_SECRET
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        False positive. The flagged lines are CloudFormation logical ids and references
+        to them (a hash-suffixed id for the MCP auth header resource). The template holds
+        names, not values.
+    - rule_id: API_KEY_OR_SECRET
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        False positive. The flagged lines are CloudFormation logical ids and references
+        to them (a hash-suffixed id for the MCP auth header resource). The template holds
+        names, not values.
+    - rule_id: API_KEY_OR_SECRET
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        False positive. The flagged lines are CloudFormation logical ids and references
+        to them (a hash-suffixed id for the MCP auth header resource). The template holds
+        names, not values.
+    - rule_id: API_KEY_OR_SECRET
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        False positive. The flagged lines are CloudFormation logical ids and references
+        to them (a hash-suffixed id for the MCP auth header resource, route table ids).
+        The template holds names, not values.
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/integration/codecommit_gate_regression/assert_case.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/config/test_config_alias_round_trip.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/utils/test_secret_masking.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
   ignore_paths:
     - path: "**/.venv/**"
       reason: Virtual environment, not committed, only 3p content
