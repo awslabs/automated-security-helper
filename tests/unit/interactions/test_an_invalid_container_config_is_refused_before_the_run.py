@@ -985,6 +985,7 @@ def test_the_sandbox_mode_probe_asks_for_the_selected_file_with_the_scans_base_g
         config=str(config),
         config_overrides=["project_name=other"],
         config_base_gate=gate,
+        workspace_plan=None,
     )
 
     ras._refuse_symlinked_output_dir(opts)
