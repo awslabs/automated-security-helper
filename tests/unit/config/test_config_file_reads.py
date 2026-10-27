@@ -15,6 +15,7 @@ config is refused too, not answered with the defaults.
 from __future__ import annotations
 
 import os
+import sys
 import threading
 from pathlib import Path
 from typing import Callable
@@ -157,7 +158,9 @@ class TestSpecialFilesAreNotRead:
         monkeypatch.setattr(
             config_sources, "ASH_CONFIG_MAX_FILE_BYTES", len(content.encode())
         )
-        (tmp_path / ".ash.yaml").write_text(content, encoding="utf-8")
+        # Bytes, not write_text: text mode would write the newline as CRLF on
+        # Windows and the file would be one byte over the bound.
+        (tmp_path / ".ash.yaml").write_bytes(content.encode())
 
         assert resolve_config(source_dir=tmp_path).project_name == "x"
 
@@ -349,7 +352,9 @@ class TestTheFileReadIsTheFileThatWasChecked:
 
     def test_control_the_same_file_is_read(self, tmp_path):
         path = tmp_path / "cfg.yaml"
-        path.write_text("project_name: checked\n", encoding="utf-8")
+        # Bytes: the assertion below compares the bytes read, and text mode
+        # would write CRLF on Windows.
+        path.write_bytes(b"project_name: checked\n")
 
         assert config_sources.read_config_bytes(
             path, expect=config_sources.file_identity(path)
@@ -398,6 +403,10 @@ class TestTheFileReadIsTheFileThatWasChecked:
 
 
 class TestTheReadItselfBlocks:
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Windows has no O_NONBLOCK, and os.get_blocking rejects a file there",
+    )
     def test_o_nonblock_is_cleared_once_the_file_is_known_to_be_regular(
         self, tmp_path, monkeypatch
     ):
