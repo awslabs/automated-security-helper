@@ -121,8 +121,9 @@ stable endpoint, with your own network boundary and TLS.
 request's whole source branch is scanned within Lambda's hard 900-second timeout,
 so it suits repositories whose clone and full scan fit in that time.
 `ash_scan_extra_args` takes presentation and diagnostic options such as
-`--log-level`; the gate refuses options that narrow the scan, including
-`--changed-files-only` and `--base-ref`.
+`--log-level`. The gate refuses `--changed-files-only`, `--base-ref` and every
+other option that narrows the scan, so the whole source branch is always scanned;
+a refused option ends every pull request in outcome "error".
 
 **CodePipeline executor** — you want a full scan of a large repository, and wall
 clock matters more than simplicity. Scales across up to 100 parallel shards, with

@@ -184,7 +184,7 @@ fetch what it needs.
 | `log_retention_days` | — | `number` | `30` | |
 | `vpc_id` | `VpcId` | `string` | `""` | Opt-in VPC placement, with `vpc_subnet_ids`. Empty leaves egress open. Set, the module creates a security group in it whose only egress is TCP 443 to `scan_egress_cidr` (`scan_security_group_id` output, to widen it); your routes must reach what that CIDR names. Not deploy-tested: the ENI grant is pinned with `aws:RequestedRegion`, which AWS does not document for Lambda's service-side calls; if VPC attachment fails on `ec2:CreateNetworkInterface`, please report it. |
 | `vpc_subnet_ids` | `VpcSubnetIds` | `list(string)` | `[]` | Subnets in `vpc_id`. Set together with `vpc_id`, or neither. |
-| `scan_egress_cidr` | `ScanEgressCidr` | `string` | `""` | Required with `vpc_id`. The IPv4 CIDR the function may reach on TCP 443. It calls CodeCommit (API and `git-codecommit`) and SSM; the Lambda service pulls the image and delivers logs. With `ash_offline_mode = false` the scanners also download from public hosts outside AWS. Use your VPC CIDR for an offline image with interface endpoints, or `0.0.0.0/0` for an online image behind a NAT gateway. |
+| `scan_egress_cidr` | `ScanEgressCidr` | `string` | `""` | Required with `vpc_id`. The IPv4 CIDR the function may reach on TCP 443. It calls CodeCommit (API and `git-codecommit`), and Systems Manager only when `base_config_ssm_parameter_name` is set (it then reads that parameter on every scan); the Lambda service pulls the image and delivers logs. With `ash_offline_mode = false` the scanners also download from public hosts outside AWS. Use your VPC CIDR for an offline image with interface endpoints, or `0.0.0.0/0` for an online image behind a NAT gateway. |
 | `tags` | — | `map(string)` | `{}` | |
 
 ## Outputs
@@ -209,7 +209,7 @@ One setting makes that more reachable, and the other is the fallback:
 **The scan cannot be narrowed from `ash_scan_extra_args`.** This gate can approve
 a pull request, so the handler decides every option that changes what is scanned
 or how the verdict is reached, and refuses them in `ash_scan_extra_args`:
-`--changed-files-only` and `--base-ref` (they drop findings outside the diff before
+`--changed-files-only` and `--base-ref` (refused because they drop findings outside the diff before
 the exit code is computed), the scanner selection, the shard options, `--config`
 and `--config-overrides`, `--phases`, `--use-existing`, and the options it passes
 itself. `GATE_OWNED_SCAN_OPTIONS` in `files/ash_pr_gate.py` is the full list. A
