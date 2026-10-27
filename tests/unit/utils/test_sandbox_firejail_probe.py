@@ -58,6 +58,15 @@ EXISTING_SANDBOX_WARNING = (
 UNCONFINED = "without a sandbox"
 
 
+def _program(name: str) -> str:
+    """Where the fake host keeps ``name``: /usr/bin/<name>, anchored to a drive on Windows.
+
+    ASH takes a sandbox program only from a path that does not depend on the working
+    directory (subprocess_utils._is_anchored), and ``/usr/bin/x`` has no drive there.
+    """
+    return os.path.abspath(f"/usr/bin/{name}")
+
+
 class FakeFirejail:
     """Answers every ``subprocess.run`` call the way a firejail would."""
 
