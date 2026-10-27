@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     # the stubs and botocore has no such name at run time, so it is imported
     # for the type checker only.
     from botocore.config import _RetryDict
+    from typing_extensions import Self
 
 # Type variable for the return type of the function
 T = TypeVar("T")
@@ -742,6 +743,27 @@ class ModelCheck(Tuple[bool, Optional[str]], metaclass=_ModelCheckType):  # noqa
     transient: bool
     listing_failure: Optional[str]
     listing_client_side: bool
+
+    if TYPE_CHECKING:
+        # The call shape, for a type checker only. At run time the metaclass's
+        # __call__ above builds the instance and this class declares no
+        # constructor of its own (the shown-text scan refuses a constructor
+        # looked up outside the escapers). mypy reads a class's constructor
+        # from its own __new__ or __init__ and takes no notice of a metaclass
+        # __call__ that returns the class, so without this declaration it
+        # checked every ModelCheck(False, reason, transient=...) against
+        # tuple's one-iterable constructor: too many arguments, unknown
+        # keywords, a bool where an iterable was expected. The declaration
+        # mirrors _ModelCheckType.__call__ parameter for parameter; keep the
+        # two in step.
+        def __new__(
+            cls,
+            is_valid: bool,
+            reason: Optional[str] = None,
+            transient: bool = False,
+            listing_failure: Optional[str] = None,
+            listing_client_side: bool = False,
+        ) -> Self: ...
 
 
 def check_is_transient(check: Any) -> bool:
