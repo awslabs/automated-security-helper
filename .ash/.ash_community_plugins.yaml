@@ -1438,6 +1438,27 @@ global_settings:
         confirmed from the SPDX license page. The package is minimatch 10.2.5,
         vendored under aws-cdk-lib; the separate top-level minimatch 3.1.5 is ISC and
         is covered by the entry above.
+    # === Time-boxed: dnspython CVE-2026-114605 / GHSA-45c3-73f7-pv4m on Python 3.10 (expires 2026-11-24) ===
+    # Same decision as the dnspython entries in .ash/.ash.yaml, restated here because
+    # a suppression list is not inherited across config files. uv.lock holds two
+    # dnspython entries. The one for Python 3.11 and later is at 2.9.0, the first
+    # fixed release. The one for Python 3.10 stays at 2.8.0 because 2.9.0 requires
+    # Python 3.11 and requires-python is >=3.10. dnspython comes in through
+    # email-validator, which pydantic[email] uses to validate email syntax. The
+    # version is pinned in the entry, so the 2.9.0 entry is never covered and a
+    # different 3.10 version reports again. trivy-repo reports the CVE id as is; grype,
+    # which would add the package name to the GHSA id, is off in this mode.
+    # Revisit when requires-python rises or a dnspython release supporting Python
+    # 3.10 ships.
+    - rule_id: "CVE-2026-114605"
+      path: "uv.lock"
+      package_name: "dnspython"
+      package_version: "2.8.0"
+      expiration: "2026-11-24"
+      reason: >-
+        CVE-2026-114605 (GHSA-45c3-73f7-pv4m): dnspython 2.8.0 in uv.lock, the Python 3.10
+        entry. The fixed release 2.9.0 requires Python 3.11; the Python 3.11 and later entry
+        is at 2.9.0. Revisit when requires-python rises or a supporting release ships.
     # === ferret-scan hits in documents, rendered templates and test files ===
     # One entry per rule and file, never a directory. The reasons describe the
     # pattern instead of quoting a line, because a quoted line would make this file
