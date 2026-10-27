@@ -1426,7 +1426,7 @@ class UVToolRunner:
                     # piece.
                     raw = result.stdout
 
-            except Exception as error:  # nosec B110 — version check failure is non-critical
+            except Exception as error:  # nosec B110 - version check failure is non-critical
                 raw = None
                 # A probe the active sandbox scope refused never ran, so it says
                 # nothing about the tool: not remembered for later callers.
