@@ -50,6 +50,25 @@ global_settings:
         version exists. Reachable only through dev/build tooling (micromatch via
         fast-glob and jsii-rosetta) and not shipped in the wheel or container image. Revisit when a fix
         ships; see the block comment above.
+    # === Time-boxed: filelock GHSA-v4x8-3wr5-3wq8 on Python 3.10 (expires 2026-11-27) ===
+    # uv.lock holds two filelock entries. The one for Python 3.11 and later is at 4.2.1,
+    # which is outside the affected range (up to 4.2.0). The one for Python 3.10 stays at
+    # 4.0.3 because no release above 4.2.0 supports Python 3.10 and requires-python is
+    # >=3.10. filelock comes in through pre-commit and virtualenv in the dev group only;
+    # it is not in the wheel or the container image. The version is pinned in the entry,
+    # so the 4.2.1 entry is never covered and a different 3.10 version reports again.
+    # Revisit when requires-python rises or a filelock release supports Python 3.10.
+    # grype reports this id with the package name appended; the trailing * covers both
+    # spellings.
+    - rule_id: "GHSA-v4x8-3wr5-3wq8*"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.3"
+      expiration: "2026-11-27"
+      reason: >-
+        GHSA-v4x8-3wr5-3wq8: filelock 4.0.3 in uv.lock, the Python 3.10 entry. Dev group only;
+        no filelock release above 4.2.0 supports Python 3.10. The Python 3.11 and later entry
+        is at 4.2.1. Revisit when requires-python rises or a supporting release ships.
     # === detect-secrets: broad patterns by path ===
     #
     # This header used to claim detect-secrets had "no inline nosec support".
