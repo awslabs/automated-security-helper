@@ -7,7 +7,7 @@
   │                                            B105                                              │
   │                                                                                              │
   │  What to review                                                                              │
-  │  Possible hardcoded password: 'hunter2'                                                      │
+  │  Possible hardcoded password: 'h******'                                                      │
   │                                                                                              │
   │  Finding context                                                                             │
   │  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓    │

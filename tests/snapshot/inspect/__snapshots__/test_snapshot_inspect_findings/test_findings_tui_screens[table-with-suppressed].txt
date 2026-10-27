@@ -5,7 +5,7 @@
  ╭──────────────────────────────────────────────────────────────────────────────────────────────╮
  │ Severity    Finding                                              Location                    │
  │ CRITICAL    B105                                                 src/app.py                  │
- │             Possible hardcoded password: 'hunter2'               line 12                     │
+ │             Possible hardcoded password: 'h******'               line 12                     │
  │ SUPPRESSED  CKV_AWS_18                                           infra/bucket.yaml           │
  │             Ensure the S3 bucket has access logging enabled      line 3                      │
  │ LOW         javascript.lang.security.audit.unsafe-eval           web/index.js                │

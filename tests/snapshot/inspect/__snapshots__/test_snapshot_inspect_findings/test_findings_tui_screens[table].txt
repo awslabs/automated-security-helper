@@ -5,7 +5,7 @@
  ╭──────────────────────────────────────────────────────────────────────────────────────────────╮
  │ Severity    Finding                                              Location                    │
  │ CRITICAL    B105                                                 src/app.py                  │
- │             Possible hardcoded password: 'hunter2'               line 12                     │
+ │             Possible hardcoded password: 'h******'               line 12                     │
  │ LOW         javascript.lang.security.audit.unsafe-eval           web/index.js                │
  │             Avoid eval() on user input                                                       │
  │ INFO        GHSA-0000-fixture                                    N/A                         │
