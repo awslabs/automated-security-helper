@@ -777,6 +777,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                     source=str(self._plugin_context.source_dir),
                     output=str(self._plugin_context.output_dir),
                     honor_ignore_files=honors_ignore_files(self._plugin_context.config),
+                    run_id=getattr(self._plugin_context, "run_id", None),
                 )
             ]
         output_abs = Path(self._plugin_context.output_dir).absolute()

@@ -93,6 +93,7 @@ def candidate_files(
                 source=str(context.source_dir),
                 output=str(context.output_dir),
                 honor_ignore_files=honors_ignore_files(context.config),
+                run_id=getattr(context, "run_id", None),
             ),
             context.source_dir,
             global_ignore_paths,

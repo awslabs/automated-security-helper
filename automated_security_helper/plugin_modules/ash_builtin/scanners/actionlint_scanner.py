@@ -822,6 +822,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 honor_ignore_files=honors_ignore_files(
                     getattr(self.context, "config", None)
                 ),
+                run_id=getattr(self.context, "run_id", None),
             )
 
         target_abs = Path(target).absolute()
