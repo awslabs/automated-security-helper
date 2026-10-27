@@ -117,7 +117,7 @@ scanners:
 | `offline`            | bool      | `false`                                      | Run offline even when ASH does not; ASH's offline mode applies regardless |
 | `scan_timeout`       | int       | `1800`                                       | Seconds ASH lets trivy run; ASH does not pass `trivy --timeout`, so trivy's own 5-minute default still applies |
 
-trivy-repo always passes `trivy --config` and `trivy --module-dir`, so trivy does not load a `trivy.yaml` from the directory it runs in. `config_file` and `module_dir` are honored only when set through `--config-overrides` or a config file outside every git checkout and the scanned directory (one that is not [repository-written](../../configuration-guide.md#settings-a-repositorys-config-cannot-choose)), and only for paths outside the scanned tree, which a path written inside the tree and led out of it by a symbolic link there is not; otherwise they are ignored with a warning. A relative path is taken from the directory of the ASH config file that sets it, or from the working directory for `--config-overrides`, not from the source directory (see [Relative paths in the operator's settings](../../configuration-guide.md#relative-paths-in-the-operators-settings)). A configured path that does not exist fails the scan. Unset or ignored, `--config` names `TRIVY_CONFIG` when that is a file outside the scanned tree (a relative path in it is taken from the working directory ASH runs in), and otherwise an empty config ASH ships; `--module-dir` names an empty directory ASH creates outside the scanned tree for each scanner run and removes when the run ends.
+trivy-repo always passes `trivy --config` and `trivy --module-dir`, so trivy does not load a `trivy.yaml` from the directory it runs in. `config_file` and `module_dir` are honored only when set through `--config-overrides` or a config file outside every git checkout and the scanned directory (one that is not [repository-written](../../../concepts/trust-model.md#how-the-tier-is-decided)), and only for paths outside the scanned tree, which a path written inside the tree and led out of it by a symbolic link there is not; otherwise they are ignored with a warning. A relative path is taken from the directory of the ASH config file that sets it, or from the working directory for `--config-overrides`, not from the source directory (see [Relative paths in the operator's settings](../../../how-to/configure.md#relative-paths)). A configured path that does not exist fails the scan. Unset or ignored, `--config` names `TRIVY_CONFIG` when that is a file outside the scanned tree (a relative path in it is taken from the working directory ASH runs in), and otherwise an empty config ASH ships; `--module-dir` names an empty directory ASH creates outside the scanned tree for each scanner run and removes when the run ends.
 
 `ignore_file` and `secret_config_file` follow the same rule, a relative path included. Unset or refused, trivy-repo uses `TRIVY_IGNOREFILE` or `TRIVY_SECRET_CONFIG` from the environment for a file outside the scanned tree (a relative path in either is taken from the working directory ASH runs in), and otherwise an empty file ASH writes outside the scanned tree, so a `.trivyignore` or `trivy-secret.yaml` in the scanned repository does not remove findings or disable secret rules.
 
@@ -214,7 +214,7 @@ results file is not graded. ASH passes `--exit-code=0`, which outranks an `exit-
 setting in your trivy config or in `TRIVY_EXIT_CODE`, so a run with findings still
 exits 0 and is reported; a `trivy.yaml` in the scanned directory is not read at all.
 ASH decides the scan's exit code from the findings. See
-[A Scanner Is ERROR With an Exit Code It Does Not Accept](../../troubleshooting.md#a-scanner-is-error-with-an-exit-code-it-does-not-accept).
+[A scanner is ERROR with an exit code it does not accept](../../../how-to/troubleshoot.md#a-scanner-is-error-with-an-exit-code-it-does-not-accept).
 
 ### Available Output Formats
 
@@ -2065,8 +2065,8 @@ trivy image --download-db-only
 
 ### Documentation
 - [Trivy Official Documentation](https://aquasecurity.github.io/trivy/)
-- [ASH Plugin Development Guide](../../plugins/development-guide.md)
-- [ASH Configuration Guide](../../configuration-guide.md)
+- [Write a scanner plugin](../../../plugins/write-a-scanner.md)
+- [Configure ASH](../../../how-to/configure.md)
 
 ### Community
 - [ASH GitHub Issues](https://github.com/aws-samples/automated-security-helper/issues)

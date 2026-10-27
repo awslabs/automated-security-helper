@@ -21,7 +21,7 @@ We encourage the community to develop and share plugins that extend ASH's capabi
 
 To contribute a community plugin:
 
-1. Develop your plugin following the [Plugin Development Guide](../../plugins/development-guide.md)
+1. Develop your plugin following the [Plugin Development Guide](../../../plugins/write-a-scanner.md)
 2. Host your plugin in a public repository
 3. Open a pull request to add your plugin to this documentation
 4. Include the following information in your PR:

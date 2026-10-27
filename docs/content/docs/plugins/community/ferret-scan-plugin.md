@@ -415,7 +415,7 @@ it gives ferret-scan has none of the bundled validators' patterns.
 So `profile` and `use_default_config` are the operator's choice. A config file
 inside the scanned tree, or one an MCP client delivered, does not set them, and
 the scan's warnings name the value that was ignored (see
-[Settings a repository's config cannot choose](../../configuration-guide.md#settings-a-repositorys-config-cannot-choose)).
+[How a file's tier is decided](../../../concepts/trust-model.md#how-the-tier-is-decided)).
 Set them with `--config-overrides`:
 
 ```bash
@@ -696,8 +696,8 @@ uv run ash --scanners ferret-scan,detect-secrets
 
 For comprehensive documentation and advanced configuration options, see:
 - [Ferret Scan GitHub Repository](https://github.com/awslabs/ferret-scan)
-- [ASH Plugin Development Guide](../index.md)
-- [ASH Scanner Plugins](../scanner-plugins.md)
+- [Plugins](../../../plugins/index.md)
+- [Write a scanner plugin](../../../plugins/write-a-scanner.md)
 
 ## Support
 

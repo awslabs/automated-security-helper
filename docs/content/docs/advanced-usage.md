@@ -46,7 +46,7 @@ and `true`). A
 repository's configuration file cannot turn this on, and `ash mcp` ignores both: an
 MCP client's scans never run a tool from inside a scanned or delivered directory, so
 for MCP use, install scanners outside the repository. See
-[Troubleshooting](troubleshooting.md#a-scanner-is-missing-because-it-was-found-only-inside-the-scanned-tree)
+[Troubleshoot](../how-to/troubleshoot.md#a-scanner-is-missing-because-it-was-found-only-inside-the-scanned-tree)
 for the message and the fixes.
 
 ### Container Mode
@@ -85,7 +85,7 @@ ash --mode nix
   version
 - Always runs offline
 - Linux and macOS; on Windows, run it in WSL2
-- See [Nix mode](installation-guide.md#nix-mode)
+- See [Nix mode](../how-to/install.md#nix-mode)
 
 ## Custom Plugins
 
@@ -174,7 +174,7 @@ semgrep and opengrep rulesets 30 days after they were downloaded. Rebuild the im
 (`ash build-image --offline`) at least that often. To scan with an older image
 anyway, pass `--allow-stale-content-db` or set `content_db_staleness: warn`; the scan
 then passes and every report names the stale database. See
-[Failing on a stale content database](configuration-guide.md#failing-on-a-stale-content-database).
+[What happens when a database is stale](../concepts/content-databases.md#what-happens-when-a-database-is-stale).
 
 ### Which scanners run offline
 
@@ -247,7 +247,7 @@ over the network on their own:
   with no lockfile has nothing to audit, and npm-audit is SKIPPED.
 - detect-secrets does not verify candidate secrets with their issuers, whatever the
   scanned repository's `.secrets.baseline` or any config says. See
-  [Secret verification](configuration-guide.md#secret-verification).
+  [What each tier may set](../concepts/trust-model.md#what-each-tier-may-set).
 
 #### Seeding the semgrep and opengrep rule cache
 
@@ -357,7 +357,7 @@ ash --mode container --oci-runner finch
 ASH does not publish a container image to a public registry. Building it yourself and
 hosting it in your own registry is the recommended posture, so that the provenance and
 patching cadence of the image that reads your source code belong to you. See
-[Building your own container image](building-your-own-image.md) for the reasoning, the
+[Build and host your own image](../how-to/run-in-a-container.md#own-image) for the reasoning, the
 rebuild cadence it commits you to, and offline builds.
 
 ```bash
@@ -475,7 +475,7 @@ accepted it and ran the scan without it.
 
 The call returns the aggregated results only when the scan's exit code is 0.
 Otherwise it ends the way `ash scan` does, by raising `SystemExit` with that code
-(see [Exit codes](cli-reference.md#exit-codes)): 2 for actionable findings while
+(see [Exit codes](../reference/exit-codes.md)): 2 for actionable findings while
 `fail_on_findings` is on, which is the default, and 1 for an incomplete scan, for
 example a selected scanner whose tool is not installed. That exit 1 is a
 `ScanIncompleteExit`, a `SystemExit` subclass whose `incompleteness` attribute names
@@ -599,4 +599,4 @@ ASH v3 includes comprehensive scanner validation that monitors scanner registrat
 
 The validation system includes result completeness validation that ensures all originally registered scanners appear in the final scan results, even if they failed or were disabled. This provides complete visibility into scan coverage and helps identify any scanners that may have been silently dropped during the scan process.
 
-For detailed information about the scanner validation system, see the [Scanner Validation System](../developer-guide/scanner-validation-system.md) developer guide.
+For detailed information about the scanner validation system, see [See why a scanner did not run](../contributing/testing.md#see-why-a-scanner-did-not-run) in the testing guide.

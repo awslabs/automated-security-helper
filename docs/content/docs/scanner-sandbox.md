@@ -204,7 +204,7 @@ it needs.
   there by a fixed name such as `ash.log`, is one. The scan stops with an error that names the link before ASH
   writes anything there, whatever the sandbox mode, since ASH clears and writes
   those itself; pass `--output-dir` with a directory that is not a link. See
-  [Output directory](concepts.md#output-directory) for the full list. Links above an
+  [Links are refused](../reference/output-files.md#links) for the full list. Links above an
   output directory outside the source tree (`/tmp` on macOS) are your own and are
   not examined.
 - ASH writes into the results directory after the scanner exits, and ASH is not
@@ -342,7 +342,7 @@ which it does when its settings list the verification filter. Only the operator'
 configuration can list it: ASH removes it from a `.secrets.baseline` inside the
 scanned tree and from a config file the scanned repository or an MCP client wrote,
 and offline from every source (see
-[Secret verification](configuration-guide.md#secret-verification)). A baseline the
+[What each tier may set](../concepts/trust-model.md#what-each-tier-may-set)). A baseline the
 operator names can still load a detect-secrets plugin from a file outside the tree, so
 the sandbox doesn't take detect-secrets' own word for it either: detect-secrets gets a
 network only when `sandbox.network_scanners` names it, and a repository can't set that
@@ -431,7 +431,7 @@ reason names the link.
 Plugin modules are judged by the same rule. A tool config file a scanner option
 names is judged by it too when a config inside the scanned tree names it; one the
 operator names may sit in a checkout of the operator's own. See
-[Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose).
+[How a file's tier is decided](../concepts/trust-model.md#how-the-tier-is-decided).
 
 Sandbox grants follow a scanner's own name, the one its code gives it. If a config
 file renames a scanner's section, for example by setting `name: grype` on a plugin's
@@ -530,7 +530,7 @@ Out of scope:
   `--changed-files-only` and workspace planning, never inside a scanner.
 - Links in the scanned tree. ASH's scan set leaves out a link to a file whose target
   is outside the source directory, and warns about each one (see
-  [Ignore files and the scan set](configuration-guide.md#ignore-files-and-the-scan-set)),
+  [What decides the files](../reference/coverage.md#what-decides-the-files)),
   so the scanners and converters that read the scan set are not given it.
   bandit, semgrep, opengrep, checkov, grype and syft walk the source directory
   themselves, and snyk-code passes it to the Snyk CLI as it is; what each of those
@@ -538,7 +538,7 @@ Out of scope:
 - Plugin modules. A config file can list `ash_plugin_modules`, which ASH imports into
   its own process, so they run unsandboxed. From a config file inside the scanned
   tree, only installed modules outside the tree are imported (see
-  [Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose)),
+  [What each tier may set](../concepts/trust-model.md#what-each-tier-may-set)),
   but an installed package still runs with ASH's access. The sandbox doesn't change
   this; review the plugin modules a repository's config names before you scan it.
   ASH's own `ash_aws_plugins` and `ash_snyk_plugins` packages are not imported from
