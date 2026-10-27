@@ -1454,9 +1454,16 @@ jobs:
           help=""
           uvx_ran="${RUNNER_TEMP}/ash-install-preflight-uvx.ran"
           rm -f -- "${uvx_ran}"
-          # The single quotes are deliberate: the inner bash expands $0 and $@.
+          # The inner bash changes to RUNNER_TEMP before uvx starts: `ash dependencies
+          # install` takes its source directory from the working directory, resolves
+          # its config there and imports the plugin modules that config names before
+          # click reads --help, so run from the checkout the scanned repository would
+          # choose what code this preflight runs (the install steps below run from
+          # RUNNER_TEMP for the same reason). with_commands_stopped itself stays in
+          # the step's own shell, as it requires.
+          # The single quotes are deliberate: the inner bash expands $0, $1 and $@.
           # shellcheck disable=SC2016
-          with_commands_stopped --capture help bash -c ': > "$0" && exec "$@" 2>&1' "${uvx_ran}" \
+          with_commands_stopped --capture help bash -c ': > "$0" && cd "$1" && shift && exec "$@" 2>&1' "${uvx_ran}" "${RUNNER_TEMP}" \
             uvx --from "${ASH_UVX_SOURCE}" ash dependencies install --help || status=$?
           [ -e "${uvx_ran}" ] || exit 1
           plain="${help//$'\e'\[*([0-9;])m/}"
