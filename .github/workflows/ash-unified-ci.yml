@@ -1482,8 +1482,19 @@ jobs:
         with:
           python-version: "3.12"
           install-ash: "false"
+      # The second line completes the cfn-lint the project environment already
+      # carries: moto (dev group) depends on cfn-lint, so `.venv/bin/cfn-lint` exists
+      # without the `sarif` extra, and `uv run` puts `.venv/bin` ahead of every other
+      # PATH entry, so the cfn-lint scanner finds that copy before the uv tool the
+      # step below installs. Its pre-installed check requires `cfn-lint[sarif]`, and
+      # offline (the cfn-lint tests scan with ASH_OFFLINE) a missing extra makes the
+      # scanner MISSING. The spec is the scanner's own; it adds the extra's packages
+      # and leaves the locked cfn-lint version in place. `uv run` syncs inexactly, so
+      # the added packages survive it.
       - name: Install dependencies
-        run: uv sync --extra cdk --extra symbols
+        run: |
+          uv sync --extra cdk --extra symbols
+          uv pip install 'cfn-lint[sarif]>=1.43.3,<2.0.0'
       # The integration suite runs bandit, actionlint, cfn-lint, cfn-guard and gitleaks
       # for real, and nothing else in this job installs them: the first test that
       # needed bandit ran `uv tool install` from inside the suite. This is the
@@ -1508,6 +1519,12 @@ jobs:
       # The installs above put the pinned binaries in ~/.ash/bin and the uv tools in
       # ~/.local/bin. PATH gains both for this step only, not through GITHUB_PATH, so no
       # later step of the job runs an executable by name from either directory.
+      #
+      # The cfn-guard rules bundle the install above put under ~/.ash/share is named
+      # by ASH_CFN_GUARD_RULES_DIR for the same reason: tests/conftest.py gives every
+      # test a home of its own, and without the variable the scanner (and the cfn-lint
+      # and cfn-guard tests' own tool check) look for the bundle under that home, where
+      # nothing installed it. The container image sets the same variable.
       - name: Run the integration suite
         env:
           ASH_REQUIRE_ACTIONLINT: "1"
@@ -1518,6 +1535,7 @@ jobs:
           ASH_REQUIRE_PREINSTALLED_TOOLS: bandit,actionlint,cfn-lint,cfn-guard,gitleaks
         run: |
           export PATH="$HOME/.ash/bin:$HOME/.local/bin:$PATH"
+          export ASH_CFN_GUARD_RULES_DIR="$HOME/.ash/share/cfn-guard-rules"
           uv run pytest \
             tests/integration \
             tests/unit/cli/mcp/test_source_delivery_scan_e2e.py \
