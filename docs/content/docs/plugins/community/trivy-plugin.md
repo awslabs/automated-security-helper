@@ -30,6 +30,8 @@ The ASH Trivy plugin provides seamless integration with Trivy's repository scann
 
 `ash dependencies install` installs the pinned trivy release (v0.75.0, checked against the SHA256 in `automated_security_helper/utils/tool_downloads.py`) that both `trivy` and `trivy-repo` run, and the ASH container image ships it. A trivy you install yourself, as below, is used when it is on `PATH`; ASH is tested against the pinned version.
 
+trivy-repo runs the first `trivy` it finds: on `PATH`, then in ASH's bin directory (`~/.ash/bin`, or the directory `ASH_BIN_PATH` names), then in `/usr/local/bin`, except on Windows. Only an executable file counts ([Where ASH looks for a tool](../../advanced-usage.md#where-ash-looks-for-a-tool)).
+
 #### Installation Options
 
 **Using Homebrew (macOS/Linux):**
