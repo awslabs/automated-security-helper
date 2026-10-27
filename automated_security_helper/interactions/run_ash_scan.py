@@ -43,6 +43,7 @@ from rich.text import Text
 from automated_security_helper.utils.console import echo, global_console
 from automated_security_helper.utils.console import print  # noqa: A004
 from automated_security_helper.utils.terminal_text import (
+    as_written,
     shown_not_obeyed,
     shown_on_one_line,
 )
@@ -945,16 +946,15 @@ def incomplete_scanners(
 def _failed_inputs_reason(failed_inputs: Sequence[Any], shown: int = 5) -> str:
     """``could not convert 2 inputs: a.ipynb, b.ipynb``, naming at most ``shown``.
 
-    The names are the scanned tree's, and this reason is printed and logged, so
-    each is shown as inert text.
+    The names are the scanned tree's, and this reason is printed and logged:
+    ``incomplete_converters`` shows the whole reason once, so each name is left
+    as it is here.
     """
     paths = [
-        inert_text(
-            str(
-                getattr(item, "path", None)
-                or (item.get("path") if isinstance(item, dict) else None)
-                or "?"
-            )
+        str(
+            getattr(item, "path", None)
+            or (item.get("path") if isinstance(item, dict) else None)
+            or "?"
         )
         for item in failed_inputs
     ]
@@ -968,10 +968,10 @@ def _failed_inputs_reason(failed_inputs: Sequence[Any], shown: int = 5) -> str:
 def _limit_refusals_reason(refused_inputs: Sequence[Any], shown: int = 5) -> str:
     """``refused 1 input over an extraction limit: a.zip (max_total_bytes)``.
 
-    Each archive's name is shown as inert text, as in _failed_inputs_reason.
+    Each archive's name is left as it is, as in _failed_inputs_reason.
     """
     named = [
-        f"{inert_text(str(getattr(item, 'path', '?')))} ({getattr(item, 'limit', '?')})"
+        f"{getattr(item, 'path', '?')} ({getattr(item, 'limit', '?')})"
         for item in refused_inputs
     ]
     listed = ", ".join(named[:shown])
@@ -1080,14 +1080,17 @@ def incomplete_converters(
         ]
         # Both reasons reach the terminal, the log and the MCP payload, and both
         # can quote the scanned tree's file names: an exception's text as well as
-        # the failed and refused inputs. So each is shown as inert text.
+        # the failed and refused inputs. So each is shown once here, as
+        # utils/terminal_text.py shows a value (a ShownText, which every sink
+        # leaves as it is); a caller that shows a whole message holding the
+        # reason reads it back with as_written first (see _compute_exit_code).
         if failure:
-            listed.append(IncompleteConverter(name, inert_text(str(failure))))
+            listed.append(IncompleteConverter(name, shown_on_one_line(str(failure))))
         elif lost:
             listed.append(
                 IncompleteConverter(
                     name,
-                    inert_text("; ".join(lost)),
+                    shown_on_one_line("; ".join(lost)),
                     # Read as the validator reads it: a record that skipped
                     # validation can hold any kind. An over-limit refusal is
                     # carried as the marker kind "limit", so the console's
@@ -6442,13 +6445,16 @@ def _compute_exit_code(
         incomplete_conversions = list(incompleteness.converters)
         if incomplete_conversions:
             # The reason is the converter's own failure text, which `ash merge`
-            # carries over from the shards.
+            # carries over from the shards. incomplete_converters showed it once;
+            # shown here as part of the whole message, its escapes would be shown
+            # again, so the text it was made from is read back first.
             ASH_LOGGER.error(
                 shown_on_one_line(
                     "Conversion incomplete, so the scanners were given fewer targets "
                     "than this repository has: "
                     + ", ".join(
-                        f"{row[0]} ({row[1]})" for row in incomplete_conversions
+                        f"{row[0]} ({as_written(row[1])})"
+                        for row in incomplete_conversions
                     )
                 ),
                 extra=NO_MARKUP,
