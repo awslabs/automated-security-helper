@@ -2003,28 +2003,28 @@ def _read_back_inner_results(
 ) -> Optional[AshAggregatedResults]:
     """The inner run's results file, parsed; None when there is none.
 
-    Exits 1 when it is not a regular file, or does not parse. The parse error
-    names each field that failed, without the values the file held there.
+    Exits 1 when it is not a regular file, is not UTF-8, or does not parse. The
+    reason is describe_results_error's, as ``ash report`` gives it for the same
+    file: a location names only the results schema's own names (a key the file
+    chose is ``<key>``), no value the file held is repeated, and control
+    characters are written as ``\\xNN``.
     """
+    from automated_security_helper.config.config_validator import (
+        describe_results_error,
+    )
+
     _refuse_an_inner_file_that_is_not_regular(output_file, "the inner run's results")
     if not output_file.exists():
         return None
-    with open(output_file, mode="r", encoding="utf-8") as f:
-        content = f.read()
     try:
+        with open(output_file, mode="r", encoding="utf-8") as f:
+            content = f.read()
         return AshAggregatedResults.model_validate_json(content)
-    except ValidationError as e:
-        problems = "; ".join(
-            (
-                f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
-                if error["loc"]
-                else error["msg"]
-            )
-            for error in e.errors(include_input=False, include_url=False)[:10]
+    except (ValidationError, ValueError) as e:
+        # UnicodeDecodeError is a ValueError, so the read is inside the handler.
+        logger.error(
+            f"Failed to parse results file {output_file}: {describe_results_error(e)}"
         )
-        logger.error(f"Failed to parse results file {output_file}: {problems}")
-    except ValueError as e:
-        logger.error(f"Failed to parse results file {output_file}: {type(e).__name__}")
     sys.exit(1)
 
 

@@ -145,7 +145,9 @@ def completed_by(results_json: str, run_id: str | None) -> str:
     document.setdefault("validation_checkpoints", []).append(
         {"type": "run_completed", "metadata": {"run_id": run_id}}
     )
-    return json.dumps(document)
+    # ensure_ascii=False keeps a lone surrogate as a character, so the surrogateescape
+    # write in FakeOciRunner.popen turns it into the byte it stands for.
+    return json.dumps(document, ensure_ascii=False)
 
 
 def _outer_run_id(args: list[str], env: dict | None) -> str | None:
