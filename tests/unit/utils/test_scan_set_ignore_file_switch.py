@@ -929,12 +929,14 @@ class TestEveryConsumerPassesTheSwitch:
     """
 
     def test_the_consumers_are_found(self):
+        """cfn-nag and cdk-nag read the scan set through
+        ``utils/cfn_template_discovery.candidate_files``, so that module is the
+        consumer for both."""
         modules = {module for module, _call in _consumers()}
         assert {
             "core/orchestrator.py",
             "plugin_modules/ash_builtin/scanners/detect_secrets_scanner.py",
-            "plugin_modules/ash_builtin/scanners/cfn_nag_scanner.py",
-            "plugin_modules/ash_builtin/scanners/cdk_nag_scanner.py",
+            "utils/cfn_template_discovery.py",
             "plugin_modules/ash_builtin/scanners/npm_audit_scanner.py",
             "plugin_modules/ash_builtin/converters/archive_converter.py",
             "plugin_modules/ash_builtin/converters/jupyter_converter.py",
