@@ -145,9 +145,12 @@ def test_container_scan_of_the_fixture(
     } == snapshot
 
 
-def test_container_exit_status_for_an_invalid_config(
-    run_cli, snapshot, fixture_repo, project_build_files_in_cwd
+def test_an_invalid_config_is_refused_on_the_host_before_the_container_starts(
+    run_cli, fixture_repo, project_build_files_in_cwd
 ):
+    # run_ash_scan refuses a config the scan inside the image would refuse, with exit 3,
+    # before it builds, runs or mounts anything (_outer_mode_config_refusal). So the
+    # host prints the refusal itself and there is no container exit to report.
     (fixture_repo / ".ash" / ".ash.yaml").write_text(BAD_CONFIG, encoding="utf-8")
     result = run_cli(
         [
@@ -164,10 +167,9 @@ def test_container_exit_status_for_an_invalid_config(
             "out",
         ]
     )
-    assert {
-        "exit_code": result["exit_code"],
-        "host_output_after_container": _host_output_after_container(result["stdout"]),
-    } == snapshot
+    assert result["exit_code"] == 3
+    assert "ERROR (3) Invalid configuration" in result["stdout"]
+    assert not any(marker in result["stdout"] for marker in _HOST_RESUMES)
 
 
 def _wrapper_env() -> dict[str, str]:

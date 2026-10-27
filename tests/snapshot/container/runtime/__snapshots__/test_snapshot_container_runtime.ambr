@@ -15,16 +15,6 @@
     'last_line': 'ERROR (2) Exiting due to 1 actionable findings found in ASH scan',
   })
 # ---
-# name: test_container_exit_status_for_an_invalid_config
-  dict({
-    'exit_code': 3,
-    'host_output_after_container': '''
-                   ERROR    Container execution failed with code 3
-                   ERROR    The container exited with 3 (invalid config), which means nothing was scanned. Only 0, 1, 2 are verdicts ASH reaches from a results file, so there is nothing in the output directory to read back.
-  
-    ''',
-  })
-# ---
 # name: test_container_scan_of_the_fixture
   dict({
     'exit_code': 2,
