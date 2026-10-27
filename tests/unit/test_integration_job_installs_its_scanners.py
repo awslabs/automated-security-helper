@@ -149,6 +149,14 @@ class TestTheScannerInstallingBanditFailsTheRun:
     @pytest.fixture(autouse=True)
     def _no_bandit_here(self, monkeypatch):
         monkeypatch.setattr(UVToolRunner, "is_uv_available", lambda self: True)
+        # With uv present, building the scanner asks it for bandit's version
+        # (`uv tool run --from bandit... bandit --version`), which the unit tests'
+        # tool guard records as a start; the version is not this class's subject.
+        monkeypatch.setattr(
+            UVToolRunner,
+            "get_tool_version",
+            lambda self, tool_name, package_name=None, *args, **kwargs: None,
+        )
         monkeypatch.setattr(UVToolRunner, "is_tool_installed", lambda self, name: False)
         monkeypatch.setattr(
             "automated_security_helper.utils.subprocess_utils.find_executable",

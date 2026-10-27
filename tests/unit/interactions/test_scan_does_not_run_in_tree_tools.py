@@ -81,6 +81,16 @@ def tree(tmp_path):
             tree / "node_modules" / ".bin", "semgrep", marks / "semgrep-ran"
         ),
     }
+    # The "other copy" a run may find once the in-tree one is refused: the test's
+    # own, outside the tree (``scan`` puts it on PATH ahead of the host's). Without
+    # it the child found the unit tests' tool guard stand-in there (the parent's
+    # PATH, inherited) and the guard recorded the scan's bandit as a start. Their
+    # marks are kept apart from ``marks``, which the tests read as "an in-tree
+    # tool ran".
+    other_marks = tmp_path / "outside-marks"
+    other_marks.mkdir()
+    for name in tools:
+        stand_in(tmp_path / "outside-bin", name, other_marks / f"{name}-ran")
     return tree, marks, tools
 
 
@@ -110,6 +120,7 @@ def scan(tree: Path, tools: dict, *extra: str, env_extra=None) -> str:
                 [
                     str(tools["bandit"].parent),
                     str(tools["semgrep"].parent),
+                    str(tree.parent / "outside-bin"),
                     # A run that must find no other copy gets the system directories
                     # only, not the host's whole PATH.
                     "/usr/bin:/bin"

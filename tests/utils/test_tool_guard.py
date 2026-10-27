@@ -1127,9 +1127,9 @@ def _probe_answers() -> list:
         uv_tool_runner,
     )
 
-    def _trivy_db_age():
+    def _trivy_db_age(probe):
         try:
-            content_db_staleness.MEASURERS["trivy-db"](None)
+            probe(None)
         except ValueError as error:
             # The error's first clause; the rest names the stub or trivy's stderr.
             return str(error).split(":", 1)[0]
@@ -1142,7 +1142,8 @@ def _probe_answers() -> list:
         pre_installed_tool._run(["uv", "--version"], 5),
         OpengrepScanner._get_opengrep_version(None),
         _trivy_scanner_base.trivy_default_misconfig_scanners("trivy", ["repository"]),
-        _trivy_db_age(),
+        _trivy_db_age(content_db_staleness.MEASURERS["trivy-db"]),
+        _trivy_db_age(content_db_staleness._built_from_trivy),
     ]
 
 
@@ -1181,6 +1182,7 @@ def test_the_child_probe_stubs_answer_as_stub_tool_probes_does(monkeypatch, tmp_
         None,
         None,
         None,
+        "`trivy version --format json` printed nothing (exit 1)",
         "`trivy version --format json` printed nothing (exit 1)",
     ]
 

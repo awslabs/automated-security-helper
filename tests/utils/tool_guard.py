@@ -944,7 +944,11 @@ def stub_tool_probes(monkeypatch) -> None:
         "_DEFAULT_MISCONFIG_SCANNERS",
         _NoDefaultMisconfigScanners(),
     )
+    # Two routes to the same probe: ``measure`` dispatches through MEASURERS, and
+    # the built-in trivy scanner imports ``_built_from_trivy`` by name when it
+    # reads its database's age (ash_builtin/scanners/trivy_scanner.py).
     monkeypatch.setitem(content_db_staleness.MEASURERS, "trivy-db", _no_trivy_database)
+    monkeypatch.setattr(content_db_staleness, "_built_from_trivy", _no_trivy_database)
 
 
 class _NoDefaultMisconfigScanners(dict):
@@ -975,21 +979,14 @@ def _no_trivy_database(ctx):
 #: uv installed with ASH beside its interpreter whatever PATH it is given, so a child
 #: ``ash scan`` ran that uv, and the tools it starts, for real. It has to be source
 #: rather than a call: a child started with ``-I`` cannot import the tests.
-CHILD_TOOL_PROBE_STUBS = """\
+#: The trivy part of ``CHILD_TOOL_PROBE_STUBS`` on its own, for a child that keeps a
+#: uv of the test's own (a stand-in uv first on its PATH, tests/utils/stand_in_uv.py)
+#: and so must not be told that uv is absent, but must not start trivy either.
+CHILD_TRIVY_PROBE_STUBS = """\
 from automated_security_helper.plugin_modules.ash_builtin.scanners import (
     _trivy_scanner_base as _stubbed_trivy_base,
 )
-from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
-    OpengrepScanner as _StubbedOpengrepScanner,
-)
 from automated_security_helper.utils import content_db_staleness as _stubbed_staleness
-from automated_security_helper.utils import pre_installed_tool as _stubbed_pre_installed
-from automated_security_helper.utils import uv_tool_runner as _stubbed_uv_tool_runner
-
-_stubbed_uv_tool_runner.UVToolRunner.uv_availability = lambda self: (False, None)
-_stubbed_uv_tool_runner.find_uv_or_none = lambda: None
-_stubbed_pre_installed._run = lambda command, timeout: None
-_StubbedOpengrepScanner._get_opengrep_version = lambda self: None
 
 
 class _NoDefaultMisconfigScanners(dict):
@@ -1011,7 +1008,24 @@ def _no_trivy_database(ctx):
 
 
 _stubbed_staleness.MEASURERS["trivy-db"] = _no_trivy_database
+_stubbed_staleness._built_from_trivy = _no_trivy_database
 """
+
+CHILD_TOOL_PROBE_STUBS = (
+    """\
+from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+    OpengrepScanner as _StubbedOpengrepScanner,
+)
+from automated_security_helper.utils import pre_installed_tool as _stubbed_pre_installed
+from automated_security_helper.utils import uv_tool_runner as _stubbed_uv_tool_runner
+
+_stubbed_uv_tool_runner.UVToolRunner.uv_availability = lambda self: (False, None)
+_stubbed_uv_tool_runner.find_uv_or_none = lambda: None
+_stubbed_pre_installed._run = lambda command, timeout: None
+_StubbedOpengrepScanner._get_opengrep_version = lambda self: None
+"""
+    + CHILD_TRIVY_PROBE_STUBS
+)
 
 
 class ToolGuard:

@@ -32,6 +32,7 @@ from tests.utils.stand_in_uv import (
     reaching_the_stand_in,
     stand_in_env,
 )
+from tests.utils.tool_guard import CHILD_TRIVY_PROBE_STUBS
 
 BROKEN = "zq8broken_ash_plugins"
 DEPENDENCY = "zq8dep_pkg"
@@ -327,7 +328,10 @@ def _run(layout: Path, mode: str) -> dict:
             sys.executable,
             "-I",
             "-c",
-            importing_this_checkout(DRIVER),
+            # The child keeps the stand-in uv (its subject); only trivy's probes are
+            # answered, because the trivy scanner read its database's age with a
+            # real `trivy version`, which reached the parent's guard stand-in.
+            importing_this_checkout(CHILD_TRIVY_PROBE_STUBS + DRIVER),
             str(layout / "modules"),
             str(layout),
             mode,
