@@ -90,6 +90,9 @@ def commands(monkeypatch, tmp_path) -> List[List[str]]:
     )
     monkeypatch.setattr(rac, "_runner_supports_buildx", lambda _runner: False)
     monkeypatch.setattr(rac, "run_cmd_direct", record)
+    # The default image is `non-root`; a Windows host defaults to `ci`
+    # (run_ash_container._resolve_build_target), which the tests below do not name.
+    monkeypatch.setattr(rac, "_host_is_windows", lambda: False)
     for name in ("CI", "ASH_IMAGE_NAME", "ASH_CONFIG", "OCI_RUNNER_WRAPPER"):
         monkeypatch.delenv(name, raising=False)
     (tmp_path / "src").mkdir()
