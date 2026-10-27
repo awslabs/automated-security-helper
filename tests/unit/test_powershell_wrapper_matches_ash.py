@@ -1990,7 +1990,9 @@ def test_every_refusal_that_shows_a_value_escapes_its_hidden_characters(tmp_path
 #: What a throw or a Write-* call in the helper may interpolate without
 #: Format-AshShownValue: names and text the helper itself chose, never a value the
 #: caller gave. $tried, $shownMode, $shownBuildCmd and $shownRunCmd are built from
-#: values already shown. $createReason and $writeReason are the system's text for an
+#: values already shown, and so are $runnerRefusal and $mountRefusal, whole messages
+#: thrown from a variable so that PowerShell's error view, which quotes the throw's
+#: source line, prints each once. $createReason and $writeReason are the system's text for an
 #: error, never the exception's message, which names the path. The
 #: ASH_BASE_OCI_LAYOUT refusal is left as it is. ``$($id[0])`` is the word UID or GID
 #: from the literal list the ContainerUID and ContainerGID check walks, and
@@ -2019,6 +2021,8 @@ _INTERPOLATED_AS_IS = {
     "$($env:ASH_BASE_OCI_LAYOUT)",
     "$($id[0])",  # 'UID' or 'GID', the first word of each pair in the literal list
     "$envConfigHeld",  # a newline, a carriage return, a comma or a double quote
+    "$runnerRefusal",  # the OCI_RUNNER refusal, built from $tried
+    "$mountRefusal",  # the --mount refusal, built from shown paths and a held phrase
 }
 
 

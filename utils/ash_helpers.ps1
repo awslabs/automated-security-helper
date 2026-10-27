@@ -1128,6 +1128,16 @@ function Invoke-ASH {
             }
             return $null
         }
+        # What in $Path a container runtime's --mount cannot take, named, or $null when
+        # nothing: the value is read as CSV, so a comma, a double quote or a line break
+        # in a mounted path cannot be written into it.
+        function Get-AshMountHeldText([string]$Path) {
+            if ($Path.Contains("`n")) { return 'a newline' }
+            if ($Path.Contains("`r")) { return 'a carriage return' }
+            if ($Path.Contains(',')) { return 'a comma' }
+            if ($Path.Contains('"')) { return 'a double quote' }
+            return $null
+        }
         # The numeric id of the user who owns the item at $Path, or $null when this
         # runtime does not say. Off Windows PowerShell 7 gives each item a UnixStat with
         # the ids. An id is read and not the User name: a user with no passwd entry, such
@@ -1569,7 +1579,7 @@ function Invoke-ASH {
             else {
                 # A --mount value is read as CSV by the runtimes, so a comma, a double
                 # quote or a line break in the source path cannot be written into it.
-                $envConfigHeld = if ($envConfigReal.Contains("`n")) { 'a newline' } elseif ($envConfigReal.Contains("`r")) { 'a carriage return' } elseif ($envConfigReal.Contains(',')) { 'a comma' } elseif ($envConfigReal.Contains('"')) { 'a double quote' } else { $null }
+                $envConfigHeld = Get-AshMountHeldText $envConfigReal
                 if ($envConfigHeld) {
                     $global:LASTEXITCODE = $refusalExitCode
                     throw "ASH_CONFIG $(Format-AshShownValue $envConfigGiven) is a path with $envConfigHeld in it, which a container runtime's --mount cannot take. Rename the directory or give another."
@@ -1711,6 +1721,24 @@ function Invoke-ASH {
         # Case is ignored on Windows and macOS, whose volumes usually ignore it, so an
         # -OutputDir typed in another case is still found to be below them.
         $outputDirAbsolute = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDir)
+
+        # The source and output directories are mounted with --mount, whose value the
+        # runtimes read as CSV, so a comma, a double quote or a line break in either
+        # path cannot be handed to them (the ASH_CONFIG path is checked the same way
+        # below). Refused here, before anything is created and before a runner is
+        # looked for, with the refusal code; -NoRun mounts nothing, so it checks
+        # nothing. Thrown from a variable: PowerShell's error view quotes the throw's
+        # source line, which with the text inline printed the message twice.
+        if (-not $NoRun) {
+            foreach ($mounted in @(@('-SourceDir', $sourceDirFull), @('-OutputDir', $outputDirAbsolute))) {
+                $mountHeld = Get-AshMountHeldText $mounted[1]
+                if ($mountHeld) {
+                    $mountRefusal = "$($mounted[0]) $(Format-AshShownValue $mounted[1]) is a path with $mountHeld in it, which cannot be handed to the container runner: a --mount value is read as CSV. Rename the directory or give another."
+                    $global:LASTEXITCODE = $refusalExitCode
+                    throw $mountRefusal
+                }
+            }
+        }
         $pathComparison = if ($onWindows -or $IsMacOS) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
         $separator = [System.IO.Path]::DirectorySeparatorChar
         $repositoryRoots = @((Get-Location).Path, $sourceDirFull) | ForEach-Object { $_.TrimEnd($separator) + $separator }
@@ -1867,8 +1895,11 @@ function Invoke-ASH {
                 # then exits with it, as every refusal here does.
                 $candidates = @($runners | ForEach-Object { Format-AshShownValue $_ })
                 $tried = if ($candidates.Count -eq 1) { "'$($candidates[0])' was not found" } else { "none of $($candidates -join ', ') was found on PATH" }
+                # Thrown from a variable: PowerShell's error view quotes the throw's
+                # source line, which with the text inline printed the message twice.
+                $runnerRefusal = "Unable to resolve an OCI_RUNNER: $tried. Install one, or name it with -OCIRunner or OCI_RUNNER."
                 $global:LASTEXITCODE = $refusalExitCode
-                throw "Unable to resolve an OCI_RUNNER: $tried. Install one, or name it with -OCIRunner or OCI_RUNNER."
+                throw $runnerRefusal
             }
             else {
                 Write-Verbose "Resolved OCI_RUNNER to: $(Format-AshShownValue ([System.IO.Path]::GetFileNameWithoutExtension($RESOLVED_OCI_RUNNER))) ($(Format-AshShownValue $RESOLVED_OCI_RUNNER))"
