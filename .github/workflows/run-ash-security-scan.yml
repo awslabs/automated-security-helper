@@ -332,6 +332,7 @@ jobs:
       # The checked values the report job uses, so it reads no input as given.
       output-dir: ${{ steps.inputs.outputs.output_dir }}
       repository-owner: ${{ steps.inputs.outputs.repository_owner }}
+      artifact-name: ${{ steps.inputs.outputs.artifact_name }}
     # Read only. This job runs ASH, the scanners and whatever ASH loads, so it holds
     # no token that can write; the reporting steps are in the `report` job below.
     permissions:
@@ -419,6 +420,7 @@ jobs:
           INPUT_REPOSITORY_OWNER: ${{ inputs.repository-owner }}
           INPUT_PYTHON_VERSION: ${{ inputs.python-version }}
           INPUT_BASE_REF: ${{ inputs.base-ref }}
+          INPUT_ARTIFACT_NAME: ${{ inputs.artifact-name }}
         run: |
           set -euo pipefail
           # Byte by byte, so the answer is the same whatever locale the runner has: in
@@ -654,8 +656,9 @@ jobs:
         id: ash-source
         shell: bash
         env:
-          INPUT_ASH_VERSION: ${{ inputs.ash-version }}
-          INPUT_ASH_REPO: ${{ inputs.ash-repo }}
+          # The input check's outputs, never the inputs as given.
+          CHECKED_ASH_VERSION: ${{ steps.inputs.outputs.ash_version }}
+          CHECKED_ASH_REPO: ${{ steps.inputs.outputs.ash_repo }}
           JOB_CONTEXT: ${{ toJSON(job) }}
         run: |
           set -euo pipefail
@@ -668,26 +671,26 @@ jobs:
           }
           workflow_sha="$(job_field workflow_sha)"
           workflow_repo="$(job_field workflow_repository)"
-          if [ -n "${INPUT_ASH_REPO}" ] && ! [[ "${INPUT_ASH_REPO}" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+          if [ -n "${CHECKED_ASH_REPO}" ] && ! [[ "${CHECKED_ASH_REPO}" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
             echo "::error::ash-repo must be owner/repo; got a value that is not."
             exit 1
           fi
           if [ -z "${workflow_sha}" ] || [ -z "${workflow_repo}" ]; then
             missing=""
-            [ -n "${INPUT_ASH_VERSION}" ] || missing="ash-version"
-            [ -n "${INPUT_ASH_REPO}" ] || missing="${missing:+${missing} and }ash-repo"
+            [ -n "${CHECKED_ASH_VERSION}" ] || missing="ash-version"
+            [ -n "${CHECKED_ASH_REPO}" ] || missing="${missing:+${missing} and }ash-repo"
             if [ -n "${missing}" ]; then
               echo "::error::Cannot tell which ASH to install: this runner provides no job.workflow_sha or job.workflow_repository (GitHub Enterprise Server does not), so both ash-version (the release or commit to install) and ash-repo (the owner/repo to install it from) are required, and $(one_line "${missing}") is unset."
               exit 1
             fi
           fi
-          if [ -z "${INPUT_ASH_VERSION}" ] && [ -n "${INPUT_ASH_REPO}" ] \
-              && [ "${INPUT_ASH_REPO,,}" != "${workflow_repo,,}" ]; then
-            echo "::error::ash-repo is $(one_line "${INPUT_ASH_REPO}") but ash-version is empty. An empty ash-version means the commit this workflow file was called at, $(one_line "${workflow_sha}"), which belongs to $(one_line "${workflow_repo}"); installing it from $(one_line "${INPUT_ASH_REPO}") would not install that repository's code. Set ash-version to the tag, branch or commit to install from $(one_line "${INPUT_ASH_REPO}")."
+          if [ -z "${CHECKED_ASH_VERSION}" ] && [ -n "${CHECKED_ASH_REPO}" ] \
+              && [ "${CHECKED_ASH_REPO,,}" != "${workflow_repo,,}" ]; then
+            echo "::error::ash-repo is $(one_line "${CHECKED_ASH_REPO}") but ash-version is empty. An empty ash-version means the commit this workflow file was called at, $(one_line "${workflow_sha}"), which belongs to $(one_line "${workflow_repo}"); installing it from $(one_line "${CHECKED_ASH_REPO}") would not install that repository's code. Set ash-version to the tag, branch or commit to install from $(one_line "${CHECKED_ASH_REPO}")."
             exit 1
           fi
-          version="${INPUT_ASH_VERSION:-${workflow_sha}}"
-          repo="${INPUT_ASH_REPO:-${workflow_repo}}"
+          version="${CHECKED_ASH_VERSION:-${workflow_sha}}"
+          repo="${CHECKED_ASH_REPO:-${workflow_repo}}"
           if ! [[ "${repo}" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
             echo "::error::ash-repo must be owner/repo; got a value that is not."
             exit 1
@@ -833,11 +836,12 @@ jobs:
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
-          CONFIGURED_BASE_REF: ${{ inputs.base-ref }}
+          # The input check's outputs, never the inputs as given.
+          CONFIGURED_BASE_REF: ${{ steps.inputs.outputs.base_ref }}
           # pull_request synchronize payloads carry `before` too; push only.
           PUSH_BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
-          ASH_MODE: ${{ inputs.ash-mode }}
-          ASH_ARGS: ${{ inputs.ash-args }}
+          ASH_MODE: ${{ steps.inputs.outputs.ash_mode }}
+          ASH_ARGS: ${{ steps.inputs.outputs.ash_args }}
         run: |
           set -euo pipefail
           # Every value a workflow command below prints goes through one_line.
@@ -2219,7 +2223,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: (success() || failure()) && steps.inputs.outcome == 'success'
         with:
-          name: ${{ inputs.artifact-name }}
+          name: ${{ steps.inputs.outputs.artifact_name }}
           path: |
             ${{ steps.inputs.outputs.output_dir }}/reports
             ${{ steps.inputs.outputs.output_dir }}/ash_aggregated_results.json
@@ -2277,7 +2281,7 @@ jobs:
       - name: Download ASH output artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ${{ inputs.artifact-name }}
+          name: ${{ needs.ash.outputs.artifact-name }}
           path: ${{ needs.ash.outputs.output-dir }}
 
       # GITHUB_TOKEN is read-only for pull requests opened from a fork, whatever
@@ -2319,10 +2323,10 @@ jobs:
           && github.event.pull_request.head.repo.full_name != github.repository
           && (success() || failure())
         shell: bash
-        env:
-          ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        # No value in the message: this job has no one_line helper, and the
+        # artifact's name is on the run's summary page.
         run: |
-          echo "::notice::Scan results were not posted as a PR comment: GITHUB_TOKEN is read-only for fork pull requests. The full report is in this job's summary and in the ${ARTIFACT_NAME} artifact."
+          echo "::notice::Scan results were not posted as a PR comment: GITHUB_TOKEN is read-only for fork pull requests. The full report is in this job's summary and in the uploaded ASH output artifact."
 
       # THE CHECKS-PERMISSION PROBE THAT USED TO GATE THIS STEP IS GONE
       #
@@ -2393,10 +2397,10 @@ jobs:
           && github.event.pull_request.head.repo.full_name != github.repository
           && (success() || failure())
         shell: bash
-        env:
-          ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        # No value in the message: this job has no one_line helper, and the
+        # artifact's name is on the run's summary page.
         run: |
-          echo "::notice::The JUnit test report was not published as a check: GITHUB_TOKEN is read-only for fork pull requests, so check runs cannot be created. The results are in this job's summary and in the ${ARTIFACT_NAME} artifact."
+          echo "::notice::The JUnit test report was not published as a check: GITHUB_TOKEN is read-only for fork pull requests, so check runs cannot be created. The results are in this job's summary and in the uploaded ASH output artifact."
 
       # This step never holds security-events: write. The `permissions:` block at
       # the top of this file does not list it, and a called workflow can only
@@ -2443,13 +2447,12 @@ jobs:
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
-          ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        # No value in either message: this job has no one_line helper (the scan
+        # job's RUNNER_TEMP is not this job's), so a load of it here would fail the
+        # step, and neither the artifact's name nor the event's needs printing.
         run: |
-          # The artifact name is the caller's input, so it goes through one_line,
-          # and the event name with it.
-          . "${RUNNER_TEMP}/ash-one-line.sh"
           if [ "${EVENT_NAME}" = "merge_group" ]; then
-            echo "::notice::The SARIF report was not uploaded to code scanning on this merge_group event: the run is on the merge queue's temporary branch, which GitHub deletes when the entry leaves the queue, and code scanning takes an upload without security-events: write only from a pull_request run. The pull request's own run uploads the report. It is also in the $(one_line "${ARTIFACT_NAME}") artifact at reports/ash.ghas.sarif."
+            echo "::notice::The SARIF report was not uploaded to code scanning on this merge_group event: the run is on the merge queue's temporary branch, which GitHub deletes when the entry leaves the queue, and code scanning takes an upload without security-events: write only from a pull_request run. The pull request's own run uploads the report. It is also in the uploaded ASH output artifact at reports/ash.ghas.sarif."
           else
-            echo "::notice::The SARIF report was not uploaded to code scanning on this $(one_line "${EVENT_NAME}") event: this workflow cannot hold security-events: write, which code scanning needs for an upload except from a pull_request run. To upload it, call upload-ash-sarif.yml in a job that grants security-events: write. The report is in the $(one_line "${ARTIFACT_NAME}") artifact at reports/ash.ghas.sarif."
+            echo "::notice::The SARIF report was not uploaded to code scanning on this event: this workflow cannot hold security-events: write, which code scanning needs for an upload except from a pull_request run. To upload it, call upload-ash-sarif.yml in a job that grants security-events: write. The report is in the uploaded ASH output artifact at reports/ash.ghas.sarif."
           fi

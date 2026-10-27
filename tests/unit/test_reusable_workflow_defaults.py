@@ -101,8 +101,10 @@ def test_ash_version_and_repo_default_to_the_workflows_own_commit():
     # see the step's comment for why not job.workflow_sha directly.
     assert env["JOB_CONTEXT"] == "${{ toJSON(job) }}"
     assert "workflow_sha" in step["run"] and "workflow_repository" in step["run"]
-    assert env["INPUT_ASH_VERSION"] == "${{ inputs.ash-version }}"
-    assert env["INPUT_ASH_REPO"] == "${{ inputs.ash-repo }}"
+    # The input check's outputs, never the inputs as given
+    # (test_an_input_cannot_add_a_workflow_command.py).
+    assert env["CHECKED_ASH_VERSION"] == "${{ steps.inputs.outputs.ash_version }}"
+    assert env["CHECKED_ASH_REPO"] == "${{ steps.inputs.outputs.ash_repo }}"
 
 
 def test_no_step_reads_the_raw_inputs():
@@ -154,8 +156,8 @@ def _run_resolve(
         "RUNNER_TEMP": str(runner_temp),
         "GITHUB_ENV": str(github_env),
         "GITHUB_OUTPUT": str(github_output),
-        "INPUT_ASH_VERSION": "",
-        "INPUT_ASH_REPO": "",
+        "CHECKED_ASH_VERSION": "",
+        "CHECKED_ASH_REPO": "",
         "JOB_CONTEXT": _job_context(),
         **env,
     }
@@ -201,8 +203,8 @@ class TestTheResolutionStep:
     def test_explicit_inputs_win(self, tmp_path):
         result, github_env, _ = _run_resolve(
             tmp_path,
-            INPUT_ASH_VERSION="v3.7.0",
-            INPUT_ASH_REPO="a-fork/automated-security-helper",
+            CHECKED_ASH_VERSION="v3.7.0",
+            CHECKED_ASH_REPO="a-fork/automated-security-helper",
             JOB_CONTEXT=_job_context(
                 workflow_sha=SHA,
                 workflow_repository="awslabs/automated-security-helper",
@@ -228,8 +230,8 @@ class TestTheResolutionStep:
     @pytest.mark.parametrize(
         "given, missing",
         [
-            ({"INPUT_ASH_VERSION": "v3.7.0"}, "ash-repo"),
-            ({"INPUT_ASH_REPO": "awslabs/automated-security-helper"}, "ash-version"),
+            ({"CHECKED_ASH_VERSION": "v3.7.0"}, "ash-repo"),
+            ({"CHECKED_ASH_REPO": "awslabs/automated-security-helper"}, "ash-version"),
         ],
         ids=["only-ash-version", "only-ash-repo"],
     )
@@ -251,8 +253,8 @@ class TestTheResolutionStep:
     def test_without_the_job_context_both_inputs_are_enough(self, tmp_path):
         result, github_env, _ = _run_resolve(
             tmp_path,
-            INPUT_ASH_VERSION="v3.7.0",
-            INPUT_ASH_REPO="awslabs/automated-security-helper",
+            CHECKED_ASH_VERSION="v3.7.0",
+            CHECKED_ASH_REPO="awslabs/automated-security-helper",
         )
 
         assert result.returncode == 0, result.stdout + result.stderr
@@ -270,7 +272,7 @@ class TestTheResolutionStep:
         """
         result, github_env, _ = _run_resolve(
             tmp_path,
-            INPUT_ASH_REPO="a-fork/automated-security-helper",
+            CHECKED_ASH_REPO="a-fork/automated-security-helper",
             JOB_CONTEXT=_job_context(
                 workflow_sha=SHA,
                 workflow_repository="awslabs/automated-security-helper",
@@ -296,7 +298,7 @@ class TestTheResolutionStep:
         context[field] += COMMAND_TEXT
         result, github_env, _ = _run_resolve(
             tmp_path,
-            INPUT_ASH_REPO="a-fork/automated-security-helper",
+            CHECKED_ASH_REPO="a-fork/automated-security-helper",
             JOB_CONTEXT=_job_context(**context),
         )
 
@@ -313,7 +315,7 @@ class TestTheResolutionStep:
         """GitHub compares owner/repo without regard to case, and so does the step."""
         result, github_env, _ = _run_resolve(
             tmp_path,
-            INPUT_ASH_REPO="AWSLabs/Automated-Security-Helper",
+            CHECKED_ASH_REPO="AWSLabs/Automated-Security-Helper",
             JOB_CONTEXT=_job_context(
                 workflow_sha=SHA,
                 workflow_repository="awslabs/automated-security-helper",
@@ -326,14 +328,14 @@ class TestTheResolutionStep:
     @pytest.mark.parametrize(
         "field, value",
         [
-            ("INPUT_ASH_VERSION", "main\nPATH=/tmp/evil"),
-            ("INPUT_ASH_VERSION", "v3.7.0 extra"),
-            ("INPUT_ASH_VERSION", "feat..x"),
-            ("INPUT_ASH_VERSION", "feat.lock"),
-            ("INPUT_ASH_VERSION", "feat:x"),
-            ("INPUT_ASH_VERSION", "feat~1"),
-            ("INPUT_ASH_VERSION", "@"),
-            ("INPUT_ASH_VERSION", "feat@{1}"),
+            ("CHECKED_ASH_VERSION", "main\nPATH=/tmp/evil"),
+            ("CHECKED_ASH_VERSION", "v3.7.0 extra"),
+            ("CHECKED_ASH_VERSION", "feat..x"),
+            ("CHECKED_ASH_VERSION", "feat.lock"),
+            ("CHECKED_ASH_VERSION", "feat:x"),
+            ("CHECKED_ASH_VERSION", "feat~1"),
+            ("CHECKED_ASH_VERSION", "@"),
+            ("CHECKED_ASH_VERSION", "feat@{1}"),
         ],
     )
     def test_a_value_that_is_not_a_ref_is_refused(self, tmp_path, field, value):
@@ -369,8 +371,8 @@ class TestTheResolutionStep:
         """
         result, github_env, github_output = _run_resolve(
             tmp_path,
-            INPUT_ASH_VERSION="v3.7.0",
-            INPUT_ASH_REPO=repo,
+            CHECKED_ASH_VERSION="v3.7.0",
+            CHECKED_ASH_REPO=repo,
             JOB_CONTEXT=_job_context(
                 workflow_sha=SHA,
                 workflow_repository="awslabs/automated-security-helper",
@@ -394,7 +396,7 @@ class TestTheResolutionStep:
         """
         result, github_env, github_output = _run_resolve(
             tmp_path,
-            INPUT_ASH_REPO="a/b\n::warning::INJECTED",
+            CHECKED_ASH_REPO="a/b\n::warning::INJECTED",
             JOB_CONTEXT=_job_context(
                 workflow_sha=SHA,
                 workflow_repository="awslabs/automated-security-helper",
@@ -416,7 +418,7 @@ class TestTheResolutionStep:
         """
         result, github_env, github_output = _run_resolve(
             tmp_path,
-            INPUT_ASH_VERSION="v3.7.0",
+            CHECKED_ASH_VERSION="v3.7.0",
             JOB_CONTEXT=_job_context(
                 workflow_sha=SHA, workflow_repository="a/b\nINJECTED=1"
             ),
@@ -447,7 +449,7 @@ class TestTheResolutionStep:
         """
         result, github_env, github_output = _run_resolve(
             tmp_path,
-            INPUT_ASH_VERSION=ref,
+            CHECKED_ASH_VERSION=ref,
             JOB_CONTEXT=_job_context(
                 workflow_sha=SHA,
                 workflow_repository="awslabs/automated-security-helper",

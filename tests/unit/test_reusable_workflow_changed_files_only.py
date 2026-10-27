@@ -76,15 +76,17 @@ def test_a_step_resolves_the_base_and_the_scan_uses_it():
     env = resolve["env"]
     assert env["PR_BASE_SHA"] == "${{ github.event.pull_request.base.sha }}"
     assert env["MERGE_GROUP_BASE_SHA"] == "${{ github.event.merge_group.base_sha }}"
-    assert env["CONFIGURED_BASE_REF"] == "${{ inputs.base-ref }}"
+    # The string inputs arrive as the input check's outputs, never as given
+    # (test_an_input_cannot_add_a_workflow_command.py).
+    assert env["CONFIGURED_BASE_REF"] == "${{ steps.inputs.outputs.base_ref }}"
     # github.event.before is in pull_request synchronize payloads too, so it is
     # read on push only.
     assert env["PUSH_BEFORE"] == (
         "${{ github.event_name == 'push' && github.event.before || '' }}"
     )
     # The two inputs that decide the scan's mode, as the scan step reads them.
-    assert env["ASH_MODE"] == "${{ inputs.ash-mode }}"
-    assert env["ASH_ARGS"] == "${{ inputs.ash-args }}"
+    assert env["ASH_MODE"] == "${{ steps.inputs.outputs.ash_mode }}"
+    assert env["ASH_ARGS"] == "${{ steps.inputs.outputs.ash_args }}"
 
     run_ash = _step(name="Run ASH")
     assert run_ash["env"]["BASE_REF"] == "${{ steps.base-ref.outputs.ref }}"
