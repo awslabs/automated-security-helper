@@ -32,7 +32,7 @@ PROBE_MODULE = (
     / "runtime"
     / "test_container_image_permissions.py"
 )
-PRUNED = {"/proc", "/sys", "/dev", "/tmp", "/var/tmp", "/run/lock"}
+PRUNED = {"/proc", "/sys", "/dev", "/tmp", "/var/tmp", "/run/lock"}  # nosec B108
 
 
 @pytest.fixture(scope="module")

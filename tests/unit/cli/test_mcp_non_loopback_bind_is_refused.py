@@ -43,7 +43,7 @@ TERRAFORM_ENTRYPOINT = (
     REPO_ROOT / "deploy/terraform/modules/ash-image-pipeline/files/ash-mcp-serve"
 )
 
-NON_LOOPBACK_HOSTS = ["0.0.0.0", "::", "192.0.2.10", "ash-mcp.example.com"]
+NON_LOOPBACK_HOSTS = ["0.0.0.0", "::", "192.0.2.10", "ash-mcp.example.com"]  # nosec B104
 LOOPBACK_HOSTS = ["127.0.0.1", "localhost", "::1"]
 HTTP_TRANSPORTS = ["streamable-http", "sse"]
 
@@ -117,7 +117,8 @@ class TestNonLoopbackBindWithoutAllowlist:
         self, startup, transport
     ) -> None:
         result = CliRunner().invoke(
-            ash_app, ["mcp", "--transport", transport, "--host", "0.0.0.0"]
+            ash_app,
+            ["mcp", "--transport", transport, "--host", "0.0.0.0"],  # nosec B104
         )
 
         assert result.exit_code == ASH_EXIT_USAGE_ERROR, (
@@ -132,7 +133,7 @@ class TestNonLoopbackBindWithoutAllowlist:
             mcp_command(
                 ctx=_ResilientFalseCtx(),
                 transport="streamable-http",
-                host="0.0.0.0",
+                host="0.0.0.0",  # nosec B104
                 stateless_http=True,
                 quiet=True,
             )
@@ -160,7 +161,7 @@ class TestBindsThatStillStart:
         mcp_command(
             ctx=_ResilientFalseCtx(),
             transport=transport,
-            host="0.0.0.0",
+            host="0.0.0.0",  # nosec B104
             allowed_host=["ash-mcp.example.com"],
             quiet=True,
         )

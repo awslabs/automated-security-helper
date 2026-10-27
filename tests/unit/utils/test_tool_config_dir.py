@@ -296,7 +296,7 @@ def test_with_no_private_directory_nothing_is_written(
     tree, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     shared = _temp_dir(monkeypatch, tmp_path / "shared", 0o777)
-    os.chmod(tree.outside, 0o777)
+    os.chmod(tree.outside, 0o777)  # nosec B103
     with tool_config_scope(_context(tree.source, tree.outside)):
         with pytest.raises(OSError, match="TMPDIR") as refused:
             write_tool_config("x.yaml", "{}\n")

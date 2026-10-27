@@ -457,7 +457,7 @@ def test_each_stage_ends_by_clearing_what_installers_left_writable(stage, instru
     assert installs, f"the {stage} stage no longer installs anything"
     assert sweeps, f"the {stage} stage has no sweep"
     assert sweeps[-1] > installs[-1]
-    for path in ("/proc", "/sys", "/dev", "/tmp", "/var/tmp", "/run/lock"):
+    for path in ("/proc", "/sys", "/dev", "/tmp", "/var/tmp", "/run/lock"):  # nosec B108
         assert f"-path {path} " in runs[sweeps[-1]]
 
 
