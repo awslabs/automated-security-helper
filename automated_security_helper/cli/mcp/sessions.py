@@ -72,6 +72,7 @@ from automated_security_helper.cli.mcp.session_paths import (
     session_directory,
     validated_path_component,
 )
+from automated_security_helper.utils.terminal_text import raw_controls_on_one_line
 
 
 class ScanCount:
@@ -926,7 +927,7 @@ def session_scan_limit_refusal(
         "success": False,
         "operation": operation,
         "error_type": SESSION_SCAN_LIMIT,
-        "error": error,
+        "error": raw_controls_on_one_line(error),
     }
 
 

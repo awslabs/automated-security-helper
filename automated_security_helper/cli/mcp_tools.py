@@ -1413,7 +1413,7 @@ def _denied_response(exc: Exception, operation: str) -> Dict[str, Any]:
     return {
         "success": False,
         "operation": operation,
-        "error": str(exc),
+        "error": raw_controls_on_one_line(str(exc)),
         "error_type": (
             CONFIG_POLICY_UNREADABLE
             if isinstance(exc, ASHConfigPolicyUnreadableError)
@@ -1508,7 +1508,7 @@ def _client_config_denial(
         # refusal the caller can read rather than an exception out of the tool.
         _logger.warning(f"Config policy check failed before the scan: {exc}")
         response = create_error_response(error=exc, operation=operation)
-        response["error"] = (
+        response["error"] = raw_controls_on_one_line(
             "The config could not be checked against this session's "
             f"runtime-override policy: {exc}"
         )
@@ -5623,7 +5623,11 @@ def mcp_select_profile(
                 session_id=session_id,
             )
     except SessionWorkspaceBusyError as e:
-        return {"success": False, "error": str(e), "error_type": SESSION_WORKSPACE_BUSY}
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(str(e)),
+            "error_type": SESSION_WORKSPACE_BUSY,
+        }
 
 
 def _select_profile(
@@ -6251,13 +6255,13 @@ def mcp_set_source_git(
     except ValueError as e:
         return {
             "success": False,
-            "error": str(e),
+            "error": raw_controls_on_one_line(str(e)),
             "error_type": "clone_url_not_permitted",
         }
     if host not in git_allowed_hosts():
         return {
             "success": False,
-            "error": (
+            "error": raw_controls_on_one_line(
                 f"Refusing to clone from {host!r}: it is not in "
                 f"{ASH_MCP_GIT_ALLOWED_HOSTS_ENV}, the hosts the operator lets "
                 f"this server clone from. The list is empty unless the operator "
@@ -6272,7 +6276,7 @@ def mcp_set_source_git(
     except ValueError as e:
         return {
             "success": False,
-            "error": str(e),
+            "error": raw_controls_on_one_line(str(e)),
             "error_type": "ssh_key_not_registered",
         }
 
@@ -6287,9 +6291,17 @@ def mcp_set_source_git(
     except SourceDeliveryBusyError as e:
         # A RuntimeError too, so it is caught first: a client retries this one
         # after the scan ends, and branches on error_type to know that.
-        return {"success": False, "error": str(e), "error_type": SOURCE_DELIVERY_BUSY}
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(str(e)),
+            "error_type": SOURCE_DELIVERY_BUSY,
+        }
     except GitTimeoutError as e:
-        return {"success": False, "error": str(e), "error_type": CLONE_TIMED_OUT}
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(str(e)),
+            "error_type": CLONE_TIMED_OUT,
+        }
     except SessionWorkspaceError as e:
         return refused(e, SESSION_WORKSPACE_UNAVAILABLE)
     except GitCommandError as e:
@@ -6358,7 +6370,11 @@ def mcp_set_source_zip_chunk(
             session_id=session_id,
         )
     except SessionWorkspaceBusyError as e:
-        return {"success": False, "error": str(e), "error_type": SESSION_WORKSPACE_BUSY}
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(str(e)),
+            "error_type": SESSION_WORKSPACE_BUSY,
+        }
     except SessionWorkspaceError as e:
         return {
             "success": False,
@@ -6418,7 +6434,11 @@ def mcp_set_source_zip_finalize(
             session_id=session_id,
         )
     except SourceDeliveryBusyError as e:
-        return {"success": False, "error": str(e), "error_type": SOURCE_DELIVERY_BUSY}
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(str(e)),
+            "error_type": SOURCE_DELIVERY_BUSY,
+        }
     except SessionWorkspaceError as e:
         return {
             "success": False,
@@ -6461,5 +6481,9 @@ def mcp_clear_source(session_id: str) -> Dict[str, Any]:
     try:
         clear_source(session_id=session_id)
     except SourceDeliveryBusyError as e:
-        return {"success": False, "error": str(e), "error_type": SOURCE_DELIVERY_BUSY}
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(str(e)),
+            "error_type": SOURCE_DELIVERY_BUSY,
+        }
     return {"success": True}

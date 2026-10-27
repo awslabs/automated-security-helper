@@ -79,6 +79,8 @@ import re
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Dict, Iterator, Mapping, Optional, cast
 
+from automated_security_helper.utils.terminal_text import raw_controls_on_one_line
+
 if TYPE_CHECKING:
     from mcp.server.mcpserver import Context as SdkContext
 
@@ -370,7 +372,7 @@ def session_identity_refusal(
         "success": False,
         "operation": operation,
         "error_type": SESSION_IDENTITY_REQUIRED,
-        "error": (
+        "error": raw_controls_on_one_line(
             f"{operation} needs a session, and this call carries none the server "
             f"issued. A stateless streamable-HTTP server issues no session, and an "
             f"Mcp-Session-Id header the server did not issue does not name one. "
