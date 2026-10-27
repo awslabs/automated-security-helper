@@ -877,11 +877,23 @@ def _gate_client_overrides(
     # environment (_environment_references): a refusal goes to the client, and
     # names a policy entry read from the environment as <value>, as
     # select_profile's does (runtime_patch._PolicyNames).
-    base = (
-        load_config_file_for_run(Path(session_config))[1]
-        if session_config
-        else AshConfig()
-    )
+    if session_config:
+        try:
+            base = load_config_file_for_run(Path(session_config))[1]
+        except ASHConfigValidationError:
+            raise
+        except Exception as exc:  # noqa: BLE001 -- a file that does not parse is a config error
+            # A session config that does not parse is the operator's config
+            # that is broken: reported as a scan reports it (exit 3), never as
+            # the parser's own error, which the tools answer as an internal
+            # error (exit 1). The parser's words can quote the file, so only
+            # the error's kind is named.
+            raise ASHConfigValidationError(
+                f"The session config {Path(session_config).as_posix()} could not "
+                f"be loaded ({type(exc).__name__})."
+            ) from exc
+    else:
+        base = AshConfig()
     entry = session_profile_entry(session_id, profile)
     allowlist = (
         policy_of(entry.config) if entry is not None else RuntimeOverridesConfig()
@@ -2082,11 +2094,11 @@ async def _scan_workspace(
         workspace_file, workspace_config, session_id
     )
     if config_refusal is not None:
-        return _error_response(
-            config_refusal,
-            "scan_workspace",
-            exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
-        )
+        # No explicit code: the refusal is caused by an
+        # ASHConfigInputNotPermittedError, which _error_response answers as
+        # config_input_not_permitted with exit 3, as mcp_resolve_workspace does
+        # for the same refusal.
+        return _error_response(config_refusal, "scan_workspace")
 
     # A caller-named output tree is written into, so it gets the scan roots a
     # scan target gets, checked before anything below creates it. The default,
