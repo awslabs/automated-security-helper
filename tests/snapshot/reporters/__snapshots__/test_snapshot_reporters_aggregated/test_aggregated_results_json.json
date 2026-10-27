@@ -224,6 +224,7 @@
         "options": {
           "severity_threshold": null,
           "scan_timeout": 1800,
+          "offline": false,
           "config_file": null,
           "shellcheck": null,
           "pyflakes": null
@@ -268,6 +269,7 @@
         "options": {
           "severity_threshold": null,
           "scan_timeout": 1800,
+          "offline": false,
           "rule_sets": [
             "wa-Security-Pillar"
           ],
@@ -280,6 +282,7 @@
         "options": {
           "severity_threshold": null,
           "scan_timeout": 1800,
+          "offline": false,
           "config_file": null,
           "regions": [],
           "ignore_checks": [],
@@ -344,6 +347,7 @@
         "options": {
           "severity_threshold": null,
           "scan_timeout": 1800,
+          "offline": false,
           "config_file": null,
           "baseline_path": null,
           "honor_inline_ignores": false,
@@ -428,6 +432,7 @@
         "options": {
           "severity_threshold": null,
           "scan_timeout": 1800,
+          "offline": false,
           "scanners": [
             "vuln"
           ],
@@ -436,8 +441,7 @@
           "disable_telemetry": true,
           "config_file": null,
           "ignore_file": null,
-          "secret_config_file": null,
-          "offline": false
+          "secret_config_file": null
         }
       },
       "zizmor": {
@@ -446,6 +450,7 @@
         "options": {
           "severity_threshold": null,
           "scan_timeout": 1800,
+          "offline": false,
           "config_file": null,
           "persona": "regular",
           "online_audits": false,

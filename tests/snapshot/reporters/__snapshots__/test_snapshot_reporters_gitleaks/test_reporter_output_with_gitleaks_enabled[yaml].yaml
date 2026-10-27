@@ -3,6 +3,7 @@ additional_reports:
     source:
       duration: 0.5
       end_time: '2026-01-15T12:00:00.500000Z'
+      exit_code: 0
       finding_count: 5
       metadata:
         scanner_version: 8.30.1
@@ -170,6 +171,7 @@ ash_config:
     shutdown_timeout_seconds: 30
     task_count_warning_threshold: 15
     thread_pool_max_workers: 4
+  output_formats: []
   project_name: gitleaks-snapshot
   reporters:
     csv:
@@ -282,6 +284,7 @@ ash_config:
       name: actionlint
       options:
         config_file: null
+        offline: false
         pyflakes: null
         scan_timeout: 1800
         severity_threshold: null
@@ -296,6 +299,7 @@ ash_config:
         excluded_paths: []
         ignore_nosec: false
         install_timeout: 300
+        offline: false
         scan_timeout: 1800
         severity_threshold: null
         tool_version: '>=1.7.0,<2.0.0'
@@ -310,12 +314,14 @@ ash_config:
           NIST80053R4Checks: false
           NIST80053R5Checks: false
           PCIDSS321Checks: false
+        offline: false
         scan_timeout: 1800
         severity_threshold: null
     cfn-guard:
       enabled: true
       name: cfn-guard
       options:
+        offline: false
         rule_sets:
         - wa-Security-Pillar
         rules_paths: []
@@ -330,6 +336,7 @@ ash_config:
         ignore_checks: []
         include_checks: []
         install_timeout: 300
+        offline: false
         regions: []
         scan_timeout: 1800
         severity_threshold: null
@@ -338,6 +345,7 @@ ash_config:
       enabled: true
       name: cfn-nag
       options:
+        offline: false
         scan_timeout: 1800
         severity_threshold: null
     checkov:
@@ -362,6 +370,8 @@ ash_config:
       name: detect-secrets
       options:
         baseline_file: null
+        max_worker_output_mib: 256
+        offline: false
         scan_settings:
           filters_used: []
           generated_at: null
@@ -379,6 +389,7 @@ ash_config:
         config_file: null
         honor_inline_ignores: false
         max_target_megabytes: null
+        offline: false
         scan_timeout: 1800
         severity_threshold: null
     grype:
@@ -462,6 +473,7 @@ ash_config:
         config_file: null
         honor_inline_ignores: false
         install_timeout: 300
+        offline: false
         online_audits: false
         persona: regular
         scan_timeout: 1800
@@ -500,7 +512,7 @@ metadata:
   inputs_not_scanned: null
   plugin_load_errors: {}
   project_name: ASH
-  report_id: ASH-20260115
+  report_id: ASH-20260115120000-000000000001
   shard: null
   summary_stats:
     actionable: 5
@@ -5053,6 +5065,7 @@ scanner_results:
       low: 0
       medium: 0
       suppressed: 0
+    skipped_reason: null
     status: FAILED
     suppressed_finding_count: 0
 used_suppressions: []

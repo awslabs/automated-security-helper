@@ -23,9 +23,12 @@
       "status": "FAILED",
       "excluded": false,
       "dependencies_missing": false,
+      "missing_reason": null,
+      "skipped_reason": null,
       "duration": 0.5,
       "targets_attempted": null,
-      "targets_failed": 0
+      "targets_failed": 0,
+      "counters_unusable": false
     }
   ],
   "content_databases": [],
@@ -42,7 +45,7 @@
   ],
   "findings": [
     {
-      "id": "trivy-CVE-2021-23337-5da50b68",
+      "id": "trivy-CVE-2021-23337-c9d2cb697ffa",
       "title": "CVE-2021-23337",
       "description": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2021-23337\nSeverity: HIGH\nFixed Version: 4.17.21\nLink: [CVE-2021-23337](https://avd.aquasec.com/nvd/cve-2021-23337)",
       "severity": "HIGH",
@@ -62,7 +65,7 @@
       "package_path": "node_modules/lodash"
     },
     {
-      "id": "trivy-CVE-2026-4800-9685a676",
+      "id": "trivy-CVE-2026-4800-f7c41132e877",
       "title": "CVE-2026-4800",
       "description": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2026-4800\nSeverity: HIGH\nFixed Version: 4.18.0\nLink: [CVE-2026-4800](https://avd.aquasec.com/nvd/cve-2026-4800)",
       "severity": "HIGH",
@@ -82,7 +85,7 @@
       "package_path": "node_modules/lodash"
     },
     {
-      "id": "trivy-CVE-2020-28500-01e7a351",
+      "id": "trivy-CVE-2020-28500-c369ba03cde2",
       "title": "CVE-2020-28500",
       "description": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2020-28500\nSeverity: MEDIUM\nFixed Version: 4.17.21\nLink: [CVE-2020-28500](https://avd.aquasec.com/nvd/cve-2020-28500)",
       "severity": "MEDIUM",
@@ -102,7 +105,7 @@
       "package_path": "node_modules/lodash"
     },
     {
-      "id": "trivy-CVE-2025-13465-f6e44935",
+      "id": "trivy-CVE-2025-13465-da6564056ada",
       "title": "CVE-2025-13465",
       "description": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2025-13465\nSeverity: MEDIUM\nFixed Version: 4.17.23\nLink: [CVE-2025-13465](https://avd.aquasec.com/nvd/cve-2025-13465)",
       "severity": "MEDIUM",
@@ -122,7 +125,7 @@
       "package_path": "node_modules/lodash"
     },
     {
-      "id": "trivy-CVE-2026-2950-ccebffa3",
+      "id": "trivy-CVE-2026-2950-18560624c0fa",
       "title": "CVE-2026-2950",
       "description": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2026-2950\nSeverity: MEDIUM\nFixed Version: 4.18.0\nLink: [CVE-2026-2950](https://avd.aquasec.com/nvd/cve-2026-2950)",
       "severity": "MEDIUM",
@@ -142,7 +145,7 @@
       "package_path": "node_modules/lodash"
     },
     {
-      "id": "trivy-CVE-2018-18074-2b388f7e",
+      "id": "trivy-CVE-2018-18074-f9a883b23119",
       "title": "CVE-2018-18074",
       "description": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2018-18074\nSeverity: HIGH\nFixed Version: 2.20.0\nLink: [CVE-2018-18074](https://avd.aquasec.com/nvd/cve-2018-18074)",
       "severity": "HIGH",
@@ -161,7 +164,7 @@
       "package_version": "2.19.1"
     },
     {
-      "id": "trivy-CVE-2023-32681-15e866d3",
+      "id": "trivy-CVE-2023-32681-d7c70cd83c9a",
       "title": "CVE-2023-32681",
       "description": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2023-32681\nSeverity: MEDIUM\nFixed Version: 2.31.0\nLink: [CVE-2023-32681](https://avd.aquasec.com/nvd/cve-2023-32681)",
       "severity": "MEDIUM",
@@ -180,7 +183,7 @@
       "package_version": "2.19.1"
     },
     {
-      "id": "trivy-CVE-2024-35195-d4b31add",
+      "id": "trivy-CVE-2024-35195-9bd17802762b",
       "title": "CVE-2024-35195",
       "description": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2024-35195\nSeverity: MEDIUM\nFixed Version: 2.32.0\nLink: [CVE-2024-35195](https://avd.aquasec.com/nvd/cve-2024-35195)",
       "severity": "MEDIUM",
@@ -199,7 +202,7 @@
       "package_version": "2.19.1"
     },
     {
-      "id": "trivy-CVE-2024-47081-b38b06e7",
+      "id": "trivy-CVE-2024-47081-2697f2462217",
       "title": "CVE-2024-47081",
       "description": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2024-47081\nSeverity: MEDIUM\nFixed Version: 2.32.4\nLink: [CVE-2024-47081](https://avd.aquasec.com/nvd/cve-2024-47081)",
       "severity": "MEDIUM",
@@ -218,7 +221,7 @@
       "package_version": "2.19.1"
     },
     {
-      "id": "trivy-CVE-2026-25645-35c6b74c",
+      "id": "trivy-CVE-2026-25645-b1adee552d6f",
       "title": "CVE-2026-25645",
       "description": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2026-25645\nSeverity: MEDIUM\nFixed Version: 2.33.0\nLink: [CVE-2026-25645](https://avd.aquasec.com/nvd/cve-2026-25645)",
       "severity": "MEDIUM",

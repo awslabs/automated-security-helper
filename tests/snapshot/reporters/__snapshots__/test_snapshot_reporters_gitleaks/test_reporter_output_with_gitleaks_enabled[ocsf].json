@@ -19,7 +19,7 @@
       },
       "version": "1.1.0"
     },
-    "severity_id": 4,
+    "severity_id": 5,
     "status": "New",
     "status_id": 1,
     "time": 1768478442000,
@@ -42,7 +42,7 @@
           "uid": "github-pat"
         },
         "desc": "github-pat has detected secret for file docs/example.md.",
-        "severity": "ERROR",
+        "severity": "CRITICAL",
         "title": "github-pat"
       }
     ]
@@ -67,7 +67,7 @@
       },
       "version": "1.1.0"
     },
-    "severity_id": 4,
+    "severity_id": 5,
     "status": "New",
     "status_id": 1,
     "time": 1768478442000,
@@ -90,7 +90,7 @@
           "uid": "slack-bot-token"
         },
         "desc": "slack-bot-token has detected secret for file app/settings.py.",
-        "severity": "ERROR",
+        "severity": "CRITICAL",
         "title": "slack-bot-token"
       }
     ]
@@ -115,7 +115,7 @@
       },
       "version": "1.1.0"
     },
-    "severity_id": 4,
+    "severity_id": 5,
     "status": "New",
     "status_id": 1,
     "time": 1768478442000,
@@ -138,7 +138,7 @@
           "uid": "github-pat"
         },
         "desc": "github-pat has detected secret for file app/settings.py.",
-        "severity": "ERROR",
+        "severity": "CRITICAL",
         "title": "github-pat"
       }
     ]
@@ -163,7 +163,7 @@
       },
       "version": "1.1.0"
     },
-    "severity_id": 4,
+    "severity_id": 5,
     "status": "New",
     "status_id": 1,
     "time": 1768478442000,
@@ -186,7 +186,7 @@
           "uid": "aws-access-token"
         },
         "desc": "aws-access-token has detected secret for file app/settings.py.",
-        "severity": "ERROR",
+        "severity": "CRITICAL",
         "title": "aws-access-token"
       }
     ]
@@ -211,7 +211,7 @@
       },
       "version": "1.1.0"
     },
-    "severity_id": 4,
+    "severity_id": 5,
     "status": "New",
     "status_id": 1,
     "time": 1768478442000,
@@ -234,7 +234,7 @@
           "uid": "github-pat"
         },
         "desc": "github-pat has detected secret for file app/inline_allowed.py.",
-        "severity": "ERROR",
+        "severity": "CRITICAL",
         "title": "github-pat"
       }
     ]

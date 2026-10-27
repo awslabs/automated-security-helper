@@ -420,6 +420,7 @@ ash_config:
       name: actionlint
       options:
         config_file: null
+        offline: false
         pyflakes: null
         scan_timeout: 1800
         severity_threshold: null
@@ -456,6 +457,7 @@ ash_config:
       enabled: true
       name: cfn-guard
       options:
+        offline: false
         rule_sets:
         - wa-Security-Pillar
         rules_paths: []
@@ -470,6 +472,7 @@ ash_config:
         ignore_checks: []
         include_checks: []
         install_timeout: 300
+        offline: false
         regions: []
         scan_timeout: 1800
         severity_threshold: null
@@ -522,6 +525,7 @@ ash_config:
         config_file: null
         honor_inline_ignores: false
         max_target_megabytes: null
+        offline: false
         scan_timeout: 1800
         severity_threshold: null
     grype:
@@ -605,6 +609,7 @@ ash_config:
         config_file: null
         honor_inline_ignores: false
         install_timeout: 300
+        offline: false
         online_audits: false
         persona: regular
         scan_timeout: 1800

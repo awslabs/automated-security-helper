@@ -42,7 +42,7 @@
           "uid": "CVE-2021-23337"
         },
         "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2021-23337\nSeverity: HIGH\nFixed Version: 4.17.21\nLink: [CVE-2021-23337](https://avd.aquasec.com/nvd/cve-2021-23337)",
-        "severity": "ERROR",
+        "severity": "HIGH",
         "title": "CVE-2021-23337"
       }
     ]
@@ -90,7 +90,7 @@
           "uid": "CVE-2026-4800"
         },
         "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2026-4800\nSeverity: HIGH\nFixed Version: 4.18.0\nLink: [CVE-2026-4800](https://avd.aquasec.com/nvd/cve-2026-4800)",
-        "severity": "ERROR",
+        "severity": "HIGH",
         "title": "CVE-2026-4800"
       }
     ]
@@ -138,7 +138,7 @@
           "uid": "CVE-2020-28500"
         },
         "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2020-28500\nSeverity: MEDIUM\nFixed Version: 4.17.21\nLink: [CVE-2020-28500](https://avd.aquasec.com/nvd/cve-2020-28500)",
-        "severity": "WARNING",
+        "severity": "MEDIUM",
         "title": "CVE-2020-28500"
       }
     ]
@@ -186,7 +186,7 @@
           "uid": "CVE-2025-13465"
         },
         "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2025-13465\nSeverity: MEDIUM\nFixed Version: 4.17.23\nLink: [CVE-2025-13465](https://avd.aquasec.com/nvd/cve-2025-13465)",
-        "severity": "WARNING",
+        "severity": "MEDIUM",
         "title": "CVE-2025-13465"
       }
     ]
@@ -234,7 +234,7 @@
           "uid": "CVE-2026-2950"
         },
         "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2026-2950\nSeverity: MEDIUM\nFixed Version: 4.18.0\nLink: [CVE-2026-2950](https://avd.aquasec.com/nvd/cve-2026-2950)",
-        "severity": "WARNING",
+        "severity": "MEDIUM",
         "title": "CVE-2026-2950"
       }
     ]
@@ -282,7 +282,7 @@
           "uid": "CVE-2018-18074"
         },
         "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2018-18074\nSeverity: HIGH\nFixed Version: 2.20.0\nLink: [CVE-2018-18074](https://avd.aquasec.com/nvd/cve-2018-18074)",
-        "severity": "ERROR",
+        "severity": "HIGH",
         "title": "CVE-2018-18074"
       }
     ]
@@ -330,7 +330,7 @@
           "uid": "CVE-2023-32681"
         },
         "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2023-32681\nSeverity: MEDIUM\nFixed Version: 2.31.0\nLink: [CVE-2023-32681](https://avd.aquasec.com/nvd/cve-2023-32681)",
-        "severity": "WARNING",
+        "severity": "MEDIUM",
         "title": "CVE-2023-32681"
       }
     ]
@@ -378,7 +378,7 @@
           "uid": "CVE-2024-35195"
         },
         "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2024-35195\nSeverity: MEDIUM\nFixed Version: 2.32.0\nLink: [CVE-2024-35195](https://avd.aquasec.com/nvd/cve-2024-35195)",
-        "severity": "WARNING",
+        "severity": "MEDIUM",
         "title": "CVE-2024-35195"
       }
     ]
@@ -426,7 +426,7 @@
           "uid": "CVE-2024-47081"
         },
         "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2024-47081\nSeverity: MEDIUM\nFixed Version: 2.32.4\nLink: [CVE-2024-47081](https://avd.aquasec.com/nvd/cve-2024-47081)",
-        "severity": "WARNING",
+        "severity": "MEDIUM",
         "title": "CVE-2024-47081"
       }
     ]
@@ -474,7 +474,7 @@
           "uid": "CVE-2026-25645"
         },
         "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2026-25645\nSeverity: MEDIUM\nFixed Version: 2.33.0\nLink: [CVE-2026-25645](https://avd.aquasec.com/nvd/cve-2026-25645)",
-        "severity": "WARNING",
+        "severity": "MEDIUM",
         "title": "CVE-2026-25645"
       }
     ]
