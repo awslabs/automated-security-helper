@@ -208,21 +208,6 @@ def _on_the_sdk_session_path(
     return through_the_sdk_session_check
 
 
-def _on_the_sdk_session_path(
-    scope: Scope, endpoint_path: Optional[str], through_the_sdk_session_check: bool
-) -> bool:
-    """True when the SDK's session endpoint handles this request's session.
-
-    Two conditions. The request is for the endpoint itself: Starlette answers
-    404 for a path the app has no route for, and that says nothing about a
-    session. And it names a protocol version the SDK sends through its session
-    check; see :func:`_through_the_sdk_session_check`.
-    """
-    if endpoint_path is None or _route_path(scope) != endpoint_path:
-        return False
-    return through_the_sdk_session_check
-
-
 def _canonical_sse_session(raw: Optional[str]) -> Optional[str]:
     """The hex form the SDK issues, for any spelling ``uuid.UUID`` accepts."""
 

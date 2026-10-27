@@ -448,16 +448,7 @@ def session_identity_refusal(
         "success": False,
         "operation": operation,
         "error_type": SESSION_IDENTITY_REQUIRED,
-        "error": raw_controls_on_one_line(
-            f"{operation} needs a session, and this call carries none the server "
-            f"issued. A stateless streamable-HTTP server issues no session, and an "
-            f"Mcp-Session-Id header the server did not issue does not name one. "
-            f"{protocol_sentence}"
-            f"To serve sessions at all, use a stateful server (without "
-            f"--stateless-http), or, when a platform in front of ASH issues and "
-            f"authenticates Mcp-Session-Id, start a stateless server with "
-            f"--trust-upstream-session-id."
-        ),
+        "error": raw_controls_on_one_line(error),
     }
 
 
