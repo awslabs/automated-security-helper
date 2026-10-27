@@ -762,9 +762,10 @@ def run_ash_scan_cli_command(
             help=(
                 "Exit 1 when a selected scanner did not complete -- ERROR (ran and "
                 "failed) or MISSING (dependencies unavailable, so it never ran). "
-                "Without this, a run where nothing ran exits 0, the same code as a "
-                "clean scan, because no scanner produced any finding. A SKIPPED "
-                "scanner, one you did not select or one with nothing of its kind "
+                "On by default: under --no-fail-on-incomplete-scanners, a run where "
+                "nothing ran exits 0, the same code as a clean scan, because no "
+                "scanner produced any finding. A SKIPPED scanner, one you did not "
+                "select or one with nothing of its kind "
                 "to scan, does not trip it by itself, so --scanners and "
                 "--exclude-scanners both narrow what is gated; but a run in which "
                 "every scanner is SKIPPED, such as one where no selected scanner "
