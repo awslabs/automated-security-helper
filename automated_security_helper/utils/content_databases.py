@@ -518,10 +518,7 @@ def main(argv: list[str] | None = None) -> int:
     # Here rather than at the top: this module imports nothing but the standard
     # library, so the drift gate can load it by path and CI can run it before ASH's
     # dependencies are installed. terminal_text is the standard library only too.
-    from automated_security_helper.utils.terminal_text import (
-        shown_not_obeyed,
-        shown_on_one_line,
-    )
+    from automated_security_helper.utils.terminal_text import shown_not_obeyed
 
     try:
         entry = get(args.name)
@@ -549,17 +546,15 @@ def main(argv: list[str] | None = None) -> int:
 
     # The value comes from the database's own metadata, and the workflows print this
     # program's output into a step log, where a line holding `::` or `##[` can be read
-    # as a workflow command. So a value that does not parse is refused, with no
-    # traceback, and quoted shown on one line: its controls and newlines written as
-    # escapes and its workflow commands broken.
+    # as a workflow command. So a value that does not parse is refused without being
+    # printed, and with no traceback, which would quote it.
     try:
         built = parse_timestamp(args.built)
     except ValueError:
         print(
-            shown_on_one_line(
-                f"--built '{args.built}' is not an RFC 3339 timestamp with a "
-                "timezone, so the database's age cannot be checked; it is neither "
-                "used nor saved."
+            shown_not_obeyed(
+                "--built is not an RFC 3339 timestamp with a timezone, so the "
+                "database's age cannot be checked; it is neither used nor saved."
             ),
             file=sys.stderr,
         )

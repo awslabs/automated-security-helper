@@ -4492,8 +4492,8 @@
   line of a config that does not parse, goes through it too, as does the grype
   database cache job in `ash-repo-scan.yml`.
   `python -m automated_security_helper.utils.content_databases check-age` exits 2,
-  with no traceback and the value quoted shown on one line, when `--built` is not
-  an RFC 3339 timestamp with a timezone.
+  without printing the value or a traceback, when `--built` is not an RFC 3339
+  timestamp with a timezone.
 
 - **ASH no longer scans its own output.** The scan's output directory, and
   `.ash/ash_output` under the scanned directory and under the directory ASH runs
