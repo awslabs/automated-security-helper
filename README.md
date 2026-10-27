@@ -21,6 +21,7 @@ Use Python 3.10–3.14 and [pipx](https://pipx.pypa.io/).
 For container mode, also install an OCI-compatible runtime such as Docker,
 Finch, or Podman.
 
+<!-- doctest: illustrative reason="installs ASH from GitHub over the network and starts a container scan" -->
 ```bash
 pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
 
@@ -48,6 +49,7 @@ covers platform prerequisites and dependency setup.
 
 Run with uv:
 
+<!-- doctest: illustrative reason="runs ASH from GitHub over the network" -->
 ```bash
 uvx --from git+https://github.com/awslabs/automated-security-helper.git@v3.7.0 ash --help
 uvx --from git+https://github.com/awslabs/automated-security-helper.git@v3.7.0 ash --mode container
@@ -55,12 +57,14 @@ uvx --from git+https://github.com/awslabs/automated-security-helper.git@v3.7.0 a
 
 Install in a Python environment:
 
+<!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
 pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
 ```
 
 Install with Homebrew:
 
+<!-- doctest: illustrative reason="installs ASH with Homebrew over the network" -->
 ```bash
 brew tap awslabs/automated-security-helper https://github.com/awslabs/automated-security-helper.git
 brew install ash
@@ -68,6 +72,7 @@ brew install ash
 
 Install from source:
 
+<!-- doctest: illustrative reason="clones this repository and installs it over the network" -->
 ```bash
 git clone --branch v3.7.0 https://github.com/awslabs/automated-security-helper.git
 cd automated-security-helper
@@ -98,6 +103,7 @@ Example scan results.
 
 Offline HTML reports include search, filters, finding details, and printing.
 
+<!-- doctest: illustrative reason="opens an interactive explorer on the results of an earlier scan" -->
 ```bash
 ash inspect findings    # Open the terminal findings explorer
 ash report              # Read the text summary of the latest scan
@@ -176,6 +182,7 @@ Check scanner coverage before reviewing findings.
 
 For agent instructions, install the `ash-mcp` skill:
 
+<!-- doctest: illustrative reason="installs an agent skill over the network" -->
 ```bash
 npx skills add awslabs/automated-security-helper
 ```

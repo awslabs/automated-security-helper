@@ -23,12 +23,14 @@ ASH runs open-source security scanners and aggregates their findings. AWS Labs p
 
 Install ASH with Python 3.10+ and pipx:
 
+<!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
 pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
 ```
 
 From your project directory, choose an execution mode:
 
+<!-- doctest: illustrative reason="container mode needs a container runtime, and every mode runs a scan with all scanner tools" -->
 ```bash
 ash --mode container
 ash --mode local

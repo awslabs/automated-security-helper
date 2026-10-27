@@ -5,6 +5,7 @@ scanners run as ordinary child processes with your user's full access: they can 
 `~/.ssh`, write anywhere you can, and open network connections. `--sandbox` runs every
 scanner subprocess inside an OS-level sandbox instead. It is off by default.
 
+<!-- doctest: illustrative reason="needs a sandbox backend on the host and the tool of every enabled scanner" -->
 ```bash
 ash scan --sandbox auto            # best sandbox this machine has
 ash scan --sandbox bwrap --offline # bubblewrap, no scanner gets a network
@@ -272,6 +273,7 @@ skipped for lacking a declaration, and never run unsandboxed.
 
 A plugin that needs more declares it:
 
+<!-- doctest: illustrative reason="a fragment of a scanner plugin class that names a config class defined elsewhere" -->
 ```python
 from typing import ClassVar
 
@@ -837,6 +839,7 @@ A macOS release or a scanner update can make a tool look up a service that is no
 the list. The profile denies it, the tool usually fails or reports less, and the
 unified log says which service it was:
 
+<!-- doctest: illustrative reason="log is a macOS command" -->
 ```bash
 log show --last 10m --predicate 'sender == "Sandbox"' | grep -E 'deny\(1\) (mach-lookup|process-exec)'
 ```

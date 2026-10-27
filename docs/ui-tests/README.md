@@ -4,6 +4,7 @@ Build the documentation, generate local fixture reports and terminal screens, ru
 
 Run from the repository root with the project's development dependencies and Node.js installed:
 
+<!-- doctest: illustrative reason="runs in a checkout of this repository and needs Node.js and a browser" -->
 ```sh
 uv sync --locked --group dev
 uv run --group dev mkdocs build --clean --strict
@@ -21,6 +22,7 @@ The generated examples use the snapshot fixtures and their pinned clock. They in
 
 TUI screenshots honor `NO_COLOR`. To review the color palette on macOS/Linux, scope the change to the preview command:
 
+<!-- doctest: illustrative reason="runs in a checkout of this repository" -->
 ```sh
 env -u NO_COLOR TERM=xterm-256color uv run --group dev python scripts/preview_interfaces.py
 ```
@@ -40,6 +42,7 @@ Without `ASH_UI_BASE_URL`, the test suite serves `public/` on loopback port 8849
 
 For example:
 
+<!-- doctest: illustrative reason="runs in a checkout of this repository and needs Node.js and a browser" -->
 ```sh
 ASH_UI_CHROME=/usr/bin/google-chrome npm test
 ASH_UI_CHROME=/usr/bin/google-chrome npm run capture
@@ -53,6 +56,7 @@ controls without the animation module.
 
 Rebuild the vendored animation module and its license notice with:
 
+<!-- doctest: illustrative reason="runs in a checkout of this repository and needs Node.js" -->
 ```sh
 npm run vendor:motion
 ```
@@ -78,6 +82,7 @@ The GitHub comment preview uses local approximate styles. Review the generated `
 After generating the fixtures, refresh the README's real report and terminal
 images from this directory:
 
+<!-- doctest: illustrative reason="runs in a checkout of this repository and needs Node.js and a browser" -->
 ```sh
 npm run capture -- --readme
 ```
@@ -88,6 +93,7 @@ committed images when changing the corresponding interfaces.
 
 Record the vector scan and include playback in the gallery:
 
+<!-- doctest: illustrative reason="downloads a browser tool over the network and needs Node.js" -->
 ```sh
 npx playwright install ffmpeg
 npm run capture -- --motion
@@ -99,6 +105,7 @@ Use the existing snapshot review policy in `DEVELOPMENT.md`. Update only intenti
 
 Relevant suites:
 
+<!-- doctest: illustrative reason="runs in a checkout of this repository" -->
 ```sh
 uv run --group dev pytest tests/unit/cli/inspect tests/unit/reporters -n 0
 uv run --group dev pytest tests/unit/core/test_metrics_table_rendering.py tests/unit/core/test_progress_display_coverage.py -n 0
@@ -107,6 +114,7 @@ uv run --group dev pytest tests/snapshot -n 0
 
 Editor changes originate in `ash-agent-plugins/agentic-coding/transpiler/_base/`. Regenerate the tool reference and all backends, then check them:
 
+<!-- doctest: illustrative reason="runs in a checkout of this repository" -->
 ```sh
 uv run python scripts/generate_mcp_tool_reference.py
 uv run --project ash-agent-plugins/agentic-coding/transpiler agentic-plugins build
