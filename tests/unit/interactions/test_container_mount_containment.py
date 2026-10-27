@@ -46,6 +46,7 @@ from automated_security_helper.core.enums import ExecutionPhase, ExecutionStrate
 from automated_security_helper.interactions import run_ash_container as rac
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import create_completed_process
+from tests.utils.windows_file_names import created_on_disk
 
 CONFIG_ROOT = rac.CONTAINER_CONFIG_ROOT
 POLICY_ROOT = rac.CONTAINER_WORKSPACE_CONFIG_ROOT
@@ -53,7 +54,7 @@ POLICY_ROOT = rac.CONTAINER_WORKSPACE_CONFIG_ROOT
 #: Names that are legal on POSIX and that ``--mount`` carries as written: no comma,
 #: double quote or line break, which the launcher refuses (see
 #: test_container_mount_paths_must_be_representable.py).
-UNUSUAL_NAMES = [
+_NAMES_LEGAL_ON_POSIX = [
     pytest.param("plain", id="plain"),
     pytest.param("with space", id="space"),
     pytest.param("dollar$HOME", id="dollar"),
@@ -66,6 +67,11 @@ UNUSUAL_NAMES = [
     pytest.param("back\\slash", id="backslash"),
     pytest.param("tab\there", id="tab"),
 ]
+
+#: Every test below creates each name as a directory, so the three a Windows file
+#: system cannot hold (the glob characters, the backslash and the tab) are skipped
+#: there and run everywhere else.
+UNUSUAL_NAMES = created_on_disk(_NAMES_LEGAL_ON_POSIX)
 
 _SCRUBBED_ENV = (
     "CI",
