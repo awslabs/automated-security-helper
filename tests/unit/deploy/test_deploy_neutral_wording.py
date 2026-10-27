@@ -58,7 +58,6 @@ _ADVERSARIAL_WORDS = re.compile(
 
 
 def _shipped_lines() -> Iterator[Tuple[str, int, str]]:
-    from tests.utils.helpers import iter_repo_files
 
     for root in ROOTS:
         # Pruned as it walks: deploy/cdk/node_modules is installed per run.
