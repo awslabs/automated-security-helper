@@ -137,7 +137,7 @@ def _scan() -> tuple[int, list[str], list[str], list[str]]:
     conditions, missing_status, uploads, found_uploads = 0, [], [], []
     for path in workflow_files():
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        where = str(path.relative_to(REPO_ROOT))
+        where = path.relative_to(REPO_ROOT).as_posix()
         for name, job, steps in _jobs_of(data):
             items = ([(f"job {name}", job.get("if"))] if job is not None else []) + [
                 (f"{name} / step {s.get('name') or s.get('uses')}", s.get("if"))
