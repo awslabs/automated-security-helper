@@ -415,27 +415,6 @@ ALLOWLIST: tuple[Entry, ...] = (
         ),
     ),
     Entry(
-        file=".github/actions/run-scan-test/action.yml",
-        kind=KIND_UPLOAD,
-        action=_UPLOAD,
-        publishes=(
-            "name=ash_scanner_stderr-${{ inputs.os }}-${{ inputs.method }}-"
-            "${{ inputs.config-file }}${{ inputs.oci-runner && "
-            "format('-{0}', inputs.oci-runner) || '' }}"
-            "${{ inputs.offline == 'true' && '-offline' || '' }} "
-            "path=.ash/ash_output/scanners/*/source/*.stderr.log"
-        ),
-        reason=(
-            "Failure evidence only: each scanner's stderr from the same self-scan "
-            "of this repository's own tree, uploaded when a leg goes red. The "
-            "tools' diagnostics about themselves (a traceback, a refused "
-            "argument, an unreadable file), the part the console truncates; a "
-            "scanner writes its findings to its stdout or results file, not here. "
-            "Not build output. The scanned tree is the public checkout, so the "
-            "paths these name are public too."
-        ),
-    ),
-    Entry(
         file=".github/workflows/run-ash-security-scan.yml",
         kind=KIND_UPLOAD,
         action=_UPLOAD,
