@@ -1042,7 +1042,12 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 level=logging.INFO,
             )
             self._post_scan(target=target, target_type=target_type)
-            return SarifReport(version="2.1.0", runs=[])
+            # True with targets_attempted left at 0 is what ScannerExecutor grades
+            # as SKIPPED, with nothing_to_scan_reason() as the reason, as zizmor
+            # does on the same tree. A SARIF report with no run is refused there
+            # as "nothing to grade" and reads as ERROR, which fails a scan of a
+            # tree without workflows under fail_on_incomplete_scanners.
+            return True
 
         self.targets_attempted = len(workflows)
         if self.results_dir is None:
