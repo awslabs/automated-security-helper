@@ -167,7 +167,7 @@ the same fixtures with the 2.4.5 and 2.5.2 binaries):
   `file://` URIs. ASH does not carry `originalUriBaseIds` into its aggregated SARIF, so
   the plugin resolves these back to absolute URIs (`_resolve_sarif_uri_base_ids`)
   before validation. Both lines then produce identical paths in every ASH report.
-- `--exclude` stopped matching raw substrings (see section 9). The same ASH ignore
+- `ferret-scan --exclude` stopped matching raw substrings (see section 9). The same ASH ignore
   paths now exclude what they say and nothing more.
 - Detector changes only narrowed results on the fixtures: 2.5.2 drops 9 PHONE false
   positives on card numbers and IBANs and adds nothing. The flag surface ASH uses and
@@ -252,13 +252,13 @@ def validate_no_unsupported_options(cls, data: Any) -> Any:
 | `exclude_patterns` | Patterns to exclude from scanning | `[]` |
 | `show_match` | Display matched text in findings | `false` |
 | `enable_preprocessors` | Extract text from documents | `true` |
-| `finding_limit` | Max findings emitted via `--limit` (`0` = unlimited; guards against ferret-scan's 200 default silently truncating) | `0` |
-| `fail_on_incomplete` | Pass `--fail-on-incomplete` → ferret-scan exits 3 on partial coverage (accepted as non-fatal; SARIF still returned) | `false` |
-| `respect_gitignore` | Pass `--respect-gitignore` (off by default; .gitignore hides high-value secret files) | `false` |
-| `disable_ip_types` | Comma-separated INTELLECTUAL_PROPERTY sub-types to skip via `--disable-ip-types` | `null` |
-| `explain` | Pass `--explain` for an offline per-finding rationale/verdict/suppression-reason | `false` |
-| `validator_budget` | Per-validator time budget via `--validator-budget` (e.g. `all=2m`) | `null` |
-| `max_live_bytes` | Memory cap on extracted content via `--max-live-bytes` (e.g. `256MB`) | `null` |
+| `finding_limit` | Max findings emitted via `ferret-scan --limit` (`0` = unlimited; guards against ferret-scan's 200 default silently truncating) | `0` |
+| `fail_on_incomplete` | Pass `ferret-scan --fail-on-incomplete` → ferret-scan exits 3 on partial coverage (accepted as non-fatal; SARIF still returned) | `false` |
+| `respect_gitignore` | Pass `ferret-scan --respect-gitignore` (off by default; .gitignore hides high-value secret files) | `false` |
+| `disable_ip_types` | Comma-separated INTELLECTUAL_PROPERTY sub-types to skip via `ferret-scan --disable-ip-types` | `null` |
+| `explain` | Pass `ferret-scan --explain` for an offline per-finding rationale/verdict/suppression-reason | `false` |
+| `validator_budget` | Per-validator time budget via `ferret-scan --validator-budget` (e.g. `all=2m`) | `null` |
+| `max_live_bytes` | Memory cap on extracted content via `ferret-scan --max-live-bytes` (e.g. `256MB`) | `null` |
 | `ferret_debug` | Enable ferret-scan's own debug logging (preprocessing/validation flow) | `false` |
 | `ferret_verbose` | Enable ferret-scan's own verbose output (detailed finding info) | `false` |
 | `tool_version` | Version constraint for installation; unset uses `>=2.4.5,<2.6.0` | `null` |
@@ -546,7 +546,7 @@ prints one stderr note listing patterns that matched nothing, which is informati
 The rest of this section describes 2.4.x, the minimum supported line.
 
 Correction (verified against ferret-scan v2.4.5, `isExcluded` in `cmd/main.go`): the
-earlier claim that `--exclude` uses "simple names, not globs" is wrong. Each pattern is
+earlier claim that `ferret-scan --exclude` uses "simple names, not globs" is wrong. Each pattern is
 tested several ways — Go `filepath.Match` glob against the full path **and** the
 basename (`*`, `?`, `[abc]` supported; `**` globstar is **not**), a plain
 `strings.Contains` substring match against the full path, and a `dir/`-segment match.
@@ -554,7 +554,7 @@ So `*.pyc` works as a glob, and a bare `.venv` excludes any path containing "`.v
 The practical guidance is unchanged — use `.venv`, not `.venv/**` (globstar is
 unsupported) — but note the substring branch means a short token like `test` or `build`
 can over-exclude any path containing it. The plugin joins all patterns into a single
-comma-separated `--exclude` value (e.g., `--exclude .venv,.git,*.pyc`).
+comma-separated `ferret-scan --exclude` value (e.g., `--exclude .venv,.git,*.pyc`).
 
 The substring branch is why the plugin's exclusion of a link that leaves the scanned
 tree (`_link_exclude_patterns`) refuses the target when another walked file's path
@@ -574,7 +574,7 @@ their findings. The configured `exclude_patterns` are passed as written.
 
 Correction (verified against ferret-scan v2.4.5): an earlier version of this note claimed
 the bundled `ferret-config.yaml`, when loaded via `--config`, overrides CLI arguments so
-ASH's `--exclude` "may be silently ignored" unless `use_default_config: false`. **That is
+ASH's `ferret-scan --exclude` "may be silently ignored" unless `use_default_config: false`. **That is
 backwards.** ferret-scan's CLI flags take precedence over the config file's `defaults`:
 
 ```text
@@ -592,7 +592,7 @@ What `use_default_config` actually controls is whether the bundled config's *val
 profile configuration* (IP `internal_urls`, social-media patterns, the named profiles) is
 loaded at all. Choose `false` when you want only ferret-scan's built-in defaults plus your
 explicit ASH options (as `.ash_community_plugins.yaml` does); choose `true` (the default)
-to pick up the bundled validator patterns. Either way, CLI `--exclude`/`--recursive` win.
+to pick up the bundled validator patterns. Either way, CLI `ferret-scan --exclude`/`ferret-scan --recursive` win.
 
 Caveat: this reasoning applies to the *bundled* config, whose `defaults` block declares no
 `exclude_patterns` of its own. A hand-written config file that itself sets excludes could
@@ -824,7 +824,7 @@ The script checks for:
 | `EXCLUDE-GLOB-SYNTAX` | Exclude patterns using `**/` globstar syntax (ferret-scan's `filepath.Match` supports `*`/`?`/`[..]` but not `**`) |
 | `TEST-COUNT` | Ensures the unit test count hasn't regressed below 67 |
 | `WINDOWS-PATH` | `str(Path)` instead of `Path.as_posix()` in CLI argument building — backslashes break ferret-scan on Windows |
-| `EXCLUDE-MULTIPLE-ARGS` | Looping over exclude patterns to append individual `--exclude` args instead of joining into one comma-separated value |
+| `EXCLUDE-MULTIPLE-ARGS` | Looping over exclude patterns to append individual `ferret-scan --exclude` args instead of joining into one comma-separated value |
 | `FERRET-IN-ASH-YAML` | ferret-scan registered in `.ash.yaml` instead of `.ash_community_plugins.yaml` (it's a community plugin) |
 | `CONFIG-OVERRIDE-EXCLUDES` | *(removed 2026-09-14 — false premise; ferret-scan CLI args override the bundled config's defaults, so excludes are honoured regardless of `use_default_config`. See gotcha §10.)* |
 | `SUPPRESSION-COVERAGE` | A SECRET-SECRET-KEYWORD hit in ferret plugin files covered only by `.ash_community_plugins.yaml` entries without `line_start` (it does not check where a pinned range points) |
@@ -1257,10 +1257,10 @@ Ad-hoc dicts like `{"findings": [], "errors": [...]}` without `"status": "failed
 will be treated as a successful scan with zero findings by `scan_phase.py`. Use
 `return` (None) instead — the framework correctly marks the container as failed.
 
-### Exit codes and `--fail-on-incomplete`
+### Exit codes and `ferret-scan --fail-on-incomplete`
 
 ferret-scan exits `0` on a normal scan (even when it finds sensitive data) and `3`
-when `--fail-on-incomplete` is set (`fail_on_incomplete: true`) and a file could not be
+when `ferret-scan --fail-on-incomplete` is set (`fail_on_incomplete: true`) and a file could not be
 fully scanned — coverage cut short by a timeout/budget, or the file could not be opened.
 
 - `_run_subprocess` runs with `check=False`, so a non-zero exit never raises; `scan()`
@@ -1314,8 +1314,8 @@ scanners:
 > **Why `use_default_config: false`**: The bundled `ferret-config.yaml` is a
 > comprehensive reference config. Setting `false` means the scan uses only ferret-scan's
 > built-in defaults plus the explicit ASH options above, rather than loading the bundled
-> validator/profile patterns. (It is **not** needed for excludes — CLI `--exclude` and
-> `--recursive` win over the config's defaults regardless; see gotcha §10.)
+> validator/profile patterns. (It is **not** needed for excludes — CLI `ferret-scan --exclude` and
+> `ferret-scan --recursive` win over the config's defaults regardless; see gotcha §10.)
 >
 > `.ash/.ash_community_plugins.yaml` is inside the scanned tree, and from such a file
 > `use_default_config` and `profile` are ignored with a warning, because they choose
@@ -1324,10 +1324,10 @@ scanners:
 > `--config-overrides scanners.ferret-scan.options.use_default_config=false`, and the
 > line in the file only records the intent.
 
-> **Why simple directory names in `exclude_patterns`**: Ferret-scan's `--exclude`
+> **Why simple directory names in `exclude_patterns`**: Ferret-scan's `ferret-scan --exclude`
 > matches with `filepath.Match` glob plus a substring fallback; the `**` globstar is
 > not supported, so use `.venv` rather than `.venv/**`. Patterns are joined into a
-> single comma-separated `--exclude` value.
+> single comma-separated `ferret-scan --exclude` value.
 
 ### 2. Update CI workflow (`.github/workflows/ash-repo-scan-validation.yml`)
 
