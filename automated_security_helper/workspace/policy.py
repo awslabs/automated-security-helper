@@ -322,9 +322,15 @@ def _read_policy_document(path: Path, named: Path, quote_values: bool) -> object
     ceiling an environment variable can loosen is not a ceiling. YAML aliases are
     refused, as in every ASH config file.
 
-    A refusal names ``named``, the path the file was reached by. Without
-    ``quote_values`` it says where the parser stopped but not the text there,
-    which a client's file may hold without the client having written it.
+    A refusal names ``named``, the path the file was reached by. A file that is
+    not UTF-8 or does not parse is refused with the error's type and where it
+    stopped (parse_error_kind), never the decoder's or the parser's own message,
+    whatever ``quote_values`` says: the decoder's prints the undecodable byte's
+    value and the parser's quotes the file (a snippet of the line, since this
+    parse is of a str) or, for a constructor's ValueError (``!!int``), the
+    value itself (config_sources.unparsed_config_reason). ``quote_values``
+    governs the schema problems only (_load_policy), where the operator's own
+    file shows the value it wrote.
     """
     label = f"workspace policy file '{named.as_posix()}'"
     undecoded = ""
@@ -334,8 +340,6 @@ def _read_policy_document(path: Path, named: Path, quote_values: bool) -> object
         reason = f": {exc}" if quote_values else f" ({exc.strerror or 'OSError'})"
         raise _refuse(f"{label} could not be read{reason}") from exc
     except UnicodeDecodeError as exc:
-        if quote_values:
-            raise _refuse(f"{label} is not valid UTF-8: {exc}") from exc
         # The decoder's message prints the byte's value; parse_error_kind gives
         # its offset and nothing from the file.
         undecoded = parse_error_kind(exc)
@@ -349,8 +353,6 @@ def _read_policy_document(path: Path, named: Path, quote_values: bool) -> object
             return json.loads(raw)
         return load_config_yaml(raw)
     except (yaml.YAMLError, ValueError) as exc:
-        if quote_values:
-            raise _refuse(f"{label} could not be parsed: {exc}") from exc
         # json.JSONDecodeError and a constructor's ValueError (!!int) are
         # ValueErrors. The type and place only: the parser's message quotes the
         # file, a snippet of the line included, since this parse is of a str,
