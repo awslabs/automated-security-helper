@@ -617,8 +617,13 @@ def test_validate_and_lint_agree_with_the_scan(case: Case, project: Path, monkey
         assert lint.exit_code == INVALID_CONFIG_EXIT, lint.output
 
     # The MCP validate_config tool gives the same verdict. It has no source
-    # directory and no overrides, so the cases that need one are left out.
+    # directory and no overrides, so the cases that need one are left out. The
+    # file is the operator's own, so the operator's config roots name its
+    # directory: a config_path outside them is judged a client's and held to
+    # the runtime-override policy (cli/mcp/sandbox.client_named_config_is_untrusted),
+    # which is a different question from the one a scan of this directory asks.
     if not case.overrides and "extends" not in case.text:
+        monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(project.parent))
         mcp = mcp_validate_config(config_path=str(project / case.file_name))
         assert mcp["valid"] is scan_accepts, mcp
 
@@ -1591,11 +1596,13 @@ def test_an_in_tree_entry_the_scan_drops_is_not_an_error_for_validate(
     """The same entry in a file inside the scanned tree: the trust layer drops
     it before the loader sees it (plugin_module_trust.confine_plugin_modules,
     it is not installed), so the scan accepts the file with a warning, and
-    validate agrees with exit 0."""
+    validate agrees with exit 0. The name is inside the plugin namespace: a
+    name outside it is kept for the scan's exit-3 namespace refusal wherever
+    the file sits (the previous test's case)."""
     config = project / ".ash" / ".ash.yaml"
     config.parent.mkdir(parents=True)
     config.write_text(
-        "project_name: demo\nash_plugin_modules:\n  - outside_module\n",
+        "project_name: demo\nash_plugin_modules:\n  - missing_ash_plugins\n",
         encoding="utf-8",
     )
 
@@ -1675,10 +1682,12 @@ def test_an_in_tree_symlinked_extends_base_keeps_the_scans_trust_judgment(
     the tree. The scan judges the base by the name that reached it, so the
     chain counts as repository-written: the not-installed entry is dropped and
     the scan accepts. A check judging only the resolved paths treats the chain
-    as the operator's and refuses what the scan never loads."""
+    as the operator's and refuses what the scan never loads. The entry is an
+    in-namespace name no package provides; a name outside the namespace is
+    refused with exit 3 wherever it sits."""
     target = project.parent / "base-target.yaml"
     target.write_text(
-        "ash_plugin_modules:\n  - outside_module\n",
+        "ash_plugin_modules:\n  - missing_ash_plugins\n",
         encoding="utf-8",
     )
     link = project / ".ash-base.yaml"
@@ -1695,6 +1704,9 @@ def test_an_in_tree_symlinked_extends_base_keeps_the_scans_trust_judgment(
 
     _every_surface_agrees(config_args, scan_accepts=True)
 
+    # The operator's file, named by the operator: set its directory aside, or
+    # the tool judges the path a client's (see the first test's MCP step).
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(project.parent))
     mcp = mcp_validate_config(config_path=str(operator))
     assert mcp["valid"] is True, mcp
 
