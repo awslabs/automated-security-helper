@@ -38,6 +38,7 @@ import pytest
 from automated_security_helper.config.config_sources import read_config_file
 from automated_security_helper.core.enums import ExecutionPhase, ExecutionStrategy
 from automated_security_helper.interactions import run_ash_container as rac
+from tests.utils.helpers import mark_git_checkout
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ASH_SCRIPT = REPO_ROOT / "ash"
@@ -477,7 +478,9 @@ def _bash_decision(fake_runner, source: Path, output: Path, config: Path, cwd: P
 @needs_bash
 def test_the_bash_wrapper_and_the_launcher_agree(layout, fake_runner, tmp_path):
     checkout = tmp_path / "repo"
-    (checkout / ".git").mkdir(parents=True)
+    # A git-shaped .git, one holding HEAD: a bare empty directory is no checkout
+    # boundary to the launcher (sandbox_grants._git_shaped), so it marks nothing.
+    mark_git_checkout(checkout)
     source = checkout / "services" / "api"
     (source / ".ash").mkdir(parents=True)
     (checkout / "ci").mkdir()
