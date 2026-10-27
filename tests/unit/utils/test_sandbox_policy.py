@@ -847,7 +847,9 @@ class TestPolicyEdges:
         scope_reset = _ACTIVE.set(RefusingScope("grype", "no bwrap here"))
         try:
             with pytest.raises(SandboxUnavailable, match="no bwrap here"):
-                spawn_run(["/usr/bin/true"])
+                # An anchored program: on Windows "/usr/bin/true" has no drive, and
+                # spawn_run refuses that before it asks the scope.
+                spawn_run([os.path.abspath("/usr/bin/true")])
         finally:
             _ACTIVE.reset(scope_reset)
 
@@ -1040,6 +1042,16 @@ class TestFirejailHidesBothHomes:
     or not at all (a whitelist under HOME), and HOME's own directory, where the
     scanner is told its home is, stayed readable unless it was under /tmp.
     """
+
+    @pytest.fixture(autouse=True)
+    def _a_user_id_where_the_platform_has_none(self, monkeypatch):
+        """firejail's plan names /run/user/<uid> (backends.py), and Windows has no getuid.
+
+        The plan is only computed here, never run, so a fixed id gives the assertions
+        below the same argv they read on Linux.
+        """
+        if not hasattr(os, "getuid"):
+            monkeypatch.setattr(os, "getuid", lambda: 1000, raising=False)
 
     @pytest.fixture
     def fake_tmp(self, tmp_path, monkeypatch):
