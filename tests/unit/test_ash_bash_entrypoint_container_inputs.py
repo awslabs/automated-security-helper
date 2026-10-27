@@ -596,7 +596,10 @@ class TestAConfigLinkedOutOfTheTreeIsRefused:
         )
 
     @pytest.mark.skipif(
-        os.geteuid() == 0, reason="root reads a file whatever its mode says"
+        # os.geteuid does not exist on Windows, and the module is skipped there
+        # (pytestmark), but this expression is evaluated when the module is imported.
+        os.name == "nt" or os.geteuid() == 0,
+        reason="root reads a file whatever its mode says",
     )
     def test_an_unreadable_config_is_refused(self, fake_runner, project, tmp_path):
         unreadable = tmp_path / "operator.yaml"
