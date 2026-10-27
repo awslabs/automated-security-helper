@@ -10,7 +10,7 @@ they use.
 | `s3` | An S3 bucket | The scan summary and the resolved ASH configuration |
 | `cloudwatch-logs` | A CloudWatch Logs log group | The same summary and configuration |
 | `bedrock-summary-reporter` | Amazon Bedrock | Finding messages, file paths, and severity counts |
-| `aws-security-hub` | AWS Security Hub | Each finding, suppressed ones included, with its rule ID, scanner, severity, message, file path, and lines |
+| `aws-security-hub` | AWS Security Hub | Nothing yet: the reporter checks its connection and writes a placeholder file ([details](#aws-security-hub)) |
 
 The S3 and CloudWatch Logs reporters do not send individual findings. To collect findings
 centrally, copy a findings file such as `reports/ash.ocsf.json` or `reports/ash.sarif` to
@@ -107,7 +107,7 @@ list too, as in `--output-formats sarif,s3`.
 ## Destinations and credentials {#destinations}
 
 These options choose where data goes, with which identity, what the Bedrock reporter
-sends, and which Security Hub findings a scan updates. ASH takes them only from operator
+sends. ASH takes them only from operator
 sources: the defaults below, an operator config file, or `--config-overrides`. `ash report`
 and `ash merge` take them from the defaults and `--config-overrides` only.
 
@@ -152,12 +152,9 @@ Of `aws-security-hub`:
 | `aws_region` | from `AWS_REGION`, else from `AWS_DEFAULT_REGION`, else `null` |
 | `aws_profile` | from `AWS_PROFILE`, else `null` |
 | `account_id` | `null` |
-| `findings_scope` | `null` |
-| `archive_resolved_findings` | `false` |
 
-With no `account_id`, the Security Hub reporter sends to the account of its credentials.
-`findings_scope` has no default, and the reporter refuses to run without one. Turning a
-reporter on, `enabled`, is the operator's too ([above](#enable)).
+With no `account_id`, the Security Hub reporter uses the account of its credentials.
+Turning a reporter on, `enabled`, is the operator's too ([above](#enable)).
 
 When a config file inside any git checkout or the scanned directory sets one of these
 options, under any spelling of the reporter's section, ASH ignores it, logs a warning that
@@ -182,8 +179,8 @@ use `--offline`, or a network that blocks the metadata service, if that matters.
 ## What each reporter sends {#what-is-sent}
 
 The S3, CloudWatch Logs, and Bedrock reporters first call `sts:GetCallerIdentity`, which
-needs no IAM permission. The Security Hub reporter calls it before it sends anything, and
-in its pre-flight check when `account_id` is not set.
+needs no IAM permission. The Security Hub reporter calls it in its pre-flight check when
+`account_id` is not set.
 
 ### `s3` {#s3}
 
@@ -254,9 +251,8 @@ describe.
 
 ### `aws-security-hub` {#aws-security-hub}
 
-The reporter is off until the operator turns it on, and it needs a `findings_scope`, which
-names this repository's findings in the account and Region. Security Hub must be enabled
-in the account and Region it imports into. In the operator's config file:
+The reporter is off until the operator turns it on. Security Hub must be enabled in the
+account and Region you name. In the operator's config file:
 
 <!-- doctest: config kind=ash -->
 ```yaml
@@ -267,98 +263,17 @@ reporters:
     enabled: true
     options:
       aws_region: us-east-1
-      findings_scope: my-org/my-service
 ```
 
-It imports every finding in the AWS Security Finding Format (ASFF) with
-`BatchImportFindings`, in requests of up to 100, under the account's default product ARN,
-`arn:<partition>:securityhub:<region>:<account>:product/<account>/default`. Each finding
-carries its rule ID, its scanner, its file path relative to the scan root and its lines,
-the severity that ASH's summary and gate use (`INFO` is sent as `INFORMATIONAL`), and its
-message without its fenced code blocks, with the product name `Automated Security Helper`
-and the company name `AWS Labs`. ASH masks the quoted password in bandit's
-hardcoded-password messages (rules `B105`, `B106`, and `B107`). Nothing else in a message
-is masked, and no code snippet is sent. A suppressed finding is sent with
-`RecordState: ARCHIVED` and its suppression's justification, so the first scan after you
-suppress a finding archives it in Security Hub. Locally the reporter writes a receipt, with
-the findings exactly as it sent them, to `reports/ash.aws-security-hub.asff.json`.
+This version of the reporter does not import findings yet. Its pre-flight check needs
+the Region, calls `DescribeHub`, and calls `sts:GetCallerIdentity` when `account_id` is not
+set; when one fails, ASH logs an error and the reporter does not run. When the checks pass,
+`report()` logs a warning that the Security Hub import is not implemented, sends nothing to
+Security Hub, and writes a placeholder file, `reports/ash.aws-security-hub.asff.json`,
+that holds a message and the number of findings in the results. In a workspace scan the
+reporter runs once per project.
 
-A finding's `Id` is `ash/` and a SHA-256 of `findings_scope` and the finding's identity,
-the same identity that the `id` of a finding in `ash.flat.json` and `ash.csv` is a hash
-of: its scanner, rule, file path, package (for dependency findings), workspace project,
-and SARIF fingerprints, or its start and end lines when it has none. A file a converter
-wrote, such as a converted notebook or a file from an archive, is identified by its path
-under the converted files, so its findings keep their `Id` wherever the output directory
-is. The scan time, the message, and the severity are not part of it, so a later scan
-updates each finding instead of adding a second one. When findings share an identity,
-such as two secrets on one line, each gets a suffix taken from its column and message. A
-finding without fingerprints gets a new `Id` when an edit moves it to another line.
-
-Give each repository that imports into one account and Region its own `findings_scope`,
-such as its `owner/name` on the code host, of at most 1024 characters: two repositories
-with the same scope update, and with archiving archive, each other's findings. The
-reporter refuses to run without one, and does not fall back to `project_name`.
-
-Import from one branch. Every scan of the repository updates the same findings, so a scan
-of a feature branch overwrites what your default branch reported, and with archiving
-archives it. In CI, turn the reporter on only in the job that scans the default branch, and
-set the scope in that job, which holds the credentials, rather than in the repository: for
-example `--config-overrides 'reporters.aws-security-hub.enabled=true'` and
-`--config-overrides "reporters.aws-security-hub.options.findings_scope=$GITHUB_REPOSITORY"`
-in a GitHub Actions job.
-
-A finding that a later scan no longer reports stays ACTIVE in Security Hub. With
-`archive_resolved_findings: true`, the reporter reads the findings Security Hub holds for
-this `findings_scope` with `GetFindings`, and archives each ACTIVE one that this scan did
-not report, when all of these hold:
-
-- it was recorded for this scan's target and workspace project. Both are compared,
-  because a workspace project's target is `<findings_scope>/<project key>`: scope `org`
-  with project `repo` reads the same as scope `org/repo` with none;
-- the scanner that reported it finished in this scan without failing on any target;
-- the scan that reported it covered the same directory as this one and scanned converted
-  files if and only if this one did. The directory is the one the scan recorded in its
-  results (`scan_source`), so `ash merge` on a collector without the checkout and
-  `ash report` on another host compare the scan's own directory. That directory is
-  recorded relative to its git repository's root, also when the root's own path is not
-  UTF-8, and not at all when its path below the root is not UTF-8. Deleting the last
-  notebook or archive also changes this, so the findings recorded before stay ACTIVE;
-- no later scan updated it.
-
-Existing findings then also keep their `CreatedAt`. It archives nothing for one shard of a
-split scan (`--shard-index`), for a scan with `--changed-files-only`, or for results that
-do not record whether they were filtered to changed files or which directory was scanned.
-The receipt's `archive_skipped` says why when archiving did not apply, and
-`archive_scanners` lists the scanners it applied to. A finding that a new `ignore_paths`
-entry or a rule change stops reporting is archived as well, so turn archiving on only for
-scans whose configuration you control.
-
-The reporter's pre-flight check needs the Region, calls `DescribeHub`, and calls
-`sts:GetCallerIdentity` when `account_id` is not set; when one fails, ASH logs an error and
-the reporter does not run. Before it sends, the reporter checks that `findings_scope` is
-set, and that `account_id`, when set, is the account of the credentials. When a check fails or any
-finding is not imported, the reporter fails: the scan logs the reason, with the findings
-Security Hub rejected, writes no receipt, and keeps its exit code. In a workspace scan the
-reporter runs once per project and imports that project's findings.
-
-An invalid option value refuses the configuration with exit code 3, before ASH scans
-anything:
-
-<!-- doctest: run expect-exit=3 -->
-```bash
-ash scan --scanners detect-secrets \
-  --ash-plugin-modules automated_security_helper.plugin_modules.ash_aws_plugins \
-  --config-overrides 'reporters.aws-security-hub.options.max_retries=three'
-```
-
-```text
-ERROR (3) Invalid configuration: Configuration validation failed:
-reporters.aws-security-hub.options.max_retries (reporter 'aws-security-hub'):
-Input should be a valid integer, unable to parse string as an integer
-```
-
-IAM: `securityhub:BatchImportFindings` and `securityhub:DescribeHub`, and with
-`archive_resolved_findings: true` also `securityhub:GetFindings`.
+IAM: `securityhub:DescribeHub`.
 
 ## Rendering a reporter from saved results {#ash-report}
 
@@ -407,11 +322,7 @@ ERROR    Reporter 's3' is enabled but does not run: no aws_region is set. Set it
 Error: reporter 's3' cannot run: its dependency check refused. See the log above for the reason.
 ```
 
-`ash report --format aws-security-hub` makes the checks the reporter makes before it
-sends, and refuses a workspace's combined results; run it once per project, with
-`--output-dir` set to the project's directory under `projects/`. It takes `findings_scope`
-from `--config-overrides`, as `ash merge` does, so it gives a scan's finding `Id`s only
-when you pass the `findings_scope` that scan used. `ash report` has no `--ash-plugin-modules` option and does
+`ash report` has no `--ash-plugin-modules` option and does
 not read `ASH_PLUGIN_MODULES`, and without `--config` it reads the config file of the
 directory you run it from. Run it from outside the repository, and load the package with
 your config file (`--config`) or with
