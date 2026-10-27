@@ -3,10 +3,12 @@
 
 """Two paths the other archive tests reach only through stand-ins.
 
-A member size below zero is refused for ``max_member_bytes``. The tarfile in this
-Python already refuses a header whose size field is negative, so the budget is
-tested with a crafted ``TarInfo``, and the parser's own refusal with a crafted
-header, which the converter then records as an archive it cannot read.
+A member size below zero is refused for ``max_member_bytes``. A current tarfile
+refuses a header whose size field is negative, so the budget is tested with a
+crafted ``TarInfo``, and the parser's own refusal with a crafted header, which the
+converter then records as an archive it cannot read. A tarfile from before that
+check (the 3.10.11 and 3.12.10 the macOS runners carry has none) returns the
+member with its size of -1, and the budget refuses the archive instead.
 
 The tar copy path, used where tarfile has no "data" filter, is checked with a real
 tar whose member is larger than one copy chunk, so the chunked copy has to loop to
@@ -61,6 +63,16 @@ def negative_size_tar() -> bytes:
     return bytes(raw)
 
 
+def tarfile_refuses_a_negative_size() -> bool:
+    """Whether this Python's tarfile raises on the header ``negative_size_tar`` builds."""
+    try:
+        with tarfile.open(fileobj=io.BytesIO(negative_size_tar())) as archive:
+            archive.getmembers()
+    except tarfile.TarError:
+        return True
+    return False
+
+
 def convert(context, monkeypatch, name: str, data: bytes, no_data_filter=False):
     tree = Path(context.source_dir)
     tree.mkdir(parents=True, exist_ok=True)
@@ -83,8 +95,15 @@ def test_a_tar_header_with_a_negative_size_is_an_archive_that_cannot_be_read(
     )
 
     assert results == []
-    assert [r.path for r in converter.failed_inputs] == ["neg.tar"]
-    assert converter.refused_inputs == []
+    if tarfile_refuses_a_negative_size():
+        assert [r.path for r in converter.failed_inputs] == ["neg.tar"]
+        assert converter.refused_inputs == []
+    else:
+        # tarfile hands over a member of -1 bytes, and the budget refuses it.
+        assert converter.failed_inputs == []
+        assert [(r.path, r.limit) for r in converter.refused_inputs] == [
+            ("neg.tar", "max_member_bytes")
+        ]
 
 
 def test_the_copy_path_writes_a_member_larger_than_one_chunk_whole(
