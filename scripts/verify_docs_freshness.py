@@ -175,12 +175,21 @@ def collect_md_files() -> list[Path]:
     --docs-root), never the absolute path: a checkout that itself sits under a
     directory named .cache, site or venv used to collect nothing, and every check
     reading the corpus then passed on zero files. An empty corpus raises instead.
+
+    The list comes from git (docs_checks.listed_files): every tracked file, plus every
+    untracked one that is not ignored, so a new doc is checked before it is added. git
+    never enters an ignored directory. A walk did, and the unit tests call this on the
+    real checkout under xdist: ``REPO_ROOT.rglob`` descended into tests/pytest-temp,
+    which is ignored, while other workers created and removed directories there. It
+    raised FileNotFoundError when one went away mid-walk, and it returned the markdown
+    those workers had written. tests/unit/test_repo_walkers_skip_scratch.py shows both.
+    A tree git cannot list raises here rather than yielding no docs.
     """
-    patterns = ("*.md", "*.md.template")
     files = [
         path
-        for pattern in patterns
-        for path in REPO_ROOT.rglob(pattern)
+        for path in _docs_checks().listed_files(
+            REPO_ROOT, ["**/*.md", "**/*.md.template"]
+        )
         if not _EXCLUDED_MD_DIRS.intersection(path.relative_to(REPO_ROOT).parts[:-1])
         and not path.relative_to(REPO_ROOT).as_posix().startswith(_EXCLUDED_MD_PATHS)
     ]
