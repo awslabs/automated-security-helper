@@ -225,7 +225,7 @@ import threading
 import types
 import typing
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePath
 from typing import (
     Any,
@@ -268,6 +268,7 @@ from automated_security_helper.config.plugin_section_names import (
 )
 from automated_security_helper.config.environment_record import (
     ENVIRONMENT_VALUE_SHOWN,
+    UNKNOWN_INDEX,
     EnvironmentReference,
     environment_references,
     referenced_name,
