@@ -78,6 +78,9 @@ def main() -> int:
             )
 
     def keychain_read():
+        # The keychain by its path when the spec names one: this process runs with
+        # the scan's HOME, which need not be the home that holds the item's keychain.
+        keychain = [spec["keychain_file"]] if spec.get("keychain_file") else []
         result = subprocess.run(  # nosec B603 - fixed argv
             [
                 "/usr/bin/security",
@@ -85,6 +88,7 @@ def main() -> int:
                 "-s",
                 spec["keychain_service"],
                 "-w",
+                *keychain,
             ],
             capture_output=True,
             timeout=30,

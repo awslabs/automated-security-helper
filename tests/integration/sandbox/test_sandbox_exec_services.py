@@ -158,9 +158,38 @@ def pasteboard() -> Iterator[str]:
     )
 
 
+def _default_keychain(env: "dict[str, str]", home: Path) -> str:
+    """The default keychain's file, as ``security default-keychain`` names it.
+
+    Its output is the path in quotes on one indented line. The login keychain's
+    usual place is the fallback when the command answers nothing usable.
+    """
+    listed = subprocess.run(  # nosec B603 - fixed argv
+        ["/usr/bin/security", "default-keychain"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+        env=env,
+    )
+    named = listed.stdout.strip().strip('"')
+    if listed.returncode == 0 and named.startswith("/"):
+        return named
+    return str(home / "Library" / "Keychains" / "login.keychain-db")
+
+
 @pytest.fixture
-def keychain_item() -> Iterator[tuple]:
-    """A throwaway item in the default keychain, removed afterwards."""
+def keychain_item(developer_home) -> Iterator[tuple]:
+    """A throwaway item in the default keychain, removed afterwards.
+
+    ``security`` runs with HOME in the home the run started with (the
+    ``developer_home`` fixture): tests/conftest.py gives this test an empty home of
+    its own, where ``security add-generic-password`` finds no default keychain and
+    hangs until the timeout. ``security`` is neither Python nor ASH, so the Popen
+    guard admits it there; the ``ash`` child the test starts keeps the test's own
+    home, which the guard requires. The item is read back by the keychain's path.
+    """
+    env = {**os.environ, "HOME": str(developer_home)}
     service = f"ash-sandbox-canary-{uuid.uuid4().hex}"
     canary = f"ash-keychain-canary-{uuid.uuid4().hex}"
     added = subprocess.run(  # nosec B603 - fixed argv
@@ -177,12 +206,14 @@ def keychain_item() -> Iterator[tuple]:
         capture_output=True,
         timeout=30,
         check=False,
+        env=env,
     )
     if added.returncode != 0:
         _unavailable(f"no writable default keychain here: {added.stderr!r}")
-    yield service, canary
+    yield service, canary, _default_keychain(env, developer_home)
     subprocess.run(  # nosec B603 - fixed argv
         ["/usr/bin/security", "delete-generic-password", "-s", service],
+        env=env,
         capture_output=True,
         timeout=30,
         check=False,
@@ -205,6 +236,7 @@ def _attempt(
     secret: str,
     service: str = "",
     keychain_service: str = "",
+    keychain_file: str = "",
     files: "list[str] | None" = None,
 ) -> str:
     source = tmp_path / "src"
@@ -224,6 +256,7 @@ def _attempt(
                 "secret": secret,
                 "service": service,
                 "keychain_service": keychain_service,
+                "keychain_file": keychain_file,
                 "files": files or [],
                 "checks": [check],
             }
@@ -314,20 +347,22 @@ def test_a_sandboxed_scanner_cannot_read_the_pasteboard(tmp_path_factory, pasteb
     assert outcome.startswith(REFUSED["pasteboard_read"]), outcome
 
 
-@pytest.mark.real_home
 def test_a_sandboxed_scanner_cannot_read_the_keychain(tmp_path_factory, keychain_item):
-    """real_home: the throwaway item goes into the login keychain of the home the run
-    started with, where ``security`` finds a default keychain. Under the per-test home
-    tests/conftest.py gives every other test, ``security add-generic-password`` has
-    no keychain to write and hangs until the fixture's timeout."""
+    """The item sits in the default keychain of the home the run started with, and the
+    probe asks ``security`` for it by that keychain's path, since the ``ash`` child
+    runs with the test's own HOME (the Popen guard in tests/conftest.py refuses an
+    ``ash`` child whose HOME is the developer's). The profile denies that keychain
+    directory for the passwd entry's home as well as $HOME's, and the keychain daemon's
+    Mach service, so the sandboxed read fails whichever way ``security`` goes."""
     _require_sandbox_exec()
-    service, canary = keychain_item
+    service, canary, keychain_file = keychain_item
     control = _attempt(
         tmp_path_factory.mktemp("control"),
         "off",
         "keychain_read",
         canary,
         keychain_service=service,
+        keychain_file=keychain_file,
     )
     if control != "succeeded":
         _unavailable(f"security cannot read its own item even unsandboxed: {control}")
@@ -338,6 +373,7 @@ def test_a_sandboxed_scanner_cannot_read_the_keychain(tmp_path_factory, keychain
         "keychain_read",
         canary,
         keychain_service=service,
+        keychain_file=keychain_file,
     )
     assert outcome != "succeeded", "sandbox-exec let the scanner read the keychain"
     assert outcome.startswith(REFUSED["keychain_read"]), outcome
@@ -357,14 +393,15 @@ def _readable_files(directory: Path) -> "list[str]":
     return readable
 
 
-@pytest.mark.real_home
 @pytest.mark.parametrize("which", KEYCHAIN_DIRECTORIES)
 def test_a_sandboxed_scanner_cannot_read_the_keychain_files(
     tmp_path_factory, which, developer_home
 ):
-    """real_home: the login keychain is in the home the run started with, and the
-    sandbox-exec profile denies ``$HOME/Library/Keychains`` of the scan's HOME, so the
-    scan runs with that home too."""
+    """The login keychain's files are under the home the run started with, read by
+    path. The ``ash`` child keeps the test's own HOME, which the Popen guard in
+    tests/conftest.py requires; the profile denies ``Library/Keychains`` under the
+    passwd entry's home as well as under $HOME when the two differ (backends.py's
+    SandboxExecBackend.profile), so the files are denied from the test's home too."""
     _require_sandbox_exec()
     directory = _keychain_directory(which, developer_home)
     files = _readable_files(directory)
