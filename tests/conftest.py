@@ -1767,7 +1767,7 @@ def _restore_process_wide_tool_state() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
-def _no_ash_config_from_the_shell(monkeypatch):
+def _no_ash_config_from_the_shell():
     """Unset ``ASH_CONFIG`` for every test; a test that needs it sets it itself.
 
     ``ASH_CONFIG`` names the config file ASH uses when none is named, and a file
@@ -1778,8 +1778,16 @@ def _no_ash_config_from_the_shell(monkeypatch):
     orchestrator test files failed, none of them about ``ASH_CONFIG``. Tests that
     exercise the variable set it with ``monkeypatch.setenv``, which runs after
     this fixture.
+
+    A private ``MonkeyPatch``, for the reason ``_isolated_home`` gives: requesting
+    the ``monkeypatch`` fixture from an autouse fixture sets it up before every
+    test's own fixtures and tears it down after them, which delays the undo of
+    each test's ``monkeypatch.setenv`` past fixtures that check the environment
+    (tests/unit/test_conftest_helpers.py).
     """
-    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.delenv("ASH_CONFIG", raising=False)
+        yield
 
 
 @pytest.fixture(autouse=True)
@@ -4607,7 +4615,7 @@ def no_cdk_kernel(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _mcp_workspace_root_outside_home(monkeypatch, tmp_path_factory):
+def _mcp_workspace_root_outside_home(tmp_path_factory):
     """Keep MCP session workspaces out of the developer's own cache directory.
 
     An MCP HTTP app removes a session's workspace when the session ends, and
@@ -4617,11 +4625,17 @@ def _mcp_workspace_root_outside_home(monkeypatch, tmp_path_factory):
     act on that real directory. Set whatever the environment says, so a developer
     who exports their own root never runs the tests against it; a test that needs
     a particular root sets its own.
+
+    A private ``MonkeyPatch``, for the reason ``_isolated_home`` gives: the
+    ``monkeypatch`` fixture requested here would be torn down after every test's
+    own fixtures. A test's own ``monkeypatch.setenv`` of the variable still wins.
     """
-    monkeypatch.setenv(
-        "ASH_MCP_WORKSPACE_ROOT",
-        str(tmp_path_factory.getbasetemp() / "mcp-workspace-root"),
-    )
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv(
+            "ASH_MCP_WORKSPACE_ROOT",
+            str(tmp_path_factory.getbasetemp() / "mcp-workspace-root"),
+        )
+        yield
 
 
 def _drop_mcp_session_state() -> None:
