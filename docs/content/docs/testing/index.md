@@ -320,7 +320,8 @@ CI's unit-test step (`.github/actions/run-unit-tests/action.yml`) runs the full 
 `--cov-fail-under=80` and fails below 80% total coverage. In the Unified CI workflow the
 suite is split into eight shards per operating system and Python version, because one job
 cannot finish it. Each shard measures coverage without a threshold, and the
-`unit-coverage` job applies the 80% to the combined data of the Linux Python 3.12 shards.
+`unit-coverage` job applies the 80% to the combined data of each operating system's Python
+3.12 shards (Linux x86_64, Linux arm64, macOS and Windows).
 To run the whole suite the way an unsharded step does:
 
 ```bash

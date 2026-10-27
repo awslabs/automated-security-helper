@@ -42,9 +42,16 @@ UNIFIED_CI = REPO_ROOT / ".github" / "workflows" / "ash-unified-ci.yml"
 RUN_UNIT_TESTS = REPO_ROOT / ".github" / "actions" / "run-unit-tests" / "action.yml"
 SCRIPTS = REPO_ROOT / ".github" / "scripts"
 
-#: The one combination whose shards the unit-coverage job combines, as the action names its
-#: artifacts: ``test-results-<os>-<arch label>-py<version>-shard<i>of<n>``.
-COVERAGE_PREFIX = "test-results-ubuntu-latest-x86_64-py3.12"
+#: The OS families the unit-coverage job gates, each with the runner.arch GitHub reports for
+#: it, and the Python version it gates. The action names its artifacts
+#: ``test-results-<os>-<arch label>-py<version>-shard<i>of<n>``.
+COVERAGE_RUNNERS = [
+    ("ubuntu-latest", "X64"),
+    ("ubuntu-24.04-arm", "ARM64"),
+    ("macos-latest", "ARM64"),
+    ("windows-latest", "X64"),
+]
+COVERAGE_PYTHON = "3.12"
 
 
 def _load_script(filename: str) -> ModuleType:
@@ -161,25 +168,48 @@ class TestTheActionKeepsTheWholeSuiteForm:
 
 
 class TestTheCoverageJobReadsWhatTheShardsUpload:
-    def test_it_accepts_every_shard_of_the_axis(self):
-        names = [f"{COVERAGE_PREFIX}-shard{entry}" for entry in _shard_axis()]
-        assert COMBINE.check_shards(names, COVERAGE_PREFIX) == []
+    @staticmethod
+    def _shard_names(os_name: str, arch: str) -> list[str]:
+        prefix = COMBINE.artifact_prefix(os_name, COVERAGE_PYTHON, arch)
+        return [f"{prefix}-shard{entry}" for entry in _shard_axis()]
 
-    def test_it_refuses_the_axis_with_any_one_shard_missing(self):
+    @pytest.mark.parametrize(("os_name", "arch"), COVERAGE_RUNNERS)
+    def test_it_accepts_every_shard_of_the_axis(self, os_name, arch):
+        prefix = COMBINE.artifact_prefix(os_name, COVERAGE_PYTHON, arch)
+        assert COMBINE.check_shards(self._shard_names(os_name, arch), prefix) == []
+
+    @pytest.mark.parametrize(("os_name", "arch"), COVERAGE_RUNNERS)
+    def test_it_refuses_the_axis_with_any_one_shard_missing(self, os_name, arch):
         """Positive control for the test above: the check can fail on this input."""
-        names = [f"{COVERAGE_PREFIX}-shard{entry}" for entry in _shard_axis()]
+        prefix = COMBINE.artifact_prefix(os_name, COVERAGE_PYTHON, arch)
+        names = self._shard_names(os_name, arch)
         for missing in range(len(names)):
             kept = names[:missing] + names[missing + 1 :]
-            assert COMBINE.check_shards(kept, COVERAGE_PREFIX), (
-                f"dropped {names[missing]}"
-            )
+            assert COMBINE.check_shards(kept, prefix), f"dropped {names[missing]}"
 
-    def test_the_cell_it_combines_is_one_the_matrix_runs(self):
-        matrix = _workflow_job("unit-test")["strategy"]["matrix"]
-        assert "ubuntu-latest" in matrix["os"]
-        assert "3.12" in matrix["python-version"]
+    def test_the_arch_labels_are_the_ones_the_action_puts_in_the_name(self):
+        """The script rebuilds the artifact name; the action is where it is made."""
+        script = str(
+            _action_step("Resolve this runner's architecture from the runner itself")[
+                "run"
+            ]
+        )
+        for runner_arch, label in COMBINE.ARCH_LABELS.items():
+            assert f"{runner_arch}) label={label} ;;" in script, (runner_arch, label)
 
-    def test_it_downloads_and_combines_that_cell(self):
+    def test_it_gates_one_leg_per_os_family_the_matrix_runs(self):
+        gated = _workflow_job("unit-coverage")["strategy"]["matrix"]["os"]
+        assert sorted(gated) == sorted(os_name for os_name, _ in COVERAGE_RUNNERS)
+        tested = _workflow_job("unit-test")["strategy"]["matrix"]
+        assert set(gated) <= set(tested["os"])
+        assert COVERAGE_PYTHON in tested["python-version"]
+
+    def test_each_leg_runs_where_its_shards_ran(self):
+        """Same runner image, same workspace path: the reason no remapping is needed."""
+        job = _workflow_job("unit-coverage")
+        assert job["runs-on"] == "${{ matrix.os }}"
+
+    def test_it_downloads_and_combines_its_family(self):
         job = _workflow_job("unit-coverage")
         assert job["needs"] == "unit-test"
         assert "cancelled()" in job["if"], (
@@ -193,13 +223,19 @@ class TestTheCoverageJobReadsWhatTheShardsUpload:
             if str(s.get("uses", "")).startswith("actions/download-artifact@")
         ]
         assert len(downloads) == 1, steps
-        assert downloads[0]["with"]["pattern"] == f"{COVERAGE_PREFIX}-shard*"
+        assert (
+            downloads[0]["with"]["pattern"]
+            == f"test-results-${{{{ matrix.os }}}}-*-py{COVERAGE_PYTHON}-shard*"
+        )
         combine = [
             s for s in steps if "combine-unit-coverage.py" in str(s.get("run", ""))
         ]
         assert len(combine) == 1, steps
-        assert f"--prefix {COVERAGE_PREFIX}" in str(combine[0]["run"])
-        assert "--fail-under 80" in str(combine[0]["run"])
+        run = str(combine[0]["run"])
+        assert combine[0]["env"]["MATRIX_OS"] == "${{ matrix.os }}"
+        assert '--os "${MATRIX_OS}"' in run
+        assert f"--python-version {COVERAGE_PYTHON}" in run
+        assert "--fail-under 80" in run
 
     def test_the_gate_still_lists_it(self):
         assert "unit-coverage" in _workflow_job("required-checks")["needs"]
