@@ -48,6 +48,9 @@ def runtime(monkeypatch, tmp_path) -> Dict[str, Any]:
     monkeypatch.setattr(
         rac, "_find_runner", lambda _name: "/nonexistent/ash-test/docker"
     )
+    # Without a request the build stage is `non-root`, and `ci` on a Windows host
+    # (run_ash_container._resolve_build_target); the host is not Windows here.
+    monkeypatch.setattr(rac, "_host_is_windows", lambda: False)
 
     def fake_execute(cmd, debug=False, env=None):
         seen["executed"] += 1
