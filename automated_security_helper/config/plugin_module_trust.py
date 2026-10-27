@@ -746,6 +746,10 @@ def confine_plugin_modules(
         if loaded != split_plugin_modules(getattr(config, "ash_plugin_modules", [])):
             reindex_plugin_module_references(config, original_entries, loaded)
             config.ash_plugin_modules = loaded
+        # The entries are now the operator's, so the record and the import
+        # log name each as the operator's file wrote it: its references
+        # come with them (_carry_trusted_module_references).
+        _carry_trusted_module_references(config, trusted_config, loaded)
     if not refused:
         return
     if not named_modules_only:
@@ -801,16 +805,22 @@ def confine_plugin_modules(
             f", and {judged}"
         )
     else:
-        # The location half is the shared clause, so this voice cannot drift
-        # from the sandbox and settle warnings' location claims; only the
-        # judgment tail is the module rule's own.
-        head = membership_clause(
-            checkout_membership=checkout_membership,
-            mixed=mixed_membership,
-            given_root=given_root_membership,
-            undecided=undecided_membership,
-            outside=outside_membership,
-        )
+        if source is not None and not source.located:
+            # A config that is no file in a tree (ash merge's shard record):
+            # the location clause would claim a place it has none of, so the
+            # source's own reason is the head, as the sandbox step says it.
+            head = source.reason
+        else:
+            # The location half is the shared clause, so this voice cannot
+            # drift from the sandbox and settle warnings' location claims;
+            # only the judgment tail is the module rule's own.
+            head = membership_clause(
+                checkout_membership=checkout_membership,
+                mixed=mixed_membership,
+                given_root=given_root_membership,
+                undecided=undecided_membership,
+                outside=outside_membership,
+            )
         if named_modules_only:
             membership = joined_membership(
                 head,
@@ -852,6 +862,65 @@ def confine_plugin_modules(
         ),
         extra=NO_MARKUP,
     )
+
+
+def _carry_trusted_module_references(
+    config: "AshConfig", trusted_config: "AshConfig", loaded: Sequence[str]
+) -> None:
+    """Carry the trusted base's ``ash_plugin_modules`` references onto ``config``.
+
+    With ``named_modules_only`` the list becomes the trusted base's, and the
+    merge imports and records those entries: one the operator's file read from
+    the environment is named ``<value>`` in the import log
+    (``config_module_names``) and written as the file wrote it in the merged
+    results (``config_validator.record_of_config``), as a shard records its
+    own. The references sit on the trusted config at the indices of ITS list,
+    so each is moved to the index its name holds in ``loaded``; an entry of
+    several comma-joined names gets one per kept piece, re-resolved to the
+    piece, as ``reindex_plugin_module_references`` does. The three lists move
+    together. References into other config places are not the list's and stay
+    where they are: ``cli/merge.py`` carries those at the write.
+    """
+    entries = list(getattr(trusted_config, "ash_plugin_modules", None) or [])
+    new_index = {name: i for i, name in enumerate(loaded)}
+    for attribute in (
+        "_environment_references",
+        "_displayed_environment_references",
+        "_written_references",
+    ):
+        carried: List[Any] = []
+        for reference in getattr(trusted_config, attribute, None) or ():
+            path = tuple(reference.path)
+            if not (
+                len(path) >= 2
+                and path[0] == "ash_plugin_modules"
+                and isinstance(path[1], int)
+                and path[1] < len(entries)
+            ):
+                continue
+            entry = entries[path[1]]
+            pieces = split_plugin_modules([entry])
+            for piece in pieces:
+                index = new_index.get(piece)
+                if index is None:
+                    continue
+                new_path = ("ash_plugin_modules", index) + path[2:]
+                if attribute == "_written_references":
+                    moved = reference._replace(path=new_path)
+                    if pieces != [entry]:
+                        moved = moved._replace(resolved=piece, environment_part=piece)
+                else:
+                    moved = reference.at(new_path)
+                    if pieces != [entry]:
+                        moved = replace(moved, resolved=piece, value=piece)
+                carried.append(moved)
+        if not carried:
+            continue
+        held = getattr(config, attribute, None) or ()
+        if attribute == "_written_references":
+            setattr(config, attribute, [*held, *carried])
+        else:
+            setattr(config, attribute, (*tuple(held), *carried))
 
 
 def reindex_plugin_module_references(

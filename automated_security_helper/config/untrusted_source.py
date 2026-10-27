@@ -51,6 +51,11 @@ class UntrustedSource:
             section out would drop the operator's values. ``ash merge``'s
             ``--config`` supplies values for what a shard recorded without adding
             to it (``cli/merge.py``), so the merge does not fill sections.
+        located: The config is a file the confinement walk placed, so the
+            sandbox and plugin-module warnings explain the drop by where it
+            sits (``sandbox_grants.membership_clause``). False for a config
+            that is no file in a tree (``SHARD_RECORDED``): those warnings say
+            ``reason`` instead, as the reporter and scanner-config steps do.
     """
 
     reason: str
@@ -59,6 +64,7 @@ class UntrustedSource:
     named_modules_only: bool = False
     scanner_steps_note: Optional[str] = None
     fills_missing_sections: bool = True
+    located: bool = True
 
 
 #: A config file inside a git checkout or the scanned tree, or one an MCP client
@@ -88,6 +94,7 @@ SHARD_RECORDED = UntrustedSource(
         "which record the operator's value"
     ),
     fills_missing_sections=False,
+    located=False,
 )
 
 #: A config file ``ash report`` reads (``--config``, ``ASH_CONFIG``), for the

@@ -684,6 +684,18 @@ def _refusal_text(error: Exception) -> Text:
     return Text(f"Refusing to merge: {_shown_lines(str(error))}", style="red")
 
 
+def _invalid_config_text(error: Exception) -> Text:
+    """The operator-config refusal as ``ash merge`` prints it, before exit 3.
+
+    As _refusal_text: the message quotes the path with its controls already
+    escaped (describe_config_path), so it is shown whole by _shown_lines, which
+    writes only a raw control as its escape, and printed as Text, which reads no
+    markup. Through escape_markup the backslash of each escape was doubled, so a
+    name holding ESC printed as ``\\\\x1b`` where ``\\x1b`` was meant.
+    """
+    return Text(f"Invalid configuration: {_shown_lines(str(error))}", style="red")
+
+
 @functools.lru_cache(maxsize=1)
 def _results_schema_names() -> frozenset[str]:
     """Every field name, alias and model name reachable from AshAggregatedResults.
@@ -2702,43 +2714,22 @@ def merge_command(
         "fail_on_incomplete_scanners": fail_on_incomplete_scanners,
     }
 
-    # The operator's --config, read first: a file that does not load refuses the
-    # merge with exit 3, as `ash report` refuses it, before any merged results
-    # exist. A named file that exists must load; falling back to the defaults for
-    # one that does not parse merged with none of the operator's settings and
-    # exited 0. One that does not exist gives the defaults, as in `ash report`.
+    # The operator's --config, read first and once: a file that does not load
+    # refuses the merge with exit 3, as `ash report` refuses it, before any merged
+    # results exist and before any shard is read. resolve_operator_config is the
+    # one read of the file (a second load here opened it twice); the rest of the
+    # merge uses what it returns, as trusted_config below. A path that does not
+    # exist, or is not a file, is refused too: the defaults in its place would
+    # send the reports somewhere the operator did not choose. Every other error
+    # the load can raise arrives as an ASHConfigValidationError
+    # (resolve_operator_config wraps OSError, UnicodeDecodeError, ValueError and
+    # yaml.YAMLError into ASHConfigSourceError, naming the file once).
     operator_config: Optional[AshConfig] = None
     if config:
         try:
-            operator_config = resolve_config(
-                config_path=config, fallback_to_default=not Path(config).exists()
-            )
+            operator_config = resolve_operator_config(config)
         except ASHConfigValidationError as exc:
-            print(f"[red]Invalid configuration: {escape_markup(exc)}[/red]")
-            raise typer.Exit(3)
-        except OSError as exc:
-            # A file the command may not read is a config it cannot use, as
-            # one that does not parse is: exit 3, never a traceback, in the
-            # words `ash report` refuses it with. An unreadable file ASH_CONFIG
-            # names arrives above instead, as an ASHConfigValidationError that
-            # names it (get_default_config), so the file here is the --config
-            # file. error_text names it as given, so its name is shown once;
-            # escape_markup alone, as the arms beside this one show their
-            # text, so nothing is escaped twice.
-            from automated_security_helper.utils.error_text import error_text
-
-            refusal = f"could not read {config}: {error_text(exc)}"
-            print(f"[red]Invalid configuration: {escape_markup(refusal)}[/red]")
-            raise typer.Exit(3)
-        except (yaml.YAMLError, ValueError) as exc:
-            # ValueError covers json.JSONDecodeError and UnicodeDecodeError. A
-            # file that does not parse arrives above, as an
-            # ASHConfigValidationError: resolve_config refuses it in words that
-            # quote none of it (unparsed_config_reason).
-            print(
-                f"[red]Invalid configuration: {escape_markup(config)} does not "
-                f"parse: {escape_markup(exc)}[/red]"
-            )
+            print(_invalid_config_text(exc))
             raise typer.Exit(3)
 
     # With the other operator-config refusals, before any shard is read:
@@ -2766,11 +2757,16 @@ def merge_command(
         raise typer.Exit(3)
 
     try:
-        # The operator's trusted base, resolved the way ``ash report`` resolves
-        # its config. The overrides are not applied to it here: the confinement
-        # below replays them onto it, as resolve_config does for a scan, and
-        # applying them twice would repeat an appending override.
-        trusted_config = resolve_operator_config(config)
+        # The operator's trusted base: the --config read above, or the defaults
+        # resolved the way ``ash report`` resolves its config. The overrides are
+        # not applied to it here: the confinement below replays them onto it, as
+        # resolve_config does for a scan, and applying them twice would repeat an
+        # appending override.
+        trusted_config = (
+            operator_config
+            if operator_config is not None
+            else resolve_operator_config(config)
+        )
         loaded = load_shard_results(results)
         apply_operator_overrides(loaded, overrides)
         # --output-formats names the formats for the merge, so it supplies
@@ -2806,7 +2802,7 @@ def merge_command(
             merged.ash_config, trusted_config, overrides, _base_results_file(loaded)
         )
     except ASHConfigValidationError as exc:
-        print(f"[red]Invalid configuration: {escape_markup(str(exc))}[/red]")
+        print(_invalid_config_text(exc))
         raise typer.Exit(3)
     except ResultsPathError as exc:
         # As Text: the message quotes the operator's path, which can read as
@@ -2858,7 +2854,10 @@ def merge_command(
         print(f"[red]{escape_markup(str(refusal))}[/red]")
         # 3, as a scan exits for the same refusal (OUTPUT_DIR_REFUSED_EXIT_CODE).
         raise typer.Exit(3)
-    output_dir_path.mkdir(parents=True, exist_ok=True)
+    # Not created yet: the plugin modules are loaded below, and a module that
+    # fails to import refuses the merge, which must leave no output directory
+    # either, as the namespace refusal above leaves none. The directory is
+    # made at the first write (below).
 
     # The scan's own configuration, carried through the shard results, rather
     # than a config file resolved on this host. The collector job need not have
@@ -2927,10 +2926,17 @@ def merge_command(
     if merged.ash_config is not None:
         # What the confinement took from the operator's config is recorded as
         # that file wrote it, as a shard records its own
-        # (config/environment_record.py).
+        # (config/environment_record.py). The module list's references were
+        # carried with the list, at their indices in the merged list
+        # (plugin_module_trust.confine_plugin_modules), so they are not added
+        # again here at the operator's indices.
         merged.ash_config._environment_references = (
             *merged.ash_config._environment_references,
-            *trusted_config._environment_references,
+            *(
+                reference
+                for reference in trusted_config._environment_references
+                if tuple(reference.path)[:1] != ("ash_plugin_modules",)
+            ),
         )
     write_text_atomically(merged_file, merged.model_dump_json(indent=2))
     logger.info(f"Wrote merged results to {merged_file}")
