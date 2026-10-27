@@ -641,9 +641,18 @@ def _expected_entries() -> Dict[str, Tuple[Optional[str], Optional[bool], bool]]
         distribution_version("cdk-nag") if cdk_nag_scanner._CDK_AVAILABLE else None
     )
     return {
+        # No stand-in on PATH and not uv-managed: not installed, nothing to install.
+        "actionlint": (None, False, False),
         "bandit": ("1.99.1", True, False),
         # No node stand-in, so unsatisfied with or without the cdk extra.
         "cdk_nag": (cdk_nag_version, False, False),
+        "cfn_guard": (None, False, False),
+        # uv-managed like semgrep: not installed, present uv, online run.
+        "cfn_lint": (None, False, True),
+        "gitleaks": (None, False, False),
+        "zizmor": (None, False, True),
+        # The same trivy stand-in as trivy_repo answers both trivy scanners.
+        "trivy": ("0.99.9", True, False),
         "cfn_nag": ("0.99.4", True, False),
         "checkov": ("3.99.2", True, False),
         "detect_secrets": (distribution_version("detect-secrets"), True, False),

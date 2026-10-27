@@ -122,6 +122,8 @@ def _non_default_arguments(tmp_path: Path):
     """CLI arguments that set every mcp_command option away from its default."""
     profile = tmp_path / "dev.yaml"
     profile.write_text("project_name: dev\n", encoding="utf-8")
+    value_file = tmp_path / "token"
+    value_file.write_text("secret-value\n", encoding="utf-8")
     argv = [
         "mcp",
         "--log-level",
@@ -142,14 +144,26 @@ def _non_default_arguments(tmp_path: Path):
         "X-Token",
         "--auth-header-value",
         "secret-value",
+        "--auth-header-value-file",
+        str(value_file),
+        "--auth-header-value-fd",
+        "3",
         "--stateless-http",
+        "--trust-upstream-session-id",
         "--allowed-host",
         "a.example",
         "--allowed-host",
         "b.example",
+        "--session-workspace-ttl",
+        "3600",
+        "--trust-upstream-host-check",
         "--profile",
         f"dev={profile}",
     ]
+    # Values that contradict each other on a real run (three sources of the auth
+    # value; --allowed-host with --trust-upstream-host-check) are refused by
+    # mcp_command, which this test replaces: here only the parse and the
+    # forwarding are measured.
     expected = {
         "log_level": "DEBUG",
         "verbose": True,
@@ -162,8 +176,13 @@ def _non_default_arguments(tmp_path: Path):
         "mount_path": "/other",
         "auth_header_name": "X-Token",
         "auth_header_value": "secret-value",
+        "auth_header_value_file": value_file,
+        "auth_header_value_fd": 3,
         "stateless_http": True,
+        "trust_upstream_session_id": True,
         "allowed_host": ["a.example", "b.example"],
+        "session_workspace_ttl": 3600,
+        "trust_upstream_host_check": True,
         "profile": [f"dev={profile}"],
     }
     return argv, expected

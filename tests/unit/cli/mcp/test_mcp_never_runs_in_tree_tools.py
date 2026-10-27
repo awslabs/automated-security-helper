@@ -26,6 +26,15 @@ from automated_security_helper.utils.subprocess_utils import (
 )
 
 
+def _serving_with(serve):
+    """``mcp.run_stdio_async`` replaced: the serving is ``serve``, run once."""
+
+    async def run_stdio_async() -> None:
+        serve()
+
+    return run_stdio_async
+
+
 @pytest.fixture
 def in_tree_tool(tmp_path, monkeypatch):
     tree = tmp_path / "delivered"
@@ -55,7 +64,10 @@ def test_the_server_refuses_in_tree_tools_with_the_opt_in_set(
             seen["found"] = find_executable("tool")
             seen["reason"] = in_tree_refusal("tool")
 
-    monkeypatch.setattr(mcp_server.mcp, "run", serve)
+    # run_mcp_server serves through _serve_stdio, which awaits
+    # mcp.run_stdio_async; the real transport would read the worker's stdin.
+    monkeypatch.setattr(mcp_server.mcp, "run_stdio_async", _serving_with(serve))
+    monkeypatch.setattr(mcp_server, "_stdout_is_fd_1", lambda: False)
 
     mcp_server.run_mcp_server()
 
@@ -75,7 +87,10 @@ def test_the_decision_point_both_ways(honored, in_tree_tool, monkeypatch):
         with scanning_tree(tree):
             seen["found"] = find_executable("tool")
 
-    monkeypatch.setattr(mcp_server.mcp, "run", serve)
+    # run_mcp_server serves through _serve_stdio, which awaits
+    # mcp.run_stdio_async; the real transport would read the worker's stdin.
+    monkeypatch.setattr(mcp_server.mcp, "run_stdio_async", _serving_with(serve))
+    monkeypatch.setattr(mcp_server, "_stdout_is_fd_1", lambda: False)
 
     mcp_server.run_mcp_server()
 
