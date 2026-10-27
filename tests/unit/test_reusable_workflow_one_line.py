@@ -143,7 +143,16 @@ OWN_STEPS = {
     ("run-ash-security-scan.yml", "Resolve the base for changed-files-only"),
     ("run-ash-security-scan.yml", "Check that this ASH can install the scanner tools"),
     ("run-ash-security-scan.yml", "Run ASH"),
-    ("run-ash-security-scan.yml", "Note that the SARIF report was not uploaded"),
+}
+#: Values a workflow command prints without one_line because the step itself sets
+#: them: the input check names the refused input by its own INPUT_<NAME> variable's
+#: name, and runs before the definer so that nothing prints an input unchecked.
+LITERAL_VALUES = {
+    (
+        "run-ash-security-scan.yml",
+        "Refuse an input that could start a workflow command",
+        "name",
+    ),
 }
 SCAN, REPO_SCAN = "run-ash-security-scan.yml", "ash-repo-scan.yml"
 #: Workflow-command lines that the base branch prints through one_line, or without
@@ -151,63 +160,17 @@ SCAN, REPO_SCAN = "run-ash-security-scan.yml", "ash-repo-scan.yml"
 #: entry is one message line, named by its step and the opening of the line, with
 #: the values it prints; a new line in the same step that prints the same value is
 #: not covered. Each entry must still be printed here, so the table names exactly
-#: what the base branch replaces.
-BASE_BRANCH_KEEPS = {
-    (
-        REPO_SCAN,
-        "Check the grype database may be saved",
-        "echo \"::warning::not saving the grype database (built '",
-    ): {"built"},
-    (
-        SCAN,
-        "Refuse a restored grype database older than its declared bound",
-        "echo \"::warning::discarding the restored grype database (built '",
-    ): {"built"},
-    (
-        SCAN,
-        "Check the grype database may be saved (default branch only)",
-        "echo \"::warning::not saving the grype database (built '",
-    ): {"built"},
-    (
-        SCAN,
-        "Install OpenGrep",
-        '*) echo "::error::no pinned OpenGrep for machine $(uname -m)"',
-    ): {"uname"},
-    (
-        SCAN,
-        "Install OpenGrep",
-        'echo "::error::this ASH revision (${ASH_UVX_SOURCE}) pins no SHA256',
-    ): {"ASH_UVX_SOURCE"},
-    (
-        SCAN,
-        "Install OpenGrep",
-        'echo "::error::the installed OpenGrep binary does not match the pinned',
-    ): {"PINNED"},
+#: what the base branch replaces. Empty since the merge: every line the base branch
+#: owned prints through one_line now, and the report job's notices print no value.
+BASE_BRANCH_KEEPS: dict[tuple[str, str, str], set[str]] = {}
+#: A keep as the two control tests below exercise `_kept` with, so the controls
+#: still measure the matching when BASE_BRANCH_KEEPS itself is empty.
+_CONTROL_KEEPS = {
     (
         SCAN,
         "Install cfn-nag",
         'echo "::error::Ruby is not on PATH for the runner user (',
     ): {"BUNDLE_BIN", "GEM_CMD", "RUBY_CMD"},
-    (
-        SCAN,
-        "Install cfn-nag",
-        'echo "::error::cfn-nag installed but cfn_nag_scan is not on PATH.',
-    ): {"BINSTUB_DIR"},
-    (
-        SCAN,
-        "Install cfn-nag",
-        "echo \"::error::cfn_nag_scan is on PATH at '",
-    ): {"CFN_NAG_SCAN"},
-    (
-        SCAN,
-        "Note that the PR comment was skipped for a fork",
-        'echo "::notice::Scan results were not posted as a PR comment:',
-    ): {"ARTIFACT_NAME"},
-    (
-        SCAN,
-        "Note that the JUnit report was skipped for a fork",
-        'echo "::notice::The JUnit test report was not published as a check:',
-    ): {"ARTIFACT_NAME"},
 }
 
 
@@ -282,12 +245,19 @@ def _printed_bare():
                 yield name, step.get("name"), kind, value, line.strip()
 
 
-def _kept(file: str, step: str, value: str, line: str) -> bool:
+def _kept(
+    file: str,
+    step: str,
+    value: str,
+    line: str,
+    keeps: dict[tuple[str, str, str], set[str]] | None = None,
+) -> bool:
     """Whether the base branch's text replaces this printed value at the merge: a
     keep for this step whose line opening this line starts with names the value."""
+    table = BASE_BRANCH_KEEPS if keeps is None else keeps
     return any(
         value in values
-        for (kept_file, kept_step, opening), values in BASE_BRANCH_KEEPS.items()
+        for (kept_file, kept_step, opening), values in table.items()
         if (kept_file, kept_step) == (file, step) and line.startswith(opening)
     )
 
@@ -297,7 +267,7 @@ def test_a_keep_covers_its_own_line():
     step = "Install cfn-nag"
     line = "echo \"::error::Ruby is not on PATH for the runner user (bundle='${BUNDLE_BIN}'"
 
-    assert _kept(SCAN, step, "BUNDLE_BIN", line)
+    assert _kept(SCAN, step, "BUNDLE_BIN", line, keeps=_CONTROL_KEEPS)
 
 
 def test_a_kept_value_on_a_new_line_is_not_kept():
@@ -306,7 +276,7 @@ def test_a_kept_value_on_a_new_line_is_not_kept():
     step = "Install cfn-nag"
     new_line = 'echo "::error::a new message with ${BUNDLE_BIN} in it"'
 
-    assert not _kept("run-ash-security-scan.yml", step, "BUNDLE_BIN", new_line)
+    assert not _kept(SCAN, step, "BUNDLE_BIN", new_line, keeps=_CONTROL_KEEPS)
 
 
 def test_every_value_a_step_prints_goes_through_one_line():
@@ -320,6 +290,7 @@ def test_every_value_a_step_prints_goes_through_one_line():
         f"{file} | {step} | {kind} | {value}: {line[:90]}"
         for file, step, kind, value, line in _printed_bare()
         if not _kept(file, step, value, line)
+        and (file, step, value) not in LITERAL_VALUES
     ]
 
     assert not bare, "values printed outside one_line:\n" + "\n".join(bare)

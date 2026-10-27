@@ -738,9 +738,11 @@ jobs:
           # The C locale, so [[:space:]] and [[:cntrl:]] below mean the same bytes on
           # every runner image.
           export LC_ALL=C
+          # Every value a workflow command below prints goes through one_line.
+          . "${RUNNER_TEMP}/ash-one-line.sh"
           # Neither refusal prints the value, so this step prints nothing it has not
           # checked even when it runs without the input check. The messages after
-          # these two checks may print it.
+          # these two checks print it through one_line.
           if [[ ! "${ASH_REPO}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
             echo "::error::ash-repo must be owner/name: letters, digits, '.', '_' and '-', one '/' between them."
             exit 1
@@ -770,7 +772,7 @@ jobs:
             rm -f -- "${LISTING}"
             UNIQUE="$(printf '%s\n' "${COMMITS[@]}" | sort -u | grep -c . || true)"
             if [ "${UNIQUE}" -gt 1 ]; then
-              echo "::error::ash-version '${ASH_VERSION}' is both a branch and a tag of ${ASH_REPO}, on different commits. Name one: refs/heads/${ASH_VERSION} or refs/tags/${ASH_VERSION}."
+              echo "::error::ash-version '$(one_line "${ASH_VERSION}")' is both a branch and a tag of $(one_line "${ASH_REPO}"), on different commits. Name one: refs/heads/$(one_line "${ASH_VERSION}") or refs/tags/$(one_line "${ASH_VERSION}")."
               exit 1
             elif [ "${UNIQUE}" -eq 1 ]; then
               COMMIT="${COMMITS[0]}"
@@ -778,7 +780,7 @@ jobs:
               # An abbreviated commit id names one commit already; uv resolves it.
               COMMIT="${ASH_VERSION}"
             else
-              echo "::error::ash-version '${ASH_VERSION}' is not a branch, tag or commit of ${ASH_REPO}."
+              echo "::error::ash-version '$(one_line "${ASH_VERSION}")' is not a branch, tag or commit of $(one_line "${ASH_REPO}")."
               exit 1
             fi
           fi
@@ -1005,10 +1007,12 @@ jobs:
           # The C locale, so [[:space:]] and [[:cntrl:]] below mean the same bytes on
           # every runner image.
           export LC_ALL=C
+          # Every value a workflow command below prints goes through one_line.
+          . "${RUNNER_TEMP}/ash-one-line.sh"
           case "${CONFIG_REF_MISSING}" in
             refuse|defaults|"") ;;
             *)
-              echo "::error::config-ref-missing must be 'refuse' or 'defaults', not '${CONFIG_REF_MISSING}'."
+              echo "::error::config-ref-missing must be 'refuse' or 'defaults', not '$(one_line "${CONFIG_REF_MISSING}")'."
               exit 1
               ;;
           esac
@@ -1021,7 +1025,7 @@ jobs:
             exit 1
           fi
           if [ -z "${CONFIG_PATH}" ]; then
-            echo "::error::config-ref is set but config is empty. Name the config file to read from ${CONFIG_REF}, for example 'config: .ash/.ash.yaml'."
+            echo "::error::config-ref is set but config is empty. Name the config file to read from $(one_line "${CONFIG_REF}"), for example 'config: .ash/.ash.yaml'."
             exit 1
           fi
           RELATIVE="${CONFIG_PATH#./}"
@@ -1029,7 +1033,7 @@ jobs:
           # an empty, `.` or `..` segment) is refused rather than read as missing.
           case "/${RELATIVE}/" in
             *//*|*/./*|*/../*)
-              echo "::error::config must be a plain path inside the repository when config-ref is set, not '${CONFIG_PATH}'."
+              echo "::error::config must be a plain path inside the repository when config-ref is set, not '$(one_line "${CONFIG_PATH}")'."
               exit 1
               ;;
           esac
@@ -1061,17 +1065,17 @@ jobs:
           rm -f -- "${LISTING}"
           if [ "${#ENTRIES[@]}" -eq 0 ]; then
             if [ "${CONFIG_REF_MISSING}" != "defaults" ]; then
-              echo "::error::${CONFIG_REF} has no ${RELATIVE}, so the config this scan was asked to use does not exist there; refusing to scan with ASH's defaults instead. Check the config input, or set config-ref-missing: defaults for the pull request that adds the first config."
+              echo "::error::$(one_line "${CONFIG_REF}") has no $(one_line "${RELATIVE}"), so the config this scan was asked to use does not exist there; refusing to scan with ASH's defaults instead. Check the config input, or set config-ref-missing: defaults for the pull request that adds the first config."
               exit 1
             fi
             printf '{}\n' > "${DEST}"
-            echo "::warning::${CONFIG_REF} has no ${RELATIVE}, and config-ref-missing is defaults, so this scan uses ASH's default config, not the checkout's."
+            echo "::warning::$(one_line "${CONFIG_REF}") has no $(one_line "${RELATIVE}"), and config-ref-missing is defaults, so this scan uses ASH's default config, not the checkout's."
           else
             ENTRY="${ENTRIES[0]}"
             ENTRY_PATH="${ENTRY#*$'\t'}"
             read -r MODE TYPE OBJECT <<< "${ENTRY%%$'\t'*}"
             if [ "${#ENTRIES[@]}" -ne 1 ] || [ "${TYPE}" != "blob" ] || [ "${MODE}" = "120000" ] || [ "${ENTRY_PATH}" != "${RELATIVE}" ]; then
-              echo "::error::${RELATIVE} at ${CONFIG_REF} is not a regular file (${MODE} ${TYPE}); refusing to scan with it."
+              echo "::error::$(one_line "${RELATIVE}") at $(one_line "${CONFIG_REF}") is not a regular file ($(one_line "${MODE}") $(one_line "${TYPE}")); refusing to scan with it."
               exit 1
             fi
             git cat-file blob "${OBJECT}" > "${DEST}"
@@ -1684,6 +1688,8 @@ jobs:
           INSTALL_TRIVY: ${{ inputs.install-trivy && 'trivy' || '' }}
         run: |
           set -euo pipefail
+          # Every value a workflow command below prints goes through one_line.
+          . "${RUNNER_TEMP}/ash-one-line.sh"
           tools=()
           for tool in "${INSTALL_ACTIONLINT}" "${INSTALL_CFN_GUARD}" "${INSTALL_GITLEAKS}" "${INSTALL_TRIVY}"; do
             if [ -n "${tool}" ]; then tools+=("${tool}"); fi
@@ -1705,7 +1711,7 @@ jobs:
               install_tools --tool "${tool}" > "${output}" 2>&1 || status=$?
               cat "${output}"
               if [ "${status}" -eq 2 ] && grep -q -F 'Unknown tool(s)' "${output}"; then
-                echo "::notice::${tool} is not a tool the installed ASH knows, so it is not installed and its scanner does not run (ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip)."
+                echo "::notice::$(one_line "${tool}") is not a tool the installed ASH knows, so it is not installed and its scanner does not run (ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip)."
               elif [ "${status}" -ne 0 ]; then
                 exit "${status}"
               fi

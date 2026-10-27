@@ -350,26 +350,8 @@ ALLOWED: dict[tuple[str, str, str], dict[str, str]] = {
         "sandbox-scanner-parity",
         "Show what sandbox-exec denied the scanners",
     ): {"log": OWN_TREE},
-    (
-        ".github/workflows/run-ash-security-scan.yml",
-        "ash",
-        "Pin the ASH ref to a commit",
-    ): {
-        "ASH_REPO": CHECKED,
-        "ASH_VERSION": CHECKED,
-    },
-    (
-        ".github/workflows/run-ash-security-scan.yml",
-        "ash",
-        "Read the ASH config from config-ref",
-    ): {
-        "CONFIG_PATH": CHECKED,
-        "CONFIG_REF": CHECKED,
-        "CONFIG_REF_MISSING": CHECKED,
-        "RELATIVE": CHECKED,
-        "MODE": FIXED_FORM,
-        "TYPE": FIXED_FORM,
-    },
+    # The pin step and the config-ref step print their checked values through
+    # one_line too (test_reusable_workflow_one_line.py), so they need no entry.
     (".github/workflows/run-ash-security-scan.yml", "ash", INPUT_CHECK_NAME): {
         "name//_/-": LITERAL
     },

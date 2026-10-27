@@ -71,8 +71,17 @@ def definers(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def calls_one_line(step: dict[str, Any]) -> bool:
-    """Whether a step that is not the definer calls one_line or with_commands_stopped."""
-    run = str(step.get("run") or "")
+    """Whether a step that is not the definer calls one_line or with_commands_stopped.
+
+    Comment lines are left out: a step that only names the helper in a comment (the
+    inline Python of the config-ref tool-config step describes its own copy) makes
+    no call.
+    """
+    run = "\n".join(
+        line
+        for line in str(step.get("run") or "").splitlines()
+        if not line.lstrip().startswith("#")
+    )
     return step.get("name") != DEFINER_NAME and (
         "one_line " in run or "with_commands_stopped " in run
     )
