@@ -1503,8 +1503,14 @@ jobs:
       # a missing tool fail those tests instead of skipping them. Without gitleaks here,
       # both tests in test_repo_tool_configs_are_not_read.py skipped.
       # tests/unit/test_integration_job_installs_required_tools.py holds this list.
+      #
+      # checkov, semgrep and zizmor are installed here too. The links-leaving-the-tree
+      # scan runs every scanner with a home of its own, so a uv tool a test installed
+      # under the suite's private home is invisible to it and the scanner records
+      # MISSING; a tool on PATH is seen by both. Without these three that test cannot
+      # tell a scanner that could not run from one that should have.
       - name: Install the scanners the integration suite runs for real
-        run: uv run ash dependencies install --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks
+        run: uv run ash dependencies install --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks --tool checkov --tool semgrep --tool zizmor
       # ASH_REQUIRE_CDK_EXTRA turns a missing cdk extra into a hard failure rather than a
       # skip, so this job cannot quietly stop testing the cdk-nag path if the install above
       # changes. ASH_REQUIRE_SYMBOLS_EXTRA does the same for the symbol-suppression scan,
@@ -1531,7 +1537,7 @@ jobs:
           ASH_REQUIRE_CFN_TOOLS: "1"
           ASH_REQUIRE_GITLEAKS: "1"
           ASH_REQUIRE_SYMBOLS_EXTRA: "1"
-          ASH_REQUIRE_PREINSTALLED_TOOLS: bandit,actionlint,cfn-lint,cfn-guard,gitleaks
+          ASH_REQUIRE_PREINSTALLED_TOOLS: bandit,actionlint,cfn-lint,cfn-guard,gitleaks,checkov,semgrep,zizmor
         run: |
           export PATH="$HOME/.ash/bin:$HOME/.local/bin:$PATH"
           export ASH_CFN_GUARD_RULES_DIR="$HOME/.ash/share/cfn-guard-rules"
