@@ -45,6 +45,11 @@ def _config_file(source: Path, tmp_path: Path) -> str:
     return TrivyRepoScanner(context=context)._trivy_config_file()
 
 
+def _posix(path: Path) -> str:
+    """The resolved file as ASH names it: with forward slashes on every platform."""
+    return Path(os.path.realpath(path)).as_posix()
+
+
 def _write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
@@ -64,7 +69,7 @@ def test_a_relative_trivy_config_is_taken_from_the_working_directory(
     monkeypatch.chdir(cwd)
     monkeypatch.setenv("TRIVY_CONFIG", "../trivy.yaml")
 
-    assert _config_file(source, tmp_path) == os.path.realpath(meant)
+    assert _config_file(source, tmp_path) == _posix(meant)
 
 
 def test_a_relative_trivy_config_inside_the_scanned_checkout_is_refused(
@@ -99,7 +104,7 @@ def test_a_relative_trivy_config_outside_every_checkout_is_used(tmp_path, monkey
     monkeypatch.chdir(cwd)
     monkeypatch.setenv("TRIVY_CONFIG", "../trivy.yaml")
 
-    assert _config_file(repo, tmp_path) == os.path.realpath(meant)
+    assert _config_file(repo, tmp_path) == _posix(meant)
 
 
 def test_control_an_absolute_trivy_config_does_not_depend_on_the_working_directory(
@@ -111,4 +116,4 @@ def test_control_an_absolute_trivy_config_does_not_depend_on_the_working_directo
     monkeypatch.chdir(source)
     monkeypatch.setenv("TRIVY_CONFIG", str(operator))
 
-    assert _config_file(source, tmp_path) == os.path.realpath(operator)
+    assert _config_file(source, tmp_path) == _posix(operator)
