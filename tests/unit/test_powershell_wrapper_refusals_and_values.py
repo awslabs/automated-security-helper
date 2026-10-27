@@ -817,14 +817,12 @@ def test_an_explicit_runner_path_runs_that_path(given, pwsh, tmp_path):
         "exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }; "
         "exit [int]$LASTEXITCODE"
     )
-    env = {
-        k: v
-        for k, v in os.environ.items()
-        if k not in ("PATH", "ASH_CONFIG", "OCI_RUNNER_WRAPPER")
-    }
+    env = inherited_env("PATH", "ASH_CONFIG", "OCI_RUNNER_WRAPPER")
     env["PATH"] = os.pathsep.join(
         [on_path.parent.as_posix(), Path(pwsh).resolve().parent.as_posix()]
     )
+    # pwsh's own HOME and caches, as in _invoke.
+    env.update(scratch_home(tmp_path))
     if given == "a-path-under-a-wrapper":
         env["OCI_RUNNER_WRAPPER"] = wrapper.as_posix()
 
