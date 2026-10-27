@@ -23,6 +23,7 @@ once).
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import shutil
 import subprocess
@@ -401,6 +402,33 @@ if command -v {host_tool.name}; then exit 11; fi
 """,
     )
     _assert_all_ok(results, 1)
+
+
+def test_the_tools_in_the_home_the_test_session_replaced_are_on_the_session_path(
+    tmp_path, monkeypatch
+):
+    """The tools of the user's own home are found though the test session moved HOME.
+
+    tests/conftest.py points HOME at a private directory for the whole pytest run and
+    records the value it replaced in ASH_TEST_PRE_SESSION_HOME. `ash dependencies
+    install` ran as the user, outside the run, so its tools are under the recorded
+    home, not under Path.home(). Planted here: a tool in each of the recorded home's
+    two default tool directories, an empty private home, and none of the variables
+    that would name those directories directly.
+    """
+    real_home = tmp_path / "real-home"
+    ash_tool = _planted_tool(real_home / ".ash" / "bin", "ash-docs-real-ash-tool")
+    uv_tool = _planted_tool(real_home / ".local" / "bin", "ash-docs-real-uv-tool")
+    private_home = tmp_path / "private-home"
+    private_home.mkdir()
+    for name in ("ASH_BIN_PATH", "UV_TOOL_BIN_DIR", "XDG_BIN_HOME", "XDG_DATA_HOME"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(
+        "ASH_TEST_PRE_SESSION_HOME", json.dumps({"HOME": str(real_home)})
+    )
+    monkeypatch.setenv("HOME", str(private_home))
+    found = [directory.resolve() for directory in runner.ash_tool_dirs()]
+    assert found == [ash_tool.parent.resolve(), uv_tool.parent.resolve()]
 
 
 def test_a_shell_session_block_runs_like_a_console_block(tmp_path):

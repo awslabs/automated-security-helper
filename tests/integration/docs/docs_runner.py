@@ -42,6 +42,7 @@ where a doc's commands are trusted, as CI does.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import shutil
 import signal
@@ -170,6 +171,43 @@ def session_blocks(page) -> list:
 SYSTEM_PATH = ("/usr/local/bin", "/usr/bin", "/bin")
 
 
+#: The variables tests/conftest.py moves into a private directory for the whole pytest
+#: run, and records (those that were set) as JSON in ASH_TEST_PRE_SESSION_HOME.
+_MOVED_BY_THE_TEST_SESSION = (
+    "HOME",
+    "USERPROFILE",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_STATE_HOME",
+)
+
+
+def invoking_user_environment() -> dict[str, str]:
+    """This process's environment, with the home variables the test session moved put back.
+
+    tests/conftest.py points HOME, USERPROFILE and three XDG directories at a private
+    directory before collection, so Path.home() here is that directory, which holds
+    no tool. ``ash dependencies install`` ran as the invoking user, outside the test
+    session, and put its tools under that user's home. The values the session replaced
+    are in ASH_TEST_PRE_SESSION_HOME, and a variable that was unset is absent from it.
+    Without the record (this module run outside that conftest) nothing was moved and
+    the environment is returned as it is.
+    """
+    env = dict(os.environ)
+    try:
+        recorded = json.loads(os.environ.get("ASH_TEST_PRE_SESSION_HOME") or "{}")
+    except ValueError:
+        recorded = {}
+    if isinstance(recorded, dict) and recorded:
+        for name in _MOVED_BY_THE_TEST_SESSION:
+            value = recorded.get(name)
+            if value:
+                env[name] = str(value)
+            else:
+                env.pop(name, None)
+    return env
+
+
 def ash_tool_dirs() -> list[Path]:
     """The directories ASH installs scanner tools into for the invoking user, that exist.
 
@@ -179,10 +217,14 @@ def ash_tool_dirs() -> list[Path]:
     XDG_BIN_HOME, else ~/.local/bin, as ``uv tool dir --bin`` resolves it). A
     session's HOME is private, so ASH and uv inside it would look only in the
     session's own, empty copies; on PATH, the invoking user's are found the way ASH
-    finds any tool on PATH.
+    finds any tool on PATH. "The invoking user's" means the home the user had before
+    the test session moved it (invoking_user_environment): in the pytest process
+    Path.home() is the session's private home, where nothing is installed.
     """
-    from_env = os.environ.get("ASH_BIN_PATH")
-    dirs = [Path(from_env) if from_env else Path.home() / ".ash" / "bin"]
+    user_env = invoking_user_environment()
+    from_env = user_env.get("ASH_BIN_PATH")
+    home = Path(user_env["HOME"]) if user_env.get("HOME") else Path.home()
+    dirs = [Path(from_env) if from_env else home / ".ash" / "bin"]
     uv = Path(sys.executable).parent / "uv"
     uv_path = str(uv) if uv.is_file() else shutil.which("uv")
     if uv_path:
@@ -193,6 +235,7 @@ def ash_tool_dirs() -> list[Path]:
                 text=True,
                 timeout=60,
                 check=False,
+                env=user_env,
             )
         except (OSError, subprocess.TimeoutExpired):
             answer = None
