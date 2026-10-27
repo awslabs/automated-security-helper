@@ -897,6 +897,9 @@ def test_the_sandbox_refusal_names_the_output_dir_on_one_line(
         config=str(tmp_path / "none.yaml"),
         config_overrides=[],
         config_base_gate=None,
+        # A ScanOptions field the check reads (a workspace run's output tree is
+        # checked with the rest); a local scan has none.
+        workspace_plan=None,
     )
 
     with pytest.raises(module.ScanRefusedExit):

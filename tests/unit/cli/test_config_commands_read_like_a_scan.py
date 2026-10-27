@@ -13,7 +13,8 @@ and reads at most ``ASH_CONFIG_MAX_FILE_BYTES``.
 
 Exit 3 here means the file could not be loaded: missing, a directory, a FIFO,
 unreadable, not UTF-8, not valid YAML or JSON, or using a YAML alias. A file that
-loads and has validation problems keeps exit 1.
+loads but a scan refuses exits 3 as well (validate says a scan refuses it); exit 1
+is validate's own failure.
 """
 
 from __future__ import annotations
@@ -167,8 +168,9 @@ class TestAConfigThatCannotBeLoadedExits3:
         assert "pyproject.toml" in result.output
 
     def test_the_validator_and_linter_name_the_file_in_a_yaml_error(self, tmp_path):
-        """As the parser did when it read the open file: the path and the line,
-        not "<unicode string>" and a copy of the line."""
+        """The shared refusal (config_sources.unparsed_config_reason): the path
+        and where the parser stopped, never "<unicode string>" or a copy of the
+        line, which the parser's own message quotes."""
         from automated_security_helper.config.config_linter import ConfigLinter
         from automated_security_helper.config.config_validator import ConfigValidator
 
@@ -179,16 +181,20 @@ class TestAConfigThatCannotBeLoadedExits3:
         issues = " ".join(str(i) for i in ConfigLinter.lint(config_path=path).issues)
 
         for text in (" ".join(errors), issues):
-            assert f'in "{path}", line 1' in text, text
+            assert f"{path.as_posix()} could not be parsed (" in text, text
             assert "<unicode string>" not in text
+            assert "[unclosed" not in text, text
 
-    def test_control_a_loadable_file_with_problems_is_still_exit_1(self, tmp_path):
+    def test_control_a_loadable_file_a_scan_refuses_is_exit_3(self, tmp_path):
+        """The file loads; validate still exits 3, the code a scan refuses it
+        with, and does not say it failed to parse."""
         path = tmp_path / ".ash.yaml"
-        path.write_text("project_name: x\nbuild: {}\n", encoding="utf-8")
+        path.write_text("project_name: x\nfail_on_findings: maybe\n", encoding="utf-8")
 
         result = _invoke("validate", "--config", str(path))
 
-        assert result.exit_code == 1, result.output
+        assert result.exit_code == 3, result.output
+        assert "does not parse" not in result.output, result.output
 
     def test_control_a_valid_file_passes(self, tmp_path):
         path = tmp_path / ".ash.yaml"

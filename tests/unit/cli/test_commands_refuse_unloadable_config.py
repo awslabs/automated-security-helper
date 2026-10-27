@@ -24,6 +24,7 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli import dependencies
 from automated_security_helper.cli.main import app
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from tests.utils.install_containment import InstallSandbox, sandbox_env
 
 BAD_YAML = "project_name: demo\nscanners: [bandit\n"
@@ -116,7 +117,10 @@ def test_a_named_config_that_does_not_parse_exits_three(tmp_path, command):
     result = CliRunner().invoke(app, command(config))
 
     assert result.exit_code == 3, result.output
-    assert "Invalidconfiguration:couldnotparse" in _flat(result.output)
+    # The shared refusal (config_sources.unparsed_config_reason): "<path> could
+    # not be parsed (<type> at ...)", under each command's label.
+    assert "Invalidconfiguration:" in _flat(result.output)
+    assert "couldnotbeparsed" in _flat(result.output)
     assert "bad.yaml" in _flat(result.output)
 
 
@@ -167,7 +171,9 @@ def test_config_get_on_a_named_file_that_does_not_exist_exits_three(tmp_path):
     result = CliRunner().invoke(app, ["config", "get", str(tmp_path / "missing.yaml")])
 
     assert result.exit_code == 3, result.output
-    assert "Configurationfilenotfound" in _flat(result.output)
+    # config get's own words (cli/config.py _refuse_missing_config), the ones
+    # test_config_path_naming_no_readable_file_is_an_invalid_config pins.
+    assert "Configfilenotfound" in _flat(result.output)
     assert "missing.yaml" in _flat(result.output)
 
 
@@ -193,7 +199,7 @@ class TestConfigGetConfigOption:
         )
 
         assert result.exit_code == 3, result.output
-        assert "Configurationfilenotfound" in _flat(result.output)
+        assert "Configfilenotfound" in _flat(result.output)
         assert "missing.yaml" in _flat(result.output)
 
     def test_a_named_file_that_loads_is_printed(self, tmp_path):
@@ -242,6 +248,8 @@ class TestConfigGetConfigOption:
             app, ["config", "get", str(first), "--config", str(second)]
         )
 
-        assert result.exit_code == 2, result.output
+        # A usage error exits ASH's code for one (cli/main.py AshTyperGroup),
+        # not click's 2, which ASH gives "actionable findings".
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
         assert "first.yaml" in _flat(result.output)
         assert "second.yaml" in _flat(result.output)
