@@ -74,7 +74,7 @@ def _shipped_lines() -> Iterator[Tuple[str, int, str]]:
                 continue
             text = path.read_text(encoding="utf-8")
             for number, line in enumerate(text.splitlines(), start=1):
-                yield str(path.relative_to(REPO_ROOT)), number, line
+                yield path.relative_to(REPO_ROOT).as_posix(), number, line
 
 
 def test_the_scan_reads_the_tree():
