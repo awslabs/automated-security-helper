@@ -188,6 +188,7 @@ def test_container_scan_of_the_fixture(
     } == snapshot
 
 
+@pytest.mark.usefixtures("runner_store_in_environ")
 def test_container_exit_status_for_an_invalid_config(
     run_cli, snapshot, fixture_repo, project_build_files_in_cwd
 ):
