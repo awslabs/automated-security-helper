@@ -426,6 +426,15 @@ _REVIEWED_LOCAL_PROCESSES = {
     "automated_security_helper.utils.sandbox.backends": (
         "probes for the local sandbox programs, reached through subprocess_utils"
     ),
+    # Reached from the same reporters because utils.content_db_staleness imports
+    # EMPTY_TOOL_CONFIG from it (the empty config file its status commands pass).
+    # The reporters call none of its functions. Its own spawns, through
+    # spawn_run, are grype db update and trivy's database downloads, run by the
+    # scanners before an online scan; they send no scan data.
+    "automated_security_helper.utils.content_db_refresh": (
+        "spawn_run for grype and trivy database updates, a local tool; "
+        "reporters import only EMPTY_TOOL_CONFIG"
+    ),
 }
 
 #: Modules a reporter or event handler reaches that import a module chosen at run
