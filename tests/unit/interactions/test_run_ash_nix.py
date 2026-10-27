@@ -367,7 +367,10 @@ class TestRunAshNix:
             lambda _: "/usr/bin/nix",
         )
 
-        run_ash_nix(argv=["scan"], outer_run_id="0123456789abcdef0123456789abcdef")
+        run_ash_nix(
+            argv=["scan"],
+            outer_run_id="0123456789abcdef0123456789abcdef",  # pragma: allowlist secret
+        )
 
         assert entered_shell.env["ASH_OUTER_RUN_ID"] == (
             "0123456789abcdef0123456789abcdef"

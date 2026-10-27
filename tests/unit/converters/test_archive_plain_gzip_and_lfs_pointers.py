@@ -97,6 +97,7 @@ def zip_that_also_reads_as_a_pointer() -> bytes:
             info.external_attr = 0o444 << 16
             info.create_system = 0
             archive.comment = b"\n"
+            # pragma: allowlist nextline secret
             archive.writestr(info, f"password = 'hunter{n}'")
         data = prefix + buffer.getvalue()
         inner = data[len(prefix) : -1]
@@ -166,7 +167,7 @@ class TestPlainGzip:
     def test_a_plain_gzip_is_decompressed_and_handed_on(
         self, name, inner, test_plugin_context, monkeypatch
     ):
-        content = b'{"api_key": "placeholder"}\n'
+        content = b'{"api_key": "placeholder"}\n'  # pragma: allowlist secret
         converter, results = convert(
             test_plugin_context, monkeypatch, {name: gzip.compress(content, mtime=0)}
         )

@@ -360,7 +360,7 @@ def _child_env(tmp_path: Path) -> dict:
             # Obvious fakes, files with nothing in them, no instance metadata and
             # a refusing endpoint: the server's credentials are never real here.
             "AWS_ACCESS_KEY_ID": "fake-access-key-id",
-            "AWS_SECRET_ACCESS_KEY": "fake-secret-access-key",
+            "AWS_SECRET_ACCESS_KEY": "fake-secret-access-key",  # pragma: allowlist secret
             "AWS_CONFIG_FILE": str(empty_aws_config),
             "AWS_SHARED_CREDENTIALS_FILE": str(empty_aws_credentials),
             "AWS_EC2_METADATA_DISABLED": "true",

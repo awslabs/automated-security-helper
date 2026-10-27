@@ -48,7 +48,7 @@ import automated_security_helper
 
 pytestmark = pytest.mark.slow
 
-COMMIT = "0123456789abcdef0123456789abcdef01234567"
+COMMIT = "0123456789abcdef0123456789abcdef01234567"  # pragma: allowlist secret
 GIT_RECORD = {
     "url": "https://github.com/awslabs/automated-security-helper.git",
     "vcs_info": {"vcs": "git", "commit_id": COMMIT, "requested_revision": COMMIT},

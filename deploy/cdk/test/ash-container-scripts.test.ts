@@ -754,7 +754,7 @@ describe('MCP entrypoint keeps the shared secret off the command line', () => {
   const path = require('path') as typeof import('path');
   const { spawnSync } = require('child_process') as typeof import('child_process');
 
-  const SECRET = 'probe-secret-value';
+  const SECRET = 'probe-secret-value'; // pragma: allowlist secret
 
   const FAKE_ASH = `#!/bin/sh
 if [ "$1" = "mcp" ] && [ "$2" = "--help" ]; then
@@ -799,7 +799,7 @@ printf '%s' '${SECRET}'
         ASH_MCP_TRUST_UPSTREAM_HOST_CHECK: 'true',
         ASH_MCP_AUTH_HEADER_NAME: 'X-Ash-Token',
         // Only checked for being set; the stand-in python3 answers for the read.
-        ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN: 'probe-secret-arn',
+        ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN: 'probe-secret-arn', // pragma: allowlist secret
       },
     });
 
