@@ -32,6 +32,7 @@ registry tools refuse on a stateless server.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess  # nosec B404 - runs this image's own `ash mcp --help`
 import sys
@@ -117,19 +118,31 @@ def _take_header_value() -> str:
     raise AssertionError("unreachable")  # pragma: no cover
 
 
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+
+
 def _ash_mcp_supports(flag: str) -> bool:
-    """Whether this image's ``ash mcp`` accepts ``flag``; AshVersion decides that."""
+    """Whether this image's ``ash mcp`` accepts ``flag``; AshVersion decides that.
+
+    The probe runs with colour off and a wide terminal, and ANSI codes are stripped
+    before the match. typer forces a terminal when GITHUB_ACTIONS, FORCE_COLOR or
+    PY_COLORS is set, and rich then styles an option name in pieces, so the plain
+    name is not in the raw output and every option read as unsupported. The
+    CodeCommit gate probes ``ash scan --help`` the same way, for the same reason.
+    """
+    probe_env = {**os.environ, "COLUMNS": "200", "NO_COLOR": "1"}
+    probe_env.pop("FORCE_COLOR", None)
     try:
         result = subprocess.run(  # nosec B603 B607 - fixed argv, the image's ash
             ["ash", "mcp", "--help"],
-            env={**os.environ, "COLUMNS": "200"},
+            env=probe_env,
             capture_output=True,
             text=True,
             timeout=120,
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
-    return flag in result.stdout + result.stderr
+    return flag in _ANSI_ESCAPE.sub("", result.stdout + result.stderr)
 
 
 def _hand_over(value: str) -> int:
