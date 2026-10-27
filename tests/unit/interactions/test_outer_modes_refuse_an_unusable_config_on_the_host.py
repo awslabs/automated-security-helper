@@ -212,11 +212,33 @@ def _promptly(make: Callable[[Path], None], path: Path, call: Callable[[], objec
     return call()
 
 
+# How the host words a config refusal, by which check refuses the file: the
+# loader's refusal of a file that does not parse or load ("Invalid
+# configuration:", run_ash_scan._printed_config_refusal); container mode's
+# hand-over check of --config (run_ash_container._unreadable_config); and the
+# check of the file ASH_CONFIG names (config/default_config.py
+# refuse_unless_ash_config_names_a_file).
+REFUSAL_WORDINGS = (
+    "Invalid configuration:",
+    "Config file not found:",
+    "Config file cannot be read:",
+    "ASH_CONFIG names ",
+    "Configuration validation failed for ",
+)
+
+
 def _assert_refused_on_the_host(stage: Stage, before: Dict[str, bytes], code, output):
     assert code == 3, output
     assert stage.runner_calls() == [], stage.runner_calls()
     assert stage.output_snapshot() == before
-    assert "Invalid configuration:" in output, output
+    assert any(wording in output for wording in REFUSAL_WORDINGS), output
+
+
+def _printed(capsys) -> str:
+    """What an API caller's refusal printed: the hand-over check writes to
+    stderr, the loader's refusal to stdout."""
+    captured = capsys.readouterr()
+    return captured.out + captured.err
 
 
 @pytest.mark.parametrize("mode", MODES)
@@ -259,7 +281,7 @@ def test_ash_config_when_an_api_caller_names_no_config(
 
     code = _promptly(make, stage.named, lambda: _api(stage, mode))
 
-    _assert_refused_on_the_host(stage, before, code, capsys.readouterr().out)
+    _assert_refused_on_the_host(stage, before, code, _printed(capsys))
 
 
 @pytest.mark.parametrize("entry", ["cli", "api"])
@@ -283,7 +305,7 @@ def test_ash_config_beside_a_valid_named_config(
         code, output = result.exit_code, result.output
     else:
         code = _promptly(make, stage.env, lambda: _api(stage, mode, stage.named))
-        output = capsys.readouterr().out
+        output = _printed(capsys)
 
     _assert_refused_on_the_host(stage, before, code, output)
     assert stage.env.name in " ".join(output.split()), output
