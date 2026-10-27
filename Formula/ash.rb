@@ -13,6 +13,15 @@ class Ash < Formula
   url "https://github.com/awslabs/automated-security-helper.git", tag: "v3.7.0"
   license "Apache-2.0"
 
+  # After the build, Homebrew rewrites every dylib ID in the keg to the library's
+  # absolute opt path, and fails the install ("Failed to fix install linkage") on a
+  # Mach-O whose header has no room for the longer name. The locked orjson wheel's
+  # extension module is one: a dylib with the ID @rpath/orjson.cpython-312-darwin.so
+  # and no header padding, because it is prebuilt rather than linked under
+  # Homebrew's -headerpad_max_install_names. Python loads extension modules by path,
+  # so the install name is never read; leave @rpath IDs as they are.
+  preserve_rpath
+
   depends_on "uv" => :build
   # cdk-nag runs on Node.js and npm-audit runs npm. Both are in ASH's default and
   # precommit scanner sets, so without Node.js those scans report them MISSING.
