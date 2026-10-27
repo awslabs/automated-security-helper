@@ -18,6 +18,12 @@ to the events that can upload.
 
 What is asserted
 ----------------
+Both steps are in the `report` job, which runs after the scan job on a runner of its
+own; the tests read that job's steps. The notice loads the one_line helper, which
+write_helper writes from the scan job's definer, the one in the file. That a job
+which loads the helper writes it itself is asserted in
+test_workflow_commands_print_no_unchecked_value.py.
+
 The upload step's condition is evaluated for each event the workflow can be called
 on, with the input on and off and with the scan passing and failing: it uploads on
 every pull_request event, from a fork as well as from the repository itself, and
@@ -54,9 +60,22 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "run-ash-security-scan.yml"
 
 
+def _jobs() -> dict[str, dict]:
+    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+
+
+def _report_steps() -> list[dict]:
+    """The steps of the job that holds the upload and the notice.
+
+    They are in the `report` job, not the scan job (`ash`): the scan job runs ASH and
+    its scanners and no longer holds a token that can write checks or comments, so the
+    reporting job, which runs after it on a runner of its own, does the reporting.
+    """
+    return _jobs()["report"]["steps"]
+
+
 def _steps() -> dict[str, dict]:
-    steps = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]["ash"]["steps"]
-    return {step["name"]: step for step in steps if "name" in step}
+    return {step["name"]: step for step in _report_steps() if "name" in step}
 
 
 def test_the_evaluator_reads_known_expressions():
@@ -125,10 +144,7 @@ def _notice_for(
 ) -> str:
     """The step's output, after the job's definer has written the one_line helper."""
     step = _steps()["Note that the SARIF report was not uploaded"]
-    workflow_steps = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"][
-        "ash"
-    ]["steps"]
-    write_helper(workflow_steps, runner_temp)
+    write_helper(_jobs()["ash"]["steps"], runner_temp)
     values = {
         "${{ github.event_name }}": event_name,
         "${{ inputs.artifact-name }}": artifact_name,
