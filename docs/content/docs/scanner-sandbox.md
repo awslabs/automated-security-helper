@@ -429,6 +429,13 @@ warning that names the files that can't grant and the settings it dropped. A `ne
 it doesn't name gets none, so a repository can keep its own scan offline with
 `network_scanners: []`.
 
+For a config in `/home/me/src/app/.ash/.ash.yaml` that grants grype a network and a
+read path, the warning reads:
+
+```text
+WARNING  Ignoring sandbox.network_scanners, sandbox.extra_read_paths from /home/me/src/app/.ash/.ash.yaml: that config is inside a git checkout or the scanned tree, or was delivered by an MCP client. A network_scanners list there still removes network from scanners it does not name, and a sandbox mode there still applies when nothing else turns the sandbox on. To keep a setting, move the file outside every git checkout, or pass the setting with --config-overrides. A file inside the scanned directory has to move out of it as well.
+```
+
 This applies to a trusted config kept in a checkout of its own as well, such as an
 ops or dotfiles repository: its grants are dropped with the same warning. Pass them
 with `--config-overrides` instead, for example
@@ -608,6 +615,33 @@ Out of scope:
   network namespace forces all traffic through it; that is future work.
 - Results integrity. A scanner can still write false results to its own results file.
 - Kernel defects. All backends share the host kernel.
+
+## When a scanner cannot be sandboxed {#missing}
+
+ASH records a scanner it cannot sandbox as `MISSING`, and under the default
+`fail_on_incomplete_scanners` the scan exits 1. The reason is in the scan output, in
+`ash.log`, and in the scanner's `missing_reason` in `ash_aggregated_results.json`:
+
+```text
+ERROR    bandit not run: scanner sandbox unavailable: firejail is not installed
+```
+
+| Message | Fix |
+|---|---|
+| `bwrap is not installed (install the 'bubblewrap' package)` | Install bubblewrap. |
+| `bwrap cannot create a sandbox here (...)` | Allow unprivileged user namespaces, or use `landlock`. |
+| `bwrap cannot apply the Unix-socket filter in its sandbox (...)` | Use the bwrap from your distribution, on x86_64 or aarch64, on a kernel that allows seccomp filters. |
+| `Landlock is not available (...)` | Add `landlock` to the `lsm=` kernel parameter. |
+| `Landlock ABI <n> is below 3 (Linux 6.2), ...` | Use bwrap, a kernel with Landlock ABI 3 or later, or container mode. |
+| `firejail is not installed` | Install firejail, or use another backend. |
+| `firejail ran a test command without a sandbox (...)` | Use `bwrap` or `landlock`; firejail does not sandbox inside this container. |
+| `sandbox-exec is not present (it has been removed from this macOS)` | No macOS backend remains; scan in a container. |
+| `--sandbox auto found no working sandbox (...)` | Lists why each backend failed; fix one of them. |
+| `no scanner sandbox is available on Windows; ...` | Use WSL2 or container mode. |
+| `<name>: the config names this scanner '<name>', but its own name is '<other>'` | Configure the scanner under its own name; grants follow a scanner's own name. |
+| `<scanner> cannot be sandboxed as requested: ...` | Logged while ASH checks the scanner's tool; fix the reason that follows. |
+| `the results directory path <path> is a symlink, ...` | Remove the link under the output directory, or pass another `--output-dir`. |
+| `a scanner tried to start a shell command, which the sandbox does not wrap` | The scanner's plugin starts its tool through a shell. Leave that scanner out of sandboxed scans, or ask the plugin's author to start the tool directly. |
 
 ## Scan a repository you do not trust {#untrusted}
 
@@ -802,6 +836,9 @@ than escaping.
 
 ### macOS: sandbox-exec
 
+`sandbox-exec` ships with macOS at `/usr/bin/sandbox-exec`; there is nothing to install.
+`--sandbox auto` uses it.
+
 `sandbox-exec` applies a Seatbelt (SBPL) profile. ASH generates one per scanner:
 deny by default, read everywhere except the home directory and the shared temporary
 directories, read the policy's tool paths inside home, write only to the results
@@ -897,9 +934,14 @@ scan.
 
 ### Windows
 
-There is no Windows backend. `--sandbox auto` on Windows finds nothing and the
-scanners are recorded `MISSING`. Run ASH under WSL2 and use `bwrap` there, or use
-container mode. A native backend would use an AppContainer or a restricted token plus
+There is no sandbox backend on Windows. With `--sandbox auto`, every scanner is
+reported `MISSING` with:
+
+```text
+no scanner sandbox is available on Windows; run ASH under WSL2 and use --sandbox bwrap there, or use --mode container
+```
+
+Run ASH under WSL2 and use `bwrap` there, or use container mode. A native backend would use an AppContainer or a restricted token plus
 a job object; that is a larger piece of work and is not in this release.
 
 ### Why not gVisor or nsjail by default
