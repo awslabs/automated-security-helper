@@ -108,13 +108,13 @@ def test_ash_version_and_repo_default_to_the_workflows_own_commit():
 
 
 def test_no_step_reads_the_raw_inputs():
-    """Every step installs the ASH the resolution step chose, or none at all."""
-    document = _document()
-    workflow_variables = set(document.get("env") or {})
-    assert "ASH_UVX_SOURCE" not in workflow_variables, (
-        "a workflow-level ASH_UVX_SOURCE is built from the raw inputs, before the "
-        "resolution step runs"
-    )
+    """Every step installs the ASH the resolution step chose, or none at all.
+
+    The workflow-level ASH_UVX_SOURCE and ASH_ASSETS_URL still name the inputs as
+    given (workflow env cannot read a step's output); the pin step replaces both
+    through GITHUB_ENV before any step uses them, and nothing before the resolve
+    step reads them (test_scan_workflow_pins_the_ash_ref.py).
+    """
     readers = [
         step.get("name")
         for step in _steps()
@@ -465,20 +465,27 @@ class TestTheResolutionStep:
         assert urllib.parse.unquote(in_url) == ref
 
 
-def test_the_cfn_nag_assets_url_takes_the_encoded_ref():
-    """The ref in a URL has to be the percent-encoded one, as in ASH_UVX_SOURCE.
+def test_the_cfn_nag_assets_url_takes_the_pinned_commit():
+    """The cfn-nag Gemfile URL names the commit the pin step resolved.
 
+    The pin step (id ash-pin) writes ASH_ASSETS_URL with that commit to GITHUB_ENV,
+    so the Install cfn-nag step must not set it in its own env, which would win over
+    GITHUB_ENV and could name the ref again. A commit id needs no percent-encoding.
     Reads YAML only, so it runs on every platform rather than with the shell tests.
     """
     (step,) = [step for step in _steps() if step.get("name") == "Install cfn-nag"]
-    assert step["env"]["ASH_ASSETS_URL"] == (
-        "https://raw.githubusercontent.com/${{ steps.ash-source.outputs.repo }}/"
-        "${{ steps.ash-source.outputs.version-url }}/automated_security_helper/assets"
-    )
+    assert "ASH_ASSETS_URL" not in (step.get("env") or {}), step.get("env")
+    (pin,) = [step for step in _steps() if step.get("id") == "ash-pin"]
+    assert (
+        "ASH_ASSETS_URL=https://raw.githubusercontent.com/${ASH_REPO}/${COMMIT}"
+        "/automated_security_helper/assets"
+    ) in pin["run"], pin["run"]
+    # Only the pin reads the raw ref, for `git ls-remote`; nothing puts it in a URL.
     readers = [
         step.get("name")
         for step in _steps()
-        if "steps.ash-source.outputs.version }}" in str(step)
+        if step.get("id") != "ash-pin"
+        and "steps.ash-source.outputs.version }}" in str(step)
     ]
     assert not readers, f"these steps put the raw ref in a URL: {readers}"
 
