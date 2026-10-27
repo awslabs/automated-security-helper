@@ -67,7 +67,7 @@ Generated with Amazon Bedrock. Verify suggestions against the source findings.
 | Index | Rule ID | Severity | File | Line range | Description |
 |-------|---------|----------|------|------------|-------------|
 | 1 | B602 | HIGH | app/app.py | 9 | subprocess call with shell=True identified, sec... |
-| 2 | B105 | LOW | app/app.py | 5 | Possible hardcoded password: &\#x27;hu***************... |
+| 2 | B105 | LOW | app/app.py | 5 | Possible hardcoded password: &\#x27;hu\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*... |
 | 3 | CKV\_AWS\_20 | HIGH | infra/main.tf | 6-9 | S3 Bucket has an ACL defined which allows publi... |
 | 4 | CKV\_AWS\_18 | MEDIUM | infra/main.tf | 2-4 | Ensure the S3 bucket has access logging enabled |
 | 5 | CKV\_DOCKER\_8 | MEDIUM | Dockerfile | 5 | Ensure the last USER is not root |
@@ -147,7 +147,7 @@ subprocess call with shell=True identified, security issue.
 
 Location: app/app.py (lines 5-5)
 
-Possible hardcoded password: &\#x27;hu**********************t&\#x27;
+Possible hardcoded password: &\#x27;hu\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*t&\#x27;
 
 </details>
 
