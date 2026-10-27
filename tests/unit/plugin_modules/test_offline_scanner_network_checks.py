@@ -397,6 +397,7 @@ class TestSemgrepOffline:
         assert spawn.flag_values("--metrics") == ["off"], spawn.command
 
 
+@pytest.mark.usefixtures("no_tool_probes")
 class TestSemgrepOnline:
     """The version check is off online too: it reads a cache file under the home.
 
