@@ -1889,7 +1889,7 @@
                 "install_timeout": 300,
                 "offline": false,
                 "scan_timeout": 1800,
-                "severity_threshold": "ALL",
+                "severity_threshold": null,
                 "tool_version": ">=1.7.0,<2.0.0"
               }
             },
@@ -2673,7 +2673,7 @@
             "install_timeout": 300,
             "offline": false,
             "scan_timeout": 1800,
-            "severity_threshold": "ALL",
+            "severity_threshold": null,
             "tool_version": ">=1.7.0,<2.0.0"
           },
           "description": "Configure Bandit scanner"
@@ -2703,6 +2703,10 @@
         },
         "config_file": {
           "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
             {
               "type": "string"
             },
@@ -2756,11 +2760,24 @@
           "title": "Scan Timeout"
         },
         "severity_threshold": {
-          "default": "ALL",
-          "description": "Severity threshold for bandit scan (ALL, LOW, MEDIUM, HIGH)",
-          "pattern": "^(ALL|LOW|MEDIUM|HIGH)$",
-          "title": "Severity Threshold",
-          "type": "string"
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
         },
         "tool_version": {
           "anyOf": [
@@ -17433,7 +17450,7 @@
             "type": "string"
           },
           "default": {},
-          "description": "Map of JSON-Pointer pattern to regex. add/replace ops are rejected when any string leaf reachable from the op's value matches the regex; lists and dicts are walked recursively so a forbidden token cannot be hidden inside a nested structure. The `test` op is exempt because it is read-only. Each key starts with '/'.",
+          "description": "Map of JSON-Pointer pattern \u2192 regex. add/replace ops are rejected when any string leaf reachable from the op's value matches the regex; lists and dicts are walked recursively so a forbidden token cannot be hidden inside a nested structure. The `test` op is exempt because it is read-only. Each key starts with '/'.",
           "title": "Denied Value Patterns",
           "type": "object"
         },
@@ -17680,7 +17697,7 @@
               "install_timeout": 300,
               "offline": false,
               "scan_timeout": 1800,
-              "severity_threshold": "ALL",
+              "severity_threshold": null,
               "tool_version": ">=1.7.0,<2.0.0"
             }
           },
