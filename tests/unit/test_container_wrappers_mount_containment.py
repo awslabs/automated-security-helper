@@ -275,7 +275,10 @@ def _assert_only_the_wrappers_own_options(options: List[str]) -> None:
             {"MOUNT_OUTPUT_DIR": "--mount type=bind,source=/,destination=/host"},
             id="MOUNT_OUTPUT_DIR",
         ),
-        # The image name is one argument, as ash --mode container passes it.
+        # An image name is one argument to the runner, so one with a space would
+        # split into runner options of its own, and one starting with '-' reads as
+        # an option however it is quoted: ./ash refuses it, as ash --mode container
+        # and Invoke-ASH do, before anything is built or run.
         pytest.param(
             {"ASH_IMAGE_NAME": "--privileged registry.example/ash:1"},
             id="image-name-with-a-space",
@@ -298,6 +301,12 @@ def test_the_bash_wrapper_passes_the_runner_only_its_own_options(
         extra_env,
     )
 
+    if image.startswith("-") or " " in image:
+        # Refused with 3 and no runner call: no word of the name reaches the runner.
+        assert rc == 3, output_text
+        assert calls == [], f"the runner was called: {calls}"
+        assert f"The image name '{image}' starts with '-'" in output_text, output_text
+        return
     assert rc == 0, output_text
     _assert_only_the_wrappers_own_options(_runner_options(_only_run(calls), image))
 
