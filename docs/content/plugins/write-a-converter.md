@@ -47,7 +47,8 @@ class MarkdownPythonConverter(ConverterPluginBase[MarkdownPythonConfig]):
 
     def _inputs(self) -> List[Path]:
         ignored = ignore_paths_that_skip_scanning(
-            self.context.config.global_settings.ignore_paths
+            self.context.config.global_settings.ignore_paths,
+            ignore_suppressions=self.context.ignore_suppressions,
         )
         inputs = []
         for name in scan_set(
