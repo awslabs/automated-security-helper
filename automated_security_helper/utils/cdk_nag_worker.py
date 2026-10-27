@@ -276,9 +276,15 @@ def main(argv: List[str]) -> int:
     try:
         out = open(response_path, "x", encoding="utf-8")
     except FileExistsError:
+        from automated_security_helper.utils.terminal_text import shown_on_one_line
+
+        # The path is the parent's argument, shown as text, not obeyed.
         sys.stderr.write(
-            f"cdk-nag worker: the response file {response_path} already exists, and "
-            "the worker writes only a file it creates\n"
+            shown_on_one_line(
+                f"cdk-nag worker: the response file {response_path} already exists, "
+                "and the worker writes only a file it creates"
+            )
+            + "\n"
         )
         return 2
     with out:
