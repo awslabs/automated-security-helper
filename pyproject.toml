@@ -278,21 +278,33 @@ version = "3.7.0"
 # extra, which no tag up to v3.7.1 defines, so they name `main` until a release
 # has it.
 #
-# The deploy/ entries pin the ASH ref each deployment target builds or installs
-# when the adopter names none. Nothing else moves them at a release, so without
-# this list a release would ship these targets defaulted to an older ASH, one
-# that may lack options the targets pass. Listed here, a
-# bump moves every one to the release being cut, and
+# The deploy/ and examples/ entries pin the ASH ref each deployment target
+# builds or installs when the adopter names none. Nothing else moves them at a
+# release, so without this list a release would ship these targets defaulted to
+# an older ASH, one that may lack options the targets pass. Listed here, a bump
+# moves every one to the release being cut, and
 # tests/unit/deploy/test_deploy_ash_cli_contract.py checks both halves: that each
 # pin names the packaged version and is rewritten by this list, and that every
 # option the targets pass exists in this tree's CLI, which at the release commit
-# is the release they default to. The synthesized CDK templates and the
-# generated cdk-constructs buildspecs are listed with their sources because a bump
-# commit is checked by the IaC drift gates: rewriting only the TypeScript would
-# leave the committed output one release behind a fresh synth. Each file is named
-# rather than globbed, because tests/unit/test_repo_walkers_skip_scratch.py keeps
-# this list free of wildcards; the contract test discovers the pins itself, so a
-# new template or example that is missing from this list fails it.
+# is the release they default to. The pins, by file: under deploy/cdk,
+# lib/ash-config.ts (DEFAULT_ASH_VERSION), the five synthesized templates
+# AshAgentCore.template.json, AshCodeCommitGate.template.json,
+# AshDistributedPipeline.template.json, AshFargate.template.json and
+# AshImagePipeline.template.json (each one's AshVersion default), and the
+# AshVersion row of README.md; under deploy/cdk-constructs,
+# src/private/commands.ts (DEFAULT_ASH_REF), the generated buildspec.yml,
+# buildspec-merge.yml and buildspec-shard.yml, README.md and
+# test/ash-scan-step.test.ts; under deploy/terraform, the ash_version line of
+# each module's examples/basic/main.tf (agentcore, ash-image-pipeline,
+# codecommit-gate, codepipeline-executor and fargate); and under
+# examples/AWSCodeBuild, the ASH_VERSION of buildspec.yml and README.md. The
+# synthesized CDK templates and the generated cdk-constructs buildspecs are
+# listed with their sources because a bump commit is checked by the IaC drift
+# gates: rewriting only the TypeScript would leave the committed output one
+# release behind a fresh synth. Each file is named rather than globbed, because
+# tests/unit/test_repo_walkers_skip_scratch.py keeps this list free of wildcards;
+# the contract test discovers the pins itself, so a new template or example that
+# is missing from this list fails it.
 #
 # On pattern choice: commitizen matches each regex per line, then replaces the
 # bare current version within the matching lines. `ash_version` is used rather
