@@ -43,7 +43,8 @@ ash-scan:
   artifacts:
     when: always
     paths:
-      - .ash/ash_output/
+      - .ash/ash_output/reports/
+      - .ash/ash_output/ash_aggregated_results.json
       - ash-exit-code.txt
     reports:
       sast: .ash/ash_output/reports/ash.gl-sast-report.json
@@ -143,7 +144,8 @@ ash-scan:
   artifacts:
     when: always
     paths:
-      - .ash/ash_output/
+      - .ash/ash_output/reports/
+      - .ash/ash_output/ash_aggregated_results.json
       - ash-exit-code.txt
     reports:
       sast: .ash/ash_output/reports/ash.gl-sast-report.json
