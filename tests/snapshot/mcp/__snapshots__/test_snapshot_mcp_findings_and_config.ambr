@@ -22,6 +22,13 @@
           'dependencies_satisfied': True,
           'enabled': True,
           'installs_on_first_scan': False,
+          'name': 'actionlint',
+          'version': None,
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
           'name': 'bandit',
           'version': '<BANDIT_VERSION>',
         }),
@@ -31,6 +38,20 @@
           'installs_on_first_scan': False,
           'name': 'cdk_nag',
           'version': '<CDK_NAG_VERSION>',
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'cfn_guard',
+          'version': None,
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'cfn_lint',
+          'version': '<CFN_LINT_VERSION>',
         }),
         dict({
           'dependencies_satisfied': True,
@@ -52,6 +73,13 @@
           'installs_on_first_scan': False,
           'name': 'detect_secrets',
           'version': '<DETECT_SECRETS_VERSION>',
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'gitleaks',
+          'version': None,
         }),
         dict({
           'dependencies_satisfied': False,
@@ -87,6 +115,20 @@
           'installs_on_first_scan': False,
           'name': 'syft',
           'version': None,
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'trivy',
+          'version': None,
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'zizmor',
+          'version': '<ZIZMOR_VERSION>',
         }),
       ]),
       'success': True,
@@ -909,6 +951,7 @@
           'name': 'actionlint',
           'options': dict({
             'config_file': None,
+            'offline': False,
             'pyflakes': None,
             'scan_timeout': 1800,
             'severity_threshold': None,
@@ -954,6 +997,7 @@
           'enabled': True,
           'name': 'cfn-guard',
           'options': dict({
+            'offline': False,
             'rule_sets': list([
               'wa-Security-Pillar',
             ]),
@@ -974,6 +1018,7 @@
             'include_checks': list([
             ]),
             'install_timeout': 300,
+            'offline': False,
             'regions': list([
             ]),
             'scan_timeout': 1800,
@@ -1043,6 +1088,7 @@
             'config_file': None,
             'honor_inline_ignores': False,
             'max_target_megabytes': None,
+            'offline': False,
             'scan_timeout': 1800,
             'severity_threshold': None,
           }),
@@ -1151,6 +1197,7 @@
             'config_file': None,
             'honor_inline_ignores': False,
             'install_timeout': 300,
+            'offline': False,
             'online_audits': False,
             'persona': 'regular',
             'scan_timeout': 1800,
@@ -1493,6 +1540,7 @@
           'name': 'actionlint',
           'options': dict({
             'config_file': None,
+            'offline': False,
             'pyflakes': None,
             'scan_timeout': 1800,
             'severity_threshold': None,
@@ -1538,6 +1586,7 @@
           'enabled': True,
           'name': 'cfn-guard',
           'options': dict({
+            'offline': False,
             'rule_sets': list([
               'wa-Security-Pillar',
             ]),
@@ -1558,6 +1607,7 @@
             'include_checks': list([
             ]),
             'install_timeout': 300,
+            'offline': False,
             'regions': list([
             ]),
             'scan_timeout': 1800,
@@ -1627,6 +1677,7 @@
             'config_file': None,
             'honor_inline_ignores': False,
             'max_target_megabytes': None,
+            'offline': False,
             'scan_timeout': 1800,
             'severity_threshold': None,
           }),
@@ -1735,6 +1786,7 @@
             'config_file': None,
             'honor_inline_ignores': False,
             'install_timeout': 300,
+            'offline': False,
             'online_audits': False,
             'persona': 'regular',
             'scan_timeout': 1800,
@@ -1757,6 +1809,7 @@
       'actionlint': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'actionlint',
         'offline_strategy': 'bundled',
         'version': None,
@@ -1780,6 +1833,7 @@
       'cfn_guard': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'cfn_guard',
         'offline_strategy': 'bundled',
         'version': None,
@@ -1787,6 +1841,7 @@
       'cfn_lint': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'cfn_lint',
         'offline_strategy': 'bundled',
         'version': '<CFN_LINT_VERSION>',
@@ -1826,6 +1881,7 @@
       'gitleaks': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'gitleaks',
         'offline_strategy': 'bundled',
         'version': None,
@@ -1881,6 +1937,7 @@
       'trivy': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'trivy',
         'offline_strategy': 'cache_flags',
         'version': None,
@@ -1896,6 +1953,7 @@
       'zizmor': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'zizmor',
         'offline_strategy': 'bundled',
         'version': '<ZIZMOR_VERSION>',
@@ -1982,6 +2040,8 @@
         }),
       ]),
       'valid': False,
+      'warnings': list([
+      ]),
     }),
     'tool': 'validate_config',
   })
@@ -2078,8 +2138,8 @@
     'result': dict({
       'errors': list([
         dict({
-          'field': 'fail_on_findings',
-          'message': "Invalid value at 'fail_on_findings': Input should be a valid boolean",
+          'field': 'global_settings.severity_threshold',
+          'message': "Invalid value at 'global_settings.severity_threshold': Input should be 'ALL', 'LOW', 'MEDIUM', 'HIGH' or 'CRITICAL'",
           'type': 'invalid_field',
         }),
       ]),

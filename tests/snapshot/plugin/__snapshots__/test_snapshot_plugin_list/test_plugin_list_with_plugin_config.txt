@@ -14,6 +14,7 @@ ASH Scanners
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "scan_timeout":   │
 │                │         │                      │                        │ 1800,                 │
+│                │         │                      │                        │     "offline": false, │
 │                │         │                      │                        │     "config_file":    │
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "shellcheck":     │
@@ -30,6 +31,7 @@ ASH Scanners
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "scan_timeout":   │
 │                │         │                      │                        │ 1800,                 │
+│                │         │                      │                        │     "offline": false, │
 │                │         │                      │                        │     "config_file":    │
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "confidence_leve… │
@@ -55,6 +57,7 @@ ASH Scanners
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "scan_timeout":   │
 │                │         │                      │                        │ 1800,                 │
+│                │         │                      │                        │     "offline": false, │
 │                │         │                      │                        │     "nag_packs": {    │
 │                │         │                      │                        │       "AwsSolutionsC… │
 │                │         │                      │                        │ true,                 │
@@ -81,6 +84,7 @@ ASH Scanners
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "scan_timeout":   │
 │                │         │                      │                        │ 1800,                 │
+│                │         │                      │                        │     "offline": false, │
 │                │         │                      │                        │     "rule_sets": [    │
 │                │         │                      │                        │       "wa-Security-P… │
 │                │         │                      │                        │     ],                │
@@ -96,6 +100,7 @@ ASH Scanners
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "scan_timeout":   │
 │                │         │                      │                        │ 1800,                 │
+│                │         │                      │                        │     "offline": false, │
 │                │         │                      │                        │     "config_file":    │
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "regions": [],    │
@@ -119,7 +124,8 @@ ASH Scanners
 │                │         │                      │                        │     "severity_thresh… │
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "scan_timeout":   │
-│                │         │                      │                        │ 1800                  │
+│                │         │                      │                        │ 1800,                 │
+│                │         │                      │                        │     "offline": false  │
 │                │         │                      │                        │   }                   │
 │                │         │                      │                        │ }                     │
 ├────────────────┼─────────┼──────────────────────┼────────────────────────┼───────────────────────┤
@@ -131,6 +137,7 @@ ASH Scanners
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "scan_timeout":   │
 │                │         │                      │                        │ 1800,                 │
+│                │         │                      │                        │     "offline": false, │
 │                │         │                      │                        │     "config_file":    │
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "skip_path": [],  │
@@ -138,7 +145,6 @@ ASH Scanners
 │                │         │                      │                        │ [                     │
 │                │         │                      │                        │       "cyclonedx_jso… │
 │                │         │                      │                        │     ],                │
-│                │         │                      │                        │     "offline": false, │
 │                │         │                      │                        │     "frameworks": [   │
 │                │         │                      │                        │       "all"           │
 │                │         │                      │                        │     ],                │
@@ -162,6 +168,7 @@ ASH Scanners
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "scan_timeout":   │
 │                │         │                      │                        │ 1800,                 │
+│                │         │                      │                        │     "offline": false, │
 │                │         │                      │                        │     "baseline_file":  │
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "scan_settings":  │
@@ -177,7 +184,9 @@ ASH Scanners
 │                │         │                      │                        │       "results": {}   │
 │                │         │                      │                        │     },                │
 │                │         │                      │                        │     "skip_generated_… │
-│                │         │                      │                        │ true                  │
+│                │         │                      │                        │ true,                 │
+│                │         │                      │                        │     "max_worker_outp… │
+│                │         │                      │                        │ 256                   │
 │                │         │                      │                        │   }                   │
 │                │         │                      │                        │ }                     │
 ├────────────────┼─────────┼──────────────────────┼────────────────────────┼───────────────────────┤
@@ -189,6 +198,7 @@ ASH Scanners
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "scan_timeout":   │
 │                │         │                      │                        │ 1800,                 │
+│                │         │                      │                        │     "offline": false, │
 │                │         │                      │                        │     "config_file":    │
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "baseline_path":  │
@@ -208,9 +218,9 @@ ASH Scanners
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "scan_timeout":   │
 │                │         │                      │                        │ 1800,                 │
+│                │         │                      │                        │     "offline": false, │
 │                │         │                      │                        │     "config_file":    │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "offline": false  │
+│                │         │                      │                        │ null                  │
 │                │         │                      │                        │   }                   │
 │                │         │                      │                        │ }                     │
 ├────────────────┼─────────┼──────────────────────┼────────────────────────┼───────────────────────┤
@@ -235,6 +245,7 @@ ASH Scanners
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "scan_timeout":   │
 │                │         │                      │                        │ 1800,                 │
+│                │         │                      │                        │     "offline": false, │
 │                │         │                      │                        │     "config": "p/ci", │
 │                │         │                      │                        │     "exclude": [      │
 │                │         │                      │                        │       "*-converted.p… │
@@ -245,7 +256,6 @@ ASH Scanners
 │                │         │                      │                        │     "severity": [],   │
 │                │         │                      │                        │     "metrics":        │
 │                │         │                      │                        │ "auto",               │
-│                │         │                      │                        │     "offline": false, │
 │                │         │                      │                        │     "patterns": [],   │
 │                │         │                      │                        │     "version":        │
 │                │         │                      │                        │ "v1.30.2",            │
@@ -261,6 +271,7 @@ ASH Scanners
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "scan_timeout":   │
 │                │         │                      │                        │ 1800,                 │
+│                │         │                      │                        │     "offline": false, │
 │                │         │                      │                        │     "config": "p/ci", │
 │                │         │                      │                        │     "exclude": [      │
 │                │         │                      │                        │       "*-converted.p… │
@@ -271,7 +282,6 @@ ASH Scanners
 │                │         │                      │                        │     "severity": [],   │
 │                │         │                      │                        │     "metrics":        │
 │                │         │                      │                        │ "auto",               │
-│                │         │                      │                        │     "offline": false, │
 │                │         │                      │                        │     "tool_version":   │
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "install_timeout… │
@@ -287,14 +297,14 @@ ASH Scanners
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "scan_timeout":   │
 │                │         │                      │                        │ 1800,                 │
+│                │         │                      │                        │     "offline": false, │
 │                │         │                      │                        │     "config_file":    │
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "exclude": [],    │
 │                │         │                      │                        │     "additional_outp… │
 │                │         │                      │                        │ [                     │
 │                │         │                      │                        │       "syft-table"    │
-│                │         │                      │                        │     ],                │
-│                │         │                      │                        │     "offline": false  │
+│                │         │                      │                        │     ]                 │
 │                │         │                      │                        │   }                   │
 │                │         │                      │                        │ }                     │
 ├────────────────┼─────────┼──────────────────────┼────────────────────────┼───────────────────────┤
@@ -306,6 +316,7 @@ ASH Scanners
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "scan_timeout":   │
 │                │         │                      │                        │ 1800,                 │
+│                │         │                      │                        │     "offline": false, │
 │                │         │                      │                        │     "scanners": [     │
 │                │         │                      │                        │       "vuln"          │
 │                │         │                      │                        │     ],                │
@@ -320,8 +331,7 @@ ASH Scanners
 │                │         │                      │                        │     "ignore_file":    │
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "secret_config_f… │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "offline": false  │
+│                │         │                      │                        │ null                  │
 │                │         │                      │                        │   }                   │
 │                │         │                      │                        │ }                     │
 ├────────────────┼─────────┼──────────────────────┼────────────────────────┼───────────────────────┤
@@ -333,6 +343,7 @@ ASH Scanners
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "scan_timeout":   │
 │                │         │                      │                        │ 1800,                 │
+│                │         │                      │                        │     "offline": false, │
 │                │         │                      │                        │     "config_file":    │
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "persona":        │

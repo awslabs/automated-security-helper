@@ -1348,6 +1348,10 @@
         "config_file": {
           "anyOf": [
             {
+              "format": "path",
+              "type": "string"
+            },
+            {
               "type": "string"
             },
             {
