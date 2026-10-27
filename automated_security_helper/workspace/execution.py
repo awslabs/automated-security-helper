@@ -373,6 +373,7 @@ from automated_security_helper.workspace.aggregation import (
     has_finding_at_min_severity,
     incomplete_converters_for_project,
     inputs_not_scanned_for_project,
+    rewrite_workspace_block,
     stale_content_databases_for_project,
 )
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
