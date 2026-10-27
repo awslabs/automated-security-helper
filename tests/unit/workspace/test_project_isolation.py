@@ -1457,8 +1457,15 @@ class TestPluginManagerSingletonState:
     #: ``_LOADS_TRIVY`` is source text for a child test file: run, that text
     #: imports builtin_plugin_registry, so a module borrowing the constant
     #: hands its caller the registry the same way a helper would.
+    #: ``_ProcessWideToolState`` (tests/conftest.py) snapshots and restores the
+    #: plugin manager's registrations around a test, so it reaches the
+    #: registry by design; its own isolation test is the other file naming it.
     _REGISTRY_HELPERS = {
         "_LOADS_TRIVY": ("tests/snapshot/test_snapshot_plugin_registry.py",),
+        "_ProcessWideToolState": (
+            "tests/conftest.py",
+            "tests/unit/test_conftest_tool_state_isolation.py",
+        ),
         "_handler_modules": ("tests/snapshot/test_snapshot_plugin_registry.py",),
         "_loaded_inside": ("tests/snapshot/test_snapshot_plugin_registry.py",),
         "a_scanner_registration": (
