@@ -44,6 +44,17 @@ PluginContext.model_rebuild()
 _PLAIN_RUNNER = "automated_security_helper.utils.subprocess_utils._run_plain"
 
 
+@pytest.fixture(autouse=True)
+def _unresolved_names_reach_the_mocked_spawn(monkeypatch):
+    """Hand names that resolve nowhere to the mocked subprocess.run on Windows too.
+
+    checkov is not installed here, and on Windows ASH refuses an unresolved name
+    before spawning it (subprocess_utils._refuse_unresolved_on_windows). These tests
+    are about what happens at the spawn, so that decision is set aside.
+    """
+    monkeypatch.setattr(subprocess_utils, "_refuse_unresolved_on_windows", False)
+
+
 def _timeout(cmd, timeout, **_kwargs):
     raise subprocess.TimeoutExpired(
         cmd=cmd, timeout=timeout, output=b"", stderr=b"checkov: still parsing\n"
