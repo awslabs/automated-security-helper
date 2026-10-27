@@ -46,10 +46,7 @@ from automated_security_helper.config.config_linter import (
     LintSeverity,
 )
 from automated_security_helper.config.resolve_config import resolve_config
-from automated_security_helper.core.exceptions import (
-    ASHConfigValidationError,
-    WorkspaceDefinitionError,
-)
+from automated_security_helper.core.exceptions import WorkspaceDefinitionError
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.models import asharp_model
 from automated_security_helper.models import core as models_core
@@ -368,7 +365,17 @@ class TestMalformedExpiration:
             AshSuppression(path="a.py", reason="r", expiration="2026/06/30")
 
     def test_config_file_with_a_malformed_date_is_refused(self, tmp_path):
-        """Exit 3 (invalid config), rather than a scan with the entry still applied."""
+        """The scanned repository's own config is refused whole, never applied in part.
+
+        A discovered in-tree config is advisory, so its invalidity does not veto
+        the operator's scan: resolve_config refuses the FILE, warns, and
+        resolves on the operator and default chain as if it were absent
+        (config/resolve_config.py, the ConfigFileRefused containment). What
+        this pins is that the entry is not applied: the resolution carries no
+        ignore path from the refused file, and the warning names the date rule.
+        A config the operator NAMED with the same date still raises; that is
+        TestWorkspacePolicy's subject.
+        """
         source = tmp_path / "src"
         source.mkdir()
         (source / ".ash.yaml").write_text(
@@ -380,9 +387,18 @@ class TestMalformedExpiration:
             "      expiration: '2026/06/30'\n",
             encoding="utf-8",
         )
-        with pytest.raises(ASHConfigValidationError) as excinfo:
-            resolve_config(source_dir=source)
-        assert "YYYY-MM-DD" in str(excinfo.value)
+        with patch(
+            "automated_security_helper.config.resolve_config.ASH_LOGGER"
+        ) as logger:
+            config = resolve_config(source_dir=source)
+        warned = [str(c.args[0]) for c in logger.warning.call_args_list]
+        assert any("contributes nothing" in w and "YYYY-MM-DD" in w for w in warned), (
+            warned
+        )
+        assert config is not None
+        assert not any(
+            entry.path == "vendor/**" for entry in config.global_settings.ignore_paths
+        ), config.global_settings.ignore_paths
 
     def test_unvalidated_malformed_entry_is_not_applied(self, tmp_path):
         """An entry built without validation fails toward scanning, with a warning.
