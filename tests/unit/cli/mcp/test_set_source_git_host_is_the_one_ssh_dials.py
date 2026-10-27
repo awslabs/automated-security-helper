@@ -87,8 +87,11 @@ def _recorded(record: Path) -> List[List[str]]:
 def _host_ssh_dials(destination: str, config: Path) -> str:
     ssh = shutil.which("ssh")
     assert ssh, "ssh is required to read the host ssh would connect to"
+    # An empty file, not os.devnull: Windows OpenSSH does not read "nul" as a
+    # config file and prints nothing, so no hostname.
+    config.write_text("", encoding="utf-8")
     printed = subprocess.run(
-        [ssh, "-F", os.devnull, "-G", destination],
+        [ssh, "-F", str(config), "-G", destination],
         capture_output=True,
         text=True,
         check=False,
