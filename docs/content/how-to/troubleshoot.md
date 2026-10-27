@@ -104,11 +104,9 @@ a run ASH itself failed to carry out (the scanner's errors name ASH's error).
 | snyk-code | 0, 1 (issues found) | 2: an error; 3: no supported project (`src/cli/exit-codes.ts`) |
 | gitleaks | 0, 2 (leaks found: ASH runs `gitleaks --exit-code=2`) | 1: any error, such as an unreadable config; gitleaks exits 1 for leaks too unless told otherwise, which is why ASH moves the leaks code |
 | zizmor | 0, 3 (nothing it could audit; findings never set the status because ASH runs `zizmor --no-exit-codes`) | any other status |
-| hadolint | 0 (ASH runs `hadolint --no-fail`) | any other status |
 | actionlint | 0, 1 (problems found) | 2: a bad command line; 3: a fatal error, such as an unreadable file |
 | cfn-lint | 0 and the even values up to 14: 2 error, 4 warning and 8 informational, added together for a run with more than one level (`cfnlint/runner/cli.py`) | 1: a fatal error, so any odd status; anything above 15 |
 | cfn-guard | 0, 19 (at least one rule failed) | any other status, such as 255 for a parse error or a missing rules path |
-| guarddog | 0, with output on stdout | any other status |
 
 trivy exits 0 for a run with findings unless its `exit-code` setting names another
 code. ASH runs trivy and trivy-repo with `trivy --exit-code=0`, which outranks an
