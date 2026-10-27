@@ -234,7 +234,7 @@ def _results_paths(command, results_dir: PurePath):
             value = value.replace("\\", "/")
             if not value.startswith(root) and "=" in value:
                 value = value.split("=", 1)[1]
-            if value.startswith(root):
+            if Path(value).is_relative_to(root):
                 paths.append(Path(value))
     return paths
 
