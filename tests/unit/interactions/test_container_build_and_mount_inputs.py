@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import json
 import os
-import platform
 import shutil
 import subprocess  # nosec B404 - one test runs a Python child against a copied package
 import sys
@@ -104,6 +103,10 @@ def commands(monkeypatch) -> List[List[str]]:
     )
     monkeypatch.setattr(rac, "_runner_supports_buildx", lambda _runner: False)
     monkeypatch.setattr(rac, "run_cmd_direct", record)
+    # Without a request the stage is `non-root`, and `ci` on a Windows host
+    # (run_ash_container._resolve_build_target); the host is not Windows here.
+    # test_container_windows_default_stage.py covers the Windows default.
+    monkeypatch.setattr(rac, "_host_is_windows", lambda: False)
     for name in _SCRUBBED_ENV:
         monkeypatch.delenv(name, raising=False)
     return seen
@@ -651,12 +654,13 @@ class TestTheBuildTargetIsTheOneRequested:
         assert _flag(_only(commands, "build"), "--target") == "non-root"
 
     def test_the_build_image_cli_builds_non_root_under_ci(self, commands, monkeypatch):
-        """`ash build-image` on Windows builds ``ci`` for its own documented reason
-        (cli/image.py: bind-mounted output is not writable there); CI variables
-        are not part of that."""
+        """`ash build-image` builds ``non-root`` under CI variables, as the scan does.
+        (A Windows host defaults to ``ci`` for its own documented reason, cli/image.py:
+        bind-mounted output is not writable there; the ``commands`` fixture makes the
+        host a non-Windows one, and test_container_windows_default_stage.py covers it.)
+        """
         monkeypatch.setenv("CI", "true")
 
         _invoke_cli(["build-image", "--no-run", "--ash-revision-to-install", "v3.7.0"])
 
-        expected = "ci" if platform.system().lower().startswith("win") else "non-root"
-        assert _flag(_only(commands, "build"), "--target") == expected
+        assert _flag(_only(commands, "build"), "--target") == "non-root"
