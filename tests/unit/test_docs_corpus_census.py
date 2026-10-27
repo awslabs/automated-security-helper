@@ -39,6 +39,7 @@ import importlib.util
 import os
 import re
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 
@@ -125,17 +126,43 @@ NOT_SAMPLE_LANGS = (
 
 
 def _walk_md_files(root: Path) -> set[str]:
-    """Every .md and .md.template file under root, outside the excluded directories
-    and paths."""
+    """Every .md and .md.template file git lists under root (tracked, or untracked and
+    not ignored), outside the excluded directories and paths.
+
+    A listing, not a filesystem walk, as the gate's is: a walk of the checkout
+    descends into tests/pytest-temp and the scan output, which other test workers
+    create and remove while this one reads, and would count the markdown they write.
+    The listing is still written here rather than imported from the gate, so the two
+    counts stay independent.
+    """
+    listing = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "--",
+            "*.md",
+            "*.md.template",
+        ],
+        capture_output=True,
+        check=True,
+    )
     found = set()
-    for directory, subdirs, names in os.walk(root):
-        subdirs[:] = [d for d in subdirs if d not in EXCLUDED_DIRS]
-        for name in names:
-            rel = (Path(directory) / name).relative_to(root).as_posix()
-            if name.endswith((".md", ".md.template")) and not rel.startswith(
-                EXCLUDED_PATHS
-            ):
-                found.add(rel)
+    for entry in listing.stdout.split(b"\0"):
+        if not entry:
+            continue
+        rel = Path(os.fsdecode(entry)).as_posix()
+        if (
+            (root / rel).is_file()
+            and not EXCLUDED_DIRS.intersection(Path(rel).parts[:-1])
+            and not rel.startswith(EXCLUDED_PATHS)
+        ):
+            found.add(rel)
     return found
 
 
