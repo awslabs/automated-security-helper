@@ -586,7 +586,9 @@ def test_the_exit_fields_of_a_run_with_no_config_do_not_ask_for_the_image_revisi
     asked = []
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     monkeypatch.setattr(
-        run_ash_container, "get_ash_revision", lambda: asked.append(1) or "LOCAL"
+        run_ash_container,
+        "get_ash_revision",
+        lambda quiet=False: asked.append(1) or "LOCAL",
     )
     src = tmp_path / "repo" / "app"
     src.mkdir(parents=True)
@@ -1588,7 +1590,7 @@ class _ImageQuestionSpy:
     def __init__(self) -> None:
         self.asks: list[tuple[bool, set[str]]] = []
 
-    def __call__(self) -> str:
+    def __call__(self, quiet: bool = False) -> str:
         import inspect
 
         silenced = any(
@@ -2575,7 +2577,9 @@ def test_an_image_question_that_answers_is_the_gates_answer(tmp_path, monkeypatc
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     src = _a_source_with_no_config(tmp_path)
     config = _write(tmp_path / "ops" / "ash.yaml", {"project_name": "op"})
-    monkeypatch.setattr(run_ash_container, "get_ash_revision", lambda: "main")
+    monkeypatch.setattr(
+        run_ash_container, "get_ash_revision", lambda quiet=False: "main"
+    )
     opts = _scan_options_for_the_gate(
         src, tmp_path / "out", config, build=True, run=True
     )

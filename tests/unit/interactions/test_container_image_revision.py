@@ -448,7 +448,7 @@ def container_runtime(monkeypatch, tmp_path) -> Dict[str, List[List[str]]]:
         seen["build"].append([str(item) for item in cmd_list])
         return create_completed_process(args=list(cmd_list), returncode=0)
 
-    def fake_execute(cmd, debug=False):
+    def fake_execute(cmd, debug=False, env=None):
         seen["run"].append([str(item) for item in cmd])
         return create_completed_process(args=list(cmd), returncode=0)
 

@@ -55,7 +55,7 @@ def events(monkeypatch, tmp_path) -> List[str]:
     monkeypatch.setattr(subprocess_utils, "get_host_uid", lambda: 4242)
     monkeypatch.setattr(subprocess_utils, "get_host_gid", lambda: 4343)
     monkeypatch.setattr(rac, "_resolve_oci_runner", lambda oci_runner: "docker")
-    monkeypatch.setattr(rac, "get_ash_revision", lambda: "LOCAL")
+    monkeypatch.setattr(rac, "get_ash_revision", lambda quiet=False: "LOCAL")
     monkeypatch.setattr(rac, "_find_dockerfile", lambda revision: dockerfile)
     monkeypatch.setattr(rac, "_build_image", lambda **kwargs: None)
     monkeypatch.setattr(rac, "_get_oci_wrapper_prefix", lambda: ["env"])
@@ -123,7 +123,7 @@ def test_a_run_that_ends_on_its_own_takes_and_drops_both_records_in_order(
 ):
     seen: dict = {}
 
-    def execute(cmd, debug=False):
+    def execute(cmd, debug=False, env=None):
         events.append("run")
         seen["leftover_records"] = _records(tmp_path)
         seen["env_records"] = tuple(cancellation._CLEANUP_FILES)
@@ -155,7 +155,7 @@ def test_a_run_that_ends_on_its_own_takes_and_drops_both_records_in_order(
 def test_a_run_ended_by_an_exception_keeps_the_leftover_record_and_drops_the_env_file(
     events, tmp_path, monkeypatch
 ):
-    def execute(cmd, debug=False):
+    def execute(cmd, debug=False, env=None):
         events.append("run")
         raise KeyboardInterrupt
 
@@ -193,7 +193,7 @@ def test_the_env_files_record_is_kept_while_its_removal_fails(
     """The rule the combined run must not loosen: with the removal failing
     silently, the file is still there, so its record stays."""
 
-    def execute(cmd, debug=False):
+    def execute(cmd, debug=False, env=None):
         return create_completed_process(args=list(cmd), returncode=0)
 
     monkeypatch.setattr(rac, "_execute_container", execute)

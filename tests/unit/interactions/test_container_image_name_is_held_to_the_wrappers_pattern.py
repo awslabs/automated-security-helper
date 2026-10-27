@@ -54,13 +54,13 @@ def runtime(monkeypatch, tmp_path) -> Dict[str, Any]:
     monkeypatch.setattr(subprocess_utils, "get_host_uid", lambda: 1000)
     monkeypatch.setattr(subprocess_utils, "get_host_gid", lambda: 1000)
     monkeypatch.setattr(rac, "_find_runner", lambda _name: "/usr/bin/docker")
-    monkeypatch.setattr(rac, "get_ash_revision", lambda: "LOCAL")
+    monkeypatch.setattr(rac, "get_ash_revision", lambda quiet=False: "LOCAL")
     monkeypatch.setattr(rac, "_find_dockerfile", lambda _rev: dockerfile)
 
     def fake_build(**kwargs):
         seen["built"].append(kwargs["image_name"])
 
-    def fake_execute(cmd, debug=False):
+    def fake_execute(cmd, debug=False, env=None):
         seen["run"].append(list(cmd))
         return create_completed_process(args=list(cmd), returncode=0)
 
