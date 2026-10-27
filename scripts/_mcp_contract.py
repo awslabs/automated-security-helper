@@ -95,6 +95,15 @@ MAX_CALL_DEPTH = 24
 #: Past this many alternatives a value's dicts are merged into one, so that a
 #: chain of spreads cannot grow without bound. Narrowing is then less precise.
 MAX_VARIANTS = 64
+#: Package functions that run their first argument, a callable, with the keyword
+#: arguments that follow it and return what it returns: ``await _run_clone(f,
+#: **kw)`` is ``f(**kw)`` on a thread pool. They reach ``f`` through
+#: ``run_in_executor(executor, functools.partial(...))``, which this module does
+#: not follow, so the response of a tool that calls them would otherwise be an
+#: unread value and the error types ``f`` returns would be listed under no tool.
+CALLABLE_RUNNERS = frozenset(
+    {f"{SERVER_MODULE}._run_clone", f"{SERVER_MODULE}._run_delivery"}
+)
 #: Builtin exceptions, which ``type(e).__name__`` can also name.
 BUILTIN_EXCEPTIONS = frozenset(
     name
@@ -1607,10 +1616,34 @@ class Evaluator:
                 return self.call(method, node, scope)
         ref = self._ref_of(func, scope)
         if ref is not None and ref.kind == "function":
+            if self._is_runner(ref):
+                return self._run_callable(node, scope)
             return self.call(ref, node, scope)
         if ref is not None and ref.kind == "class":
             return self._instance(ref, node, scope)
         return unread(scope.site(node))
+
+    def _is_runner(self, ref: _Ref) -> bool:
+        name = getattr(ref.node, "name", "")
+        return (
+            ref.module is not None and f"{ref.module.name}.{name}" in CALLABLE_RUNNERS
+        )
+
+    def _run_callable(self, node: ast.Call, scope: _Scope) -> Shape:
+        """``runner(f, **kw)``: what ``f(**kw)`` returns, with ``kw`` bound.
+
+        A callable that is not a package function, or a call that passes anything
+        but ``f`` and keywords, is unread.
+        """
+        if len(node.args) != 1 or isinstance(node.args[0], ast.Starred):
+            return unread(scope.site(node))
+        target = self._ref_of(node.args[0], scope)
+        if target is None or target.kind != "function":
+            return unread(scope.site(node))
+        forwarded = ast.copy_location(
+            ast.Call(func=node.args[0], args=[], keywords=node.keywords), node
+        )
+        return self.call(target, forwarded, scope)
 
     def _builtin_call(self, name: str, node: ast.Call, scope: _Scope) -> Shape:
         if name == "dict":
@@ -1665,6 +1698,8 @@ class Evaluator:
                 ):
                     value = self.evaluate(stmt.value, init_scope)
                     attrs[target.attr] = union(attrs.get(target.attr), value)
+        for name, value in self._class_attributes(ref).items():
+            attrs.setdefault(name, value)
         return one(ObjectV(cls.name, tuple(attrs.items())))
 
     def _caught(self, type_node: ast.expr, scope: _Scope) -> Shape:
@@ -1672,7 +1707,10 @@ class Evaluator:
 
         Each construction's arguments are read in its module's scope, so a
         module constant passed to the exception is followed and a local
-        variable is unread. Exceptions the package does not define are unread.
+        variable is unread. The package's subclasses of ``X`` count too, since
+        ``except X`` catches them; each carries the class attributes it sets
+        (``error_type = "..."``). Exceptions the package does not define are
+        unread.
         """
         types = type_node.elts if isinstance(type_node, ast.Tuple) else [type_node]
         parts: list[Shape] = []
@@ -1684,9 +1722,10 @@ class Evaluator:
             key = id(ref.node)
             if key not in self._caught_memo:
                 built = [
-                    self._instance(ref, call, _Scope(module=module))
-                    for module, call in self._constructions(ref.node.name)  # type: ignore[union-attr]
-                    if self._is_class(call.func, module, ref.node)
+                    self._instance(kind, call, _Scope(module=module))
+                    for kind in [ref, *self._subclasses(ref)]
+                    for module, call in self._constructions(kind.node.name)  # type: ignore[union-attr]
+                    if self._is_class(call.func, module, kind.node)  # type: ignore[arg-type]
                 ]
                 self._caught_memo[key] = (
                     union(*built)
@@ -1697,6 +1736,61 @@ class Evaluator:
                 )
             parts.append(self._caught_memo[key])
         return union(*parts)
+
+    def _subclasses(self, ref: _Ref) -> list[_Ref]:
+        """Every package class that derives from ``ref``'s class, nearest first."""
+        found: list[_Ref] = []
+        pending = [ref]
+        while pending:
+            parent = pending.pop(0)
+            for module in self.source.all_modules():
+                for node in module.defs.values():
+                    if not isinstance(node, ast.ClassDef) or any(
+                        kind.node is node for kind in found
+                    ):
+                        continue
+                    scope = _Scope(module=module)
+                    for base in node.bases:
+                        target = self._ref_of(base, scope)
+                        if (
+                            target is not None
+                            and target.kind == "class"
+                            and target.node is parent.node
+                        ):
+                            child = _Ref("class", module=module, node=node)
+                            found.append(child)
+                            pending.append(child)
+                            break
+        return found
+
+    def _class_attributes(self, ref: _Ref) -> dict[str, Shape]:
+        """The plain class attributes (``error_type = "x"``) of a package class.
+
+        The class's own come first and win over its package bases'.
+        """
+        attrs: dict[str, Shape] = {}
+        seen: set[int] = set()
+        pending = [ref]
+        while pending:
+            current = pending.pop(0)
+            cls = current.node
+            if not isinstance(cls, ast.ClassDef) or current.module is None:
+                continue
+            if id(cls) in seen:
+                continue
+            seen.add(id(cls))
+            scope = _Scope(module=current.module)
+            for stmt in cls.body:
+                if not isinstance(stmt, ast.Assign):
+                    continue
+                for target in stmt.targets:
+                    if isinstance(target, ast.Name) and target.id not in attrs:
+                        attrs[target.id] = self.evaluate(stmt.value, scope)
+            for base in cls.bases:
+                parent = self._ref_of(base, scope)
+                if parent is not None and parent.kind == "class":
+                    pending.append(parent)
+        return attrs
 
     def _constructions(self, class_name: str) -> list[tuple[_Module, ast.Call]]:
         """Every call in the package spelled like a call of ``class_name``."""
@@ -1753,6 +1847,8 @@ class Evaluator:
         for name in fields:
             if name not in attrs and name in defaults:
                 attrs[name] = self.evaluate(defaults[name], class_scope)
+        for name, value in self._class_attributes(ref).items():
+            attrs.setdefault(name, value)
         return one(ObjectV(cls.name, tuple(attrs.items())))
 
     # -- calls ----------------------------------------------------------------

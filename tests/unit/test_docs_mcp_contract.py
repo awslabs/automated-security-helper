@@ -707,6 +707,158 @@ def test_error_types_carried_by_a_caught_exception(planted_contracts):
     assert clone.error_types_unread == ()
 
 
+PLANTED_EXECUTOR_SERVER = """
+import asyncio
+import functools
+
+from automated_security_helper.cli.tools import mcp_clear, mcp_clone
+
+mcp = object()
+
+
+async def _run_on(function, kwargs):
+    return await asyncio.get_running_loop().run_in_executor(
+        None, functools.partial(function, **kwargs)
+    )
+
+
+async def _run_clone(function, /, **kwargs):
+    return await _run_on(function, kwargs)
+
+
+async def _run_delivery(function, /, **kwargs):
+    return await _run_on(function, kwargs)
+
+
+async def _run_elsewhere(function, /, **kwargs):
+    return await _run_on(function, kwargs)
+
+
+def _with_session(result, session):
+    return {**result, "session_id": session}
+
+
+@mcp.tool()
+async def clone(url):
+    result = await _run_clone(mcp_clone, url=url)
+    return _with_session(result, "s")
+
+
+@mcp.tool()
+async def clear():
+    return _with_session(await _run_delivery(mcp_clear, session_id="s"), "s")
+
+
+@mcp.tool()
+async def elsewhere():
+    return _with_session(await _run_elsewhere(mcp_clear, session_id="s"), "s")
+"""
+
+PLANTED_EXECUTOR_TOOLS = """
+BUSY = "workspace_busy"
+TIMED_OUT = "clone_timed_out"
+
+
+class CloneRefused(RuntimeError):
+    error_type = "clone_refused"
+
+
+class TimedOut(CloneRefused):
+    error_type = TIMED_OUT
+
+
+class Busy(RuntimeError):
+    error_type = BUSY
+
+
+def _fail(url):
+    if not url:
+        raise TimedOut("slow")
+    raise CloneRefused("no")
+
+
+def mcp_clone(url):
+    try:
+        _fail(url)
+    except CloneRefused as e:
+        return {"success": False, "error": str(e), "error_type": e.error_type}
+    return {"success": True}
+
+
+def mcp_clear(session_id):
+    try:
+        raise Busy("held")
+    except Busy as e:
+        return {"success": False, "error_type": e.error_type}
+    return {"success": True}
+"""
+
+
+@pytest.fixture
+def planted_executor_contracts(tmp_path: Path):
+    package = _plant_server(tmp_path, PLANTED_EXECUTOR_SERVER)
+    (package / "cli" / "tools.py").write_text(
+        textwrap.dedent(PLANTED_EXECUTOR_TOOLS).lstrip("\n"), encoding="utf-8"
+    )
+    return _reader().tool_contracts(package)
+
+
+def test_a_tool_that_runs_its_implementation_on_an_executor_returns_its_types(
+    planted_executor_contracts,
+):
+    """``await _run_clone(f, **kw)`` is ``f(**kw)``: the types ``f`` returns are the
+    tool's, and the dict it returns is read rather than left open at the
+    ``_with_session`` spread. A wrapper that is not a declared runner stays unread,
+    so the planted ``elsewhere`` tool is the control that nothing else is followed."""
+    contracts = planted_executor_contracts
+    for name, expected in (
+        ("clone", ("clone_refused", "clone_timed_out")),
+        ("clear", ("workspace_busy",)),
+    ):
+        contract = contracts[name]
+        assert contract.error_types == expected, name
+        assert contract.error_types_unread == (), name
+        assert [
+            v for v in contract.response.variants if getattr(v, "open_at", ())
+        ] == [], name
+    elsewhere = contracts["elsewhere"]
+    assert elsewhere.error_types == ()
+    assert any(getattr(v, "open_at", ()) for v in elsewhere.response.variants)
+
+
+def test_the_runners_the_reader_follows_are_defined_by_the_server():
+    reader = _reader()
+    server = ast.parse(
+        (_installed_package() / "cli" / "mcp_server.py").read_text(encoding="utf-8")
+    )
+    defined = {
+        node.name
+        for node in server.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    assert reader.CALLABLE_RUNNERS
+    for dotted in reader.CALLABLE_RUNNERS:
+        module, _, name = dotted.rpartition(".")
+        assert module == reader.SERVER_MODULE, dotted
+        assert name in defined, dotted
+
+
+def test_the_source_delivery_tools_return_the_types_their_implementations_do():
+    """The clone and upload tools run on executors; their refusals still reach the
+    pages' check (the `clone_*` types, and `session_workspace_busy` from a chunk)."""
+    contracts = _reader().tool_contracts(_installed_package())
+    assert {
+        "clone_host_not_permitted",
+        "clone_timed_out",
+        "clone_url_not_permitted",
+        "local_clone_source_refused",
+        "ssh_key_not_registered",
+    } <= set(contracts["set_source_git"].error_types)
+    assert "session_workspace_busy" in contracts["set_source_zip_chunk"].error_types
+    for name in ("clear_source", "set_source_git", "set_source_zip_finalize"):
+        assert contracts[name].error_types_unread == (), name
+
+
 PLANTED_FORMS = """
 import re
 

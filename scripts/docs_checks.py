@@ -5754,7 +5754,7 @@ UNREAD_RESPONSE_EXPLAINED = (
         "get_config",
         "automated_security_helper/config/environment_record.py",
         "_Index.record",
-        "def record(self, item:",
+        "def record(",
         "2026-12-31",
         "the recorder's per-node walk over the same dump.",
     ),
