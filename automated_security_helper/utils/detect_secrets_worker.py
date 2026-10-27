@@ -41,8 +41,10 @@ column, and without one two secrets of one type on one line are indistinguishabl
 ASH. The column is worked out here because only this process holds the secret's
 value; the value is not written to OUTPUT.
 
-Deliberately imports nothing from ASH beyond the standard library and detect-secrets,
-so starting it does not load the plugin registry.
+Deliberately imports nothing from ASH beyond ``utils.process_env`` (itself standard
+library only, and required so the environment write below lands under
+``ENVIRON_LOCK``), the standard library and detect-secrets, so starting it does not
+load the plugin registry.
 """
 
 import itertools
@@ -51,6 +53,11 @@ import multiprocessing
 import os
 import sys
 from typing import Any, Dict, List, Optional
+
+from automated_security_helper.utils.process_env import (
+    apply_environ_overrides,
+    restore_environ,
+)
 
 #: The key of the column in each secret written to OUTPUT.
 START_COLUMN_KEY = "ash_start_column"
@@ -187,20 +194,23 @@ def run(request: Dict[str, Any]) -> List[List[Any]]:
             except RuntimeError:
                 pass
 
-    baseline = request.get("baseline")
-    collection = (
-        SecretsCollection.load_from_baseline(baseline=baseline)
-        if baseline is not None
-        else SecretsCollection()
-    )
-    collection.root = request["root"]
-    with transient_settings(request["settings"]):
-        _scan_files(collection, request["paths"])
-    lines_by_file: Dict[str, Optional[List[str]]] = {}
-    return [
-        [key, [_with_column(secret, lines_by_file) for secret in secrets]]
-        for key, secrets in collection.data.items()
-    ]
+        baseline = request.get("baseline")
+        collection = (
+            SecretsCollection.load_from_baseline(baseline=baseline)
+            if baseline is not None
+            else SecretsCollection()
+        )
+        collection.root = request["root"]
+        with transient_settings(request["settings"]):
+            _scan_files(collection, request["paths"])
+        lines_by_file: Dict[str, Optional[List[str]]] = {}
+        return [
+            [key, [_with_column(secret, lines_by_file) for secret in secrets]]
+            for key, secrets in collection.data.items()
+        ]
+    finally:
+        if refusing:
+            restore_environ(previous)
 
 
 def main(argv: List[str]) -> int:
