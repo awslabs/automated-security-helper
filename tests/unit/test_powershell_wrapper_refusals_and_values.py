@@ -411,6 +411,9 @@ def _invoke(
             "-SourceDir src -OutputDir out", {"ASH_CONFIG": "missing.yaml"}, id="config"
         ),
         pytest.param("-SourceDir src -OutputDir 'a,b'", None, id="mount-path"),
+        pytest.param(
+            "-SourceDir src -OutputDir 'a\"b'", None, id="mount-path-double-quote"
+        ),
     ],
 )
 def test_a_refusal_exits_3_under_error_action_stop(

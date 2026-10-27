@@ -544,14 +544,20 @@ def test_values_stay_one_argument_under_legacy_native_argument_passing(tmp_path)
     # handed: the source and output directories' paths reach it in `-e NAME=value`
     # pairs (the source directory in the `--mount type=bind,source=...` value too),
     # and -Scanners as an argument of ash. (-OutputFormat does not reach the run
-    # at all; see test_output_format_sets_no_variable_ash_does_not_read.)
+    # at all; see test_output_format_sets_no_variable_ash_does_not_read.) The
+    # directories' paths hold the space and --privileged but no double quote: a
+    # mounted path with one is refused before any runner is looked for, as ./ash
+    # refuses it (a --mount value is read as CSV; test_a_refusal_exits_3_under_
+    # error_action_stop[mount-path-double-quote]), so the quote rides in -Scanners,
+    # an argument of ash and not a mount.
     runner = _native_runner(tmp_path)
+    directory = "q --privileged "
     payload = 'q" --privileged '
-    output_name = 'out q" --privileged x'
-    (tmp_path / payload).mkdir()
+    output_name = "out --privileged x"
+    (tmp_path / directory).mkdir()
     result, calls = _invoke(
         tmp_path,
-        f"Invoke-ASH -NoBuild -SourceDir {_ps_double_quoted(payload)} "
+        f"Invoke-ASH -NoBuild -SourceDir {_ps_double_quoted(directory)} "
         f"-OutputDir {_ps_double_quoted(output_name)} "
         f"-Scanners {_ps_double_quoted(payload)}",
         preamble="$PSNativeCommandArgumentPassing = 'Legacy'\n",
@@ -562,7 +568,7 @@ def test_values_stay_one_argument_under_legacy_native_argument_passing(tmp_path)
     run = _native_calls(tmp_path, "run")
     assert "--privileged" not in run, run
     assert f"ASH_ACTUAL_OUTPUT_DIR={tmp_path / output_name}" in run, run
-    assert f"ASH_ACTUAL_SOURCE_DIR={tmp_path / payload}" in run, run
+    assert f"ASH_ACTUAL_SOURCE_DIR={tmp_path / directory}" in run, run
     assert payload in run, run
 
 
