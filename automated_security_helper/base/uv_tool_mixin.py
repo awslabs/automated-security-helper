@@ -303,7 +303,10 @@ class UVToolMixin:
                 )
                 return None
             version = runner.get_tool_version(
-                tool_name, package_name, values=probe_values
+                tool_name,
+                package_name,
+                values=probe_values,
+                **self._uv_python_kwargs(),
             )
             if version:
                 self._plugin_log(
@@ -511,6 +514,7 @@ class UVToolMixin:
                     env=env,
                     timeout=timeout,
                     values=values,
+                    **self._uv_python_kwargs(),
                 )
 
         except UVToolRunnerError as e:
@@ -1393,7 +1397,15 @@ class UVToolMixin:
                 )
             return
 
-        install_cmd_str = f"uv tool install {tool_spec}"
+        install_cmd_parts = ["uv", "tool", "install"]
+        python_request = self._get_tool_python_request()
+        if python_request:
+            # One argv element each, and the request must carry no whitespace:
+            # get_installation_commands splits this string on whitespace.
+            install_cmd_parts.extend(["--python", python_request])
+        install_cmd_parts.append(tool_spec)
+
+        install_cmd_str = " ".join(install_cmd_parts)
         self.uv_tool_install_commands = [install_cmd_str]
 
         if values_note is not None:
@@ -1709,6 +1721,7 @@ class UVToolMixin:
                 # hidden from its debug line, so nothing degrades to an empty
                 # value set.
                 values=record_values,
+                **self._uv_python_kwargs(),
             )
 
             install_duration = time.time() - install_start_time
@@ -1735,7 +1748,10 @@ class UVToolMixin:
                 # was worse: the failure was cached under the key
                 # "bandit::['sarif', 'toml']" and served to later callers.
                 post_install_version = runner.get_installed_tool_version(
-                    self.command, self._uv_from_spec(), values=record_values
+                    self.command,
+                    self._uv_from_spec(),
+                    values=record_values,
+                    **self._uv_python_kwargs(),
                 )
 
                 self._plugin_log(
