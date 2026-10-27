@@ -161,7 +161,11 @@ def test_a_container_build_without_a_run_is_not_stopped_by_committed_reports(
     tmp_path, monkeypatch
 ):
     """``--no-run`` builds the image and writes nothing in the output directory but
-    the log, so committed reports do not stop it and are not touched."""
+    the log and, inside the tree, the directory's ``.gitignore``
+    (run_ash_scan._ignore_output_dir_in_git, before any mode starts), so committed
+    reports do not end it and are not touched."""
+    from automated_security_helper.utils.output_dir_links import OUTPUT_GITIGNORE
+
     source, output = _repo(tmp_path, monkeypatch)
     _confined(tmp_path, source, output)
     before = _snapshot(output)
@@ -187,6 +191,7 @@ def test_a_container_build_without_a_run_is_not_stopped_by_committed_reports(
     assert built == [False]
     after = _snapshot(output)
     after.pop("ash.log", None)
+    after.pop(OUTPUT_GITIGNORE, None)
     assert after == before
 
 

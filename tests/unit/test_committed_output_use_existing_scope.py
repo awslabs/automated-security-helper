@@ -26,11 +26,14 @@ from automated_security_helper.core.enums import RunMode
 from automated_security_helper.core.exceptions import CommittedOutputFilesError
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.interactions.run_ash_scan import run_ash_scan
-from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.asharp_model import (
+    AshAggregatedResults,
+    ScannerTargetStatusInfo,
+)
+from automated_security_helper.utils.output_dir_links import OUTPUT_GITIGNORE
 from tests.unit.test_committed_output_refused_at_entry_points import _repo
 from tests.unit.test_committed_results_paths_are_never_deleted import (
     _confined,
-    _results_json,
     _snapshot,
 )
 
@@ -59,10 +62,29 @@ class _ReportingEngine:
 
 
 def _existing_results(tmp_path: Path) -> Path:
+    """A completed run's results, as ``--use-existing`` reports on them: one
+    scanner ran and found nothing. A file with no scanner results and no findings
+    is what a run that stopped before its scan leaves, and the orchestrator
+    refuses to report on one (utils/inner_run_outcome.existing_results_problem)."""
+    model = AshAggregatedResults()
+    model.metadata.project_name = "previous-run"
+    model.scanner_results["bandit"] = ScannerTargetStatusInfo()
     path = tmp_path / "previous" / "ash_aggregated_results.json"
     path.parent.mkdir()
-    path.write_text(_results_json("previous-run"), encoding="utf-8")
+    path.write_text(model.model_dump_json(by_alias=True), encoding="utf-8")
     return path
+
+
+def _written(output: Path) -> dict:
+    """What the output directory holds, the ``.gitignore`` the run writes aside.
+
+    An output directory inside the scanned tree gets one before any phase runs
+    (core/orchestrator.ensure_directories,
+    utils/output_dir_links.ignore_output_dir_in_git); it is the run's own file,
+    not a change to anything the repository committed."""
+    found = _snapshot(output)
+    found.pop(OUTPUT_GITIGNORE, None)
+    return found
 
 
 def _report_over(
@@ -112,7 +134,7 @@ def test_a_report_over_existing_results_is_not_stopped_where_it_never_writes(
     engine = _report_over(source, output, existing, phases=["report"])
 
     assert engine.phases == [["report"]]
-    assert _snapshot(output) == before
+    assert _written(output) == before
 
 
 @pytest.mark.parametrize(
@@ -139,7 +161,9 @@ def test_a_report_over_existing_results_is_stopped_where_it_writes(
 
     assert committed in str(refused.value), refused.value
     assert engine is None
-    assert _snapshot(output) == before
+    # analysis/ is checked once the phases are known, in execute_scan, after
+    # initialize wrote the output directory's .gitignore (_written).
+    assert _written(output) == before
 
 
 def _run_use_existing(source, output, existing, **kwargs):

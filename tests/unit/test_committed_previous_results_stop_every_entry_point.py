@@ -148,6 +148,7 @@ def test_a_report_over_existing_results_is_not_stopped_by_a_committed_held_set(
         _existing_results,
         _report_over,
         _run_use_existing,
+        _written,
     )
 
     source, output = _repo(tmp_path, monkeypatch, committed=HELD)
@@ -158,7 +159,8 @@ def test_a_report_over_existing_results_is_not_stopped_by_a_committed_held_set(
     engine = _report_over(source, output, existing, phases=["report"])
 
     assert engine.phases == [["report"]]
-    assert _snapshot(output) == before
+    # The run's own .gitignore aside (_written), nothing in the directory changed.
+    assert _written(output) == before
     monkeypatch.setattr(
         ASHScanOrchestrator,
         "create",
