@@ -7,15 +7,13 @@ CI check: verify documentation stays in sync with source code.
 
 Run with: uv run python scripts/verify_docs_freshness.py
 
-Exit code 0 if all checks pass, exit code 1 with a detailed report if any fail.
+Exit code 0 if all checks pass, exit code 1 with a detailed report if any fail, and
+exit code 2 if any check raised and so did not run (an ERROR line names it).
 """
 
 from __future__ import annotations
 
-import os
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -24,26 +22,29 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-CLI_SCAN_PY = REPO_ROOT / "automated_security_helper" / "cli" / "scan.py"
 MCP_SERVER_PY = REPO_ROOT / "automated_security_helper" / "cli" / "mcp_server.py"
 PYPROJECT_TOML = REPO_ROOT / "pyproject.toml"
-README_MD = REPO_ROOT / "README.md"
-
-# README.md is GENERATED. scripts/version_template_manager.py renders
-# README.md.template over it on every release that bumps the version, so an edit
-# made to README.md alone is discarded at the next bump -- which is exactly what
-# happened to a `@v3.0,1` typo fix that survived six releases (see
-# tests/unit/test_version_template_round_trip.py for the measurement).
-#
-# Every check below that looks for a NAME therefore reads the template, so a
-# contributor sent here by a failure edits the file that survives.
-# check_version_consistency is the deliberate exception: it asserts the rendered
-# version string, which by construction exists only in the generated file.
-README_TEMPLATE_MD = REPO_ROOT / "README.md.template"
 DOCS_DIR = REPO_ROOT / "docs"
-CLI_REFERENCE_MD = DOCS_DIR / "content" / "docs" / "cli-reference.md"
-OUTPUT_FORMATS_MD = DOCS_DIR / "content" / "docs" / "output-formats.md"
-DOCS_INDEX_MD = DOCS_DIR / "content" / "index.md"
+
+# The name inventories (scanners, reporters, MCP tools) are compared against the
+# reference pages, which scripts/generate_*.py write from the code. A row there is
+# fixed by fixing the code or the generator and regenerating, never by editing the
+# page: tests/unit/test_generated_docs_freshness.py fails when a page differs from
+# its generator's output. These checks are the other half: the generator could
+# itself drop or invent a name, and here the page is held against a second source
+# (the config models, the plugin registry, the @mcp.tool decorators).
+REFERENCE_DIR = DOCS_DIR / "content" / "reference"
+SCANNERS_REFERENCE_MD = REFERENCE_DIR / "scanners.md"
+REPORTERS_REFERENCE_MD = REFERENCE_DIR / "reporters.md"
+MCP_TOOLS_REFERENCE_MD = REFERENCE_DIR / "mcp-tools.md"
+
+# The version pin is checked in the generated files, not their templates:
+# scripts/version_template_manager.py renders README.md.template and
+# docs/content/how-to/install.md.template with the release version, so the
+# rendered string exists only in the generated file. These are the two pages that
+# tell a reader which ref to install.
+README_MD = REPO_ROOT / "README.md"
+INSTALL_MD = DOCS_DIR / "content" / "how-to" / "install.md"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -119,12 +120,33 @@ _EXCLUDED_MD_DIRS = frozenset(
         "venv",
         "node_modules",
         "site",  # mkdocs build output
+        "public",  # configured MkDocs build output
+        ".previews",
+        "playwright-report",
         ".pytest_cache",
         ".ruff_cache",
         ".mypy_cache",
         "test-results",
         "__pycache__",
+        # Gitignored caches: the docs build's privacy plugin and the jsii package
+        # cache the cdk-nag tests extract, which holds the README of every bundled
+        # npm package. The docs-example runner would otherwise run their examples.
+        ".cache",
+        # syrupy's golden files. A markdown reporter snapshot is generated output, so
+        # checking it as a docs page reports the fixture's text, not the docs.
+        "__snapshots__",
     }
+)
+
+# Directories excluded by their path below REPO_ROOT, not by name, for prose that
+# is a dated record rather than documentation a reader is sent to.
+_EXCLUDED_MD_PATHS = (
+    # ferret-scan's spec/ notes are the analysis and work log of one upgrade,
+    # kept as their authors wrote them. They quote ferret-scan's own flags and
+    # its earlier behavior, which the checks here would report as ASH options
+    # and as current claims. The plugin's README.md and DEVELOPMENT.md beside
+    # them are documentation and stay in the corpus.
+    "automated_security_helper/plugin_modules/ash_ferret_plugins/spec/",
 )
 
 
@@ -149,57 +171,25 @@ def collect_md_files() -> list[Path]:
     first version of this change edited docs/content/faq.md and not
     docs/content/faq.md.template, and the round-trip test is what noticed.
 
-    The list comes from git, not a walk of the filesystem: every tracked file,
-    plus every untracked one that is not ignored, so a new doc is checked before
-    it is added. git does not enter an ignored directory. A walk did, and that
-    matters because the unit tests call this on the real checkout under xdist:
-    ``REPO_ROOT.rglob`` descended into tests/pytest-temp, which is ignored, while
-    other workers created and removed directories there. It raised
-    FileNotFoundError when one went away mid-walk, and it returned the markdown
-    those workers had written. tests/unit/test_repo_walkers_skip_scratch.py shows
-    both. A checkout git cannot read raises here rather than yielding no docs, so
-    every check built on this list cannot pass by checking nothing.
+    The exclusions are matched against the path below REPO_ROOT (the docs root with
+    --docs-root), never the absolute path: a checkout that itself sits under a
+    directory named .cache, site or venv used to collect nothing, and every check
+    reading the corpus then passed on zero files. An empty corpus raises instead.
     """
-    git = shutil.which("git")
-    if git is None:
-        raise RuntimeError("git is not on PATH, so the docs to check are unknown")
-    listing = subprocess.run(
-        [
-            git,
-            "-C",
-            str(REPO_ROOT),
-            "ls-files",
-            "-z",
-            "--cached",
-            "--others",
-            "--exclude-standard",
-            "--",
-            "*.md",
-            "*.md.template",
-        ],
-        capture_output=True,
-        check=False,
-    )
-    if listing.returncode != 0:
-        raise RuntimeError(
-            f"git ls-files failed in {REPO_ROOT}, so the docs to check are unknown: "
-            f"{listing.stderr.decode(errors='replace').strip()}"
-        )
-    files = set()
-    for entry in listing.stdout.split(b"\0"):
-        if not entry:
-            continue
-        relative = Path(os.fsdecode(entry))
-        path = REPO_ROOT / relative
-        # --cached still lists a tracked file deleted from the working tree.
-        if not _EXCLUDED_MD_DIRS.intersection(relative.parts) and path.is_file():
-            files.add(path)
+    patterns = ("*.md", "*.md.template")
+    files = [
+        path
+        for pattern in patterns
+        for path in REPO_ROOT.rglob(pattern)
+        if not _EXCLUDED_MD_DIRS.intersection(path.relative_to(REPO_ROOT).parts[:-1])
+        and not path.relative_to(REPO_ROOT).as_posix().startswith(_EXCLUDED_MD_PATHS)
+    ]
     if not files:
         raise RuntimeError(
-            f"git ls-files found no markdown in {REPO_ROOT}; every check that reads "
-            f"these docs would pass by checking nothing"
+            f"no markdown files were collected under {REPO_ROOT}, so every check "
+            "that reads the docs would pass on nothing"
         )
-    return sorted(files)
+    return sorted(set(files))
 
 
 # ---------------------------------------------------------------------------
@@ -320,74 +310,23 @@ def compare_inventories(
 
 
 # ---------------------------------------------------------------------------
-# Check 1: CLI flags in docs match source
+# CLI options: no check here
 # ---------------------------------------------------------------------------
-
-
-def check_cli_flags() -> list[str]:
-    """Parse scan.py for CLI option names and verify they appear in cli-reference.md."""
-    failures: list[str] = []
-    source = read_text(CLI_SCAN_PY)
-    docs = read_text(CLI_REFERENCE_MD)
-
-    # Extract every --flag named inside a quoted string in scan.py.
-    #
-    # The pattern this replaced required the flag to be the ENTIRE quoted string,
-    # so it could not see either half of typer's combined form. scan.py writes
-    # `"--python-only/--full"` and `"--progress/--no-progress"`, and those are
-    # real user-facing flags; the old pattern found neither. That is also why
-    # skip_flags below was dead code -- it listed `--no-progress`, a string the
-    # pattern was structurally incapable of producing, so the entry could never
-    # match and never skipped anything.
-    flag_pattern = re.compile(r"--[a-z][a-z0-9-]*")
-    flags_in_source: set[str] = set()
-    for literal in re.findall(r'"([^"]*--[^"]*)"', source):
-        flags_in_source.update(flag_pattern.findall(literal))
-
-    # Also derive flags from Python parameter names (snake_case -> --kebab-case)
-    # Match the parameter name preceding the Annotated[...typer.Option block
-    param_pattern = re.compile(
-        r"^\s+([a-z_][a-z0-9_]*):\s*Annotated\[\s*\n?\s*.*?,\s*\n?\s*typer\.Option\(",
-        re.MULTILINE,
-    )
-    #
-    # Only for an Option that names no flag of its own. Given flag strings, typer
-    # uses those and nothing else, and the literal scan above already has them; the
-    # parameter name then names no flag at all. Deriving one anyway reported
-    # `--config-files-from-scanned-repository`, which does not exist, for a
-    # parameter whose flag is `--config-file-from-scanned-repository`.
-    for match in param_pattern.finditer(source):
-        if re.match(r"\s*[\"']", source[match.end() :]):
-            continue
-        param_name = match.group(1)
-        flag = "--" + param_name.replace("_", "-")
-        flags_in_source.add(flag)
-
-    # Off-by-default halves of a boolean pair. typer generates both halves from
-    # one declaration, and the docs document the pair under its on-form, so
-    # requiring a separate entry for the negation would report drift that does
-    # not exist. Now that the extraction above actually produces these strings,
-    # every entry here is load-bearing -- verified by removing them one at a
-    # time and seeing the check fail.
-    skip_flags = {"--no-build", "--no-run", "--no-progress", "--no-color"}
-
-    docs_lower = docs.lower()
-    for flag in sorted(flags_in_source):
-        if flag in skip_flags:
-            continue
-        # Check if the flag appears in the docs (case-insensitive)
-        if flag.lower() not in docs_lower:
-            # Also try with backtick wrapping
-            if f"`{flag}`".lower() not in docs_lower:
-                failures.append(
-                    f"CLI flag {flag} found in source but missing from cli-reference.md"
-                )
-
-    return failures
+#
+# "CLI flags in docs match source" grepped scan.py for --flags and required each to
+# appear somewhere in the hand-written docs/content/docs/cli-reference.md. That
+# page is gone. Its replacement, docs/content/reference/cli.md, is written by
+# scripts/generate_cli_docs.py from the click tree of every command, and
+# tests/unit/test_generated_docs_freshness.py fails when the page differs from the
+# generator's output, so every option of every command is on it by construction.
+# Every other mention of an option in the docs is parsed and checked against the
+# same click tree by "ASH commands in docs match the CLI" (docs_checks.check_cli).
+# A grep of one command's source file against the generated page would be a weaker
+# copy of the freshness test.
 
 
 # ---------------------------------------------------------------------------
-# Check 2: Reporter list in docs matches code
+# Check 1: Reporter list in docs matches code
 # ---------------------------------------------------------------------------
 
 
@@ -452,32 +391,49 @@ def reporter_names() -> dict[str, str]:
 
 
 def check_reporters() -> list[str]:
-    """The registered reporter set and the output-formats table must be the same set."""
+    """The registered reporter set and the built-in reporters table must be the same set.
+
+    The first table headed Reporter in reference/reporters.md lists the built-in
+    reporters; the plugin-module reporters come in a second table after it.
+    """
     names = reporter_names()
     if not names:
         return [
             (
                 "Reporter: the plugin registry returned no reporters, so there is "
-                "nothing to compare the output-formats table against"
+                "nothing to compare the reporters reference against"
             )
         ]
 
     return compare_inventories(
         "Reporter",
         names,
-        read_text(OUTPUT_FORMATS_MD),
-        "Format",
-        "docs/content/docs/output-formats.md",
+        read_text(REPORTERS_REFERENCE_MD),
+        "Reporter",
+        "docs/content/reference/reporters.md",
     )
 
 
 # ---------------------------------------------------------------------------
-# Check 3: Scanner list in docs matches code
+# Check 2: Scanner list in docs matches code
 # ---------------------------------------------------------------------------
 
 
+def scanner_names() -> dict[str, str]:
+    """Every scanner ASH ships, by config name: the fields of ScannerConfigSegment
+    (the built-in scanners) and the scanner config classes of the community plugin
+    modules in the package, which are configured under the same ``scanners`` key."""
+    from automated_security_helper.config.ash_config import ScannerConfigSegment
+
+    names = _segment_names(ScannerConfigSegment)
+    models = _docs_checks().load_config_models()
+    for name, config_cls in sorted(models.plugin_configs.get("scanners", {}).items()):
+        names.setdefault(name, f"{config_cls.__module__}.{config_cls.__name__}")
+    return names
+
+
 def check_scanners() -> list[str]:
-    """The scanner inventory and README's scanner table must be the same set.
+    """The scanners ASH ships and the scanners reference's inventory must be the same set.
 
     The three "variants" this used to try were one variant and two no-ops: the
     third was ``field_name.replace("_", "_")``, which is the field name
@@ -486,19 +442,19 @@ def check_scanners() -> list[str]:
     README, so `bandit` matched the word inside an unrelated code sample.
     normalize_name plus a table-scoped comparison replaces all of it.
     """
-    from automated_security_helper.config.ash_config import ScannerConfigSegment
-
+    names = scanner_names()
+    _print_skipped(_docs_checks().load_config_models().skipped_notes())
     return compare_inventories(
         "Scanner",
-        _segment_names(ScannerConfigSegment),
-        read_text(README_TEMPLATE_MD),
+        names,
+        read_text(SCANNERS_REFERENCE_MD),
         "Scanner",
-        "README.md.template",
+        "docs/content/reference/scanners.md",
     )
 
 
 # ---------------------------------------------------------------------------
-# Check 4: MCP tool names in docs match code
+# Check 3: MCP tool names in docs match code
 # ---------------------------------------------------------------------------
 
 
@@ -535,8 +491,14 @@ def mcp_tool_names() -> dict[str, str]:
     return names
 
 
+#: A tool's section in the MCP tools reference: ``## run_ash_scan``.
+_TOOL_HEADING = re.compile(r"^## ([a-z][a-z0-9_]*)\s*$", re.MULTILINE)
+
+
 def check_mcp_tools() -> list[str]:
-    """The registered MCP tool set and README's tool table must be the same set.
+    """The registered MCP tool set and the MCP tools reference's sections must be the
+    same set. The reference gives each tool a ``## <tool>`` section; other sections
+    (Resources, Severity levels) are not identifiers and are not compared.
 
     Overlaps deliberately with tests/unit/cli/mcp/test_tool_surface_parity.py,
     and neither subsumes the other. That test derives the registered side from
@@ -546,22 +508,35 @@ def check_mcp_tools() -> list[str]:
     documentation-only pull request gets its answer. The shared property is the
     set of names; if they ever disagree, the runtime one is right.
     """
-    failures = ["MCP tool inventory is empty; the parse found nothing to check"]
     tools = mcp_tool_names()
     if not tools:
-        return failures
-
-    return compare_inventories(
-        "MCP tool",
-        tools,
-        read_text(README_TEMPLATE_MD),
-        "Tool",
-        "README.md.template",
-    )
+        return ["MCP tool inventory is empty; the parse found nothing to check"]
+    label = "docs/content/reference/mcp-tools.md"
+    sections = set(_TOOL_HEADING.findall(read_text(MCP_TOOLS_REFERENCE_MD)))
+    if not sections:
+        return [
+            (
+                f"MCP tool: {label} has no '## <tool>' sections. The page was "
+                "renamed, moved or restructured; this check cannot run and must not "
+                "report success."
+            )
+        ]
+    failures = [
+        f"MCP tool: '{name}' (from {origin}) is registered but {label} has no "
+        f"'## {name}' section"
+        for name, origin in sorted(tools.items())
+        if name not in sections
+    ]
+    failures += [
+        f"MCP tool: {label} has a '## {name}' section, but no @mcp.tool is named "
+        f"{name}; it was removed or renamed and the section was left behind"
+        for name in sorted(sections - set(tools))
+    ]
+    return failures
 
 
 # ---------------------------------------------------------------------------
-# Check 5: Version consistency
+# Check 4: Version consistency
 # ---------------------------------------------------------------------------
 
 
@@ -573,7 +548,7 @@ def check_version_consistency() -> list[str]:
 
     files_to_check = [
         (README_MD, "README.md"),
-        (DOCS_INDEX_MD, "docs/content/index.md"),
+        (INSTALL_MD, "docs/content/how-to/install.md"),
     ]
 
     for path, label in files_to_check:
@@ -581,24 +556,22 @@ def check_version_consistency() -> list[str]:
             failures.append(f"File {label} does not exist")
             continue
         content = read_text(path)
-        if version_tag not in content:
-            # Check if ANY version tag is present (might just be outdated)
-            old_tags = re.findall(r"@v\d+\.\d+\.\d+", content)
-            if old_tags:
-                outdated = set(old_tags) - {version_tag}
-                if outdated:
-                    failures.append(
-                        f"{label} references outdated version(s) {sorted(outdated)} "
-                        f"instead of {version_tag}"
-                    )
-            else:
-                failures.append(f"{label} does not reference version {version_tag}")
+        # Every older pin is reported, whether or not the current one is also on the
+        # page: a reader who copies the one stale command installs the wrong release.
+        outdated = set(re.findall(r"@v\d+\.\d+\.\d+", content)) - {version_tag}
+        if outdated:
+            failures.append(
+                f"{label} references outdated version(s) {sorted(outdated)} "
+                f"instead of {version_tag}"
+            )
+        elif version_tag not in content:
+            failures.append(f"{label} does not reference version {version_tag}")
 
     return failures
 
 
 # ---------------------------------------------------------------------------
-# Check 6: Config file path consistency
+# Check 5: Config file path consistency
 # ---------------------------------------------------------------------------
 
 
@@ -703,7 +676,7 @@ def check_config_path() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Check 7: Suppression field name
+# Check 6: Suppression field name
 # ---------------------------------------------------------------------------
 
 
@@ -743,7 +716,7 @@ def check_suppression_field_name() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Check 8: documented plugin options exist and validate
+# Check 7: documented plugin options exist and validate
 # ---------------------------------------------------------------------------
 
 
@@ -800,15 +773,20 @@ def _plugin_option_models(config_suffix: str, options_base: type) -> dict[str, t
 def check_plugin_option_keys() -> list[str]:
     """Every documented <section>.<name>.options block must validate.
 
+    Each option key in such a block must be a field of the plugin's options model,
+    and the whole mapping must validate against that model. The check reports a key
+    that is not a field whatever the model does with it, so it gives the same answer
+    on an ASH that accepts the key and never reads it and on one that refuses the
+    config.
+
     Why this check exists
     ---------------------
-    The three options bases -- scanner, reporter, converter -- all set
-    ``extra="allow"``, so an option name that does not
-    exist is accepted and then never read. A reader who copies it gets no error and
-    no effect. That let 46 invented option keys accumulate across the configuration
-    guide and the built-in plugin pages -- ``severity_level`` for bandit (the field
-    is ``severity_threshold``), ``rules`` and ``timeout`` for semgrep (``config`` and
-    ``scan_timeout``), ``framework`` for checkov (``frameworks``), and others.
+    A plugin never reads an option it does not declare. 46 invented option keys
+    accumulated across the configuration guide and the built-in plugin pages --
+    ``severity_level`` for bandit (the field is ``severity_threshold``), ``rules``
+    and ``timeout`` for semgrep (``config`` and ``scan_timeout``), ``framework`` for
+    checkov (``frameworks``), and others -- and a reader who copied one got nothing
+    the page promised.
 
     Validating rather than only checking key names also catches wrong *values*,
     which fail loudly at runtime instead of silently: ``confidence_level`` is
@@ -829,6 +807,13 @@ def check_plugin_option_keys() -> list[str]:
     Only blocks that parse as a mapping with one of these section keys are
     considered, and only for plugins this build knows about, so a snippet documenting
     a third-party plugin is skipped rather than reported.
+
+    A block marked ``config kind=ash-invalid`` is skipped. It shows a config ASH
+    refuses, such as an option the plugin does not declare, and "Config blocks in
+    docs validate" (docs_checks.config_block_problems) already requires that it be
+    invalid, so a valid config marked that way is still reported. Blocks are found
+    with docs_checks.parse_page, the parser that check and the docs runner use, so
+    the three agree on which marker governs which block.
     """
     import yaml
     from pydantic import ValidationError
@@ -854,17 +839,16 @@ def check_plugin_option_keys() -> list[str]:
             return [f"Could not import any built-in {section} options model"]
         models[section] = found
 
-    fence = re.compile(r"```ya?ml\n(.*?)```", re.DOTALL)
-
     for md_file in collect_md_files():
-        content = read_text(md_file)
+        page = _docs_checks().parse_page(md_file, REPO_ROOT, read_text(md_file))
         rel_path = md_file.relative_to(REPO_ROOT)
 
-        for block in fence.finditer(content):
-            body = block.group(1)
-            line_no = content[: block.start()].count("\n") + 2
+        for block in page.blocks:
+            if block.lang not in ("yaml", "yml") or block.config_kind == "ash-invalid":
+                continue
+            line_no = block.body_line
             try:
-                parsed = yaml.safe_load(body)
+                parsed = yaml.safe_load(block.body)
             except yaml.YAMLError:
                 # Deliberately-invalid YAML is documented on purpose in places.
                 continue
@@ -890,9 +874,10 @@ def check_plugin_option_keys() -> list[str]:
                         if key not in model.model_fields:
                             failures.append(
                                 f"{rel_path}:~{line_no} {section}.{plugin_name}"
-                                f".options.{key} is not a field on "
-                                f"{model.__name__}; extra='allow' means it is "
-                                f"accepted and ignored"
+                                f".options.{key} is not a field of "
+                                f"{model.__name__}. Use an option {plugin_name} "
+                                "declares, or mark a block that shows the mistake "
+                                "config kind=ash-invalid"
                             )
 
                     try:
@@ -915,13 +900,245 @@ def check_plugin_option_keys() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Checks 9-16: doc blocks, commands, environment variables, links, navigation
+# ---------------------------------------------------------------------------
+#
+# Implemented in scripts/docs_checks.py, which the docs-example runner in
+# tests/integration/docs/ loads too, so the checks and the runner agree on what a
+# block and its marker are. Each wrapper below hands that module this script's corpus
+# and root, so a test that monkeypatches collect_md_files or REPO_ROOT here steers
+# these checks the same way it steers the eight above.
+
+DOCS_CHECKS = REPO_ROOT / "scripts" / "docs_checks.py"
+_docs_checks_module = None
+
+
+def _docs_checks():
+    """Load scripts/docs_checks.py by path, once.
+
+    Registered in sys.modules before it runs: its dataclasses resolve their
+    annotations through the module's entry there.
+    """
+    global _docs_checks_module
+    name = "_ash_docs_checks"
+    if _docs_checks_module is None and name in sys.modules:
+        # The docs runner loads the same file under the same name; one module per
+        # process, so a patch or a cache in one is seen by the other.
+        _docs_checks_module = sys.modules[name]
+    if _docs_checks_module is None:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(name, DOCS_CHECKS)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"cannot load {DOCS_CHECKS}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+        _docs_checks_module = module
+    return _docs_checks_module
+
+
+def check_doc_markers() -> list[str]:
+    return [str(f) for f in _docs_checks().check_markers(collect_md_files(), REPO_ROOT)]
+
+
+def check_doc_cli() -> list[str]:
+    return [str(f) for f in _docs_checks().check_cli(collect_md_files(), REPO_ROOT)]
+
+
+#: Set by --verbose: checks that can say why something passed print it.
+_VERBOSE = False
+
+
+def _print_skipped(notes: list[str]) -> None:
+    """What a check could not look at, printed whether or not --verbose is set.
+
+    A plugin module that does not import (an optional extra that is not installed)
+    is not a docs finding, but a check that passes without having seen its plugins
+    has to say so.
+    """
+    for note in notes:
+        print(f"        skipped: {note}")
+
+
+def check_doc_env_vars() -> list[str]:
+    notes: list[str] | None = [] if _VERBOSE else None
+    findings = _docs_checks().check_env_vars(collect_md_files(), REPO_ROOT, notes=notes)
+    for note in notes or []:
+        print(f"        note: {note}")
+    return [str(f) for f in findings]
+
+
+def check_doc_config_blocks() -> list[str]:
+    notes: list[str] = []
+    findings = _docs_checks().check_config_blocks(
+        collect_md_files(), REPO_ROOT, notes=notes
+    )
+    _print_skipped(notes)
+    return [str(f) for f in findings]
+
+
+def check_doc_python_blocks() -> list[str]:
+    return [
+        str(f)
+        for f in _docs_checks().check_python_blocks(collect_md_files(), REPO_ROOT)
+    ]
+
+
+def check_doc_links() -> list[str]:
+    return [str(f) for f in _docs_checks().check_links(collect_md_files(), REPO_ROOT)]
+
+
+def check_doc_nav() -> list[str]:
+    return [str(f) for f in _docs_checks().check_nav(REPO_ROOT)]
+
+
+def check_doc_site_build() -> list[str]:
+    return [str(f) for f in _docs_checks().check_site_build(REPO_ROOT)]
+
+
+def check_doc_release_placeholders() -> list[str]:
+    return [str(f) for f in _docs_checks().check_release_placeholders(REPO_ROOT)]
+
+
+def check_doc_code_links() -> list[str]:
+    return [str(f) for f in _docs_checks().check_code_links(REPO_ROOT)]
+
+
+def check_doc_mcp_contract() -> list[str]:
+    notes: list[str] = []
+    findings = _docs_checks().check_mcp_contract(
+        collect_md_files(), REPO_ROOT, notes=notes
+    )
+    for note in notes:
+        print(f"        note: {note}")
+    return [str(f) for f in findings]
+
+
+def check_doc_install_commands() -> list[str]:
+    return [
+        str(f)
+        for f in _docs_checks().check_install_commands(collect_md_files(), REPO_ROOT)
+    ]
+
+
+def check_doc_option_tables() -> list[str]:
+    notes: list[str] = []
+    findings = _docs_checks().check_option_tables(
+        collect_md_files(), REPO_ROOT, notes=notes
+    )
+    _print_skipped(notes)
+    return [str(f) for f in findings]
+
+
+def check_doc_report_files() -> list[str]:
+    return [
+        str(f) for f in _docs_checks().check_report_files(collect_md_files(), REPO_ROOT)
+    ]
+
+
+def check_doc_scanner_names() -> list[str]:
+    notes: list[str] = []
+    findings = _docs_checks().check_scanner_names(
+        collect_md_files(), REPO_ROOT, notes=notes
+    )
+    for note in notes:
+        print(f"        note: {note}")
+    return [str(f) for f in findings]
+
+
+def check_doc_session_variables() -> list[str]:
+    return [
+        str(f)
+        for f in _docs_checks().check_session_variables(collect_md_files(), REPO_ROOT)
+    ]
+
+
+def check_doc_workflow_inputs() -> list[str]:
+    notes: list[str] = []
+    findings = _docs_checks().check_workflow_inputs(
+        collect_md_files(), REPO_ROOT, notes=notes
+    )
+    for note in notes:
+        print(f"        note: {note}")
+    return [str(f) for f in findings]
+
+
+# ---------------------------------------------------------------------------
+# Docs from one tree, code from another
+# ---------------------------------------------------------------------------
+#
+# A docs rewrite describes code that is not on main yet, so its pages have to be
+# checked against another checkout's code. `--docs-root <tree>` reads every markdown
+# file, the nav, mkdocs.yml and the redirect map from <tree>, while everything about
+# the code comes from the ASH this interpreter imports: run it as
+#
+#     <code-tree>/.venv/bin/python <docs-tree>/scripts/verify_docs_freshness.py \
+#         --docs-root <docs-tree>
+#
+# The path constants at the top of this file are rebased here rather than rewritten,
+# so they stay the single statement of where each file is.
+
+#: Constants naming a file the docs tree owns, and ones naming a package source file.
+_DOCS_PATHS = (
+    "README_MD",
+    "DOCS_DIR",
+    "REFERENCE_DIR",
+    "SCANNERS_REFERENCE_MD",
+    "REPORTERS_REFERENCE_MD",
+    "MCP_TOOLS_REFERENCE_MD",
+    "INSTALL_MD",
+)
+#: Code files, by their path inside the package, so a rebase never depends on where
+#: the previous one put them.
+_CODE_PATHS = {"MCP_SERVER_PY": Path("cli") / "mcp_server.py"}
+
+
+def _use_trees(docs_root: Path) -> None:
+    """Read docs from docs_root and code from the installed ASH, for every check."""
+    names = globals()
+    old_root = names["REPO_ROOT"]
+    docs_root = docs_root.resolve()
+    package = _docs_checks().installed_package_dir()
+    code = _docs_checks().code_root(docs_root)
+    for name in _DOCS_PATHS:
+        names[name] = docs_root / names[name].relative_to(old_root)
+    for name, inside in _CODE_PATHS.items():
+        names[name] = package / inside
+    names["PYPROJECT_TOML"] = code / "pyproject.toml"
+    names["REPO_ROOT"] = docs_root
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
+    parser.add_argument(
+        "--docs-root",
+        type=Path,
+        help="check the docs in this checkout against the installed ASH's code "
+        "(default: the checkout this script is in)",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="also say which known set each accepted environment variable matched",
+    )
+    args = parser.parse_args(argv)
+    global _VERBOSE
+    _VERBOSE = args.verbose
+    if args.docs_root is not None:
+        _use_trees(args.docs_root)
+    print(f"ASH package: {_docs_checks().installed_package_dir()}")
+    print(f"Docs root:   {REPO_ROOT}")
+    print()
+
     checks = [
-        ("CLI flags in docs match source", check_cli_flags),
         ("Reporter list in docs matches code", check_reporters),
         ("Scanner list in docs matches code", check_scanners),
         ("MCP tool names in docs match code", check_mcp_tools),
@@ -929,17 +1146,62 @@ def main() -> int:
         ("Config file path consistency", check_config_path),
         ("Suppression field name", check_suppression_field_name),
         ("Plugin options in docs exist and validate", check_plugin_option_keys),
+        ("Doc block markers are well formed", check_doc_markers),
+        ("ASH commands in docs match the CLI", check_doc_cli),
+        ("ASH environment variables in docs are read by ASH", check_doc_env_vars),
+        ("Config blocks in docs validate", check_doc_config_blocks),
+        ("Python blocks in docs parse and import", check_doc_python_blocks),
+        ("Links and anchors in docs resolve", check_doc_links),
+        ("Docs navigation and redirects resolve", check_doc_nav),
+        ("Docs site build is strict, offline and versioned", check_doc_site_build),
+        (
+            "Release numbers in templates stay out of install commands",
+            check_doc_release_placeholders,
+        ),
+        ("Docs links in the ASH source resolve", check_doc_code_links),
+        (
+            "Option tables and config paths in docs match the models",
+            check_doc_option_tables,
+        ),
+        (
+            "MCP error types and example responses in docs match the tools",
+            check_doc_mcp_contract,
+        ),
+        (
+            "Install commands in docs name real extras, Pythons and refs",
+            check_doc_install_commands,
+        ),
+        ("Report file names in docs are files ASH writes", check_doc_report_files),
+        (
+            "Scanner names in docs tables are scanners ASH ships",
+            check_doc_scanner_names,
+        ),
+        (
+            "Shell variables in docs examples are set in the session that reads them",
+            check_doc_session_variables,
+        ),
+        (
+            "Values docs examples pass the scan workflow pass its input check",
+            check_doc_workflow_inputs,
+        ),
     ]
 
     all_failures: list[tuple[str, list[str]]] = []
     passed = 0
     failed = 0
+    not_run = 0
 
     for name, check_fn in checks:
         try:
             failures = check_fn()
-        except Exception as e:
-            failures = [f"Check raised an exception: {e}"]
+        except Exception as e:  # noqa: BLE001 -- reported as a check that did not run
+            # Not a finding: the check never got as far as the docs. Printed apart
+            # from findings, counted apart and exited on apart, so that two runs
+            # where it raised the same way cannot compare as two runs that agree.
+            not_run += 1
+            print(f"ERROR {name}")
+            print(f"        - the check did not run: {type(e).__name__}: {e}")
+            continue
 
         if failures:
             failed += 1
@@ -952,12 +1214,24 @@ def main() -> int:
             print(f"PASS  {name}")
 
     print()
-    print(f"Results: {passed} passed, {failed} failed, {passed + failed} total")
+    did_not_run = f"{not_run} did not run, " if not_run else ""
+    print(
+        f"Results: {passed} passed, {failed} failed, {did_not_run}"
+        f"{passed + failed + not_run} total"
+    )
 
     if all_failures:
         print()
         print("Documentation is out of sync with source code.")
         print("Fix the issues above and re-run this script.")
+
+    if not_run:
+        print()
+        print("A check that did not run checked nothing, so its docs are unverified.")
+        print("Fix what stopped it (the ERROR above) and re-run this script.")
+        return 2
+
+    if all_failures:
         return 1
 
     print()

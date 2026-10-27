@@ -1315,6 +1315,8 @@ class UVToolRunner:
                 return None
 
         cache_key = f"{tool_name}::{package_name or ''}"
+        if python_request:
+            cache_key += f"::python={python_request}"
 
         # One probe asks one executable one question, and an offline probe
         # (--offline) is not an online one's answer. Each memoized answer is
@@ -1509,6 +1511,10 @@ class UVToolRunner:
                 attempt in flight rather than from the start of the call, and no
                 callback arrives once this function has returned. With a
                 ``retry_config`` in play the message also names the attempt.
+            python_request: Optional interpreter request passed as
+                ``uv tool install --python``. None, the default, leaves the
+                interpreter to uv, which is what every caller did before it
+                existed.
 
         Returns:
             True if installation succeeded, False otherwise
@@ -1610,6 +1616,9 @@ class UVToolRunner:
         offline = os.environ.get("UV_OFFLINE") == "1"
         if offline:
             cmd.append("--offline")
+
+        if python_request:
+            cmd.extend(["--python", python_request])
 
         # Add --with dependencies if provided
         if with_dependencies:
@@ -1993,6 +2002,9 @@ class UVToolRunner:
             env = dict(env) if env is not None else snapshot_environ()
             env["UV_OFFLINE"] = "1"
             command.append("--offline")
+
+        if python_request:
+            command.extend(["--python", python_request])
 
         # Build command with --from parameter if extras or version constraint specified
         if package_extras or version_constraint:

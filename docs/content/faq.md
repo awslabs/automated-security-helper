@@ -1,44 +1,77 @@
-# Frequently Asked Questions
+# Frequently asked questions
 
-## General Questions
+Short answers, each with a link to the page that has the details. The config examples are
+keys to add to your ASH config file. `ash config init` writes one, `.ashrc.yaml`, in the
+current directory.
 
-### What is ASH?
-ASH (Automated Security Helper) is a security scanning tool designed to help you identify potential security issues in your code, infrastructure, and IAM configurations as early as possible in your development process.
+## Why does my first scan exit 1?
 
-### What's new in ASH v3?
-ASH v3 has been completely rewritten in Python with significant improvements:
-- Python-based CLI with multiple execution modes
-- Enhanced configuration system
-- Improved reporting formats
-- Customizable plugin system
-- Better Windows support
-- Programmatic API for integration
+At least one scanner is MISSING: its tool is not installed, or ASH found the tool only
+inside the scanned directory, such as in the project's `.venv`, and did not run it (see
+[Tools inside the scanned directory](docs/advanced-usage.md#tools-inside-the-scanned-directory)).
+A scan with a MISSING scanner is incomplete, and an incomplete scan exits 1 even when it
+also found something. Run `ash dependencies install` to install the tools it can install.
+A scanner with nothing to scan shows as SKIPPED whether or not its tool is installed, so
+npm-audit and cdk-nag need Node.js, and cfn-nag needs Ruby with a C compiler, only in a
+project they have something to scan in: CloudFormation templates for cdk-nag and cfn-nag,
+and a lockfile beside a `package.json` for npm-audit. To scan without a tool you cannot install, leave its scanner out with
+`ash --exclude-scanners cdk-nag,npm-audit`. See
+[A scanner shows MISSING](how-to/troubleshoot.md#a-scanner-shows-missing) and
+[Exit codes](reference/exit-codes.md).
 
-### Is ASH a replacement for human security reviews?
-No. ASH is designed to help identify common security issues early in the development process, but it's not a replacement for human security reviews or team/customer security standards.
+In a project without CloudFormation templates, cdk-nag shows as SKIPPED in this scan,
+with or without Node.js, so the exit code is detect-secrets' verdict alone:
 
-## Installation and Setup
-
-### How do I install ASH v3?
-You have several options:
+<!-- doctest: run expect-exit=2 -->
 ```bash
-# Using uvx (recommended)
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
-
-# Using pipx
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
-
-# Using pip
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+ash --scanners cdk-nag,detect-secrets --no-progress
 ```
 
-### What are the prerequisites for ASH v3?
+## How do I install ASH, and which version should I pin?
 
-### What is the `v3` floating tag?
-We maintain a `v3` Git tag that always points to the latest stable v3.x release. This means you can use `@v3` in your installation commands instead of a specific version like `@v3.7.0`:
+Install from GitHub, with a git URL or with Homebrew from the repository's tap;
+[Install ASH](how-to/install.md) shows each method. ASH is not published on PyPI. The
+PyPI project named `automated-security-helper` is not published by this project, so do not
+install ASH by that name. Pin an exact release tag or a commit. The floating `v3` tag moves to
+every new 3.x release, including releases with breaking changes. A pin fixes ASH's own
+code, not every dependency: uv, pipx, and pip resolve ASH's dependencies again when they
+install it. Homebrew installs the release its formula names, the latest one, with the
+dependency versions locked in that release's `uv.lock`.
 
+## Is there a container image?
+
+ASH publishes no image. `ash build-image` builds one from a release tag, and
+`ash --mode container` builds one and runs the scan in it. ASH uses the first of finch,
+docker, nerdctl, and podman that it finds on your `PATH`, or the one you name with
+`--oci-runner`. The default image runs as a non-root user whose UID and GID you can set;
+`--build-target ci` builds the image that runs as root, which a job running as root
+needs. See [Run ASH in a container](how-to/run-in-a-container.md#build-target).
+
+## Which scanners run on my code?
+
+In local and container mode, every enabled scanner runs on every scan. A scanner that
+finds nothing of its kind to check, such as actionlint in a repository without GitHub
+Actions workflows, shows as SKIPPED, whether or not its tool is installed. [Scanner coverage](reference/coverage.md) lists the
+languages and file types each scanner checks, and the
+[scanners reference](reference/scanners.md) lists each scanner's options.
+
+## Does ASH scan my CDK app?
+
+It scans the CloudFormation templates the app synthesizes, not the CDK source. Run
+`cdk synth` before the scan, so that the templates exist under `cdk.out`. ASH scans the
+`*.template.json` files there even when a `.gitignore` excludes `cdk.out`, at the root of
+the scanned directory or inside your CDK app's directory, and the rest of `cdk.out`
+stays out of the scan. The same holds for an assembly that `cdk synth -o` writes to
+another directory. cdk-nag, cfn-nag, cfn-lint, and the other CloudFormation scanners then
+evaluate the templates. To check, look for a template in the list of files the scan
+read:
+
+<!-- doctest: run expect-exit=2 -->
 ```bash
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3"
+mkdir -p cdk.out
+echo '{"Resources": {"Bucket": {"Type": "AWS::S3::Bucket"}}}' > cdk.out/App.template.json
+echo cdk.out >> .gitignore
+ash --scanners detect-secrets --offline --no-progress
 ```
 
 This is convenient for local development where you always want the latest version. For CI/CD pipelines or environments where reproducibility matters, we recommend pinning to a specific release tag (e.g., `@v3.7.0`).
@@ -72,30 +105,28 @@ ash --mode container
 ash --mode precommit
 ```
 
-### How do I specify which files to scan?
-```bash
-# Scan a specific directory
-ash --source-dir /path/to/code
+## A scanner hangs. What can I do?
 
 # Configure ignore paths in your ASH config file (.ashrc.yaml in a new project)
 global_settings:
   ignore_paths:
-    - path: 'tests/test_data'
-      reason: 'Test data only'
+    - path: tests/fixtures/**
+      reason: Test data with deliberate findings.
 ```
 
-### How do I exclude files from scanning?
-ASH leaves out of its scan set every file a `.gitignore` or `.ignore` file in the scanned tree matches. You can also configure ignore paths in your `.ash/.ash.yaml` configuration file. The summaries and `ash_aggregated_results.json` (`metadata.ignore_file_exclusions`) record how many files the ignore files excluded.
+ASH passes the ignore paths to every scanner. Some scanners skip those files and others
+scan them, and either way ASH drops every finding located in an ignored path. ASH also
+reads `.gitignore`, so directories it excludes, such as `.venv/` and `node_modules/` in
+most projects, are not scanned. If they are not in `.gitignore`, add them to
+`ignore_paths`. See
+[Suppressions, ignore paths, and scanner exclusions](concepts/suppressions.md).
 
 ASH leaves its own output out of the scan, whether or not `.gitignore` lists it: the output directory of the current scan, and `.ash/ash_output` under the scanned directory and under the directory ASH runs from. In a git checkout, regular files committed to one of those directories are still scanned (a committed link is not), and ASH warns that its output directory holds committed files. Outside a git checkout, or when git cannot list the repository, only the current scan's output directory is left out: an earlier run's `.ash/ash_output` is scanned like the rest of the tree, and ASH warns once per scan while the scan set still holds files in it, naming it and saying how to leave it out: delete it, or list it in an ignore file such as `.gitignore`. Adding it to `global_settings.ignore_paths` leaves its findings out, but the scan still reads it, so the warning repeats until the directory is deleted or an ignore file lists it. The output directory is recognized when it or the scanned directory is given through a link above the tree, as `/var` is on macOS. A scan does not delete or overwrite a committed file: when git tracks one where a scan writes its output (`ash_aggregated_results.json`, `ash-ignore-report.txt`, `ash-scan-set-files-list.txt`, `ash-scan-set-run.json`, `ash.log`, `ash.log.jsonl`, `.ash_previous_results_restored`, or anything under `analysis/`, `reports/`, `scanners/`, `converted/`, `.ash_previous_results/` or `.ash_previous_results.partial/`), the scan exits 3 before it deletes or writes anything, in every mode and from the MCP server. When git cannot list the repository the output directory is in (git is not installed, or it fails on the repository), any file at one of those paths stops the scan the same way, and the message names git's error and says to let git read the repository or remove the old results. A report over existing results (`--use-existing`) is stopped only where it writes: the results file, the logs, `reports/`, and `analysis/` with `--inspect` or `converted/` with `--cleanup`. A `.ash/ash_output` that is a link, or that a link inside the scanned directory leads to, is not taken as ASH's output, however the path to it is spelled, and a scan into an output directory git tracks as a link exits 3. The trivy-repo plugin still reads those directories, and ASH drops the findings it reports there, except in committed files. Any other directory is scanned, even one holding an earlier run's or another shard's results; ASH warns when a directory holds `ash_aggregated_results.json`, or both `ash-ignore-report.txt` and `ash-scan-set-files-list.txt`. Write shard output outside the scanned directory, or list it in `.gitignore`. CloudFormation templates that `cdk synth` writes (`*.template.json`) are scanned even when `.gitignore` excludes `cdk.out`, so cdk-nag and cfn-nag check them; the rest of the `cdk.out` directory stays excluded.
 
 ### How do I scan files that a `.gitignore` excludes?
 Pass `--no-honor-ignore-files`, or set `honor_ignore_files: false` in a config file outside the scanned tree. A config file inside the repository being scanned cannot change this setting. See [Ignore files and the scan set](docs/configuration-guide.md#ignore-files-and-the-scan-set).
 
-### How do I run specific scanners?
-```bash
-# Run only specific scanners
-ash --scanners bandit,semgrep
+## How do I fail only on high-severity findings, or never fail on findings?
 
 # Exclude specific scanners
 ash --exclude-scanners cfn-nag,cdk-nag
@@ -189,13 +220,19 @@ ash_plugin_modules:
   - my_ash_plugins
 ```
 
-## CI/CD Integration
+With `fail_on_findings: false`, or `--no-fail-on-findings` on the command line, findings
+never fail the scan. An incomplete scan, or one with a vulnerability database or offline
+ruleset past its age bound, still exits 1. See [Set the gate](how-to/set-the-gate.md).
 
-### How do I run ASH in CI/CD pipelines?
-ASH can be run in container mode in any CI/CD environment that supports containers. See the [tutorials](tutorials/running-ash-in-ci.md) for examples.
+## Why do two scanners report the same problem?
 
-### How do I use ASH with pre-commit?
-Add this to your `.pre-commit-config.yaml`:
+ASH runs scanners whose checks overlap and does not deduplicate their findings: semgrep and
+opengrep run the same ruleset, grype and trivy both check dependencies, and detect-secrets
+and gitleaks both look for secrets. Each finding carries its scanner's own rule ID, so a
+suppression for one does not cover the other. To keep one of a pair, turn the other off
+by setting `scanners.opengrep.enabled` to `false` in the config or by passing
+`--exclude-scanners opengrep`. See
+[Choose scanners](how-to/choose-scanners.md).
 
 ```yaml
 repos:
@@ -209,23 +246,29 @@ The `ash` hook runs bandit, detect-secrets, checkov, cdk-nag and npm-audit. It n
 
 ### How do I fail CI builds on security findings?
 ```bash
-# Exit with non-zero code if findings are found
-ash --mode local --fail-on-findings
+echo '{"name": "demo", "version": "1.0.0"}' > package.json
+echo '{"name": "demo", "version": "1.0.0", "lockfileVersion": 3, "packages": {}}' > package-lock.json
+ash --offline --scanners npm-audit,detect-secrets --no-progress
 ```
 
-## Advanced Usage
+## What does a scan send over the network?
 
-### How do I run ASH in an offline/air-gapped environment?
-Build an offline image with `ash --mode container --offline --offline-semgrep-rulesets p/ci --no-run`, push to your private registry, then use `ash --mode container --offline --no-build` in your air-gapped environment.
+ASH itself sends no telemetry. The scanners download rules and vulnerability databases, and
+some send data to their own services: for example, semgrep sends usage metrics to Semgrep
+when it uses registry rules, and npm-audit sends your dependency tree to the npm registry.
+See [what leaves the machine during a scan](concepts/scanning-untrusted-code.md#what-leaves-the-machine-during-a-scan).
 
 npm-audit does not run offline, because npm, yarn and pnpm audit a lockfile by asking the registry. In an offline scan a project with a lockfile beside a `package.json` reports npm-audit `MISSING` and the scan exits 1; a project without one reports it `SKIPPED`. Pass `--exclude-scanners npm-audit` to scan a JavaScript project offline without it. See [Offline mode](docs/advanced-usage.md#offline-mode).
 
 ### Can I use ASH programmatically?
 Yes, ASH v3 can be used programmatically in Python:
 
+Yes. `run_ash_scan` runs a scan from Python:
+
+<!-- doctest: illustrative reason="scans a placeholder path; reference/python-api.md has runnable examples" -->
 ```python
-from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 from automated_security_helper.core.enums import RunMode
+from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 
 results = run_ash_scan(
     source_dir="/path/to/code",

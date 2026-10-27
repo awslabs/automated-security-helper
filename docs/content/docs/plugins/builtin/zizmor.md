@@ -31,7 +31,7 @@ would read it where it points. In the source directory, such a link is left out
 by the scan set before zizmor's check sees it, with the warning
 `Not scanning '<path>': link leaves the scanned tree`, and is listed among the
 inputs not scanned (see
-[Ignore files and the scan set](../../configuration-guide.md#ignore-files-and-the-scan-set)).
+[What decides the files](../../../reference/coverage.md#what-decides-the-files)).
 A broken symlink (its target is missing, or links
 loop) is skipped with a warning too, since zizmor would fail the whole run on it. A repository
 with neither kind of file does not start zizmor; the scanner reports `SKIPPED`
@@ -67,11 +67,11 @@ scanners:
 - `config_file`: passed as `zizmor --config`, when the operator set it: from
   `--config-overrides`, or an ASH config file outside every git checkout and the
   scanned directory (one that is not
-  [repository-written](../../configuration-guide.md#settings-a-repositorys-config-cannot-choose)).
+  [repository-written](../../../concepts/trust-model.md#how-the-tier-is-decided)).
   A relative path is taken from the directory of the ASH config file that sets it,
   or from the working directory for `--config-overrides`, not from the source
   directory (see
-  [Relative paths in the operator's settings](../../configuration-guide.md#relative-paths-in-the-operators-settings));
+  [Relative paths in the operator's settings](../../../how-to/configure.md#relative-paths));
   an absolute path is used as given. Without it, ASH runs
   `zizmor --no-config`, so a `zizmor.yml` or `.github/zizmor.yml` in the scanned
   repository is not read: a config there can disable audits or ignore findings,

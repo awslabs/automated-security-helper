@@ -1,12 +1,36 @@
 nav:
   - Home: index.md
-  - Getting Started:
-      - Quick Start Guide: docs/quick-start-guide.md
-      - Installation Guide: docs/installation-guide.md
-      - Building Your Own Container Image: docs/building-your-own-image.md
-      - Migrating from ASH v2 to v3: docs/migration-guide.md
-      - Troubleshooting UV Installation: docs/troubleshooting-uv-installation.md
-      - UV Tool Installation Guide: docs/uv-tool-installation-guide.md
+  - Getting started:
+      - Choose a path: getting-started/index.md
+      - Scan on your machine: getting-started/local.md
+      - Add ASH to CI: getting-started/ci.md
+      - Connect an AI agent: getting-started/agents.md
+      - Roll out across repositories: getting-started/platform-teams.md
+  - How-to guides:
+      - Install ASH: how-to/install.md
+      - Manage scanner tools: docs/advanced-usage.md
+      - Configure ASH: how-to/configure.md
+      - Choose scanners: how-to/choose-scanners.md
+      - Set the gate: how-to/set-the-gate.md
+      - Suppress findings: how-to/suppress-findings.md
+      - Read scan results: how-to/read-results.md
+      - Export reports: how-to/export-reports.md
+      - Enable the scanner sandbox: docs/scanner-sandbox.md
+      - Run in a container: how-to/run-in-a-container.md
+      - Run offline: how-to/run-offline.md
+      - Choose an integration: integrations.md
+      - Run ASH with pre-commit: how-to/pre-commit.md
+      - CI systems:
+          - GitHub Actions: how-to/ci/github-actions.md
+          - GitLab CI: how-to/ci/gitlab-ci.md
+          - Other CI systems: how-to/ci/other-ci.md
+      - Scale to large repositories: how-to/scale-large-repos.md
+      - Run the MCP server: how-to/mcp-server.md
+      - Install an agent plugin: how-to/agent-plugins.md
+      - ASH GenAI integration guide: docs/genai-steering-guide.md
+      - Deploy on AWS: how-to/deploy-on-aws.md
+      - Troubleshoot: how-to/troubleshoot.md
+      - Migrate from v2: how-to/migrate-from-v2.md
   - Concepts:
       - Core Concepts: docs/concepts.md
       - Supported Languages & Frameworks: docs/supported-languages.md
@@ -97,6 +121,37 @@ nav:
           - Parallel Testing: docs/testing/parallel_testing.md
           - Test Utilities: docs/testing/test_utilities.md
   - Reference:
-      - API Reference: docs/api-reference.md
-      - Support: docs/support.md
-      - FAQ: faq.md
+      - Overview: reference/index.md
+      - CLI: reference/cli.md
+      - Configuration: reference/configuration.md
+      - Environment variables: reference/environment-variables.md
+      - Scanners: reference/scanners.md
+      - Reporters: reference/reporters.md
+      - Converters: reference/converters.md
+      - MCP tools: reference/mcp-tools.md
+      - Exit codes: reference/exit-codes.md
+      - Output files: reference/output-files.md
+      - Coverage by language: reference/coverage.md
+      - Python API: reference/python-api.md
+  - Plugins:
+      - Plugins: plugins/index.md
+      - Built-in scanner pages:
+          - "docs/plugins/builtin/*.md"
+      - Community plugins:
+          - Community plugins: docs/plugins/community/index.md
+          - "docs/plugins/community/*.md"
+      - AWS reporters: plugins/aws.md
+      - Write a scanner plugin: plugins/write-a-scanner.md
+      - Write a reporter plugin: plugins/write-a-reporter.md
+      - Write a converter plugin: plugins/write-a-converter.md
+      - Subscribe to scan events: plugins/event-subscribers.md
+  - Contributing:
+      - Development setup: contributing/index.md
+      - Testing: contributing/testing.md
+      - Documentation: contributing/documentation.md
+      - Interface design system: developer-guide/interface-design.md
+      - Interaction surface inventory: developer-guide/interface-review.md
+      - Design & UX review: developer-guide/high-end-design-review.md
+      - Releases: contributing/releases.md
+  - FAQ: faq.md
+  - Support: support.md

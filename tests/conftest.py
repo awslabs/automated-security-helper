@@ -574,7 +574,7 @@ def pytest_configure(config):
     for marker, flag in _RUNTIME_SNAPSHOT_MARKERS.items():
         config.addinivalue_line(
             "markers",
-            f"{marker}: snapshot of output that needs a real runtime; deselected "
+            f"{marker}: needs a real runtime this host may not have; deselected "
             f"unless {flag} is given",
         )
 
@@ -1031,7 +1031,7 @@ def pytest_addoption(parser):
             flag,
             action="store_true",
             default=False,
-            help=f"Run the {marker} snapshot tests (needs that runtime on this host)",
+            help=f"Run the {marker} tests (needs that runtime on this host)",
         )
 
 
@@ -1044,10 +1044,85 @@ def pytest_addoption(parser):
 #: default run's two sets equal, so that check stays on. The marked modules
 #: also live in their own directory (tests/snapshot/container/runtime/), because
 #: syrupy reads a whole __snapshots__ directory once any test beside it asserts.
+#:
+#: ``ci_runner`` marks tests/integration/docs/test_docs_ci_runners.py and its negative
+#: controls, which run the CI pages' pipelines under their CI systems' runners. They run
+#: only in the Docs CI Runners workflow, on GitHub-hosted runners, which passes the flag.
 _RUNTIME_SNAPSHOT_MARKERS = {
     "container_runtime": "--run-container-snapshots",
     "nix_runtime": "--run-nix-snapshots",
+    "ci_runner": "--run-ci-runners",
 }
+
+#: The CI-runner legs. Each ``ci_runner`` test of one block carries its leg and page as
+#: the marker's ``runner`` and ``page``; --ci-runner and --ci-runner-page deselect the
+#: others, so a leg's junit file holds exactly its blocks, none of them skipped.
+_CI_RUNNER_LEGS = (
+    "act",
+    "gitlab-ci-local",
+    "jenkinsfile-runner-lts",
+    "jenkinsfile-runner-bundled",
+    "codebuild-agent",
+    "circleci",
+)
+
+
+def _add_ci_runner_options(parser):
+    group = parser.getgroup(
+        "ci-runner", "the CI pages' pipelines under their CI systems' runners"
+    )
+    group.addoption(
+        "--ci-runner",
+        choices=_CI_RUNNER_LEGS,
+        default=None,
+        help="run only the blocks of this leg",
+    )
+    group.addoption(
+        "--ci-runner-page",
+        default=None,
+        help="run only the blocks of this page, a repository-relative path",
+    )
+    group.addoption(
+        "--ci-runner-bin",
+        default=None,
+        help="the directory install_tools.py installed the leg's tools in",
+    )
+    group.addoption(
+        "--ci-runner-jenkins-dir",
+        default=None,
+        help="the directory install_tools.py put the Jenkins core and plugins in",
+    )
+    group.addoption(
+        "--ci-runner-wheel",
+        default=None,
+        help="the ASH wheel built from the checkout under test",
+    )
+    group.addoption(
+        "--ci-runner-out",
+        default=None,
+        help="the directory every run's logs, pipelines and reports are written to",
+    )
+    group.addoption(
+        "--ci-runner-launch-timeout",
+        type=float,
+        default=1800.0,
+        help="seconds each runner launch may take before it is stopped (default 1800)",
+    )
+
+
+def _ci_runner_unselected(item, config) -> bool:
+    """Whether --ci-runner or --ci-runner-page leaves out this test of one block."""
+    leg = config.getoption("--ci-runner")
+    page = config.getoption("--ci-runner-page")
+    if leg is None and page is None:
+        return False
+    for mark in item.iter_markers("ci_runner"):
+        if "runner" not in mark.kwargs and "page" not in mark.kwargs:
+            continue
+        return (leg is not None and mark.kwargs.get("runner") != leg) or (
+            page is not None and mark.kwargs.get("page") != page
+        )
+    return False
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -1060,6 +1135,7 @@ def pytest_collection_modifyitems(config, items):
             item.get_closest_marker(marker) is not None and not config.getoption(flag)
             for marker, flag in _RUNTIME_SNAPSHOT_MARKERS.items()
         )
+        or _ci_runner_unselected(item, config)
     ]
     if deselected:
         config.hook.pytest_deselected(items=deselected)

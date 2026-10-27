@@ -5,9 +5,9 @@ allowed-tools: ["mcp__plugin_ash_ash__run_ash_scan", "mcp__plugin_ash_ash__get_s
 
 # Scan
 
-Run a full ASH security scan on the current working directory and report a prioritized findings summary.
+Run an ASH security scan on the current project and report what it finds, most severe first.
 
-## Workflow
+## Steps
 
 1. **Verify installation** — call `check_installation`. If it fails or `installed` is false, surface the install command (`uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash mcp`) and stop. If `ready` is false, tell the user which scanners in `missing_dependencies` will not run (their tools are not installed on the server's host; `ash dependencies install` installs the ones ASH can) and continue. Scanners in `installs_on_first_scan` do run: the first scan installs their tools, which needs network access and takes longer.
 
@@ -36,6 +36,6 @@ Run a full ASH security scan on the current working directory and report a prior
 
 ## Notes
 
-- The scan runs in the background regardless of MCP connection state. If the user cancels mid-scan, call `cancel_scan` to free server resources.
-- Default scan time is 30-120 seconds; longer for large monorepos.
-- For deeper investigation of a specific finding, use the full ASH MCP skill workflow.
+- If there are no ASH tools, the MCP server is not running. The plugin starts it with `uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash mcp`, which needs uv, and network access to GitHub the first time.
+- The MCP server always scans in local mode. For a container scan, the user runs `ash scan --mode container`.
+- Do not repeat the value of a detected secret. Refer to its file and line.

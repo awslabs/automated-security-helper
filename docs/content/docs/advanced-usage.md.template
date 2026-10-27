@@ -8,6 +8,7 @@ ASH v3 supports four execution modes:
 
 ### Local Mode
 
+<!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 ash --mode local
 ```
@@ -46,11 +47,12 @@ and `true`). A
 repository's configuration file cannot turn this on, and `ash mcp` ignores both: an
 MCP client's scans never run a tool from inside a scanned or delivered directory, so
 for MCP use, install scanners outside the repository. See
-[Troubleshooting](troubleshooting.md#a-scanner-is-missing-because-it-was-found-only-inside-the-scanned-tree)
+[Troubleshoot](../how-to/troubleshoot.md#a-scanner-is-missing-because-it-was-found-only-inside-the-scanned-tree)
 for the message and the fixes.
 
 ### Container Mode
 
+<!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 ash --mode container
 ```
@@ -62,6 +64,7 @@ ash --mode container
 
 ### Precommit Mode
 
+<!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 ash --mode precommit
 ```
@@ -95,6 +98,7 @@ ASH v3 supports custom plugins for extending functionality:
 
 1. Create a Python module with your plugins:
 
+<!-- doctest: illustrative reason="a fragment of Python code that names objects defined elsewhere" -->
 ```python
 # my_ash_plugins/scanners.py
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
@@ -143,6 +147,7 @@ ash_plugin_modules:
 
 3. Use your custom scanner:
 
+<!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 ash --ash-plugin-modules my_ash_plugins
 ```
@@ -151,6 +156,7 @@ ash --ash-plugin-modules my_ash_plugins
 
 For air-gapped environments:
 
+<!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Build an offline image
 ash build-image --offline --offline-semgrep-rulesets p/ci
@@ -174,7 +180,7 @@ semgrep and opengrep rulesets 30 days after they were downloaded. Rebuild the im
 (`ash build-image --offline`) at least that often. To scan with an older image
 anyway, pass `--allow-stale-content-db` or set `content_db_staleness: warn`; the scan
 then passes and every report names the stale database. See
-[Failing on a stale content database](configuration-guide.md#failing-on-a-stale-content-database).
+[What happens when a database is stale](../concepts/content-databases.md#what-happens-when-a-database-is-stale).
 
 ### Which scanners run offline
 
@@ -235,7 +241,8 @@ over the network on their own:
   registry's advisory service: offline `npm audit --offline` reported no advisories for
   a lockfile with known ones, `pnpm audit --offline` sent the dependency list to the
   registry anyway, and `yarn npm audit` has no offline mode. Every lockfile it would
-  have audited is listed as not scanned, with the reason, in
+  have audited (a `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock` or
+  `pnpm-lock.yaml` beside a `package.json`) is listed as not scanned, with the reason, in
   `ash_aggregated_results.json` (the scanner's `inputs_not_scanned`), the console
   summary, and the "Inputs not scanned" section of `ash.summary.md` and
   `ash.summary.txt`. A workspace scan lists every project's, with workspace-relative
@@ -246,7 +253,7 @@ over the network on their own:
   with no lockfile has nothing to audit, and npm-audit is SKIPPED.
 - detect-secrets does not verify candidate secrets with their issuers, whatever the
   scanned repository's `.secrets.baseline` or any config says. See
-  [Secret verification](configuration-guide.md#secret-verification).
+  [What each tier may set](../concepts/trust-model.md#what-each-tier-may-set).
 
 #### Seeding the semgrep and opengrep rule cache
 
@@ -260,6 +267,7 @@ For the container, build the image with `--offline`. The build downloads each ru
 in `--offline-semgrep-rulesets` (space-separated, default `p/ci`) into
 `/deps/.semgrep` and `/deps/.opengrep` and sets both variables:
 
+<!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 ash build-image --offline --offline-semgrep-rulesets "p/ci p/python"
 ```
@@ -269,6 +277,7 @@ image build uses, and record the download time in `.ash-rules-fetched-at` next t
 them. ASH reads that file to hold the rules to their 30-day bound; without it, it
 falls back to the oldest rule file's modification time, which a copy resets.
 
+<!-- doctest: illustrative reason="needs the network to download rulesets" -->
 ```bash
 export SEMGREP_RULES_CACHE_DIR="$HOME/.cache/ash/semgrep"
 export OPENGREP_RULES_CACHE_DIR="$HOME/.cache/ash/opengrep"
@@ -299,21 +308,23 @@ rules directory itself. If semgrep or opengrep still cannot read its rules, it e
 
 ASH v3 executes scans in phases:
 
+<!-- doctest: illustrative reason="runs full scans of the current directory with every enabled scanner, which need their tools and network access" -->
 ```bash
-# Run only specific phases
-ash --phases convert,scan
+# Run only specific phases (give --phases once for each phase)
+ash --phases convert --phases scan
 
 # Skip report generation
-ash --phases convert,scan
+ash --phases convert --phases scan
 
 # Include inspection phase
-ash --phases convert,scan,report,inspect
+ash --phases convert --phases scan --phases report --phases inspect
 ```
 
 ## Using Existing Results
 
 You can generate reports from existing scan results:
 
+<!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Use existing results file
 ash --use-existing --output-dir /path/to/results
@@ -326,6 +337,7 @@ ash report --format html --output-dir /path/to/results
 
 ASH v3 includes an interactive TUI for exploring findings:
 
+<!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Launch the findings explorer
 ash inspect findings --output-dir /path/to/results
@@ -343,6 +355,7 @@ directory, a symlink that leads out of it, or results in any other directory sho
 
 ### Using Alternative Container Runtimes
 
+<!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Use Podman instead of Docker
 ash --mode container --oci-runner podman
@@ -356,9 +369,10 @@ ash --mode container --oci-runner finch
 ASH does not publish a container image to a public registry. Building it yourself and
 hosting it in your own registry is the recommended posture, so that the provenance and
 patching cadence of the image that reads your source code belong to you. See
-[Building your own container image](building-your-own-image.md) for the reasoning, the
+[Build and host your own image](../how-to/run-in-a-container.md#own-image) for the reasoning, the
 rebuild cadence it commits you to, and offline builds.
 
+<!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Specify a custom container image
 export ASH_IMAGE_NAME="my-registry/ash:custom"
@@ -367,6 +381,7 @@ ash --mode container
 
 ### Building Custom Images
 
+<!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Build a custom image
 ash build-image --build-target ci --custom-containerfile ./my-dockerfile
@@ -374,6 +389,7 @@ ash build-image --build-target ci --custom-containerfile ./my-dockerfile
 
 ## Advanced Configuration Overrides
 
+<!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Complex configuration overrides
 ash --config-overrides 'scanners.semgrep.options.config=p/owasp-top-ten'
@@ -384,6 +400,7 @@ ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reaso
 
 ### Adding Suppressions via Config Overrides
 
+<!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Add a suppression rule
 ash --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-123", "path": "src/example.py", "reason": "False positive"}]'
@@ -408,6 +425,7 @@ Two directives are supported:
 The directives are case-insensitive. The reason text is optional but
 recommended.
 
+<!-- doctest: illustrative reason="a fragment of Python code that names objects defined elsewhere" -->
 ```python
 # Suppress a specific rule on the same line:
 password = os.environ[
@@ -435,6 +453,7 @@ suppressions start with `"(ASH)"` while inline suppressions start with
 
 ### Temporarily Ignoring Suppressions
 
+<!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Run a scan ignoring all suppression rules, ignore_paths included
 ash --ignore-suppressions
@@ -447,6 +466,7 @@ ash --ignore-suppressions --output-dir ./verification-scan
 
 ASH v3 can be used programmatically in Python:
 
+<!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```python
 from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 from automated_security_helper.core.enums import ExecutionStrategy, RunMode
@@ -563,6 +583,7 @@ Both examples keep `scanners/` and `converted/` out of the artifact: those hold 
 
 ## Performance Optimization
 
+<!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Run scanners in parallel (default)
 ash --strategy parallel
@@ -576,6 +597,7 @@ ash --cleanup
 
 ## Debugging
 
+<!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Enable debug logging
 ash --debug
@@ -598,4 +620,4 @@ ASH v3 includes comprehensive scanner validation that monitors scanner registrat
 
 The validation system includes result completeness validation that ensures all originally registered scanners appear in the final scan results, even if they failed or were disabled. This provides complete visibility into scan coverage and helps identify any scanners that may have been silently dropped during the scan process.
 
-For detailed information about the scanner validation system, see the [Scanner Validation System](../developer-guide/scanner-validation-system.md) developer guide.
+For detailed information about the scanner validation system, see [See why a scanner did not run](../contributing/testing.md#see-why-a-scanner-did-not-run) in the testing guide.

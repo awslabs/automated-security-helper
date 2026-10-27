@@ -170,7 +170,13 @@ dev = [
  "types-boto3-sqs>=1.43,<2.0.0",
  "types-boto3-sts>=1.43.94,<2.0.0",
  "mkdocs-awesome-nav>=3.3,<4.0.0",
- "mkdocs-mermaid2-plugin>=1.2,<2.0.0",
+ # Versioned docs: the docs workflow publishes each release, and main, with mike, which
+ # builds a version into its own directory of the gh-pages branch and records it in
+ # versions.json. Material's version selector (extra.version.provider in mkdocs.yml)
+ # reads that file, and scripts/docs_versions.py check builds the two together on every
+ # pull request. The floor is the version that check and the deploy were verified
+ # against; the cap is this group's next-major convention.
+ "mike>=2.2,<3.0.0",
  "pytest-xdist>=3.8,<4.0.0",
  "toml>=0.10",
  "hatchling>=1.32.4",
@@ -258,18 +264,19 @@ version = "3.7.0"
 # resolves the ref, so a wrong tag is a wrong ASH and a deleted tag is a hard
 # failure.
 #
-# cli-reference.md, mcp-performance-scalability.md and trivy-plugin.md are the
-# same failure again, and they are the reason this list is not the only guard.
-# Each holds a paste-in install command that nothing rewrote: cli-reference.md
-# and mcp-performance-scalability.md sat three minor releases behind, and
-# trivy-plugin.md six. They were missed because the
-# repository had three separate hand-maintained lists of files that pin the
-# version -- this one, scripts/version_template_manager.py's target_files, and
-# the test's own list -- and a file absent from all three is invisible to every
-# one of them. tests/unit/test_agent_plugin_ash_version.py now walks the whole
-# tree for install refs instead of consulting a list, so the next omission fails
-# a test rather than shipping. Adding a pin here without adding it there is
-# safe; the reverse is what this comment exists to prevent.
+# There used to be three docs/ entries here: cli-reference.md,
+# mcp-performance-scalability.md and trivy-plugin.md each held a paste-in install
+# command that nothing rewrote, and they sat three to six minor releases behind. The
+# docs rewrite removed the first two pages and the pin from the third; every page
+# that still pins a tag is a .md.template rendered by
+# scripts/version_template_manager.py. They were missed because the repository had
+# three separate hand-maintained lists of files that pin the version -- this one,
+# scripts/version_template_manager.py's target_files, and the test's own list --
+# and a file absent from all three is invisible to every one of them.
+# tests/unit/test_agent_plugin_ash_version.py now walks the whole tree for install
+# refs instead of consulting a list, so the next omission fails a test rather than
+# shipping. Adding a pin here without adding it there is safe; the reverse is what
+# this comment exists to prevent.
 #
 # building-your-own-image.md joined when its install commands stopped naming
 # ASH's distribution bare, which PyPI resolves to an unrelated project, and

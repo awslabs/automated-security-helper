@@ -1,0 +1,19 @@
+{
+  "description": "Browser checks, captures, and the vendored MIT animation build for ASH.",
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@playwright/test": "1.64.0",
+    "animejs": "4.5.0",
+    "esbuild": "0.28.2"
+  },
+  "name": "ash-interface-checks",
+  "private": true,
+  "scripts": {
+    "capture": "node capture.cjs",
+    "report": "playwright show-report",
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "vendor:motion": "node vendor-motion.cjs"
+  },
+  "version": "1.0.0"
+}

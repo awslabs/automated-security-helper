@@ -5,6 +5,7 @@ scanners run as ordinary child processes with your user's full access: they can 
 `~/.ssh`, write anywhere you can, and open network connections. `--sandbox` runs every
 scanner subprocess inside an OS-level sandbox instead. It is off by default.
 
+<!-- doctest: illustrative reason="needs a sandbox backend on the host and the tool of every enabled scanner" -->
 ```bash
 ash scan --sandbox auto            # best sandbox this machine has
 ash scan --sandbox bwrap --offline # bubblewrap, no scanner gets a network
@@ -232,7 +233,7 @@ it needs.
   there by a fixed name such as `ash.log`, is one. The scan stops with an error that names the link before ASH
   writes anything there, whatever the sandbox mode, since ASH clears and writes
   those itself; pass `--output-dir` with a directory that is not a link. See
-  [Output directory](concepts.md#output-directory) for the full list. Links above an
+  [Links are refused](../reference/output-files.md#links) for the full list. Links above an
   output directory outside the source tree (`/tmp` on macOS) are your own and are
   not examined.
 - ASH writes into the results directory after the scanner exits, and ASH is not
@@ -300,6 +301,7 @@ skipped for lacking a declaration, and never run unsandboxed.
 
 A plugin that needs more declares it:
 
+<!-- doctest: illustrative reason="a fragment of a scanner plugin class that names a config class defined elsewhere" -->
 ```python
 from typing import ClassVar
 
@@ -370,7 +372,7 @@ which it does when its settings list the verification filter. Only the operator'
 configuration can list it: ASH removes it from a `.secrets.baseline` inside the
 scanned tree and from a config file the scanned repository or an MCP client wrote,
 and offline from every source (see
-[Secret verification](configuration-guide.md#secret-verification)). A baseline the
+[What each tier may set](../concepts/trust-model.md#what-each-tier-may-set)). A baseline the
 operator names can still load a detect-secrets plugin from a file outside the tree, so
 the sandbox doesn't take detect-secrets' own word for it either: detect-secrets gets a
 network only when `sandbox.network_scanners` names it, and a repository can't set that
@@ -385,6 +387,8 @@ and the sandbox wraps them like any other scanner. To let detect-secrets verify
 secrets under the sandbox, pass `--config-overrides 'sandbox.network_scanners=[detect-secrets]'`
 (plus any other scanners that need a network). Under `--offline` it gets none.
 
+### Give a scanner more access {#grants}
+
 To give an extra scanner network access, or take it away:
 
 ```yaml
@@ -393,6 +397,8 @@ sandbox:
   network_scanners: [grype, trivy-repo]   # replaces the per-scanner defaults
   extra_read_paths: [/opt/company-ca]
 ```
+
+#### Who may grant
 
 Four settings grant access: `network_scanners`, `extra_read_paths`, and the two
 below that let a scanner have what its own options ask for. A config file the
@@ -463,7 +469,7 @@ reason names the link.
 Plugin modules are judged by the same rule. A tool config file a scanner option
 names is judged by it too when a config inside the scanned tree names it; one the
 operator names may sit in a checkout of the operator's own. See
-[Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose).
+[How a file's tier is decided](../concepts/trust-model.md#how-the-tier-is-decided).
 
 Sandbox grants follow a scanner's own name, the one its code gives it. If a config
 file renames a scanner's section, for example by setting `name: grype` on a plugin's
@@ -478,6 +484,8 @@ a checkout, because a mode other than `off` grants nothing. Only `--sandbox off`
 sandbox on, the repository's `mode` applies, because a sandbox the repository asks
 for only takes access away. In workspace mode, the operator's `--config` decides for
 a project that has its own config file, the same as for one that doesn't.
+
+### Install tools before a sandboxed scan
 
 A sandboxed scan does not install tools, for scanners and converters alike:
 installing runs a package's build code and writes uv's tool directory, which a
@@ -579,7 +587,7 @@ Out of scope:
 - Plugin modules. A config file can list `ash_plugin_modules`, which ASH imports into
   its own process, so they run unsandboxed. From a config file inside the scanned
   tree, only installed modules outside the tree are imported (see
-  [Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose)),
+  [What each tier may set](../concepts/trust-model.md#what-each-tier-may-set)),
   but an installed package still runs with ASH's access. The sandbox doesn't change
   this; review the plugin modules a repository's config names before you scan it.
   ASH's own `ash_aws_plugins` and `ash_snyk_plugins` packages are not imported from
@@ -600,6 +608,46 @@ Out of scope:
   network namespace forces all traffic through it; that is future work.
 - Results integrity. A scanner can still write false results to its own results file.
 - Kernel defects. All backends share the host kernel.
+
+## Scan a repository you do not trust {#untrusted}
+
+For a repository you do not trust, on Linux or macOS:
+
+1. Install the scanners first, from a trusted environment, with
+   `ash dependencies install`. Run it from a directory outside the repository, because
+   it reads the ASH config of the directory it runs in. A sandboxed scan does not
+   install tools (see
+   [Install tools before a sandboxed scan](#install-tools-before-a-sandboxed-scan)),
+   and a scanner whose tool is missing is recorded `MISSING`.
+2. Keep your own config file outside every git checkout and outside the scanned
+   directory, and pass it with `--config`. Only such a file and `--config-overrides`
+   can grant sandbox access (see [Who may grant](#who-may-grant)).
+3. Scan in local mode with the sandbox on. On Linux, name the backend with
+   `--sandbox bwrap`, or set `sandbox.mode` to `bwrap` in that file: `--sandbox auto`
+   falls back to firejail when bwrap is not usable, and firejail leaves readable every
+   path outside `$HOME` that your user can read. On macOS the backend is sandbox-exec,
+   which reads everywhere except the home directory and the shared temporary
+   directories.
+4. Scan with `--offline` if you can, so that no scanner gets a network. Otherwise set
+   `sandbox.network_scanners` to the shortest list that works. Offline, npm-audit is
+   `MISSING` for a project that has a lockfile, because npm, pnpm and yarn audit only
+   against the package registry; leave it out with `--exclude-scanners npm-audit`.
+5. Put the output directory outside the repository with `--output-dir`. The default
+   output directory, `.ash/ash_output`, is inside the scanned directory.
+6. Do not pass `--allow-in-tree-tools` or set `ASH_ALLOW_IN_TREE_TOOLS`, so that ASH
+   starts no tool it finds only inside the repository (see
+   [Tools inside the scanned directory](advanced-usage.md#tools-inside-the-scanned-directory)).
+7. Name only plugin modules you trust. A plugin module runs in ASH's own process,
+   outside the sandbox.
+
+With the default `fail_on_incomplete_scanners`, a scanner whose tool is found only
+inside the repository, or that cannot be sandboxed under `--sandbox auto` because no
+backend works, is `MISSING`. A scanner whose sandbox backend you named and that is
+unavailable, or whose sandbox is refused for another reason, is `ERROR`. Either way the
+scan exits 1, rather than passing on fewer scanners than you asked for.
+
+On Windows there is no sandbox backend. Run ASH under WSL2 with `--sandbox bwrap`, or
+use container mode, where the container is the boundary.
 
 ## Design
 
@@ -832,6 +880,7 @@ A macOS release or a scanner update can make a tool look up a service that is no
 the list. The profile denies it, the tool usually fails or reports less, and the
 unified log says which service it was:
 
+<!-- doctest: illustrative reason="log is a macOS command" -->
 ```bash
 log show --last 10m --predicate 'sender == "Sandbox"' | grep -E 'deny\(1\) (mach-lookup|process-exec)'
 ```

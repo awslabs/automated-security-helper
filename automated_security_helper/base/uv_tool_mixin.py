@@ -1998,6 +1998,31 @@ class UVToolMixin:
         """
         return None
 
+    def _get_tool_python_request(self) -> Optional[str]:
+        """Interpreter request for ``uv tool install/run --python``, or None.
+
+        None, the default, leaves the interpreter to uv, which is how every
+        uv-backed plugin behaved before this hook existed. Override it for a tool
+        whose dependencies publish no wheels for the newest interpreter uv may
+        pick: uv then builds those dependencies from source, which needs a C
+        toolchain and system headers, and the install fails. GuardDog is the
+        case that added this (pygit2 and yara-python have no CPython 3.14 wheels
+        at the pinned version). A version specifier such as ``">=3.10,<3.14"``
+        lets uv choose, or download, any interpreter that satisfies it.
+
+        The value must carry no whitespace; see ``_setup_uv_tool_install_commands``.
+        """
+        return None
+
+    def _uv_python_kwargs(self) -> Dict[str, Any]:
+        """``{"python_request": ...}`` for the runner calls, or ``{}`` when unset.
+
+        Empty rather than ``{"python_request": None}`` when unset, so every
+        existing plugin calls the runner with exactly the arguments it did before.
+        """
+        python_request = self._get_tool_python_request()
+        return {"python_request": python_request} if python_request else {}
+
     def _get_tool_with_dependencies(self) -> Optional[List[str]]:
         """Get additional dependencies to install with the tool using --with flag.
 

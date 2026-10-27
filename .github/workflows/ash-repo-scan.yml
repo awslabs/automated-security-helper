@@ -1,8 +1,10 @@
 name: Run ASH
 on:
   pull_request:
+    # "**" not "*": "*" does not match "/", so a pull request whose base is a nested
+    # branch would get no scan at all. "**" matches nested branch names too.
     branches:
-      - "*"
+      - "**"
   merge_group:
   workflow_dispatch: {}
   # For the grype-db-cache job only. The scan job below skips pushes, so a merge does
