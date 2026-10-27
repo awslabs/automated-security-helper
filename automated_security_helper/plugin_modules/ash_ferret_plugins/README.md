@@ -23,6 +23,7 @@ Ferret Scan is a sensitive data detection tool that scans files for potential se
 
 Install Ferret Scan:
 
+<!-- doctest: illustrative reason="installs a tool over the network" -->
 ```bash
 # Recommended: let ASH install the version this plugin is tested against
 ash dependencies install --config .ash/.ash_community_plugins.yaml
@@ -66,6 +67,7 @@ scanners:
 
 Use the `--ash-plugin-modules` flag when running ASH:
 
+<!-- doctest: illustrative reason="runs a scan that needs ferret-scan installed on the host" -->
 ```bash
 uv run ash scan --source-dir /path/to/code \
     --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins
@@ -75,6 +77,7 @@ uv run ash scan --source-dir /path/to/code \
 
 To verify the plugin is properly loaded:
 
+<!-- doctest: illustrative reason="runs a scan that needs ferret-scan installed on the host" -->
 ```bash
 # With config file
 uv run ash plugin list | grep -i ferret
@@ -363,6 +366,7 @@ hardcode it, as ferret-scan adds detectors between releases. As of v2.4.5 throug
 To create your own config file, you can:
 
 1. Copy the default config from the plugin:
+   <!-- doctest: illustrative reason="a shell outline that needs the plugin's tool and a project to scan" -->
    ```bash
    cp $(python -c "import automated_security_helper.plugin_modules.ash_ferret_plugins as p; print(p.__path__[0])")/ferret-config.yaml ./my-ferret-config.yaml
    ```
@@ -386,7 +390,7 @@ To create your own config file, you can:
 The plugin outputs results in SARIF format, which is automatically aggregated with other ASH scanner results.
 
 Results are written to:
-```
+```text
 .ash/ash_output/
 ├── scanners/
 │   └── ferret-scan/
@@ -398,6 +402,7 @@ Results are written to:
 
 ## Example Usage
 
+<!-- doctest: illustrative reason="runs a scan that needs ferret-scan installed on the host" -->
 ```bash
 # Run ASH with Ferret Scan enabled
 uv run ash --source-dir /path/to/code
@@ -423,7 +428,7 @@ uv run ash --source-dir /path/to/code \
 
 If you try to use bare `debug` instead of `ferret_debug`, you'll see a clear error:
 
-```
+```text
 ValueError: Unsupported option 'debug' in ferret-scan plugin configuration. 
 Use 'ferret_debug: true' instead. Bare 'debug' is blocked to avoid confusion with ASH's --debug flag.
 ```
@@ -431,6 +436,7 @@ Use 'ferret_debug: true' instead. Bare 'debug' is blocked to avoid confusion wit
 ### Common Issues
 
 **ferret-scan binary not found:**
+<!-- doctest: illustrative reason="installs a tool over the network" -->
 ```bash
 # Install ferret-scan
 pip install ferret-scan

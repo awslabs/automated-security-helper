@@ -8,6 +8,7 @@ ASH v3 supports four execution modes:
 
 ### Local Mode
 
+<!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 ash --mode local
 ```
@@ -51,6 +52,7 @@ for the message and the fixes.
 
 ### Container Mode
 
+<!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 ash --mode container
 ```
@@ -62,6 +64,7 @@ ash --mode container
 
 ### Precommit Mode
 
+<!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 ash --mode precommit
 ```
@@ -77,6 +80,7 @@ ash --mode precommit
 
 ### Nix Mode
 
+<!-- doctest: illustrative reason="needs Nix" -->
 ```bash
 ash --mode nix
 ```
@@ -138,6 +142,7 @@ ASH v3 supports custom plugins for extending functionality:
 
 1. Create a Python module with your plugins:
 
+<!-- doctest: illustrative reason="a fragment of Python code that names objects defined elsewhere" -->
 ```python
 # my_ash_plugins/scanners.py
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
@@ -186,6 +191,7 @@ ash_plugin_modules:
 
 3. Use your custom scanner:
 
+<!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 ash --ash-plugin-modules my_ash_plugins
 ```
@@ -194,6 +200,7 @@ ash --ash-plugin-modules my_ash_plugins
 
 For air-gapped environments:
 
+<!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Build an offline image
 ash build-image --offline --offline-semgrep-rulesets p/ci
@@ -304,6 +311,7 @@ For the container, build the image with `--offline`. The build downloads each ru
 in `--offline-semgrep-rulesets` (space-separated, default `p/ci`) into
 `/deps/.semgrep` and `/deps/.opengrep` and sets both variables:
 
+<!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 ash build-image --offline --offline-semgrep-rulesets "p/ci p/python"
 ```
@@ -313,6 +321,7 @@ image build uses, and record the download time in `.ash-rules-fetched-at` next t
 them. ASH reads that file to hold the rules to their 30-day bound; without it, it
 falls back to the oldest rule file's modification time, which a copy resets.
 
+<!-- doctest: illustrative reason="needs the network to download rulesets" -->
 ```bash
 export SEMGREP_RULES_CACHE_DIR="$HOME/.cache/ash/semgrep"
 export OPENGREP_RULES_CACHE_DIR="$HOME/.cache/ash/opengrep"
@@ -359,6 +368,7 @@ ash --phases convert --phases scan --phases report --phases inspect
 
 You can generate reports from existing scan results:
 
+<!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Use existing results file
 ash --use-existing --output-dir /path/to/results
@@ -371,6 +381,7 @@ ash report --format html --output-dir /path/to/results
 
 ASH v3 includes an interactive TUI for exploring findings:
 
+<!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Launch the findings explorer
 ash inspect findings --output-dir /path/to/results
@@ -388,6 +399,7 @@ directory, a symlink that leads out of it, or results in any other directory sho
 
 ### Using Alternative Container Runtimes
 
+<!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Use Podman instead of Docker
 ash --mode container --oci-runner podman
@@ -404,6 +416,7 @@ patching cadence of the image that reads your source code belong to you. See
 [Build and host your own image](../how-to/run-in-a-container.md#own-image) for the reasoning, the
 rebuild cadence it commits you to, and offline builds.
 
+<!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Specify a custom container image
 export ASH_IMAGE_NAME="my-registry/ash:custom"
@@ -412,6 +425,7 @@ ash --mode container
 
 ### Building Custom Images
 
+<!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Build a custom image
 ash build-image --build-target ci --custom-containerfile ./my-dockerfile
@@ -419,6 +433,7 @@ ash build-image --build-target ci --custom-containerfile ./my-dockerfile
 
 ## Advanced Configuration Overrides
 
+<!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Complex configuration overrides
 ash --config-overrides 'scanners.semgrep.options.config=p/owasp-top-ten'
@@ -429,6 +444,7 @@ ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reaso
 
 ### Adding Suppressions via Config Overrides
 
+<!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Add a suppression rule
 ash --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-123", "path": "src/example.py", "reason": "False positive"}]'
@@ -453,6 +469,7 @@ Two directives are supported:
 The directives are case-insensitive. The reason text is optional but
 recommended.
 
+<!-- doctest: illustrative reason="a fragment of Python code that names objects defined elsewhere" -->
 ```python
 # Suppress a specific rule on the same line:
 password = os.environ[
@@ -480,6 +497,7 @@ suppressions start with `"(ASH)"` while inline suppressions start with
 
 ### Temporarily Ignoring Suppressions
 
+<!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Run a scan ignoring all suppression rules, ignore_paths included
 ash --ignore-suppressions
@@ -492,6 +510,7 @@ ash --ignore-suppressions --output-dir ./verification-scan
 
 ASH v3 can be used programmatically in Python:
 
+<!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```python
 from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 from automated_security_helper.core.enums import ExecutionStrategy, RunMode
@@ -540,6 +559,7 @@ command. To have your handler write them as ASH's own console and log file do,
 with control characters as escapes and CI command lines broken, give it
 `CommandSafeFormatter`:
 
+<!-- doctest: illustrative reason="a fragment of Python code that names objects defined elsewhere" -->
 ```python
 import logging
 
@@ -608,6 +628,7 @@ Both examples keep `scanners/` and `converted/` out of the artifact: those hold 
 
 ## Performance Optimization
 
+<!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Run scanners in parallel (default)
 ash --strategy parallel
@@ -621,6 +642,7 @@ ash --cleanup
 
 ## Debugging
 
+<!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Enable debug logging
 ash --debug

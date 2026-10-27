@@ -20,16 +20,19 @@ The Snyk Code plugin enables ASH to leverage Snyk's powerful static analysis cap
 The plugin requires Snyk CLI to be installed and available in your system PATH.
 
 **npm (Recommended)**:
+<!-- doctest: illustrative reason="installs the Snyk CLI over the network" -->
 ```bash
 npm install -g snyk
 ```
 
 **Homebrew (macOS)**:
+<!-- doctest: illustrative reason="installs the Snyk CLI over the network" -->
 ```bash
 brew install snyk/tap/snyk
 ```
 
 **Manual Installation**:
+<!-- doctest: illustrative reason="installs the Snyk CLI over the network" -->
 ```bash
 # Download and install latest release
 curl -Lo snyk https://github.com/snyk/cli/releases/latest/download/snyk-linux
@@ -44,11 +47,13 @@ sudo mv snyk /usr/local/bin/
 Snyk Code requires authentication to access the scanning service:
 
 **Option 1: Environment Variable**
+<!-- doctest: illustrative reason="sets a placeholder token for the Snyk CLI" -->
 ```bash
 export SNYK_TOKEN=your-snyk-token
 ```
 
 **Option 2: CLI Authentication**
+<!-- doctest: illustrative reason="needs the Snyk CLI and a Snyk account" -->
 ```bash
 snyk auth
 ```
@@ -58,6 +63,7 @@ The plugin will automatically check for credentials at `~/.config/configstore/sn
 
 ### Verify Installation
 
+<!-- doctest: illustrative reason="needs the Snyk CLI and a Snyk account" -->
 ```bash
 snyk --version
 snyk code test --help
@@ -75,6 +81,7 @@ is ignored with a warning naming the entry.
 
 Load it with `--ash-plugin-modules`:
 
+<!-- doctest: illustrative reason="runs a scan that needs the Snyk CLI and a Snyk account" -->
 ```bash
 uv run ash --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
 ```
@@ -82,6 +89,7 @@ uv run ash --ash-plugin-modules automated_security_helper.plugin_modules.ash_sny
 or with the `ASH_PLUGIN_MODULES` environment variable, which the commands on the
 rest of this page assume is set:
 
+<!-- doctest: illustrative reason="a shell outline that needs the Snyk CLI" -->
 ```bash
 export ASH_PLUGIN_MODULES=automated_security_helper.plugin_modules.ash_snyk_plugins
 ```
@@ -104,6 +112,7 @@ scanners:
 
 ### Run Snyk Code Scan
 
+<!-- doctest: illustrative reason="runs a scan that needs the Snyk CLI and a Snyk account" -->
 ```bash
 # Scan current directory
 uv run ash --scanners snyk-code
@@ -116,6 +125,7 @@ uv run ash --scanners snyk-code /path/to/project
 
 If you want to run Snyk code scan without saving a configuration file for ASH:
 
+<!-- doctest: illustrative reason="runs a scan that needs the Snyk CLI and a Snyk account" -->
 ```bash
 # Scan current directory only with snyk-code
 uv run ash --scanners snyk-code --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_snyk_plugins\"]"
@@ -152,6 +162,7 @@ neither does `.gitignore`, which ASH's own scan set honors too.
 To accept a repository's exclusions, set `honor_tree_exclusions` with
 `--config-overrides`:
 
+<!-- doctest: illustrative reason="runs a scan that needs the Snyk CLI and a Snyk account" -->
 ```bash
 uv run ash --scanners snyk-code --config-overrides 'scanners.snyk-code.options.honor_tree_exclusions=true'
 ```
@@ -202,6 +213,7 @@ scanners:
 
 ### Combined with Other Scanners
 
+<!-- doctest: illustrative reason="runs a scan that needs the Snyk CLI and a Snyk account" -->
 ```bash
 # Use Snyk Code alongside other ASH scanners
 uv run ash --scanners snyk-code,bandit,semgrep
@@ -212,6 +224,7 @@ uv run ash --scanners snyk-code,trivy-repo --config .ash/.ash_community_plugins.
 
 ### CI/CD Integration
 
+<!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Run in container mode for CI/CD
 uv run ash --mode container --scanners snyk-code --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
@@ -239,6 +252,7 @@ Snyk Code results are integrated into ASH's unified reporting system:
 ### Common Issues
 
 **Snyk CLI not found**:
+<!-- doctest: illustrative reason="installs the Snyk CLI over the network" -->
 ```bash
 # Check if Snyk is in PATH
 which snyk
@@ -248,6 +262,7 @@ npm install -g snyk
 ```
 
 **Authentication errors**:
+<!-- doctest: illustrative reason="needs the Snyk CLI and a Snyk account" -->
 ```bash
 # Check authentication status
 snyk auth
@@ -257,6 +272,7 @@ export SNYK_TOKEN=your-token-here
 ```
 
 **Network connectivity issues**:
+<!-- doctest: illustrative reason="needs the Snyk CLI and a Snyk account" -->
 ```bash
 # Test connectivity to Snyk services
 snyk test --dry-run
@@ -275,6 +291,7 @@ failure and is reported ERROR.
 
 Enable verbose logging to troubleshoot issues:
 
+<!-- doctest: illustrative reason="runs a scan that needs the Snyk CLI and a Snyk account" -->
 ```bash
 uv run ash --scanners snyk-code --log-level DEBUG
 ```
@@ -287,6 +304,7 @@ completeness gate (`fail_on_incomplete_scanners`, exit code 1). To scan offline
 without it, leave it out. Both commands assume the plugin is enabled in your
 configuration, as shown above:
 
+<!-- doctest: illustrative reason="runs a scan that needs the Snyk CLI and a Snyk account" -->
 ```bash
 # snyk-code is MISSING here, and the scan exits 1
 uv run ash --offline --scanners snyk-code

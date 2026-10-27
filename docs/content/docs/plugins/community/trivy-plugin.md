@@ -33,11 +33,13 @@ The ASH Trivy plugin provides seamless integration with Trivy's repository scann
 #### Installation Options
 
 **Using Homebrew (macOS/Linux):**
+<!-- doctest: illustrative reason="installs a tool over the network" -->
 ```bash
 brew install trivy
 ```
 
 **Using Package Managers:**
+<!-- doctest: illustrative reason="installs a tool over the network" -->
 ```bash
 # Ubuntu/Debian
 sudo apt-get install wget apt-transport-https gnupg lsb-release
@@ -56,12 +58,14 @@ sudo yum -y install trivy
 **Using Binary Releases:**
 
 *Linux/macOS:*
+<!-- doctest: illustrative reason="installs a tool over the network" -->
 ```bash
 # Download and install from GitHub releases
 curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
 ```
 
 *Windows:*
+<!-- doctest: illustrative reason="installs a tool over the network" -->
 ```bash
 # Download and install using the official endpoint
 curl -sfL -o trivy.zip "https://get.trivy.dev/trivy?type=zip&os=windows&arch=amd64"
@@ -72,6 +76,7 @@ unzip trivy.zip
 ### Verification
 
 Verify Trivy installation:
+<!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
 trivy version
 ```
@@ -82,7 +87,7 @@ trivy version
 
 Add the Trivy plugin to your `.ash/.ash.yaml` configuration:
 
-```
+```text
 ash_plugin_modules:
   - automated_security_helper.plugin_modules.ash_trivy_plugins
 ```
@@ -143,6 +148,7 @@ Trivy supports the following severity levels (from lowest to highest):
 
 ### Basic Repository Scan
 
+<!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
 # Scan current directory with default Trivy settings
 ash --scanners trivy-repo
@@ -164,6 +170,7 @@ scanners:
       ignore_unfixed: true
 ```
 
+<!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
 ash --scanners trivy-repo
 ```
@@ -301,6 +308,7 @@ scanners:
 
 #### 2. Directory-Based Optimization
 
+<!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
 # Scan critical paths first
 ash --target src/ --scanners trivy-repo  # Core application code
@@ -326,6 +334,7 @@ global_settings:
 
 #### 3. Caching Optimization
 
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 # Optimize cache location for performance
 export TRIVY_CACHE_DIR=/fast-ssd/trivy-cache
@@ -340,6 +349,7 @@ chmod -R 755 /shared/trivy-cache
 
 #### 4. Parallel Processing
 
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 #!/bin/bash
 # parallel-scan.sh
@@ -361,6 +371,7 @@ python scripts/merge_scan_results.py
 
 #### 5. Incremental Scanning
 
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 #!/bin/bash
 # incremental-scan.sh
@@ -389,6 +400,7 @@ touch .last_trivy_scan
 
 #### Performance Measurement
 
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 #!/bin/bash
 # benchmark-trivy.sh
@@ -418,6 +430,7 @@ echo "Total findings: $finding_count"
 
 #### Continuous Performance Monitoring
 
+<!-- doctest: illustrative reason="a fragment of plugin code that names objects defined elsewhere" -->
 ```python
 # performance_monitor.py
 import json
@@ -497,6 +510,7 @@ if __name__ == "__main__":
 
 #### Horizontal Scaling
 
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 #!/bin/bash
 # distributed-scan.sh
@@ -546,6 +560,7 @@ services:
 
 #### Memory Limits
 
+<!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Set memory limits for container mode
 ash --mode container --memory 2g --scanners trivy-repo
@@ -557,6 +572,7 @@ ash --scanners trivy-repo
 
 #### Time Limits
 
+<!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
 # Set timeout for scans
 timeout 600 ash --scanners trivy-repo  # 10-minute timeout
@@ -574,6 +590,7 @@ done
 
 #### Disk Space Management
 
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 # Clean up old results
 find .ash/ash_output -name "*.sarif" -mtime +7 -delete
@@ -593,6 +610,7 @@ find .ash/ash_output -name "*.json" -mtime +1 -exec gzip {} \;
 ### 1. Development Workflow Integration
 
 #### Pre-commit Scanning
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 #!/bin/bash
 # .git/hooks/pre-commit
@@ -705,6 +723,7 @@ global_settings:
       reason: "Build artifacts"
 ```
 
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 #!/bin/bash
 # scan-monorepo.sh
@@ -757,6 +776,7 @@ global_settings:
       reason: "Terraform state files"
 ```
 
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 # Scan Terraform modules
 find . -name "*.tf" | xargs dirname | sort -u | while read tf_dir; do
@@ -776,6 +796,7 @@ scanners:
       severity_threshold: "MEDIUM"
 ```
 
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 # Scan Kubernetes manifests
 find . -name "*.yaml" -o -name "*.yml" | grep -E "(k8s|kubernetes|manifests)" | xargs dirname | sort -u | while read k8s_dir; do
@@ -787,6 +808,7 @@ done
 ### 4. Container and Docker Scanning
 
 #### Dockerfile Analysis
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 #!/bin/bash
 # scan-dockerfiles.sh
@@ -809,6 +831,7 @@ done
 ```
 
 #### Docker Compose Projects
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 #!/bin/bash
 # scan-compose-projects.sh
@@ -852,6 +875,7 @@ reporters:
     enabled: true
 ```
 
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 #!/bin/bash
 # license-compliance-check.sh
@@ -908,6 +932,7 @@ EOF
 ### 6. Security Baseline and Regression Testing
 
 #### Establish Security Baseline
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 #!/bin/bash
 # establish-security-baseline.sh
@@ -957,6 +982,7 @@ EOF
 ```
 
 #### Regression Detection
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 #!/bin/bash
 # detect-security-regressions.sh
@@ -1040,18 +1066,21 @@ EOF
 
 **Solutions**:
 1. **Verify Installation**: Check if Trivy is installed
+   <!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
    ```bash
    trivy version
    which trivy
    ```
 
 2. **PATH Configuration**: Ensure Trivy is in your PATH
+   <!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
    ```bash
    echo $PATH
    export PATH=$PATH:/path/to/trivy/bin
    ```
 
 3. **Reinstall Trivy**: Use your preferred installation method
+   <!-- doctest: illustrative reason="installs a tool over the network" -->
    ```bash
    # Homebrew
    brew install trivy
@@ -1061,6 +1090,7 @@ EOF
    ```
 
 4. **Container Mode Alternative**: Use ASH container mode
+   <!-- doctest: illustrative reason="needs a container runtime" -->
    ```bash
    ash --mode container --scanners trivy-repo
    ```
@@ -1076,17 +1106,20 @@ EOF
 
 **Solutions**:
 1. **Check Connectivity**: Verify internet access
+   <!-- doctest: illustrative reason="needs the network" -->
    ```bash
    curl -I https://github.com/aquasecurity/trivy-db/releases
    ```
 
 2. **Clear Cache**: Remove corrupted database cache
+   <!-- doctest: illustrative reason="needs the network" -->
    ```bash
    rm -rf ~/.cache/trivy/
    trivy image --download-db-only
    ```
 
 3. **Proxy Configuration**: Configure proxy settings
+   <!-- doctest: illustrative reason="needs the network" -->
    ```bash
    export HTTP_PROXY=http://proxy.company.com:8080
    export HTTPS_PROXY=http://proxy.company.com:8080
@@ -1094,6 +1127,7 @@ EOF
    ```
 
 4. **Offline Mode**: Use pre-downloaded database
+   <!-- doctest: illustrative reason="needs the network" -->
    ```bash
    # Download database separately
    trivy image --download-db-only --cache-dir /shared/trivy-cache
@@ -1116,23 +1150,27 @@ EOF
 
 **Solutions**:
 1. **Check Permissions**: Verify directory access
+   <!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
    ```bash
    ls -la /path/to/target
    find /path/to/target -type f ! -readable
    ```
 
 2. **Fix Ownership**: Correct file ownership
+   <!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
    ```bash
    sudo chown -R $USER:$USER /path/to/target
    chmod -R u+r /path/to/target
    ```
 
 3. **Run with Sudo**: Use elevated permissions (not recommended)
+   <!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
    ```bash
    sudo ash --scanners trivy-repo --target /path/to/target
    ```
 
 4. **Container Mode**: Use container with proper volume mounts
+   <!-- doctest: illustrative reason="needs a container runtime" -->
    ```bash
    ash --mode container --target /path/to/target --scanners trivy-repo
    ```
@@ -1158,6 +1196,7 @@ EOF
    ```
 
 2. **Directory Filtering**: Scan specific subdirectories
+   <!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
    ```bash
    # Scan only source code directories
    ash --target src/ --scanners trivy-repo
@@ -1177,6 +1216,7 @@ EOF
    ```
 
 4. **Parallel Processing**: Split large repositories
+   <!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
    ```bash
    # Process in parallel
    ash --target frontend/ --scanners trivy-repo &
@@ -1190,11 +1230,13 @@ EOF
 
 **Solutions**:
 1. **Increase Memory Limits**: For container mode
+   <!-- doctest: illustrative reason="needs a container runtime" -->
    ```bash
    docker run --memory=2g --scanners trivy-repo
    ```
 
 2. **Process Smaller Chunks**: Break down large scans
+   <!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
    ```bash
    find . -maxdepth 1 -type d | xargs -I {} ash --target {} --scanners trivy-repo
    ```
@@ -1214,6 +1256,7 @@ EOF
 
 **Solutions**:
 1. **Corporate Firewall**: Configure proxy and certificates
+   <!-- doctest: illustrative reason="needs the network" -->
    ```bash
    export HTTP_PROXY=http://proxy.company.com:8080
    export HTTPS_PROXY=http://proxy.company.com:8080
@@ -1221,11 +1264,13 @@ EOF
    ```
 
 2. **Disable SSL Verification** (not recommended for production):
+   <!-- doctest: illustrative reason="needs the network" -->
    ```bash
    export TRIVY_INSECURE=true
    ```
 
 3. **Use Internal Mirror**: Configure custom database repository
+   <!-- doctest: illustrative reason="needs the network" -->
    ```bash
    export TRIVY_DB_REPOSITORY=internal-mirror.company.com/trivy-db
    ```
@@ -1259,6 +1304,7 @@ EOF
 
 3. **Custom Ignore Files**: A `.trivyignore` in the scanned repository is not read.
    Use ASH suppressions, or an operator ignore file outside the scanned tree:
+   <!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
    ```bash
    echo "CVE-2023-12345" > /etc/ash/trivyignore
    ash --scanners trivy-repo \
@@ -1269,6 +1315,7 @@ EOF
 
 #### Enable Detailed Logging
 
+<!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
 # ASH debug mode
 ash --scanners trivy-repo --log-level DEBUG
@@ -1283,6 +1330,7 @@ TRIVY_DEBUG=true ash --scanners trivy-repo --log-level DEBUG
 
 #### Log Analysis
 
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 # Check ASH logs
 tail -f .ash/ash_output/scanners/trivy-repo/*/ash.log
@@ -1301,6 +1349,7 @@ grep -i error .ash/ash_output/scanners/trivy-repo/*/ash.log
 **Error**: `No such file or directory` in container mode
 
 **Solution**:
+<!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Ensure proper volume mounting
 ash --mode container --target $(pwd) --scanners trivy-repo
@@ -1314,6 +1363,7 @@ docker logs $(docker ps -q --filter ancestor=ash)
 **Error**: Database download fails in container
 
 **Solution**:
+<!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Use host network
 ash --mode container --network host --scanners trivy-repo
@@ -1353,6 +1403,7 @@ ash --mode container --scanners trivy-repo
 #### Windows-Specific Issues
 
 **Path Separator Issues**:
+<!-- doctest: illustrative reason="runs only on Windows" -->
 ```powershell
 # Use forward slashes or escape backslashes
 ash --target "C:/projects/myapp" --scanners trivy-repo
@@ -1367,6 +1418,7 @@ ash --target $PWD --scanners trivy-repo
 
 When reporting issues, include:
 
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 # System information
 uv --version
@@ -1465,6 +1517,7 @@ repos:
 
 Trivy supports extensive configuration through environment variables:
 
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 # Database and caching
 export TRIVY_CACHE_DIR=/custom/cache/path
@@ -1491,6 +1544,7 @@ ash --scanners trivy-repo
 
 #### Using Private Vulnerability Database
 
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 # Set custom database repository
 export TRIVY_DB_REPOSITORY=registry.company.com/security/trivy-db
@@ -1505,6 +1559,7 @@ ash --scanners trivy-repo
 
 #### Offline Scanning Setup
 
+<!-- doctest: illustrative reason="needs the network" -->
 ```bash
 # 1. Download database on internet-connected machine
 trivy image --download-db-only --cache-dir /shared/trivy-cache
@@ -1580,6 +1635,7 @@ global_settings:
 
 #### Dynamic Suppressions
 
+<!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
 # Generate suppressions from previous scan
 ash --scanners trivy-repo --reporters json > results.json
@@ -1615,6 +1671,7 @@ scanners:
       license_full: false
 ```
 
+<!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
 # Use environment-specific configs
 ash --config-file .ash/production.yaml --scanners trivy-repo
@@ -1623,6 +1680,7 @@ ash --config-file .ash/development.yaml --scanners trivy-repo
 
 #### Multi-Target Scanning Strategies
 
+<!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
 # Parallel scanning of different components
 ash --target frontend/ --scanners trivy-repo --config-file .ash/frontend.yaml &
@@ -1640,6 +1698,7 @@ done
 
 #### Caching Strategies
 
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 # Shared cache for team environments
 export TRIVY_CACHE_DIR=/shared/trivy-cache
@@ -1655,6 +1714,7 @@ ash --scanners trivy-repo
 
 #### Incremental Scanning
 
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 # Scan only changed files (requires Git)
 git diff --name-only HEAD~1 | while read file; do
@@ -1699,6 +1759,7 @@ global_settings:
 
 #### Custom Reporting Pipeline
 
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 #!/bin/bash
 # custom-trivy-scan.sh
@@ -1718,6 +1779,7 @@ python scripts/notify_security_team.py
 
 #### Webhook Integration
 
+<!-- doctest: illustrative reason="a fragment of plugin code that names objects defined elsewhere" -->
 ```python
 # webhook_handler.py
 import json
@@ -1750,6 +1812,7 @@ if __name__ == "__main__":
 
 #### Database Integration
 
+<!-- doctest: illustrative reason="a fragment of plugin code that names objects defined elsewhere" -->
 ```python
 # store_results.py
 import json
@@ -1831,6 +1894,7 @@ scanners:
 # Custom script for container + repo scanning
 ```
 
+<!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 #!/bin/bash
 # container-and-repo-scan.sh
@@ -1871,6 +1935,7 @@ reporters:
     # is no per-reporter output_file option.
 ```
 
+<!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
 # Generate license compliance report
 ash --config-file .ash/license-compliance.yaml --scanners trivy-repo
@@ -1881,6 +1946,7 @@ python scripts/license_compliance_check.py license-report.csv
 
 #### Security Baseline Establishment
 
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 #!/bin/bash
 # establish-baseline.sh
@@ -1901,6 +1967,7 @@ echo "Security baseline established. Review and approve suppressions in .ash/bas
 
 #### Trend Analysis
 
+<!-- doctest: illustrative reason="a fragment of plugin code that names objects defined elsewhere" -->
 ```python
 # trend_analysis.py
 import json
@@ -1951,6 +2018,7 @@ if __name__ == "__main__":
 
 #### Automated Alerting
 
+<!-- doctest: illustrative reason="a shell outline that needs trivy and a checkout of a project to scan" -->
 ```bash
 #!/bin/bash
 # security-alert.sh
@@ -2052,6 +2120,7 @@ scanners:
 
 Ensure Trivy's vulnerability database stays current:
 
+<!-- doctest: illustrative reason="needs the network" -->
 ```bash
 # Manual database update
 trivy image --download-db-only
