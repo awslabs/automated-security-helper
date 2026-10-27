@@ -310,19 +310,29 @@ class TestTheConfigIsReadableInsideTheContainer:
         config = tmp_path / "operator" / "ash.yaml"
         config.parent.mkdir()
         config.write_text("project_name: p\n")
+        # --config is mounted under /ash-config; the ASH_CONFIG file under its own
+        # root, /ash-env-config, and named to the scan as its --config as well when
+        # no --config is given, as ash --mode container mounts and names them.
+        expected = "/ash-config/ash.yaml"
         if how == "--config <path>":
             args, env = ["--no-build", "--config", str(config)], None
         elif how == "--config=<path>":
             args, env = ["--no-build", f"--config={config}"], None
         else:
             args, env = ["--no-build"], {"ASH_CONFIG": str(config)}
+            expected = "/ash-env-config/ash.yaml"
 
         rc, err, calls = _run_ash_status(fake_runner, project, args, env)
 
         assert rc == 0, err
         run = _only(calls, "run")
-        inner = _flag(_inner_args(run), "--config")
-        assert inner == "/ash-config/ash.yaml"
+        if how == "--config=<path>":
+            # An inline value is rewritten in place, in the same word.
+            (word,) = [w for w in _inner_args(run) if w.startswith("--config=")]
+            inner = word[len("--config=") :]
+        else:
+            inner = _flag(_inner_args(run), "--config")
+        assert inner == expected
         mount = _mount(run, inner)
         assert Path(str(mount["source"])) == config.resolve()
         assert "readonly" in mount, f"the config mount is writable: {mount}"
