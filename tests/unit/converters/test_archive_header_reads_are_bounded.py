@@ -164,7 +164,24 @@ def test_header_reads_past_the_per_member_allowance_are_refused(
     assert_refused_for_header_reads(converter, results, "many.tar", OVER_THE_ALLOWANCE)
 
 
-@pytest.mark.parametrize("data_filter", [True, False], ids=["data-filter", "copy"])
+@pytest.mark.parametrize(
+    "data_filter",
+    [
+        pytest.param(
+            True,
+            id="data-filter",
+            marks=pytest.mark.skipif(
+                not hasattr(tarfile, "data_filter"),
+                reason=(
+                    "this tarfile has no data filter (before 3.10.12), so "
+                    "TarFile.extractall() takes no filter= argument and ASH uses the "
+                    "copy path; the copy case covers it"
+                ),
+            ),
+        ),
+        pytest.param(False, id="copy"),
+    ],
+)
 def test_member_data_far_past_the_header_allowance_is_extracted_whole(
     data_filter, lowered_caps, test_plugin_context, monkeypatch
 ):
