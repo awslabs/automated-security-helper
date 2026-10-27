@@ -33,6 +33,7 @@ from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.inner_run_outcome import (
     OUTER_RUN_ID_ENV,
     completion_marker,
+    record_reports_written,
 )
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
@@ -518,6 +519,23 @@ def runner_that_reports_a_finding(recording_runner, monkeypatch):
                             Path(fields["source"], "reports", "ash.sarif"),
                             _SARIF_WITH_A_HIGH_FINDING,
                         )
+                        # As the scan inside records it: the SARIF reporter's
+                        # file is named in the results, or the host's exit code
+                        # does not read it (report_file_written_as).
+                        results_path = Path(
+                            fields["source"], "ash_aggregated_results.json"
+                        )
+                        document = json.loads(results_path.read_text(encoding="utf-8"))
+                        holder = SimpleNamespace(
+                            validation_checkpoints=document.get(
+                                "validation_checkpoints", []
+                            )
+                        )
+                        record_reports_written(holder, [("ash.sarif", "sarif")])
+                        document["validation_checkpoints"] = (
+                            holder.validation_checkpoints
+                        )
+                        results_path.write_text(json.dumps(document), encoding="utf-8")
         return completed
 
     monkeypatch.setattr(run_ash_container, "run_cmd_direct", record_and_report)
@@ -629,8 +647,11 @@ def test_the_exit_fields_of_an_admitted_config_are_read_from_its_document(tmp_pa
         },
     )
     opts = _opts_for_the_exit_fields(tmp_path, config)
-    assert ras._resolve_config_fail_on_findings(opts) is False
-    assert ras._resolve_config_fail_on_incomplete_scanners(opts) is False
+    # The fallback to the document's fields lives in the exit-fields loader; the
+    # resolvers read the field off what it loaded, as the scan's callers do.
+    loaded = ras._load_config_file_or_its_exit_fields(opts)
+    assert ras._resolve_config_fail_on_findings(opts, loaded=loaded) is False
+    assert ras._resolve_config_fail_on_incomplete_scanners(opts, loaded=loaded) is False
 
 
 def test_an_exit_field_that_is_missing_keeps_its_default(tmp_path):
@@ -886,8 +907,9 @@ def test_a_refused_exit_field_does_not_hide_the_one_beside_it(tmp_path):
         },
     )
     opts = _opts_for_the_exit_fields(tmp_path, config)
-    assert ras._resolve_config_fail_on_findings(opts) is False
-    assert ras._resolve_config_fail_on_incomplete_scanners(opts) is None
+    loaded = ras._load_config_file_or_its_exit_fields(opts)
+    assert ras._resolve_config_fail_on_findings(opts, loaded=loaded) is False
+    assert ras._resolve_config_fail_on_incomplete_scanners(opts, loaded=loaded) is None
 
 
 class _StoppedBeforeTheRun(Exception):
@@ -2911,11 +2933,17 @@ def runner_that_records_a_reference(recording_runner, monkeypatch):
                         part.partition("=")[::2] for part in cmd[i + 1].split(",")
                     )
                     if fields.get("destination") == "/out":
+                        # With the record that the run the host gave this ID
+                        # completed, as the scan inside writes it; the file
+                        # replaces the recorder's, so the marker is written here.
+                        run_id = (kwargs.get("env") or {}).get(OUTER_RUN_ID_ENV)
+                        document = json.loads(_results_with_an_unreadable_reference())
+                        document["validation_checkpoints"] = (
+                            [completion_marker(run_id)] if run_id else []
+                        )
                         Path(
                             fields["source"], "ash_aggregated_results.json"
-                        ).write_text(
-                            _results_with_an_unreadable_reference(), encoding="utf-8"
-                        )
+                        ).write_text(json.dumps(document), encoding="utf-8")
         return completed
 
     monkeypatch.setattr(run_ash_container, "run_cmd_direct", record_and_write)
