@@ -20,7 +20,6 @@ from typing import (
 
 import botocore.config
 import botocore.exceptions
-from typing_extensions import Self
 
 from automated_security_helper.utils.error_text import error_text, text_without_values
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -689,9 +688,32 @@ def get_fallback_model(current_model_id: str) -> Optional[str]:
     return "us.amazon.nova-pro-v1:0"
 
 
+class _ModelCheckType(type):
+    """Builds a ModelCheck from its pair and its kind, with no ``__new__`` of its own.
+
+    The tuple is made by tuple's own constructor from the pair, so a copy or a
+    pickle, which rebuilds it from ``tuple(check)`` and restores the instance
+    dict, gives back the same pair and the same kind.
+    """
+
+    def __call__(
+        cls,
+        is_valid: bool,
+        reason: Optional[str] = None,
+        transient: bool = False,
+        listing_failure: Optional[str] = None,
+        listing_client_side: bool = False,
+    ) -> Any:
+        check = super().__call__((is_valid, reason))
+        check.transient = transient
+        check.listing_failure = listing_failure
+        check.listing_client_side = listing_client_side
+        return check
+
+
 # A tuple subclass cannot declare non-empty __slots__ (CPython refuses), so the
 # flag below lives in the instance dict.
-class ModelCheck(Tuple[bool, Optional[str]]):  # noqa: SLOT001
+class ModelCheck(Tuple[bool, Optional[str]], metaclass=_ModelCheckType):  # noqa: SLOT001
     """What ``validate_bedrock_model`` answers: ``(is_valid, reason)``, so a
     caller can unpack it as a pair.
 
@@ -720,35 +742,6 @@ class ModelCheck(Tuple[bool, Optional[str]]):  # noqa: SLOT001
     transient: bool
     listing_failure: Optional[str]
     listing_client_side: bool
-
-    def __new__(
-        cls,
-        is_valid: bool,
-        reason: Optional[str] = None,
-        transient: bool = False,
-        listing_failure: Optional[str] = None,
-        listing_client_side: bool = False,
-    ) -> Self:
-        check = super().__new__(cls, (is_valid, reason))
-        check.transient = transient
-        check.listing_failure = listing_failure
-        check.listing_client_side = listing_client_side
-        return check
-
-    def __getnewargs__(
-        self,
-    ) -> Tuple[bool, Optional[str], bool, Optional[str], bool]:
-        """The arguments ``copy`` and ``pickle`` rebuild a check from. The
-        tuple's own rebuild passes the pair as one argument, which makes the
-        copy ``((False, reason), None)``: truthy, and a refusal read as an
-        answer."""
-        return (
-            self[0],
-            self[1],
-            self.transient,
-            self.listing_failure,
-            self.listing_client_side,
-        )
 
 
 def check_is_transient(check: Any) -> bool:
