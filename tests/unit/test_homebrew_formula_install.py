@@ -234,7 +234,10 @@ class TestTheCiLegScansWithTheDefaultSelection:
 
     A scan narrowed to detect-secrets passed while a default scan from the same
     install exited 1 with cdk-nag MISSING. The default scan may leave out only
-    the four scanners that are separate programs the formula does not install.
+    the scanners that are separate programs the formula does not install: the
+    native binaries gitleaks, grype, opengrep, syft and trivy, and the Ruby gem
+    cfn-nag. A default-set scanner the formula does provide for (the Python
+    tools, cdk-nag, npm-audit) has to run.
     """
 
     def test_a_scan_without_a_scanner_selection_runs(self):
@@ -257,7 +260,14 @@ class TestTheCiLegScansWithTheDefaultSelection:
         assert len(allowed) == 1, (
             f"homebrew.sh should check the default scan's statuses once: {allowed}"
         )
-        assert set(allowed[0].split(",")) == {"cfn-nag", "grype", "opengrep", "syft"}
+        assert set(allowed[0].split(",")) == {
+            "cfn-nag",
+            "gitleaks",
+            "grype",
+            "opengrep",
+            "syft",
+            "trivy",
+        }
 
 
 class TestTheBuildBackendSkipsTheUvCache:
