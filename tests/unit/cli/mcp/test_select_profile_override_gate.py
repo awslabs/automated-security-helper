@@ -1302,7 +1302,9 @@ def test_override_yaml_is_refused_by_every_shipped_denied_path(
     # named is the first that covers the write the refusal quotes.
     import re
 
-    quoted = re.search(r"'path': '([^']+)'", overridden["error"])
+    # The refusal names the op as "Patch op '<op>' at '<path>'"
+    # (runtime_patch.RuntimePatchDeniedError, _op_and_path).
+    quoted = re.search(r"Patch op '[^']*' at '([^']+)'", overridden["error"])
     covering_override = (
         first_denied_under(section)
         if plugin_section
@@ -1758,7 +1760,10 @@ def test_a_client_turning_s3_off_with_a_bucket_of_its_own_is_refused(
 
     for result in (patched, overridden):
         assert result["success"] is False, result
-        assert "'s3'" in result["error"], result["error"]
+        # s3 is a built-in reporter, so the always-denied entry
+        # '/reporters/s3/**' refuses the section (ash_config.ALWAYS_DENIED_PATHS)
+        # before the off-host-section rule names it; the refusal quotes the path.
+        assert "/reporters/s3" in result["error"], result["error"]
     _assert_unbound("patch")
     _assert_unbound("override")
 

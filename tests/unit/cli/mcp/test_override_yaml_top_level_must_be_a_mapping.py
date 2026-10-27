@@ -93,7 +93,14 @@ def test_a_non_mapping_override_yaml_is_refused_by_its_shape(
 
 
 def test_control_a_mapping_override_still_binds(wide_profile) -> None:
-    answer = _select("project_name: plain\n")
+    # The override restates the profile's runtime-override policy: an override
+    # that leaves global_settings.mcp out is the patch that clears it, and
+    # '/global_settings/mcp' is in the shipped denied_paths
+    # (ash_config.RuntimeOverridesConfig's default list).
+    answer = _select(
+        "project_name: plain\nglobal_settings:\n  mcp:\n    runtime_overrides:\n"
+        '      enabled: true\n      allowed_paths: ["/**"]\n'
+    )
     assert answer.get("success") is True, answer
     assert answer.get("mode") == "override", answer
 
