@@ -70,14 +70,22 @@ def test_a_config_that_does_not_validate_is_refused_before_the_scan(
 
 
 def _count_reads(monkeypatch) -> List[Path]:
+    """Count the chain walk's reads of each file.
+
+    The stock chain reader reads a file's text once with
+    ``config_sources.read_config_text`` and parses that held text
+    (``_read_into_state``); ``read_config_file`` is the stand-alone reader and
+    is never called for a chain, so a count at it reads zero whatever the
+    pre-check does.
+    """
     reads: List[Path] = []
-    real_read = config_sources.read_config_file
+    real_read = config_sources.read_config_text
 
     def counting_read(path, *args, **kwargs):
         reads.append(Path(path))
         return real_read(path, *args, **kwargs)
 
-    monkeypatch.setattr(config_sources, "read_config_file", counting_read)
+    monkeypatch.setattr(config_sources, "read_config_text", counting_read)
     return reads
 
 
