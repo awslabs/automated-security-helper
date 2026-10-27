@@ -32,7 +32,8 @@ PROBE_MODULE = (
     / "runtime"
     / "test_container_image_permissions.py"
 )
-PRUNED = {"/proc", "/sys", "/dev", "/tmp", "/var/tmp", "/run/lock"}
+# Paths inside the image under test; nothing is created or opened under them.
+PRUNED = {"/proc", "/sys", "/dev", "/tmp", "/var/tmp", "/run/lock"}  # nosec B108
 
 
 @pytest.fixture(scope="module")
