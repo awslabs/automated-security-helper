@@ -169,6 +169,92 @@ global_settings:
         Nine digits is the shape the SSN detector looks for; each is a size in
         bytes, and the converter's source sets the per-member default as
         256 * 1024 * 1024.
+    # === ferret-scan API_KEY_OR_SECRET: files the 10-22 scan did not report ===
+    # Same detector and the same causes as the two blocks above. The scan of the
+    # pull request's later head reports these thirteen files that the first
+    # scan did not (new files, a newer ferret-scan, or both). Each was read at the
+    # reported line. One entry per file, no globs, no line numbers.
+    - path: CHANGELOG.md
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. The flagged line is release-note prose in an entry about a
+        scanner check that contacts AWS with the host's credentials. It names the
+        behavior; it holds no credential.
+    - path: automated_security_helper/plugin_modules/ash_ferret_plugins/spec/2026-09-13-ferret-scan-plugin-v2-update-analysis.md
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. This design note documents the very detector false
+        positive the entries above suppress: two lines quote a typed model field
+        named for a session object that the detector reads as a credential. The
+        lines are documentation of the false positive, not secrets.
+    - path: deploy/cdk/templates/AshAgentCore.template.json
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. Three lines in the synthesized template: the logical id of
+        the Secrets Manager secret that holds the MCP auth header, and two Ref
+        expressions that point at it. A logical id holds no value; the secret's
+        content is created at deploy time. No line numbers because cdk synth
+        regenerates the file.
+    - path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. The flagged line is the logical id of the Secrets Manager
+        secret for the MCP auth header, the same id as in the other templates. No
+        line number because cdk synth regenerates the file.
+    - path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. The flagged line is the logical id of the Secrets Manager
+        secret for the MCP auth header, the same id as in the other templates. No
+        line number because cdk synth regenerates the file.
+    - path: tests/integration/codecommit_gate_regression/assert_case.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. The flagged line is a key in an expected scanner-results
+        table: the detect-secrets scanner's name with a status. The name carries
+        the word "secrets"; no value is a credential.
+    - path: tests/unit/config/test_config_alias_round_trip.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. The flagged line is a fixture config section for the
+        detect-secrets scanner holding a severity threshold. The scanner's name is
+        what the detector matches.
+    - path: tests/unit/cli/mcp/test_clone_limits_and_delivery_interlocks.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. A module constant named for a fake MCP session, the same
+        shape as the entries for the other MCP tests above.
+    - path: tests/unit/cli/mcp/test_delivered_config_env.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. A module constant named for a fake client session, the
+        same shape as the entries for the other MCP tests above.
+    - path: tests/unit/plugin_modules/ash_builtin/test_detect_secrets_scanner_behavior.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. The flagged constant is a made-up 40-character git commit
+        id used as a fixture revision, the same shape as the entries above. The
+        line already carries the detect-secrets allowlist marker.
+    - path: tests/unit/utils/test_ash_install.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. The flagged constant is a made-up 40-character git commit
+        id used as a fixture revision. The line already carries the detect-secrets
+        allowlist marker.
+    - path: tests/unit/test_pinned_tool_github_lookup.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. The flagged constant is a placeholder token string that the
+        test sets in a fake environment and asserts never reaches the report or
+        the log. It authenticates nothing. The line already carries the
+        detect-secrets allowlist marker.
+    - path: tests/unit/utils/test_secret_masking.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. Five lines are fixtures for ASH's own secret masking: sample
+        scanner messages and a dummy key copied from AWS documentation's published
+        example value. The tests exist to prove such text is masked in the output.
+        Scoped to this file, as the SECRET-SECRET-KEYWORD entries above are.
     # === ferret-scan API_KEY_OR_SECRET: pinned release checksums ===
     # Separate from the block above and for a different reason. Those are identifiers
     # whose NAMES match a secret keyword; this one is a table of values that genuinely
