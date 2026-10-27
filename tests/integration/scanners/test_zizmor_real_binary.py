@@ -170,8 +170,33 @@ def test_real_zizmor_offline(source, monkeypatch):
     assert REQUIRED_FINDINGS <= found
 
 
+def _region(report: SarifReport, rule: str, uri: str) -> tuple[int, int]:
+    """``(startLine, endLine)`` the installed zizmor gives ``rule`` at ``uri``."""
+    for run in report.runs:
+        for result in run.results or []:
+            physical = result.locations[0].physicalLocation.root
+            if result.ruleId == rule and physical.artifactLocation.uri == uri:
+                start = physical.region.startLine
+                return start, physical.region.endLine or start
+    raise AssertionError(f"zizmor reported no {rule} at {uri}")
+
+
 def test_ash_scan_with_zizmor_applies_rule_path_and_line_suppressions(source):
     from automated_security_helper.interactions.run_ash_scan import run_ash_scan
+
+    # Where zizmor puts a dangerous-triggers finding differs between releases of the
+    # supported range: 1.30.1 spans the whole ``on:`` block (lines 2 to 5, pinned in
+    # tests/test_data/scanners/zizmor/zizmor-1.30.1.sarif), a later one can point at
+    # the trigger's own line. The suppression is written from what the installed
+    # binary reports for a copy of the fixture, so the line it names is a line the
+    # finding really occupies; the unpinned-uses entry below stays on a line that
+    # finding is not on.
+    probe = source.parent / "probe"
+    shutil.copytree(FIXTURE_REPO, probe)
+    _, probed = _scan(probe)
+    trigger_start, trigger_end = _region(
+        probed, "zizmor/dangerous-triggers", ".github/workflows/vulnerable.yml"
+    )
 
     config = {
         "project_name": "zizmor-suppressions",
@@ -186,8 +211,8 @@ def test_ash_scan_with_zizmor_applies_rule_path_and_line_suppressions(source):
                 {
                     "rule_id": "zizmor/dangerous-triggers",
                     "path": ".github/workflows/vulnerable.yml",
-                    "line_start": 2,
-                    "line_end": 2,
+                    "line_start": trigger_start,
+                    "line_end": trigger_end,
                     "reason": "rule, path and line",
                 },
                 {
