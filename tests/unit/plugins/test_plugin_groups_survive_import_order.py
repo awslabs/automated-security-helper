@@ -70,10 +70,11 @@ if first:
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import (
     load_internal_plugins,
-    plugin_load_errors,
+    recorded_load_errors,
 )
 
-loaded = load_internal_plugins()
+record = {}
+loaded = load_internal_plugins(record)
 print(
     "ASH_PROBE_RESULT="
     + json.dumps(
@@ -92,7 +93,7 @@ print(
                 ).ASH_EVENT_HANDLERS.items()
                 for handler in handlers
             ),
-            "errors": plugin_load_errors(),
+            "errors": recorded_load_errors(record),
         }
     )
 )
@@ -157,19 +158,21 @@ REPORTERS = "automated_security_helper.plugin_modules.ash_builtin.reporters"
 def test_a_group_recovered_on_a_later_call_is_no_longer_reported(monkeypatch):
     """An error recorded by an earlier call is dropped once the group loads.
 
-    plugin_load_errors() feeds the completeness gate, which grades every scanner
-    of a reported group MISSING; a group that loaded on retry but stayed in the
-    record would fail a scan whose scanners all ran.
+    The run's PluginLoadRecord feeds the completeness gate, which grades every
+    scanner of a reported group MISSING; a group that loaded on retry but stayed
+    in the record would fail a scan whose scanners all ran.
     """
     import automated_security_helper.plugin_modules.ash_builtin as ash_builtin
     from automated_security_helper.plugins import loader
 
     monkeypatch.setitem(loader._PLUGIN_LOAD_ERRORS, REPORTERS, "ImportError: partial")
     monkeypatch.setattr(ash_builtin, "ASH_PLUGIN_LOAD_ERRORS", {})
+    record: dict = {}
 
-    loader.load_internal_plugins()
+    loader.load_internal_plugins(record)
 
-    assert REPORTERS not in loader.plugin_load_errors()
+    assert REPORTERS not in loader.recorded_load_errors(record)
+    assert REPORTERS not in loader._PLUGIN_LOAD_ERRORS
 
 
 def test_control_a_group_that_is_still_lost_stays_reported(monkeypatch):
@@ -185,7 +188,9 @@ def test_control_a_group_that_is_still_lost_stays_reported(monkeypatch):
         "retry_failed_plugin_groups",
         lambda: dict(ash_builtin.ASH_PLUGIN_LOAD_ERRORS),
     )
+    record: dict = {}
 
-    loader.load_internal_plugins()
+    loader.load_internal_plugins(record)
 
-    assert REPORTERS in loader.plugin_load_errors()
+    assert loader.recorded_load_errors(record) == still_lost
+    assert REPORTERS in loader._PLUGIN_LOAD_ERRORS
