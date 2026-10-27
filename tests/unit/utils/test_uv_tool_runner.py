@@ -3808,13 +3808,35 @@ class TestBuiltinPluginEnvironmentReadsAreAudited:
                 " nothing of it can print"
             ),
         ),
-        ("scanners/grype_scanner.py", "os.environ passed as a value"): (
+        ("scanners/_trivy_scanner_base.py", 'os.environ.get("TRIVY_CONFIG")'): (
             1,
             (
-                "a read-only view handed to _declared_grype_db_bound, which"
-                " merges operator-declared DB age bounds into the grype"
-                " child's extra_env and receives the run's environment_values"
-                " beside it; not a uv install input"
+                "the operator's trivy config path, anchored and checked by"
+                " honored_path and passed to the trivy binary; trivy is not"
+                " installed through uv, so it is never a uv install input"
+            ),
+        ),
+        ("scanners/_trivy_scanner_base.py", "os.environ.get(<dynamic>)"): (
+            1,
+            (
+                "the operator's trivy ignore or input file path"
+                " (_trivy_input_file), anchored and checked by honored_path"
+                " and passed to the trivy binary; never a uv install input"
+            ),
+        ),
+        ("scanners/gitleaks_scanner.py", "os.environ.get(<dynamic>)"): (
+            1,
+            (
+                "a presence check over CONFIG_ENV_VARS for the sandbox"
+                " warning; only the variable names are logged, never a value"
+            ),
+        ),
+        ("scanners/gitleaks_scanner.py", 'os.environ.get("GITLEAKS_CONFIG")'): (
+            1,
+            (
+                "the re-scan's GITLEAKS_CONFIG made absolute for the gitleaks"
+                " child's environment; gitleaks is not installed through uv, so"
+                " it is never a uv install input"
             ),
         ),
         (
