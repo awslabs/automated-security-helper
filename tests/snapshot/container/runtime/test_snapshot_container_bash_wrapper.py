@@ -34,8 +34,11 @@ ASH_SCRIPT = REPO_ROOT / "ash"
 
 pytestmark = pytest.mark.container_runtime
 
-#: The utilities ./ash calls besides bash builtins and the runner.
-_TOOLS = ("dirname", "basename", "mkdir", "id", "date", "cat", "rm")
+#: The utilities ./ash calls besides bash builtins and the runner. tr lower-cases the
+#: build target, so without it the image tag is empty and every run prints
+#: "tr: command not found". tests/unit/test_ash_bash_entrypoint_refusals.py lists the
+#: same tools.
+_TOOLS = ("dirname", "basename", "mkdir", "id", "date", "cat", "tr", "rm")
 
 FAKE_RUNNER = """#!/bin/bash
 echo "fake-oci-runner $1" >> "$FAKE_RUNNER_LOG"
