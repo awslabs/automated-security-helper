@@ -109,11 +109,15 @@ permissions:
   contents: read
 
 concurrency:
-  # One in-flight run per pull request; pushing again supersedes the previous run.
+  # One in-flight run per pull request or branch; pushing again supersedes the previous
+  # run.
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Only pull_request runs may be cancelled. A merge_group run must finish or the
-  # queue loses its verdict.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # pull_request runs may be cancelled, and so may push runs on branches other than
+  # main: a newer push to the same pull request or branch supersedes the run on its old
+  # head. A push to main or a tag is the only report its commit will get, a
+  # workflow_dispatch run was asked for by a person, and a merge_group run must finish
+  # or the queue loses the answer it is waiting for.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main') }}
 
 jobs:
   drift-and-validate:

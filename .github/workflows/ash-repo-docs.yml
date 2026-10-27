@@ -21,15 +21,18 @@ permissions:
   contents: read
 
 concurrency:
-  # One in-flight run per pull request; pushing again supersedes the previous run.
+  # One in-flight run per pull request or branch; pushing again supersedes the previous
+  # run.
   #
   # github.ref is refs/pull/<n>/merge on pull_request, and on merge_group it is the
   # per-entry gh-readonly-queue/main/pr-<n>-<sha> branch, so every queue entry lands
   # in its own group and entries never serialize behind one another.
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Only pull_request runs may be cancelled. A merge_group run must finish or the
-  # queue loses its verdict, and push runs feed the docs.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # pull_request runs may be cancelled, and so may push runs on branches other than
+  # main: a newer push to the same pull request or branch supersedes the build of its
+  # old head, and only a push to main deploys. A push to main must finish, because it is
+  # the publish, and a workflow_dispatch run was asked for by a person.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main') }}
 
 jobs:
   build-docs:
