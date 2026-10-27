@@ -100,7 +100,7 @@ def check_shards(names: list[str], prefix: str) -> list[str]:
 
 
 def self_test() -> list[str]:
-    """Positive and negative controls for check_shards and artifact_prefix."""
+    """Positive and negative controls for check_shards."""
     prefix = "test-results-ubuntu-latest-x86_64-py3.12"
     whole = [f"{prefix}-shard{i}of3" for i in range(1, 4)]
     cases = [

@@ -1233,51 +1233,6 @@ global_settings:
     # The same unquoted-assignment and name-matching dispositions as the block
     # above. Per-file entries naming the flagged value, as the existing ferret
     # entries do.
-    - path: automated_security_helper/config/operator_paths.py
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        The match is '"detect-secrets": ("baseline_file",)' -- a scanner NAME
-        mapped to the names of its path-valued config keys. Names, not values.
-    - path: automated_security_helper/config/tool_config_trust.py
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        The same scanner-name-to-config-key table as operator_paths.py
-        ('"detect-secrets": ("baseline_file",)'). Names, not values.
-    - path: deploy/cdk/templates/AshFargate.template.json
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        A synthesized CloudFormation template. The matches are CloudFormation
-        LOGICAL IDS and Refs (VpcPrivateSubnet*RouteTable*,
-        ConfigMcpAuthHeaderSecret99D04B65): resource names whose words trip the
-        heuristic. The secret resource holds an ARN reference resolved at
-        deploy time; no value is in the template.
-    - path: deploy/cdk/templates/AshImagePipeline.template.json
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        The match is inside the template's embedded build script -- a git
-        fetch/checkout command string using ${ASH_REPOSITORY_URL} and
-        ${ASH_VERSION} build variables. Command text, not a credential.
-    - path: tests/unit/cli/mcp/test_scan_directory_start_failures.py
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        SESSION = "start-failures-session" is a fixture session NAME; the
-        heuristic fires on the unquoted assignment shape. Not a credential.
-    - path: tests/unit/cli/mcp/test_workspace_scan_holds_the_session_tree.py
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        SESSION = "workspace-session" is a fixture session NAME. Not a credential.
-    - path: tests/unit/config/test_config_link_bases.py
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        SESSION = "client-1" is a fixture session NAME. Not a credential.
-    - path: tests/unit/config/test_operator_configs_judged_by_every_name.py
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        SESSION = "client-1" is a fixture session NAME. Not a credential.
-    - path: tests/unit/workspace/test_workspace_project_config_links.py
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        SESSION = "client-1" is a fixture session NAME. Not a credential.
     - path: tests/unit/test_docs_ci_runner_judgments.py
       rule_id: API_KEY_OR_SECRET
       reason: >-

@@ -12,9 +12,9 @@ inputs:
     description: >-
       Which slice of the suite to run, written <index>of<count> (for example 3of8).
       The default, 1of1, runs the whole suite and enforces the coverage threshold
-      itself. Any other value runs only that shard's test files, measures coverage
-      without gating it, and leaves the threshold to the unit-coverage job, which
-      combines every shard's data (.github/scripts/combine-unit-coverage.py).
+      through .coveragerc. Any other value runs only that shard's test files, measures
+      coverage without gating it, and leaves the threshold to the unit-coverage job,
+      which combines every shard's data (.github/scripts/combine-unit-coverage.py).
     required: false
     default: "1of1"
 
@@ -96,13 +96,12 @@ runs:
     # intended scenario, a home that is NOT inside the sandbox's private tmp.
     # tests/conftest.py sets this knob with setdefault, so the value here wins.
     #
-    # This step runs only for the whole-suite shard (1of1). pytest.ini adds --cov and
-    # .coveragerc sets fail_under=80, so it is also where the coverage threshold is enforced
-    # for a whole-suite run. ash-unified-ci.yml gives the suite eight shards per OS and
-    # Python version, because the whole suite did not finish inside any job timeout on a
-    # 4-worker runner. A shard covers part of the package, so the shard step below runs it
-    # without the threshold, and the unit-coverage job applies the same 80% to the shards'
-    # combined data.
+    # This step runs only for the whole-suite shard (1of1). ash-unified-ci.yml gives the
+    # suite eight shards per OS and Python version, because the whole suite (about 23,900
+    # items at this writing) did not finish inside the 20-minute job timeout on 14 of the
+    # 25 legs. A shard covers part of the package, so the steps below run it without the
+    # threshold that .coveragerc and pytest.ini apply to a whole run, and the unit-coverage
+    # job applies the same 80% to the shards' combined data.
     - name: Run PyTest
       if: inputs.shard == '1of1'
       shell: bash
@@ -112,8 +111,7 @@ runs:
       run: uv run pytest
 
     # The test files this shard owns, one per line. Passing them as arguments, rather than
-    # deselecting after collection, also keeps each shard from collecting the whole tree,
-    # which took several minutes per run on the unsharded suite.
+    # deselecting after collection, also keeps each shard from collecting the whole tree.
     # The self-test runs first: a selector that dealt out a subset would otherwise pass.
     - name: Select this shard's test files
       if: inputs.shard != '1of1'
@@ -125,18 +123,22 @@ runs:
         uv run python .github/scripts/select-test-shard.py \
           --shard "${SHARD}" --output test-results/shard-files.txt
 
-    # One shard of the suite, with the same environment as "Run PyTest" above.
+    # One shard of the suite, with the same extras gate and basetemp as "Run PyTest" above.
     #
-    # Coverage is measured and written to test-results/coverage.data, which the artifact
-    # upload below carries to the unit-coverage job. --cov-fail-under=0 turns off the
-    # threshold that .coveragerc would otherwise apply to this shard's partial total; pytest-cov
-    # only reads the configured value when the option is absent. The coverage options in
-    # pytest.ini still add their term, XML and HTML reports, which are partial and unused here.
-    # The data file has no leading dot on purpose: upload-artifact leaves out hidden files
-    # unless told otherwise.
+    # `-o addopts=` clears pytest.ini's addopts and the options that matter are restated:
+    # the same worker count and distribution, verbosity and durations, and coverage of the
+    # package under .coveragerc. Left in place, addopts would also write the XML and HTML
+    # coverage reports, and `--cov-report=` would have to cancel them one by one.
     #
-    # Its own --junit-xml path, so it does not claim the file pytest.ini names for the
-    # whole-suite run and the cdk-nag step below. The report step's glob matches all of them.
+    # Coverage is written to test-results/coverage.data, which the artifact upload below
+    # carries to the unit-coverage job. --cov-report= prints and writes nothing else.
+    # --cov-fail-under=0 is load-bearing: .coveragerc sets fail_under=80, pytest-cov takes
+    # that as its threshold when none is given, and a shard covers only part of the
+    # package. The data file has no leading dot on purpose: upload-artifact leaves out
+    # hidden files unless told otherwise.
+    #
+    # Its own --junit-xml path, so it does not claim the file the cdk-nag step below
+    # writes through addopts. The report step's glob matches both.
     - name: Run PyTest shard
       if: inputs.shard != '1of1'
       shell: bash
@@ -147,6 +149,14 @@ runs:
       run: |
         uv run pytest \
           @test-results/shard-files.txt \
+          -o addopts= \
+          --verbose \
+          --durations=10 \
+          -n auto \
+          --dist worksteal \
+          --cov=automated_security_helper \
+          --cov-config=.coveragerc \
+          --cov-report= \
           --cov-fail-under=0 \
           --junit-xml=test-results/pytest-shard.junit.xml
 
@@ -168,9 +178,9 @@ runs:
     # ASH_REQUIRE_CDK_EXTRA turns a missing extra into a hard failure instead of a skip, so
     # this step cannot silently stop testing anything if the install step above changes.
     #
-    # Once per OS and Python version, not once per shard: it runs in the first shard
-    # (the whole-suite shard 1of1 also starts with "1of"), so each OS and Python
-    # combination still runs these tests exactly once.
+    # Once per OS and Python version, not once per shard: it runs in the first shard (the
+    # whole-suite shard 1of1 also starts with "1of"), so each OS and Python combination
+    # still runs these eleven tests exactly once.
     - name: Run cdk-nag integration tests
       if: success() && startsWith(inputs.shard, '1of')
       shell: bash
@@ -197,10 +207,10 @@ runs:
     # Dropping the input takes the create path, which names the check run from
     # `check_name` below -- so that per-cell input is load-bearing now instead of dead.
     #
-    # report_paths matches every JUnit file under test-results/: pytest.junit.xml from a
-    # whole-suite run and from the cdk-nag step, and pytest-shard.junit.xml from a shard.
-    # The check name carries the shard, so the eight shards of one OS and Python version
-    # publish eight check runs instead of colliding on one name.
+    # `test-results/*.junit.xml` matches the whole-suite report (pytest.junit.xml), the
+    # shard's own (pytest-shard.junit.xml) and the cdk-nag step's, which writes
+    # pytest.junit.xml through addopts. The check name carries the shard, so the eight
+    # shards of one OS and Python version publish eight check runs rather than one.
     - name: Publish PyTest JUnit Test Report
       uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
       if: success() || failure()

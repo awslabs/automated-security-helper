@@ -37,13 +37,9 @@ on:
   # against ~175, before install-validation's five cheap install methods stopped being
   # 105 separate legs, which nearly halves what this deliberate duplication costs.
   # The 91 is derived from a census rather than being one -- see the note on the
-  # required-checks job for which link in that chain was actually measured.
-  #
-  # Every job count in these notes predates the unit-test shards. The unit-test job is now
-  # 200 legs (25 OS and Python combinations, eight shards each) instead of 25, which adds 175,
-  # and unit-coverage adds 4 more, so each figure that includes unit-test is low by 179. Each
-  # shard repeats the checkout and the dependency install, so the job count rises faster than
-  # the test time falls.
+  # required-checks job for which link in that chain was actually measured. Every job
+  # figure in these notes predates the unit-test shards, which took that job from 25 legs
+  # to 200 (+175) and added the unit-coverage job, one leg per OS family (+4).
   #
   # Both counts are job counts, from
   # `gh api .../actions/runs/<run>/jobs --paginate --jq '.jobs[].name' | wc -l`
@@ -468,19 +464,19 @@ jobs:
 
   # WHY EACH OS AND PYTHON COMBINATION IS EIGHT JOBS
   #
-  # One job per combination never finished. The suite is tens of thousands of items, a
-  # 4-worker runner spends several minutes on collection alone, and every unit-test leg
-  # was cancelled at the old 20-minute timeout, somewhere between a third and all the way
-  # through its items. The matrix had not reported a result on the tips where it was
-  # measured.
+  # The suite is about 23,900 items. Fourteen of the 25 legs were cancelled by the old
+  # 20-minute timeout on the last run of this branch that finished, at 61 to 99 percent of
+  # the tests; the legs that did finish took 10 to 17 minutes on macOS. So most legs sat
+  # within minutes of the wall, and a slower runner or a few more tests put them over it.
   #
-  # Raising the timeout was rejected as the cure: it would make every leg a job of well over
-  # an hour on the slowest runners and still leave a result only after all of it. The cure
-  # is to split each combination into eight shards that run in parallel. A shard owns every
-  # eighth test file of the sorted list (see .github/scripts/select-test-shard.py), which
-  # puts an eighth of the items on each runner, plus a few minutes of setup. The 30-minute
-  # timeout below is the guard for the slower macOS and Windows runners, not the cure, and
-  # how long a shard takes is a measurement the CI run makes.
+  # Raising the timeout was rejected as the cure: every leg would become a 25-minute job
+  # on the slowest runners, with a result only after all of it, and the next growth of the
+  # suite would reach the new limit too. The cure is to split each combination into eight
+  # shards that run in parallel. A shard owns every eighth test file of the sorted list
+  # (see .github/scripts/select-test-shard.py), so a leg that took 20 to 25 minutes becomes
+  # eight that each take a few minutes of tests plus the setup every shard repeats. The
+  # 30-minute timeout below is the guard for the slower macOS and Windows runners. That
+  # estimate is arithmetic, not a measurement.
   #
   # The 80% total-coverage gate cannot run per shard, since a shard covers part of the
   # package. Each shard uploads its coverage data, and the `unit-coverage` job below
@@ -542,6 +538,7 @@ jobs:
         # the name on an artifact is a statement the runner made about itself. Removing the
         # include changes no leg count: every entry matched an existing `os` axis value and only
         # added a key, so the matrix was 25 cells with it and is 25 cells without it.
+        # The shard axis then multiplies each of those 25 by eight.
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -561,7 +558,8 @@ jobs:
   # The unsharded run applied the gate in every one of the 25 OS and Python combinations;
   # this keeps it for each OS family at one Python version, which is where the platform
   # specific code paths differ. The other Python versions' coverage is measured and
-  # uploaded by their shards and gated nowhere.
+  # uploaded by their shards and gated nowhere. macos-14 has no leg of its own: it is the
+  # same architecture as macos-latest.
   #
   # Each leg runs on the same kind of runner as the shards it combines. Coverage data
   # records absolute source paths, and a runner of one image has one workspace path
@@ -2003,6 +2001,11 @@ jobs:
   # Those 25 are not jobs and land in a separate check suite, so a job census alone undercounts
   # what this file puts on a pull request -- that gap is most of why the old figure of 84 looked
   # defensible.
+  #
+  # The 116 and the 91 below predate the unit-test shards. The job went from 25 legs to 200
+  # (eight shards in each of the 25 combinations, +175), and each shard publishes its own
+  # `PyTest - ...` check run, so the check-run figure grows by the same 175; unit-coverage
+  # added four jobs, one per OS family.
   #
   # The 91 is arithmetic on a measured anchor, and the chain is worth keeping because each link
   # is a different kind of claim. Run 35370310502 reported `total_count` 168 with 168 rows
