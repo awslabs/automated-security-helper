@@ -317,7 +317,11 @@ uv run pytest --cov=automated_security_helper --cov-report=html
 ### Coverage Enforcement
 
 CI's unit-test step (`.github/actions/run-unit-tests/action.yml`) runs the full suite with
-`--cov-fail-under=80` and fails below 80% total coverage. To run it the same way:
+`--cov-fail-under=80` and fails below 80% total coverage. In the Unified CI workflow the
+suite is split into eight shards per operating system and Python version, because one job
+cannot finish it. Each shard measures coverage without a threshold, and the
+`unit-coverage` job applies the 80% to the combined data of the Linux Python 3.12 shards.
+To run the whole suite the way an unsharded step does:
 
 ```bash
 uv sync --extra cdk --extra symbols
