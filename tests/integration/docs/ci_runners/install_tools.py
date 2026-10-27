@@ -176,6 +176,10 @@ RETRIED_STATUSES = frozenset({408, 429})
 #: install step's timeout-minutes, counted from the step's start, or this limit,
 #: counted from the pull's start. Outside that step only this limit applies.
 PULL_TIMEOUT_SECONDS = 20 * 60
+#: A docker pull that exits non-zero is tried this many times in all, waiting
+#: PULL_RETRY_SECONDS times the attempt number after each failure.
+PULL_ATTEMPTS = 3
+PULL_RETRY_SECONDS = 60
 #: A download larger than this is refused and removed. The largest pinned download,
 #: the 2.375.4 Jenkins WAR, is about 94 MB, so this leaves room for a later pin and
 #: still bounds what one download can write to the runner's disk.
@@ -653,7 +657,32 @@ def pull_image(
     reference raises ValueError before run is called; a pull that fails or runs past
     PULL_TIMEOUT_SECONDS raises, and in each case the log is unchanged."""
     argv = docker_pull_argv(ref)
-    run(argv, check=True, stdout=subprocess.DEVNULL, timeout=PULL_TIMEOUT_SECONDS)
+    for attempt in range(1, PULL_ATTEMPTS + 1):
+        try:
+            run(
+                argv,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                timeout=PULL_TIMEOUT_SECONDS,
+            )
+            break
+        except subprocess.CalledProcessError as error:
+            # ECR Public answers "toomanyrequests: Data limit exceeded" when the
+            # runner's address has used its anonymous pull allowance, and that
+            # clears with time. The job holds no AWS credential to pull with an
+            # allowance of its own, so the same pull is tried again after a wait.
+            # A pull that timed out is not tried again: it already used its limit.
+            if attempt == PULL_ATTEMPTS:
+                raise
+            print(
+                _one_line(
+                    f"pull of {ref} failed (exit {error.returncode}); "
+                    f"trying again in {PULL_RETRY_SECONDS * attempt} seconds"
+                ),
+                file=sys.stderr,
+                flush=True,
+            )
+            time.sleep(PULL_RETRY_SECONDS * attempt)
     with Path(pull_log).open("a", encoding="utf-8") as log:
         log.write(ref + "\n")
 

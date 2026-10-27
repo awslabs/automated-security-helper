@@ -1081,10 +1081,11 @@ def test_pull_image_hands_the_argv_to_its_runner_and_records_the_pull(tmp_path):
     assert pull_log.read_text(encoding="utf-8").split() == [ref]
 
 
-def test_a_failed_pull_is_not_logged(tmp_path):
+def test_a_failed_pull_is_not_logged(tmp_path, monkeypatch):
     """The log lists pulls that happened, so the allowlist check can ask the events
     file for each one."""
     pull_image = _api("install_tools", "pull_image")
+    _no_sleep(monkeypatch)
     pull_log = tmp_path / "pulls.txt"
 
     def run(argv, *args, **kwargs):
@@ -1093,6 +1094,62 @@ def test_a_failed_pull_is_not_logged(tmp_path):
     with pytest.raises(subprocess.CalledProcessError):
         pull_image(REF, pull_log=pull_log, run=run)
     assert not pull_log.exists() or pull_log.read_text(encoding="utf-8") == ""
+
+
+def test_a_pull_the_registry_throttles_is_tried_again_and_logged_once(
+    tmp_path, monkeypatch, capsys
+):
+    """ECR Public's "toomanyrequests: Data limit exceeded" clears with time, and the
+    job has no credential to pull with an allowance of its own."""
+    pull_image = _api("install_tools", "pull_image")
+    attempts_allowed = _api("install_tools", "PULL_ATTEMPTS")
+    slept = _no_sleep(monkeypatch)
+    pull_log = tmp_path / "pulls.txt"
+    calls: list[list[str]] = []
+
+    def run(argv, *args, **kwargs):
+        calls.append(list(argv))
+        if len(calls) < attempts_allowed:
+            raise subprocess.CalledProcessError(1, argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    pull_image(REF, pull_log=pull_log, run=run)
+    assert len(calls) == attempts_allowed and attempts_allowed >= 2
+    assert all(call == ["docker", "pull", REF] for call in calls)
+    assert len(slept) == attempts_allowed - 1 and all(s > 0 for s in slept)
+    assert pull_log.read_text(encoding="utf-8").split() == [REF]
+    assert capsys.readouterr().err.count("trying again") == attempts_allowed - 1
+
+
+def test_a_pull_that_fails_every_time_is_tried_the_set_number_of_times(
+    tmp_path, monkeypatch
+):
+    pull_image = _api("install_tools", "pull_image")
+    attempts_allowed = _api("install_tools", "PULL_ATTEMPTS")
+    _no_sleep(monkeypatch)
+    calls: list[list[str]] = []
+
+    def run(argv, *args, **kwargs):
+        calls.append(list(argv))
+        raise subprocess.CalledProcessError(1, argv)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        pull_image(REF, pull_log=tmp_path / "pulls.txt", run=run)
+    assert len(calls) == attempts_allowed
+
+
+def test_a_timed_out_pull_is_not_tried_again(tmp_path, monkeypatch):
+    pull_image = _api("install_tools", "pull_image")
+    slept = _no_sleep(monkeypatch)
+    calls: list[list[str]] = []
+
+    def run(argv, *args, **kwargs):
+        calls.append(list(argv))
+        raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        pull_image(REF, pull_log=tmp_path / "pulls.txt", run=run)
+    assert len(calls) == 1 and slept == []
 
 
 def test_a_pull_has_a_timeout_and_a_timed_out_pull_is_not_logged(tmp_path):
