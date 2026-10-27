@@ -543,8 +543,14 @@ def ps1() -> str:
 
 
 def _mount_literals(text: str) -> List[str]:
-    """Every ``--mount "..."`` value the script writes, as written."""
-    return re.findall(r'--mount "([^"]*)"', text)
+    """Every ``--mount`` value the script writes, as written: the pair the run
+    command takes (``"--mount", "..."``) and the pair the extra run arguments
+    take (``$runArgs.Add('--mount')``, then ``$runArgs.Add("...")``)."""
+    paired = re.findall(r'"--mount",\s*"([^"]*)"', text)
+    added = re.findall(
+        r"\$runArgs\.Add\('--mount'\)\s*\$runArgs\.Add\(\"([^\"]*)\"\)", text
+    )
+    return paired + added
 
 
 def test_the_powershell_wrapper_mounts_the_source_read_only(ps1):
@@ -556,21 +562,27 @@ def test_the_powershell_wrapper_mounts_only_the_documented_destinations(ps1):
     destinations = sorted(
         re.search(r"destination=([^,]*)", m).group(1) for m in _mount_literals(ps1)
     )
-    assert destinations == ["$configInner", "/out", "/src"]
-    config = [m for m in _mount_literals(ps1) if "destination=$configInner" in m]
-    assert config == ["type=bind,source=$configFull,destination=$configInner,readonly"]
-    # The config's container path is under /src or /ash-config, nowhere else.
-    assigned = re.findall(r"\$configInner\s*=\s*(\"[^\"]*\")", ps1)
+    assert destinations == ["$envConfigInner", "/out", "/src"]
+    config = [m for m in _mount_literals(ps1) if "destination=$envConfigInner" in m]
+    assert config == [
+        "type=bind,source=$envConfigReal,destination=$envConfigInner,readonly"
+    ]
+    # The config's container path is under /src or /ash-env-config, nowhere else.
+    assigned = re.findall(r"\$envConfigInner\s*=\s*(['\"])([^'\"]*)\1", ps1)
     assert assigned and all(
-        value.startswith(('"/src/', '"/ash-config/')) for value in assigned
+        value.startswith(("/src/", "/ash-env-config/")) for _, value in assigned
     ), assigned
 
 
 def test_the_powershell_wrapper_reads_source_and_output_paths_literally(ps1):
     """-Path takes '[', ']', '*' and '?' as wildcards (about_Wildcards), so a source
-    directory named 'src[1]' would resolve to 'src1' when that exists."""
+    directory named 'src[1]' would resolve to 'src1' when that exists. Read on the
+    code alone: a comment may name the wildcard reading it rules out."""
+    code = "\n".join(
+        line for line in ps1.splitlines() if not line.strip().startswith("#")
+    )
     by_path = re.findall(
         r"\b(?:Get-Item|Test-Path|New-Item)\s+(?!-LiteralPath)\$(?:_|SourceDir|OutputDir)\b",
-        ps1,
+        code,
     )
     assert by_path == [], by_path
