@@ -241,21 +241,49 @@ def test_process_config_options_skip_paths(test_plugin_context):
         )
 
 
+#: What checkov writes for a clean scan: SARIF with one run and no results. The
+#: template refuses a log with no run as nothing to grade, so a mocked clean
+#: run has to carry the run checkov's writer always adds.
+CHECKOV_CLEAN_RUN_SARIF = (
+    '{"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "checkov"}}, '
+    '"results": []}]}'
+)
+
+
 def test_checkov_scanner_scan(test_checkov_scanner, test_data_dir):
-    """Test CheckovScanner scan method."""
+    """Test CheckovScanner scan method: a mocked clean run returns its report."""
     # Mock the scan to avoid actual execution
     import unittest.mock
 
     with (
         unittest.mock.patch.object(test_checkov_scanner, "_run_subprocess"),
-        unittest.mock.patch("builtins.open", unittest.mock.mock_open(read_data="{}")),
-        unittest.mock.patch("json.load", return_value={}),
+        unittest.mock.patch(
+            "builtins.open", unittest.mock.mock_open(read_data=CHECKOV_CLEAN_RUN_SARIF)
+        ),
     ):
         # Run the scan
         results = test_checkov_scanner.scan(test_data_dir, target_type="source")
 
-    # Check that results were returned
+    # Check that the clean run came back as a report with its one run
     assert results is not None
+    assert len(results.runs) == 1
+    assert results.runs[0].results == []
+
+
+def test_checkov_scanner_scan_refuses_a_result_with_no_run(
+    test_checkov_scanner, test_data_dir
+):
+    """``{}`` validates as SARIF with no run, and no run is no scan: refused."""
+    import unittest.mock
+
+    from automated_security_helper.core.exceptions import ScannerError
+
+    with (
+        unittest.mock.patch.object(test_checkov_scanner, "_run_subprocess"),
+        unittest.mock.patch("builtins.open", unittest.mock.mock_open(read_data="{}")),
+        pytest.raises(ScannerError, match="holds no SARIF run"),
+    ):
+        test_checkov_scanner.scan(test_data_dir, target_type="source")
 
 
 def test_checkov_scanner_scan_error(test_checkov_scanner):
