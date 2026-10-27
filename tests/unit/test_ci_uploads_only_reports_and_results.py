@@ -174,11 +174,14 @@ def test_the_scan_finds_the_uploads_it_is_about():
         ".github/workflows/run-ash-security-scan.yml",
         ".github/actions/run-scan-test/action.yml",
         "docs/content/docs/advanced-usage.md.template",
-        "docs/content/tutorials/running-ash-in-ci.md.template",
         "docs/content/docs/plugins/community/trivy-plugin.md",
-        "docs/content/tutorials/CI/GitLabCI/.gitlab-ci.yml",
-        "docs/content/tutorials/CI/Jenkins/Jenkinsfile",
-        "docs/content/tutorials/CI/GitHubActions/.github/workflows/run-ash-scan.yml",
+        # The CI how-to pages replaced the tutorials; between them they hold a
+        # GitHub Actions, a GitLab CI, a Jenkins and a CircleCI upload, and the
+        # sharded scan's per-shard upload.
+        "docs/content/how-to/ci/github-actions.md",
+        "docs/content/how-to/ci/gitlab-ci.md",
+        "docs/content/how-to/ci/other-ci.md",
+        "docs/content/how-to/scale-large-repos.md",
     ):
         assert expected in where, f"found no upload of ASH output in {expected}"
 
