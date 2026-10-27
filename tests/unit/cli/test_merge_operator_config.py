@@ -2,14 +2,17 @@
 # SPDX-License-Identifier: Apache-2.0
 """``ash merge --config``: the operator's file is read first, and its modules load.
 
-The operator's ``--config`` is the only configuration that can turn on a reporter
-that sends findings off the host in a merge (the shards' recorded config is
-ignored for those). The tests below check two things about it:
+The operator's ``--config`` names the plugin modules the merge loads (the shards'
+recorded modules are not imported). Whether a reporter that sends findings off
+the host runs, and where it sends, come from ``--config-overrides`` alone: the
+shards do not record which tree was scanned, so the file may be that tree's own
+(``reporter_trust.confine_off_host_reporters_to_overrides``). The tests below
+check two things about it:
 
 - The merge imports the modules it names in ``ash_plugin_modules``. With a
-  ``--config`` naming the AWS plugins and enabling S3, the merge finds the S3
-  reporter and uploads to the operator's bucket; modules only the shards recorded
-  are not imported. An in-process test of the same thing would pass whatever the
+  ``--config`` naming the AWS plugins and overrides enabling S3, the merge finds
+  the S3 reporter and uploads to the operator's bucket; modules only the shards
+  recorded are not imported. An in-process test of the same thing would pass whatever the
   merge imports, because its module imports an AWS reporter at the top, which
   registers the AWS plugins for the whole worker. These run the merge in a child
   process, where the only modules registered are the ones the merge imports
@@ -105,11 +108,26 @@ def _merge_in_a_child(
 
 def test_the_operators_config_loads_its_own_plugin_modules(tmp_path, aws_stand_in):
     """The shards name no plugin module; the operator's --config names the AWS
-    plugins and enables S3. The upload reaches the operator's bucket."""
+    plugins, and the overrides enable and aim S3 (an off-host reporter's enabled
+    and destination come only from --config-overrides). The upload reaches the
+    operator's bucket, so the module the --config names was imported."""
     endpoint, requests = aws_stand_in
     config = _operator_config(tmp_path / "operator" / "ash.yaml", ENABLE_S3)
 
-    result = _merge_in_a_child(tmp_path, endpoint, "--config", str(config))
+    result = _merge_in_a_child(
+        tmp_path,
+        endpoint,
+        "--config",
+        str(config),
+        "--config-overrides",
+        "reporters.s3.enabled=true",
+        "--config-overrides",
+        "reporters.s3.options.bucket_name=operator-bucket",
+        "--config-overrides",
+        "reporters.s3.options.aws_region=us-east-1",
+        "--config-overrides",
+        "reporters.s3.options.max_retries=0",
+    )
 
     assert "Traceback" not in result.stderr, result.stderr
     puts = [path for service, path in requests if path.startswith("PutObject")]
@@ -124,8 +142,9 @@ def test_the_operators_config_loads_its_own_plugin_modules(tmp_path, aws_stand_i
 
 def test_security_hub_imports_under_the_operators_scope_not_the_shards(tmp_path):
     """The shards record Security Hub enabled under their own scope, with
-    archiving on; the operator's --config enables it under the operator's. The
-    import is under the operator's scope, and nothing is read or archived."""
+    archiving on; the operator's --config names the module and the overrides
+    enable it under the operator's scope. The import is under the operator's
+    scope, and nothing is read or archived."""
     bodies: list = []
     shard_config = {
         "ash_plugin_modules": [AWS_PLUGIN_MODULE],
@@ -149,7 +168,17 @@ def test_security_hub_imports_under_the_operators_scope_not_the_shards(tmp_path)
 
     with stand_in.aws_stand_in(security_hub=True, bodies=bodies) as (url, requests):
         result = _merge_in_a_child(
-            tmp_path, url, "--config", str(config), shard_config=shard_config
+            tmp_path,
+            url,
+            "--config",
+            str(config),
+            "--config-overrides",
+            "reporters.aws-security-hub.enabled=true",
+            "--config-overrides",
+            "reporters.aws-security-hub.options.aws_region=us-east-1",
+            "--config-overrides",
+            "reporters.aws-security-hub.options.findings_scope=operator-scope",
+            shard_config=shard_config,
         )
 
     assert "Traceback" not in result.stderr, result.stderr

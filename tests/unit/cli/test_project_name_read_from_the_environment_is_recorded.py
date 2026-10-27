@@ -21,11 +21,11 @@ WHAT IT CHECKS
 --------------
 Two shards are scanned from a tree whose configuration reads ``project_name``
 from ASH_PROBE_VALUE, the first with the operator's overrides turning S3 and
-CloudWatch Logs on. ``ash merge`` merges them with the same settings, given in
-an operator configuration file outside the tree (``--config``), and ``ash
-report`` sends a shard with each reporter, with the overrides. Every command
-runs in a child whose AWS endpoints are a loopback stand-in that keeps each
-request's body.
+CloudWatch Logs on. ``ash merge`` merges them with the same overrides (a
+``--config`` file cannot turn an off-host reporter on for a merge; see LIMITS),
+and ``ash report`` sends a shard with each reporter, with the overrides. Every
+command runs in a child whose AWS endpoints are a loopback stand-in that keeps
+each request's body.
 - Control: the run read the variable. The configuration writes the bare
   ``${ASH_PROBE_VALUE}``, which refuses the configuration when the variable is
   unset, and every scan exits 0. The shard's own summary report names the
@@ -42,7 +42,12 @@ Failures name the file, the JSON path or the request target, never the text.
 
 LIMITS
 ------
-- The merge gets the operator's settings from the file ``--config`` names, not from ``--config-overrides``.
+- The merge gets the operator's settings from ``--config-overrides``, as the
+  scan and the report do. An off-host reporter's ``enabled`` and destinations
+  in a ``--config`` file are replaced with the defaults and the overrides
+  (config/reporter_trust.py, confine_off_host_reporters_to_overrides): the
+  shards do not record which tree was scanned, so the file may be that tree's
+  own.
 - The scan's own reports are checked in
   tests/unit/cli/test_outputs_hold_no_value_read_from_the_environment.py; the
   first control here reads one of them.
@@ -82,25 +87,6 @@ OPERATOR = [
     "reporters.cloudwatch-logs.options.log_stream_name=operator-stream",
     "reporters.cloudwatch-logs.options.max_retries=0",
 ]
-#: The same settings as the operator's configuration file, for ``ash merge``.
-OPERATOR_FILE = f"""\
-ash_plugin_modules:
-  - {AWS}
-reporters:
-  s3:
-    enabled: true
-    options:
-      bucket_name: operator-bucket
-      aws_region: us-east-1
-      max_retries: 0
-  cloudwatch-logs:
-    enabled: true
-    options:
-      aws_region: us-east-1
-      log_group_name: operator-group
-      log_stream_name: operator-stream
-      max_retries: 0
-"""
 RESULTS = ("shard0", "shard1", "merged")
 
 
@@ -150,9 +136,6 @@ def _verb(target: str) -> str:
 @pytest.fixture(scope="module")
 def runs(tmp_path_factory):
     work = tmp_path_factory.mktemp("project-name")
-    # Outside the scanned tree and the working directory: the operator's.
-    operator = tmp_path_factory.mktemp("operator") / "ash-operator.yaml"
-    operator.write_text(OPERATOR_FILE, encoding="utf-8")
     requests: list = []
     bodies: list = []
     # The stand-in, keeping each PutObject's body as well.
@@ -235,7 +218,7 @@ def runs(tmp_path_factory):
                 str(work / f"shard{index}" / "ash_aggregated_results.json"),
             ]
         before = len(bodies)
-        steps["merge"] = ash(*merge_argv, "--no-color", "--config", str(operator))
+        steps["merge"] = ash(*merge_argv, "--no-color", *overrides)
         sent_by += ["merge"] * (len(bodies) - before)
         for fmt in ("s3", "cloudwatch-logs"):
             before = len(bodies)
