@@ -130,7 +130,9 @@ class TestTheExpansion:
         assert LEGS["lint"] == 1
 
     def test_an_axis_product_less_its_excludes(self):
-        assert LEGS["unit-test"] == 25
+        # 25 OS and Python combinations, each split into 8 shards (tests/unit/test_unit_test_shards.py
+        # holds the shard axis itself to one list of eight).
+        assert LEGS["unit-test"] == 25 * 8
 
     def test_an_include_that_merges_adds_no_cell(self):
         job = {
