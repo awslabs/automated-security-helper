@@ -41,6 +41,9 @@ REAL_TOOL_MODULES = frozenset(
         # The real uv, run from a tree holding a planted .venv and project: which of
         # the two uv looks at is what these measure (tests/utils/planted_uv.py).
         "base/test_scanner_uv_commands_discover_nothing_from_the_tree.py",
+        # Runs the real npm and gem from an empty directory and from the planted
+        # repository; a stand-in cannot read a .npmrc or a Gemfile.
+        "cli/test_dependencies_install_commands_start_outside_the_tree.py",
         "cli/test_dependencies_uv_commands_discover_nothing_from_the_tree.py",
         "cli/test_genai_guide_ships_with_install.py",
         # Starts no tool: its two cells are unguarded on purpose, so the
