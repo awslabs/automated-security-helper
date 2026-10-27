@@ -343,7 +343,10 @@ class TestJsonConfigs:
         assert "extension:" not in text and '"extension"' not in text
         check = ConfigValidator.check_config_file(target)
         assert check.errors == [] and check.warnings == [], check
-        assert AshConfig.from_file(target) == config
+        # The fields, not the models: a loaded config carries private attributes
+        # the loader sets (_loaded_from, resolve_config.load_config_file), which
+        # pydantic's == compares, so a loaded config never equals a built one.
+        assert AshConfig.from_file(target).model_dump() == config.model_dump()
 
     def test_init_writes_json(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
