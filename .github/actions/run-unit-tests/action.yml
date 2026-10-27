@@ -8,6 +8,15 @@ inputs:
   python-version:
     description: "Python version label for artifact naming"
     required: true
+  shard:
+    description: >-
+      Which slice of the suite to run, written <index>of<count> (for example 3of8).
+      The default, 1of1, runs the whole suite and enforces the coverage threshold
+      itself. Any other value runs only that shard's test files, measures coverage
+      without gating it, and leaves the threshold to the unit-coverage job, which
+      combines every shard's data (.github/scripts/combine-unit-coverage.py).
+    required: false
+    default: "1of1"
 
 runs:
   using: "composite"
@@ -86,12 +95,60 @@ runs:
     # /home/runner/work/_temp on the Linux images, so the tests measure the
     # intended scenario, a home that is NOT inside the sandbox's private tmp.
     # tests/conftest.py sets this knob with setdefault, so the value here wins.
+    #
+    # This step runs only for the whole-suite shard (1of1). pytest.ini adds --cov and
+    # .coveragerc sets fail_under=80, so it is also where the coverage threshold is enforced
+    # for a whole-suite run. ash-unified-ci.yml gives the suite eight shards per OS and
+    # Python version, because the whole suite did not finish inside any job timeout on a
+    # 4-worker runner. A shard covers part of the package, so the shard step below runs it
+    # without the threshold, and the unit-coverage job applies the same 80% to the shards'
+    # combined data.
     - name: Run PyTest
+      if: inputs.shard == '1of1'
       shell: bash
       env:
         ASH_REQUIRE_SYMBOLS_EXTRA: "1"
         PYTEST_DEBUG_TEMPROOT: ${{ runner.temp }}
       run: uv run pytest
+
+    # The test files this shard owns, one per line. Passing them as arguments, rather than
+    # deselecting after collection, also keeps each shard from collecting the whole tree,
+    # which took several minutes per run on the unsharded suite.
+    # The self-test runs first: a selector that dealt out a subset would otherwise pass.
+    - name: Select this shard's test files
+      if: inputs.shard != '1of1'
+      shell: bash
+      env:
+        SHARD: ${{ inputs.shard }}
+      run: |
+        uv run python .github/scripts/select-test-shard.py --self-test
+        uv run python .github/scripts/select-test-shard.py \
+          --shard "${SHARD}" --output test-results/shard-files.txt
+
+    # One shard of the suite, with the same environment as "Run PyTest" above.
+    #
+    # Coverage is measured and written to test-results/coverage.data, which the artifact
+    # upload below carries to the unit-coverage job. --cov-fail-under=0 turns off the
+    # threshold that .coveragerc would otherwise apply to this shard's partial total; pytest-cov
+    # only reads the configured value when the option is absent. The coverage options in
+    # pytest.ini still add their term, XML and HTML reports, which are partial and unused here.
+    # The data file has no leading dot on purpose: upload-artifact leaves out hidden files
+    # unless told otherwise.
+    #
+    # Its own --junit-xml path, so it does not claim the file pytest.ini names for the
+    # whole-suite run and the cdk-nag step below. The report step's glob matches all of them.
+    - name: Run PyTest shard
+      if: inputs.shard != '1of1'
+      shell: bash
+      env:
+        ASH_REQUIRE_SYMBOLS_EXTRA: "1"
+        PYTEST_DEBUG_TEMPROOT: ${{ runner.temp }}
+        COVERAGE_FILE: test-results/coverage.data
+      run: |
+        uv run pytest \
+          @test-results/shard-files.txt \
+          --cov-fail-under=0 \
+          --junit-xml=test-results/pytest-shard.junit.xml
 
     # Runs the cdk-nag integration tests, which the default pytest invocation above does
     # NOT run: tests/conftest.py skips anything whose keywords include "integration", and
@@ -110,7 +167,12 @@ runs:
     #
     # ASH_REQUIRE_CDK_EXTRA turns a missing extra into a hard failure instead of a skip, so
     # this step cannot silently stop testing anything if the install step above changes.
+    #
+    # Once per OS and Python version, not once per shard: it runs in the first shard
+    # (the whole-suite shard 1of1 also starts with "1of"), so each OS and Python
+    # combination still runs these tests exactly once.
     - name: Run cdk-nag integration tests
+      if: success() && startsWith(inputs.shard, '1of')
       shell: bash
       env:
         ASH_REQUIRE_CDK_EXTRA: "1"
@@ -134,13 +196,18 @@ runs:
     # not accessible by integration". Nor a stale pin; v6.5.0 is the newest release.
     # Dropping the input takes the create path, which names the check run from
     # `check_name` below -- so that per-cell input is load-bearing now instead of dead.
+    #
+    # report_paths matches every JUnit file under test-results/: pytest.junit.xml from a
+    # whole-suite run and from the cdk-nag step, and pytest-shard.junit.xml from a shard.
+    # The check name carries the shard, so the eight shards of one OS and Python version
+    # publish eight check runs instead of colliding on one name.
     - name: Publish PyTest JUnit Test Report
       uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
       if: success() || failure()
       with:
-        report_paths: "**/pytest.junit.xml"
+        report_paths: "test-results/*.junit.xml"
         include_passed: true
-        check_name: PyTest - ${{ inputs.os }} ${{ steps.runner-arch.outputs.label }} Python ${{ inputs.python-version }}
+        check_name: PyTest - ${{ inputs.os }} ${{ steps.runner-arch.outputs.label }} Python ${{ inputs.python-version }} shard ${{ inputs.shard }}
 
     # Rendered by coverage.py itself rather than by irongut/CodeCoverageSummary, which is a
     # Docker-based action. A Docker action's image is pulled during the job's prepare phase,
@@ -174,7 +241,10 @@ runs:
       # reads the runner context directly, so the selection does not depend on the mapping in the
       # step above being right. A typo there can only break an artifact name, never silently
       # deselect every leg.
-      if: runner.os == 'Linux' && inputs.python-version == '3.12' && runner.arch == 'X64'
+      #
+      # Only for the whole-suite shard: a sharded leg has only its own slice's data, and the
+      # unit-coverage job renders this table from the combined data instead.
+      if: runner.os == 'Linux' && inputs.python-version == '3.12' && runner.arch == 'X64' && inputs.shard == '1of1'
       run: |
         {
           echo '## Code coverage'
@@ -186,6 +256,6 @@ runs:
       if: success() || failure()
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
-        name: test-results-${{ inputs.os }}-${{ steps.runner-arch.outputs.label }}-py${{ inputs.python-version }}
+        name: test-results-${{ inputs.os }}-${{ steps.runner-arch.outputs.label }}-py${{ inputs.python-version }}-shard${{ inputs.shard }}
         path: test-results/
         if-no-files-found: warn
