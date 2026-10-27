@@ -128,11 +128,16 @@ def test_offline_grype_keeps_the_go_toolchain_local(offline, context):
 @pytest.mark.skipif(
     sys.platform == "win32", reason="the fake go is a POSIX shell script"
 )
+@pytest.mark.runs_real_tools(
+    reason="whether syft hands the module to the go on PATH is syft's own behavior"
+)
 def test_a_real_offline_syft_runs_no_go_command(offline, context, tmp_path):
     """syft itself, with a ``go`` first on PATH that records every invocation.
 
     Runs in the CI job that installs every scanner, where a missing syft fails it
     (tests/utils/helpers.require_scanner_binary); elsewhere it skips without syft.
+    The unit tests' tool guard (tests/unit/conftest.py) would otherwise put a
+    stand-in for syft first on PATH, which records the call and exits 1.
     """
     require_scanner_binary("syft")
     scrub_cloud_credentials(offline)

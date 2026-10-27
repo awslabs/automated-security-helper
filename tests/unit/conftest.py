@@ -45,6 +45,10 @@ REAL_TOOL_MODULES = frozenset(
         "utils/test_find_executable_cache_isolation.py",
         "plugin_modules/ash_builtin/converters/test_jupyter_conversion_runs_outside_tree.py",
         "plugin_modules/ash_builtin/scanners/test_nix_provided_scanner_selection.py",
+        # One test each runs the real syft or trivy offline, in the CI job that
+        # installs every scanner; the stand-in would answer for the tool and exit 1.
+        "plugin_modules/test_offline_go_toolchain.py",
+        "plugin_modules/test_offline_trivy_terraform_modules.py",
         "utils/test_pre_installed_tool.py",
         "utils/test_uv_ignores_repository_config.py",
     }

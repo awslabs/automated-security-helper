@@ -354,11 +354,16 @@ def _reset_list_cache() -> None:
         reset()
 
 
+@pytest.mark.runs_real_tools(
+    reason="what trivy fetches offline, and the list its --help prints, are trivy's own"
+)
 def test_a_real_offline_trivy_fetches_no_terraform_module(offline, context, tmp_path):
     """trivy itself, offline, over a .tf file that names remote module sources.
 
     Runs in the CI job that installs every scanner, where a missing trivy fails it
     (tests/utils/helpers.require_scanner_binary); elsewhere it skips without trivy.
+    The unit tests' tool guard (tests/unit/conftest.py) would otherwise put a
+    stand-in for trivy first on PATH, which prints no --help text and exits 1.
     """
     require_scanner_binary("trivy")
     scrub_cloud_credentials(offline)
