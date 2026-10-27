@@ -814,7 +814,10 @@ def test_the_example_plugin_package_declares_no_dependency_on_ash():
     accordingly lists nothing to rewrite in it (an entry whose file holds no
     version would fail ``--check-consistency`` at the next release).
     """
-    import tomllib
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # pragma: no cover - Python 3.10
+        import tomli as tomllib
 
     example = tomllib.loads(EXAMPLE_PYPROJECT.read_text(encoding="utf-8"))
     assert "poetry" not in example.get("tool", {}), sorted(example["tool"])
