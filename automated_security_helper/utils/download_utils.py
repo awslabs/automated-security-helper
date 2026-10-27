@@ -1376,7 +1376,9 @@ def current_bin_path() -> Optional[Path]:
     """
     from_env = ash_bin_path_from_environment()
     if from_env:
-        return Path(from_env)
+        # Read against the working directory here, where the caller named it,
+        # not against the empty directory the install command later runs in.
+        return Path(os.path.abspath(from_env))
     if ASH_BIN_PATH is None:
         warn_if_home_unusable()
     return ASH_BIN_PATH
