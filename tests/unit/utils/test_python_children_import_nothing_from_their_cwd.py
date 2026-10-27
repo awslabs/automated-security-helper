@@ -278,21 +278,21 @@ def test_the_helper_adds_no_directory_of_the_child_to_sys_path(tmp_path):
 #:
 #: Install commands: plugins declare them as argv lists and only
 #: ``ash dependencies install`` runs them, through ``cli.dependencies.run_command``,
-#: which starts each Python one through ``python_child`` (tested above).
+#: which starts each Python one through ``python_child`` (tested above). The pip
+#: install that plugin_base, cdk-nag and ferret declare is built in one place,
+#: ``python_package_install_command``, and a command that can only refuse by
+#: ``refusing_install_command``.
+#:
+#: ``_ash_environment_install`` compares an install command's prefix with this
+#: list and starts nothing.
 #:
 #: The cdk-nag worker: its ``-c`` source drops ``sys.path[0]`` before importing
 #: anything, and it starts in a directory it has just created; see
 #: test_the_child_does_not_import_from_the_scanned_directory in test_cdk_nag_worker.py.
 RAW_PYTHON_ARGV_ALLOWED = {
-    ("base/plugin_base.py", "_INSTALL_COMMAND_BUILDERS"),
-    (
-        "plugin_modules/ash_builtin/scanners/cdk_nag_scanner.py",
-        "get_installation_commands",
-    ),
-    (
-        "plugin_modules/ash_ferret_plugins/ferret_scanner.py",
-        "get_installation_commands",
-    ),
+    ("utils/python_installer.py", "python_package_install_command"),
+    ("utils/download_utils.py", "refusing_install_command"),
+    ("cli/dependencies.py", "_ash_environment_install"),
     ("utils/download_utils.py", "create_pinned_tool_install_command"),
     ("utils/download_utils.py", "create_url_download_command"),
     ("utils/rules_bundles.py", "create_rules_bundle_install_command"),
