@@ -63,6 +63,7 @@ from tests.utils.bare_install_names import (
     EXPORTED_CONSTANTS,
     find_bare_installs,
     find_in_file,
+    normalize,
 )
 from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, iter_repo_files
 
@@ -792,37 +793,66 @@ def test_the_mcp_testing_guide_does_not_call_the_ash_package_warning_harmless():
         assert "`uv run`" in after, (index + 1, after)
 
 
-def test_the_example_plugin_package_pins_the_packaged_release():
-    """The commented git dependency in the example names the release this repo ships.
+def _requirement_names(requirements: list[str]) -> list[str]:
+    """The PEP 503-normalized project name of each PEP 508 requirement string."""
+    return [
+        normalize(re.match(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)", req).group(1))
+        for req in requirements
+    ]
 
-    `[tool.commitizen] version_files` is the only thing that keeps it current:
-    the version-pin walk's ``@v`` patterns do not read poetry's ``tag = "v..."``.
+
+def test_the_example_plugin_package_declares_no_dependency_on_ash():
+    """The example is a ``[project]`` package with no requirement on ASH's name.
+
+    The package is installed into the environment ASH already runs in (its
+    README's Installation section), so it names ASH in no dependency list: a
+    requirement on ``automated-security-helper`` would be resolved from PyPI,
+    where that name is not ASH's. The example used to be a poetry package with a
+    path dependency on this checkout and a commented git alternative pinned to
+    the packaged release; the pyproject's own comment above ``dependencies``
+    now says why neither is declared, and ``[tool.commitizen] version_files``
+    accordingly lists nothing to rewrite in it (an entry whose file holds no
+    version would fail ``--check-consistency`` at the next release).
     """
     import tomllib
 
+    example = tomllib.loads(EXAMPLE_PYPROJECT.read_text(encoding="utf-8"))
+    assert "poetry" not in example.get("tool", {}), sorted(example["tool"])
+    project = example["project"]
+    declared = _requirement_names(project.get("dependencies", []))
+    for group, requirements in project.get("optional-dependencies", {}).items():
+        declared += [f"{group}:{name}" for name in _requirement_names(requirements)]
+    assert not any(
+        name.rsplit(":", 1)[-1] in {"automated-security-helper", "ash"}
+        for name in declared
+    ), declared
     pyproject = tomllib.loads(
         (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )
-    packaged = pyproject["tool"]["commitizen"]["version"]
-    tags = re.findall(
-        r'^#\s*automated-security-helper\s*=\s*\{[^}]*\btag\s*=\s*"v([^"]+)"',
-        EXAMPLE_PYPROJECT.read_text(encoding="utf-8"),
-        re.MULTILINE,
-    )
-    assert tags == [packaged], tags
     entries = pyproject["tool"]["commitizen"]["version_files"]
-    assert any(
-        entry.startswith("examples/ash_plugins_example/pyproject.toml:")
-        for entry in entries
+    assert not any(
+        entry.startswith("examples/ash_plugins_example/") for entry in entries
     ), entries
 
 
-def test_the_example_plugin_package_depends_on_ash_by_path():
-    """The example's live dependency on ASH is a path dependency on this checkout."""
-    text = EXAMPLE_PYPROJECT.read_text(encoding="utf-8")
+def test_the_example_plugin_package_says_why_ash_is_not_a_dependency():
+    """The pyproject and the README both tell a copier not to add the dependency.
+
+    A user who copies the package as a starting point reads one of the two, and
+    the natural edit, ``dependencies = ["automated-security-helper"]``, installs
+    PyPI's unrelated project. The README's install commands name the git
+    repository or the checkout path instead.
+    """
+    pyproject_text = EXAMPLE_PYPROJECT.read_text(encoding="utf-8")
     assert re.search(
-        r"^automated-security-helper\s*=\s*\{[^}]*\bpath\s*=", text, re.MULTILINE
-    ), text
+        r"^#.*\bNo dependency on automated-security-helper\b",
+        pyproject_text,
+        re.MULTILINE,
+    ), pyproject_text
+    readme = (EXAMPLE_PYPROJECT.parent / "README.md").read_text(encoding="utf-8")
+    assert "declares no dependency on `automated-security-helper`" in readme
+    assert GIT_URL in readme
+    assert "./examples/ash_plugins_example" in readme
 
 
 def test_the_example_plugin_package_offers_no_version_constraint_on_ash():
