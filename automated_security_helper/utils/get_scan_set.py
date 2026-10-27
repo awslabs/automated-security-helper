@@ -38,6 +38,7 @@ from automated_security_helper.utils.output_dir_links import OUTPUT_GITIGNORE
 from automated_security_helper.utils.scan_output_dirs import (
     SCAN_SET_RUN_FILE_NAME,
     SCAN_START_FILE_NAMES,
+    _through_a_link_in_the_tree,
     classified_output_dirs,
     holds_ash_output,
     tracked_files_in,
@@ -389,20 +390,32 @@ def _directory_identity(
 class _OwnOutput(NamedTuple):
     """ASH's output directory for one scan, as the walks recognize it."""
 
-    #: :func:`_directory_identity` of the directory, followed if it is a link (it
-    #: is where ASH writes, whatever it is called; the orchestrator refuses a
-    #: symlinked one anyway). None when it does not exist.
+    #: :func:`_directory_identity` of the directory, followed when the way to it
+    #: is the operator's (a link above the tree, such as ``/var`` on macOS: it is
+    #: where ASH writes, whatever it is called). Not followed through a link the
+    #: tree holds: ``.ash/ash_output`` committed as a link to the repository's own
+    #: ``src`` would otherwise take ``src`` out of the scan, and such a directory
+    #: is named as ASH's by nothing (``scan_output_dirs.named_output_dirs``); the
+    #: orchestrator refuses a symlinked one anyway. None when it does not exist,
+    #: or is such a link.
     identity: Optional[tuple[int, int]]
     #: Its absolute, case-normalized path, for when the identity cannot decide.
     path: str
 
 
-def _own_output_of(output: Optional[str | Path]) -> Optional[_OwnOutput]:
+def _own_output_of(
+    output: Optional[str | Path], source: str | Path
+) -> Optional[_OwnOutput]:
+    """The output directory of the scan of *source*, or None for no output directory."""
     if not output:
         return None
+    absolute = Path(os.path.abspath(output))
+    through_the_tree = _through_a_link_in_the_tree(
+        absolute, Path(os.path.realpath(source))
+    )
     return _OwnOutput(
-        identity=_directory_identity(output, follow_symlinks=True),
-        path=os.path.normcase(os.path.abspath(output)),
+        identity=_directory_identity(output, follow_symlinks=not through_the_tree),
+        path=os.path.normcase(str(absolute)),
     )
 
 
@@ -739,9 +752,10 @@ def _collect_ignorefiles_and_all_files(
             )
 
     pruned_key = os.path.join(path, ".gitignore")
-    # The output directory is followed if it is a link: it is where ASH writes,
-    # whatever it is called. The orchestrator refuses a symlinked one anyway.
-    own = _own_output_of(own_output)
+    # The output directory is followed if it is reached through a link above the
+    # tree: it is where ASH writes, whatever it is called. A link the tree holds is
+    # not followed (_OwnOutput); the orchestrator refuses a symlinked one anyway.
+    own = _own_output_of(own_output, path)
 
     for root, dirs, files in os.walk(path):
         root_path = Path(os.path.abspath(root))
