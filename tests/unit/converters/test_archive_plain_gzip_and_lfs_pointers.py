@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import gzip
 import io
+import sys
 import tarfile
 import zipfile
 from pathlib import Path
@@ -438,6 +439,10 @@ class TestGitLfsPointers:
         assert converter.refused_inputs == []
         assert converter.failed_inputs == []
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="the member name holds a colon, which Windows cannot create as a file",
+    )
     def test_a_tar_whose_first_name_starts_like_a_pointer_is_still_a_tar(
         self, test_plugin_context, monkeypatch
     ):
