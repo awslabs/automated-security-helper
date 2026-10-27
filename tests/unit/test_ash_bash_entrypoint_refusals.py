@@ -278,7 +278,7 @@ def test_a_source_dir_that_starts_with_a_dash_is_the_directory_it_names(
         result.stdout + result.stderr
     )
     mounts = _mounts(tmp_path)
-    # The source mount is read-write here: the output dir is not beneath it.
+    # The source mount is read-only wherever the output is; only its start is read.
     assert mounts[0].startswith(
         f"source={tmp_path / '-dashdir'},type=bind,destination=/src"
     ), mounts
@@ -350,18 +350,21 @@ def test_an_option_given_only_whitespace(run_ash, bare_path, option, blank):
 
 
 @pytest.mark.parametrize(
-    "output_dir, read_only",
+    "output_dir",
     [
-        # A sibling whose name starts with the source dir's: the prefix test read
-        # it as inside, and mounted /src read-write.
-        pytest.param("src-out", True, id="sibling-with-the-same-prefix"),
-        pytest.param("src/out", False, id="inside-the-source-dir"),
-        pytest.param("out", True, id="elsewhere"),
+        # A sibling whose name starts with the source dir's: the prefix test once
+        # read it as inside the source, where the mount differed.
+        pytest.param("src-out", id="sibling-with-the-same-prefix"),
+        pytest.param("src/out", id="inside-the-source-dir"),
+        pytest.param("out", id="elsewhere"),
     ],
 )
-def test_the_source_mount_is_read_only_unless_the_output_is_inside_it(
-    tmp_path, run_ash, bare_path, output_dir, read_only
+def test_the_source_mount_is_read_only_wherever_the_output_is(
+    tmp_path, run_ash, bare_path, output_dir
 ):
+    """The output has its own read-write mount at /out and the scan inside writes
+    there, so /src is read-only also when the output directory is inside the source
+    (the default .ash/ash_output is)."""
     result, calls = run_ash(
         "--no-build",
         "--source-dir",
@@ -373,11 +376,13 @@ def test_the_source_mount_is_read_only_unless_the_output_is_inside_it(
 
     assert len(calls) == 1, result.stdout + result.stderr
     source_mount = _mounts(tmp_path)[0]
-    assert source_mount.endswith(",readonly") is read_only, source_mount
+    assert source_mount.endswith(",readonly"), source_mount
 
 
 def test_a_root_source_dir_holds_an_output_dir_beneath_it(tmp_path, run_ash, bare_path):
-    """With / as the source the prefix was "//", so / was mounted read-only over it."""
+    """With / as the source the prefix was "//", so the output under it read as
+    outside. The output beneath / is not above the source, so the run is not
+    refused, and / is mounted at /src read-only as every source is."""
     result, calls = run_ash(
         "--no-build",
         "--source-dir",
@@ -388,7 +393,7 @@ def test_a_root_source_dir_holds_an_output_dir_beneath_it(tmp_path, run_ash, bar
     )
 
     assert len(calls) == 1, result.stdout + result.stderr
-    assert _mounts(tmp_path)[0] == "source=/,type=bind,destination=/src"
+    assert _mounts(tmp_path)[0] == "source=/,type=bind,destination=/src,readonly"
 
 
 def test_a_source_dir_whose_name_ends_in_a_newline_is_refused(
