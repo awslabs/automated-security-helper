@@ -1393,21 +1393,34 @@ def test_the_act_event_names_the_head_and_the_base_of_the_pull_request():
 # ---------------------------------------------------------------------------
 
 
-def _gitlab_argv(tmp_path: Path, event):
+def _gitlab_argv(tmp_path: Path, event, **extra):
     return _api("run_gitlab_ci_local", "gitlab_ci_local_argv")(
         program=tmp_path / "bin" / "gitlab-ci-local",
         project=tmp_path / "project",
         wheel_dir=tmp_path / "wheel",
         event=event,
         base_sha="f" * 40,
+        **extra,
     )
+
+
+def test_gitlab_ci_local_gets_a_relative_cwd(tmp_path):
+    """gitlab-ci-local 4.76.1 refuses an absolute --cwd, so the option is the project
+    relative to the directory the launch runs it in."""
+    here = _gitlab_argv(tmp_path, None, cwd=tmp_path / "project")
+    assert _value(here, "--cwd") == ["."]
+    assert _value(_gitlab_argv(tmp_path, None), "--cwd") == ["."]
+    above = _gitlab_argv(tmp_path, None, cwd=tmp_path)
+    assert _value(above, "--cwd") == ["project"]
+    for argv in (here, above):
+        assert not Path(_value(argv, "--cwd")[0]).is_absolute()
 
 
 @pytest.mark.parametrize("event", [None, "push", "merge_request"])
 def test_gitlab_ci_local_uses_the_built_helper_and_the_wheel_mount(tmp_path, event):
     argv = _gitlab_argv(tmp_path, event)
     assert argv[0] == str(tmp_path / "bin" / "gitlab-ci-local")
-    assert _value(argv, "--cwd") == [str(tmp_path / "project")]
+    assert _value(argv, "--cwd") == ["."]
     assert _value(argv, "--helper-image") == ["doctest-gitlab-helper:local"]
     assert _value(argv, "--pull-policy") == ["if-not-present"]
     assert _value(argv, "--volume") == [f"{tmp_path / 'wheel'}:/ash-wheel:ro"]

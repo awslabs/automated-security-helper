@@ -795,6 +795,7 @@ def _launch_gitlab(prepared: Prepared, session: Session) -> Launched:
         wheel_dir=session.options.wheel.parent,
         event=prepared.run.event,
         base_sha=fixture.base_sha,
+        cwd=project,
     )
     _record(out, "gitlab-ci-local", argv)
     log = out / "gitlab-ci-local.log"

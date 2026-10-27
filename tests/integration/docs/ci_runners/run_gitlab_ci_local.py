@@ -18,6 +18,7 @@ gitlab-ci-local's defaults. GitLab has no pull request event.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -41,14 +42,22 @@ def gitlab_ci_local_argv(
     wheel_dir: Path,
     event: str | None,
     base_sha: str,
+    cwd: Path | None = None,
 ) -> list[str]:
-    """``gitlab-ci-local`` for the whole pipeline of ``project``."""
+    """``gitlab-ci-local`` for the whole pipeline of ``project``.
+
+    gitlab-ci-local 4.76.1 refuses an absolute ``--cwd`` ("Please use relative path for
+    the --cwd option"; ``assert(!path.isAbsolute(cwd), ...)`` in src/argv.ts) and joins
+    a relative one onto its own working directory. ``cwd`` is the directory the launch
+    runs it in (``project`` when not given, which makes the option ``.``), so the option
+    is ``project`` relative to that directory.
+    """
     if event not in EVENTS:
         raise ValueError(f"GitLab has no {event} event; the events are {EVENTS}")
     argv = [
         str(program),
         "--cwd",
-        str(project),
+        os.path.relpath(project, cwd if cwd is not None else project),
         "--volume",
         f"{wheel_dir}:{WHEEL_MOUNT}:ro",
         "--helper-image",
