@@ -24,8 +24,7 @@ test is skipped with its status and what it lacks, so the run's report lists it.
 Tools the test can use when the environment provides them, none required: the
 grype and trivy databases (``GRYPE_DB_CACHE_DIR`` naming grype's ``db`` directory,
 ``TRIVY_CACHE_DIR``), the cfn-guard rules directory (``ASH_CFN_GUARD_RULES_DIR``), and
-the scanner binaries on ``PATH`` or installed as uv tools, found the way the scanner
-finds them. semgrep and opengrep get an offline rule cache the test writes.
+the scanner binaries on ``PATH``. semgrep and opengrep get an offline rule cache the test writes.
 """
 
 from __future__ import annotations
@@ -44,7 +43,6 @@ from pathlib import Path
 
 import pytest
 
-from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 from tests.utils.gitleaks_fixture import fabricated_tokens
 from tests.utils.helpers import importing_this_checkout
 
@@ -479,19 +477,6 @@ def _registered_scanner_names() -> set[str]:
     return names
 
 
-def _installed(command: str, path: str) -> bool:
-    """Whether the scanner finds ``command``: on ``path``, or as an installed uv tool.
-
-    A scanner that runs as a uv tool (checkov, zizmor) is found by ``uv tool list``
-    as well as by PATH, so a lookup of PATH alone says "not installed" for a tool
-    the scanner runs. ``UVToolRunner.get_tool_installation_info`` is the lookup the
-    scanner makes.
-    """
-    if shutil.which(command, path=path):
-        return True
-    return bool(UVToolRunner().get_tool_installation_info(command).get("available"))
-
-
 def _why_it_cannot_run(control: Control) -> str | None:
     """None when the scanner can run here; otherwise what it lacks."""
     if control.offline:
@@ -499,7 +484,13 @@ def _why_it_cannot_run(control: Control) -> str | None:
     path = os.pathsep.join(
         [os.environ.get("PATH", ""), str(Path(sys.executable).parent)]
     )
-    missing = [command for command in control.commands if not _installed(command, path)]
+    # PATH only, because that is all the scan can see: it runs with a home of its own,
+    # so a uv tool a test installed under this session's private home (which `uv tool
+    # list` shows here) is not one the scan finds, and the scanner records MISSING.
+    # CI installs the uv tools the suite needs before it starts, onto PATH.
+    missing = [
+        command for command in control.commands if not shutil.which(command, path=path)
+    ]
     if missing:
         return f"{', '.join(missing)} is not installed here"
     if control.module and importlib.util.find_spec(control.module) is None:
