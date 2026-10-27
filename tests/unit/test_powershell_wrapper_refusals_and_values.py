@@ -44,6 +44,7 @@ from tests.utils.config_link_layouts import (
     config_through_links,
 )
 from tests.utils.helpers import mark_git_checkout
+from tests.utils.pwsh_env import inherited_env, scratch_home
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HELPERS = REPO_ROOT / "utils" / "ash_helpers.ps1"
@@ -366,13 +367,18 @@ def _invoke(
     arguments: str,
     extra_env=None,
     helpers: Path = HELPERS,
+    cwd: Path | None = None,
 ):
     """Run Invoke-ASH as a CI step does: under ``Stop``, wrapped so a refusal, which
     throws, ends the step with its code (docs/content/docs/cli-reference.md).
 
     *extra_env* is set after the scrub of ASH_CONFIG, so a test gives the variable
     the file it means. *helpers* is the script that is dot-sourced, the repository's
-    unless a test gives a copy it changed."""
+    unless a test gives a copy it changed. *cwd* is the working directory, *tmp_path*
+    unless a test needs a link it made to sit outside it. pwsh gets a HOME and XDG
+    directories of its own under *tmp_path* (``scratch_home``): it writes its startup
+    cache and its telemetry id under them, and the test's HOME must hold no tool's
+    files when the test ends (tests/unit/conftest.py, ``_unit_tool_guard``)."""
     script = (
         f"$ErrorActionPreference = 'Stop'; . '{helpers.as_posix()}'; "
         f"try {{ Invoke-ASH -OCIRunner docker -NoBuild {arguments} }} "
@@ -380,14 +386,15 @@ def _invoke(
         "exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }; "
         "exit [int]$LASTEXITCODE"
     )
-    env = {k: v for k, v in os.environ.items() if k not in ("PATH", "ASH_CONFIG")}
+    env = inherited_env("PATH", "ASH_CONFIG")
     env["PATH"] = os.pathsep.join(
         [bin_dir.as_posix(), Path(pwsh).resolve().parent.as_posix()]
     )
+    env.update(scratch_home(tmp_path))
     env.update(extra_env or {})
     return subprocess.run(  # nosec B603 - fixed interpreter, script built here
         [pwsh, "-NoProfile", "-NonInteractive", "-Command", script],
-        cwd=tmp_path,
+        cwd=cwd or tmp_path,
         env=env,
         capture_output=True,
         text=True,

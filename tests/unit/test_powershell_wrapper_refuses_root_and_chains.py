@@ -41,6 +41,7 @@ from typing import Optional
 import pytest
 
 from tests.utils.host_ids import fixed_id_dir
+from tests.utils.pwsh_env import inherited_env, scratch_home
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HELPERS = REPO_ROOT / "utils" / "ash_helpers.ps1"
@@ -178,7 +179,12 @@ def _pwsh_script(
     flags: tuple = ("-NonInteractive",),
     stdin: Optional[str] = None,
 ):
-    """Run *body* with the helpers dot-sourced, as a script file or a -Command string."""
+    """Run *body* with the helpers dot-sourced, as a script file or a -Command string.
+
+    pwsh gets a HOME and XDG directories of its own under *tmp_path*
+    (``scratch_home``): it writes its startup cache and its telemetry id under them,
+    and the test's HOME must hold no tool's files when the test ends
+    (tests/unit/conftest.py, ``_unit_tool_guard``)."""
     script = f". '{HELPERS.as_posix()}'\n{body}\n"
     if file:
         path = tmp_path / "caller.ps1"
@@ -186,7 +192,8 @@ def _pwsh_script(
         command = [pwsh, "-NoProfile", *flags, "-File", str(path)]
     else:
         command = [pwsh, "-NoProfile", *flags, "-Command", script]
-    env = {k: v for k, v in os.environ.items() if k != "ASH_CONFIG"}
+    env = inherited_env("ASH_CONFIG")
+    env.update(scratch_home(tmp_path))
     env["NO_COLOR"] = "1"
     return subprocess.run(  # nosec B603 - fixed interpreter, script built here
         command,
@@ -360,7 +367,7 @@ def host(tmp_path, pwsh):
             f"{_wrapped(call)}; "
             "exit [int]$LASTEXITCODE"
         )
-        env = {k: v for k, v in os.environ.items() if k not in ("PATH", "ASH_CONFIG")}
+        env = inherited_env("PATH", "ASH_CONFIG")
         env["PATH"] = os.pathsep.join(
             [
                 bin_dir.as_posix(),
@@ -369,6 +376,8 @@ def host(tmp_path, pwsh):
                 "/bin",
             ]
         )
+        # pwsh's own HOME and caches, as in _pwsh_script.
+        env.update(scratch_home(tmp_path))
         env.update(extra_env or {})
         result = subprocess.run(  # nosec B603 - fixed interpreter, script built here
             [pwsh, "-NoProfile", "-NonInteractive", "-Command", script],
