@@ -424,6 +424,12 @@ _UVX_STUB = """#!/bin/sh
 
 def _run(step: dict[str, Any], ctx: dict[str, Any], tmp_path: Path) -> dict[str, Any]:
     """Run ``step`` as the runner would, with ``uvx`` stubbed; what it did."""
+    if os.name == "nt":
+        # The steps run under `shell: bash` in a job on ubuntu-latest. On a Windows
+        # runner `bash` resolves to the WSL launcher stub, which exits 1 with a UTF-16
+        # "no installed distributions" message and runs nothing, so a run there would
+        # prove nothing about the step. The evaluator checks above still run on Windows.
+        pytest.skip("the install steps are bash steps that run on ubuntu-latest")
     stub = tmp_path / "stub-bin"
     stub.mkdir(exist_ok=True)
     (stub / "uvx").write_text(_UVX_STUB, encoding="utf-8")
