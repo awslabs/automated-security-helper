@@ -1078,8 +1078,9 @@ class TestAPathStartingWithADashIsAPath:
 
 class TestADirectoryThatCannotBeEnteredEndsTheRun:
     """A ``--source-dir`` the wrapper cannot enter, or an ``--output-dir`` it cannot
-    create, ends the run with exit 1, as the Python CLI does for a source directory
-    that does not exist. Nothing else is mounted in its place."""
+    create, ends the run with exit 5, the usage error ``ash scan`` refuses the same
+    input with (utils/directory_refusals.py), in its words. Nothing else is mounted
+    in its place."""
 
     def test_a_source_directory_that_does_not_exist_ends_the_run(
         self, fake_runner, project
@@ -1088,7 +1089,7 @@ class TestADirectoryThatCannotBeEnteredEndsTheRun:
             fake_runner, project, ["--no-build", "--source-dir", "missing"]
         )
 
-        assert rc == 1, output
+        assert rc == 5, output
         assert calls == []
         assert "missing" in output
 
