@@ -455,6 +455,56 @@ global_settings:
         in a comment. A nine-digit number is the shape of a social security number;
         this one is a power of two. Scoped to this page so an identifier-like number
         added to another document is still reported.
+    # === ferret-scan API_KEY_OR_SECRET: more identifier and fixture matches ===
+    # Same detector, same cause as the block above: the unquoted-assignment check
+    # reads a name that contains a secret keyword, or a long hex string, as a
+    # credential. Each file below was read at the reported line. Reasons are
+    # paraphrased, not quoted, so this file does not flag itself. Every entry is
+    # scoped to one file; nothing here is a glob.
+    - path: automated_security_helper/config/operator_paths.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. The flagged line is a row in the table of scanner options
+        that name a file. It pairs the detect-secrets scanner with its
+        baseline_file option. The scanner's name carries the word "secrets"; the
+        value is an option name, not a credential.
+    - path: automated_security_helper/config/tool_config_trust.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. Same table row as in operator_paths.py: the detect-secrets
+        scanner name and its baseline_file option name, not a credential.
+    - path: tests/unit/cli/mcp/test_scan_directory_start_failures.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. The flagged line assigns a short fixture string to a
+        module constant named for an MCP session, the same shape as the
+        test_sessions.py entry above. It is an identifier for a fake session.
+    - path: tests/unit/cli/mcp/test_workspace_scan_holds_the_session_tree.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. Same shape as test_scan_directory_start_failures.py: a
+        module constant named for a fake MCP session.
+    - path: tests/unit/cli/mcp/test_zip_finalize_handle_and_lock.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. Same shape as test_scan_directory_start_failures.py: a
+        module constant named for a fake MCP session.
+    - path: tests/unit/config/test_config_link_bases.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. Same shape as test_scan_directory_start_failures.py: a
+        module constant named for a fake client session.
+    - path: tests/unit/config/test_operator_configs_judged_by_every_name.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. Same shape as test_scan_directory_start_failures.py: a
+        module constant named for a fake client session.
+    - path: tests/unit/workspace/test_workspace_project_config_links.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. Same shape as test_scan_directory_start_failures.py: a
+        module constant named for a fake client session.
+    # === ferret-scan SSN: a byte limit written as a nine-digit number ===
     # === ferret-scan API_KEY_OR_SECRET: pinned release checksums ===
     # Separate from the block above and for a different reason. Those are identifiers
     # whose NAMES match a secret keyword; this one is a table of values that genuinely
