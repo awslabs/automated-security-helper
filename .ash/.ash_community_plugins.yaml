@@ -283,8 +283,8 @@ global_settings:
         fails when the block moves and this range does not.
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/DEVELOPMENT.md
       rule_id: SECRET-SECRET-KEYWORD
-      line_start: 501
-      line_end: 501
+      line_start: 594
+      line_end: 594
       reason: Documentation example showing the SECRET-SECRET-KEYWORD detection pattern.
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
       rule_id: B404
