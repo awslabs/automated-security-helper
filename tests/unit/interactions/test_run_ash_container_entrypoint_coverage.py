@@ -28,6 +28,7 @@ is replaced by a recorder, so what is asserted is the decision
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from subprocess import CalledProcessError
 from typing import Any, Dict, List
@@ -383,8 +384,11 @@ class TestCustomContainerfile:
         run_ash_container(source_dir=tmp_path, build=True, run=True)
 
         assert container_stubs["custom"] == []
+        # The default stage is non-root, and ci on Windows (see _build_target in
+        # run_ash_container), where the non-root user cannot write the output.
+        stage = "ci" if sys.platform == "win32" else "non-root"
         assert container_stubs["run_command"][0]["image_name"] == (
-            "automated-security-helper:non-root"
+            f"automated-security-helper:{stage}"
         )
 
 
