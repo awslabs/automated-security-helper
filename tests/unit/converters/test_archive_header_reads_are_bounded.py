@@ -164,7 +164,23 @@ def test_header_reads_past_the_per_member_allowance_are_refused(
     assert_refused_for_header_reads(converter, results, "many.tar", OVER_THE_ALLOWANCE)
 
 
-@pytest.mark.parametrize("data_filter", [True, False], ids=["data-filter", "copy"])
+@pytest.mark.parametrize(
+    "data_filter",
+    [
+        # The converter sets _TAR_HAS_DATA_FILTER from hasattr(tarfile, "data_filter")
+        # (archive_converter.py), so forcing it on where tarfile has no data filter
+        # (before 3.10.12) calls extractall(filter=...) on a tarfile that lacks it.
+        pytest.param(
+            True,
+            id="data-filter",
+            marks=pytest.mark.skipif(
+                not hasattr(tarfile, "data_filter"),
+                reason="this Python's tarfile has no data filter",
+            ),
+        ),
+        pytest.param(False, id="copy"),
+    ],
+)
 def test_member_data_far_past_the_header_allowance_is_extracted_whole(
     data_filter, lowered_caps, test_plugin_context, monkeypatch
 ):
