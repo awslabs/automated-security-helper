@@ -38,6 +38,7 @@ from pathlib import Path
 import pytest
 
 from tests.utils.helpers import importing_this_checkout
+from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
 
 ROOT = Path(__file__).resolve().parents[3]
 SCANNERS = (
@@ -205,8 +206,17 @@ def test_a_scanner_run_as_a_script_prints_no_named_command_a_file_name_holds(
     (tmp_path / PLANTED).write_text("x = 1\n", encoding="utf-8")
     name = f"{PACKAGE}.{module.removesuffix('.py')}"
 
+    # The child's tool probes are answered first: the module's own
+    # ``@ash_scanner_plugin`` class probes its tool when built, with the uv
+    # installed beside the interpreter, which left uv's cache in the test's HOME.
     completed = subprocess.run(  # nosec B603 - fixed argv, the test's own interpreter
-        [sys.executable, "-I", "-c", importing_this_checkout(_DRIVER), name],
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            importing_this_checkout(CHILD_TOOL_PROBE_STUBS + _DRIVER),
+            name,
+        ],
         capture_output=True,
         text=True,
         timeout=300,

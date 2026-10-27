@@ -56,6 +56,7 @@ from tests.utils.isolated_tool_env import (
     isolated_tool_env,
     without_inherited_aws,
 )
+from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
 
 #: Refused by the loader. The second and third are what a prefix test written as
 #: ``startswith("ash_plugins")`` or ``startswith("automated_security_helper")`` would
@@ -187,7 +188,12 @@ class TestWorkspacePrewarmHonorsTheNamespace:
 
 # --------------------------------------------------------------------------- end to end
 
-_PROGRAM = r"""
+# The child's tool probes are answered first (CHILD_TOOL_PROBE_STUBS): it finds the
+# uv installed with ASH beside its interpreter whatever PATH it is given, and ran it,
+# which left uv's cache in the test's HOME.
+_PROGRAM = (
+    CHILD_TOOL_PROBE_STUBS
+    + r"""
 import asyncio
 import json
 import sys
@@ -266,6 +272,7 @@ if mode == "mcp":
 
 raise SystemExit("unknown mode " + mode)
 """
+)
 
 
 class _Run:

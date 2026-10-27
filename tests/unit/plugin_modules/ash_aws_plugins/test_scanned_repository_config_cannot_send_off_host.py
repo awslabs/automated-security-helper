@@ -653,6 +653,7 @@ class TestInAFreshProcess:
         import sys
 
         from tests.utils.helpers import importing_this_checkout
+        from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
 
         isolate_from_aws(monkeypatch, tmp_path)
         checkout = _scanned_checkout(tmp_path, sections)
@@ -691,7 +692,10 @@ class TestInAFreshProcess:
                 sys.executable,
                 "-I",
                 "-c",
-                importing_this_checkout(self._DRIVER),
+                # The child's tool probes are answered first: it finds the uv
+                # installed with ASH beside its interpreter whatever PATH it is
+                # given, and ran it, which left uv's cache in the test's HOME.
+                importing_this_checkout(CHILD_TOOL_PROBE_STUBS + self._DRIVER),
                 json.dumps(argv),
                 json.dumps(answers),
             ],

@@ -73,6 +73,7 @@ from typing import Callable, Dict, List
 import pytest
 
 from tests.utils.helpers import importing_this_checkout
+from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
 
 # Proposed names; see the module docstring.
 SWITCH_OFF_FLAG = "--no-honor-ignore-files"
@@ -128,9 +129,13 @@ KEPT_BY_NEGATION = ("keep.log", "sub/keep.tmp", "sub/deep/trace.log")
 ASH_OWN_EXCLUSION = ".git/HEAD"
 
 # Run in the child: ASH's own CLI from this checkout, nothing replaced. `-I` alone
-# would import the interpreter's installed ASH; see importing_this_checkout.
+# would import the interpreter's installed ASH; see importing_this_checkout. The
+# child's tool probes are answered first (CHILD_TOOL_PROBE_STUBS): it finds the uv
+# installed with ASH beside its interpreter whatever PATH it is given, and ran it,
+# which left uv's cache in the test's HOME.
 DRIVER = importing_this_checkout(
-    textwrap.dedent(
+    CHILD_TOOL_PROBE_STUBS
+    + textwrap.dedent(
         """
         from automated_security_helper.cli.main import app
 

@@ -34,9 +34,14 @@ import pytest
 from automated_security_helper.interactions import run_ash_scan
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from tests.utils.helpers import importing_this_checkout
+from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
 
+# The child's tool probes are answered first (CHILD_TOOL_PROBE_STUBS): it finds the
+# uv installed with ASH beside its interpreter whatever PATH it is given, and ran it,
+# which left uv's cache in the test's HOME.
 DRIVER = importing_this_checkout(
-    textwrap.dedent(
+    CHILD_TOOL_PROBE_STUBS
+    + textwrap.dedent(
         """
         from automated_security_helper.cli.main import app
 

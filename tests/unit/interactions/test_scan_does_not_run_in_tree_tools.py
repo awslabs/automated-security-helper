@@ -28,24 +28,35 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
+
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32", reason="the stand-in tools are POSIX shell scripts"
 )
 
 # The ASH the parent test imported, ahead of whatever the interpreter has installed,
-# so the child runs the code under test.
-DRIVER = textwrap.dedent(
-    """
-    import os
-    import sys
+# so the child runs the code under test. Its tool probes are answered first
+# (CHILD_TOOL_PROBE_STUBS, after the path insert it imports through): the child
+# finds the uv installed with ASH beside its interpreter whatever PATH it is given,
+# and ran it, which left uv's cache in the test's HOME.
+DRIVER = (
+    textwrap.dedent(
+        """
+        import os
+        import sys
 
-    sys.path.insert(0, os.environ["ASH_TEST_CODE_ROOT"])
+        sys.path.insert(0, os.environ["ASH_TEST_CODE_ROOT"])
+        """
+    )
+    + CHILD_TOOL_PROBE_STUBS
+    + textwrap.dedent(
+        """
+        from automated_security_helper.cli.main import app
 
-    from automated_security_helper.cli.main import app
-
-    sys.argv = ["ash", "scan", *sys.argv[1:]]
-    app()
-    """
+        sys.argv = ["ash", "scan", *sys.argv[1:]]
+        app()
+        """
+    )
 )
 
 

@@ -53,6 +53,7 @@ from tests.utils.isolated_tool_env import (
     isolated_tool_env,
     without_inherited_aws,
 )
+from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
 
 SNYK_MODULE = "automated_security_helper.plugin_modules.ash_snyk_plugins"
 
@@ -66,7 +67,13 @@ _REPORT_PREFIX = "SCAN-SELECTION-REPORT "
 #: ``{"op": "mcp_scan", "source_dir", "config"}``, through the MCP tool
 #: ``mcp_scan_directory`` itself; or ``{"op": "workspace_scan", "workspace_file",
 #: "output_dir"}``.
-_PROGRAM = r"""
+#:
+#: The child's tool probes are answered first (CHILD_TOOL_PROBE_STUBS): it finds the
+#: uv installed with ASH beside its interpreter whatever PATH it is given, and ran
+#: it, which left uv's cache in the test's HOME.
+_PROGRAM = (
+    CHILD_TOOL_PROBE_STUBS
+    + r"""
 import asyncio
 import json
 import sys
@@ -169,6 +176,7 @@ for step in json.loads(sys.argv[1])["steps"]:
 
 print("SCAN-SELECTION-REPORT " + json.dumps(report), flush=True)
 """
+)
 
 #: Body of each fake community tool. Records the call and answers a version probe;
 #: ``snyk`` also writes an empty SARIF log where ASH asked for one.

@@ -51,6 +51,7 @@ from tests.utils.isolated_tool_env import (
     isolated_tool_env,
     without_inherited_aws,
 )
+from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
 
 SNYK_MODULE = "automated_security_helper.plugin_modules.ash_snyk_plugins"
 FERRET_MODULE = "automated_security_helper.plugin_modules.ash_ferret_plugins"
@@ -234,7 +235,12 @@ def _reports(output_dir: Path, extension: str) -> List[str]:
 #: ``ash_plugin_manager.subscribe``, which writes ``embedded-<tree name>``. Prints one
 #: report line: per scan, the exit code, each scanner row's status, and the scan's
 #: "not used by this scan" log records with their levels.
-_PROGRAM = r"""
+#: The child's tool probes are answered first (CHILD_TOOL_PROBE_STUBS): it finds the
+#: uv installed with ASH beside its interpreter whatever PATH it is given, and ran
+#: it, which left uv's cache in the test's HOME.
+_PROGRAM = (
+    CHILD_TOOL_PROBE_STUBS
+    + r"""
 import json
 import logging
 import os
@@ -340,6 +346,7 @@ for step in json.loads(sys.argv[1]):
 
 print("PLUGIN-SELECTION-REPORT " + json.dumps(scans), flush=True)
 """
+)
 
 
 class _Process:

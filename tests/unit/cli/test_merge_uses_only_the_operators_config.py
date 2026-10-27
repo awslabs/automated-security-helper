@@ -46,6 +46,7 @@ from tests.utils.isolated_tool_env import (
     isolated_tool_env,
     without_inherited_aws,
 )
+from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 INVALID_CONFIG_EXIT = 3
@@ -59,7 +60,12 @@ UNSET_VARIABLE = "ASH_TEST_UNSET_VARIABLE"
 #: A directory name holding an escape sequence and a newline.
 CONTROL_NAME = "op\x1b[31mred\nnext"
 
-_CHILD = r"""
+# The child's tool probes are answered first (CHILD_TOOL_PROBE_STUBS): it finds the
+# uv installed with ASH beside its interpreter whatever PATH it is given, and ran it,
+# which left uv's cache in the test's HOME.
+_CHILD = (
+    CHILD_TOOL_PROBE_STUBS
+    + r"""
 import json
 import os
 import sys
@@ -93,6 +99,7 @@ except SystemExit as exit_:
 sys.stdout.flush()
 print("\nMERGE-CHILD " + json.dumps({"exit_code": code or 0, "opens": len(opens)}))
 """
+)
 
 
 class _Child:
