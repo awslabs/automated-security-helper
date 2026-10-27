@@ -31,6 +31,8 @@ import stat
 from pathlib import Path
 from typing import IO, Any, Optional, Tuple, Union
 
+from automated_security_helper.utils.link_locations import without_extended_prefix
+
 PathLike = Union[str, "os.PathLike[str]"]
 
 #: The directories ASH clears and recreates under the output directory: the
@@ -142,6 +144,18 @@ def _identity(path: PathLike) -> Optional[Tuple[int, int]]:
     return (found.st_dev, found.st_ino)
 
 
+def _real_path(path: PathLike) -> Path:
+    """``os.path.realpath`` of ``path``, without the Win32 extended-length prefix.
+
+    On Windows, realpath of a path that does not exist yet can come back as
+    ``\\\\?\\C:\\dir`` while the same call on its existing parent does not. The two
+    spellings do not compare equal, so a not-yet-created output directory below the
+    tree was taken for one that resolves outside it.
+    """
+    real = os.path.realpath(path)
+    return Path(without_extended_prefix(real) if os.name == "nt" else real)
+
+
 def _is_below(path: Path, root: Path, root_identity: Optional[Tuple[int, int]]) -> bool:
     """Whether ``root`` is one of ``path``'s parents, by name or by identity.
 
@@ -209,8 +223,8 @@ def linked_output_component(
     lexical = Path(os.path.abspath(spelled))
     inside_root = root_path is not None and _is_below(lexical, root_path, root_identity)
     if root_path is not None and inside_root:
-        real_root = Path(os.path.realpath(root_path))
-        actual = Path(os.path.realpath(lexical))
+        real_root = _real_path(root_path)
+        actual = _real_path(lexical)
         if not _is_below(actual, real_root, root_identity):
             return (
                 f"the output directory {lexical.as_posix()} resolves to "
