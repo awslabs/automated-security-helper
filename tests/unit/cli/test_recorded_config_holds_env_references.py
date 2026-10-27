@@ -23,9 +23,10 @@ wrote, or null; an environment value equal to another field's value leaves that
 field alone; a relative path the load anchored has only its environment part
 replaced; a ``patch`` value, a base's value and a TOML value are recorded as
 written; and the other writers of a resolved config (MCP ``get_config``,
-``ash config get``, ``ash config update``, and the profile file the MCP server
-writes for a session) hold the reference, while the config they load back still
-reads the value.
+``ash config get``, and the profile file the MCP server writes for a session)
+hold the reference, while the config they load back still reads the value; and
+``ash config update`` refuses a file with references rather than rewrite each
+with its value.
 
 The positive controls: the scan's in-run report, rendered from the live
 config, holds the canary, so the scan did read the values; and each recorded
@@ -545,19 +546,27 @@ def test_ash_config_get_shows_the_reference(tmp_path, probe_env):
 
 
 def test_ash_config_update_keeps_the_reference(tmp_path, probe_env):
+    """``ash config update`` writes the whole resolved config back, which would
+    replace each reference with its value, so a file with environment references
+    is refused with exit 1 and left as written (cli/config.py, _rewrite_refusal);
+    the refusal names no value, and the file still reads the values."""
     from automated_security_helper.config.ash_config import AshConfig
 
     path = _operator_config(tmp_path, READING_CONFIG)
+    before = path.read_bytes()
     result = CliRunner().invoke(
         app,
         ["config", "update", str(path), "--set", "fail_on_findings=false"],
         env={"COLUMNS": "300"},
     )
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 1, result.output
     assert CANARY not in result.output
-    written = path.read_text(encoding="utf-8")
-    assert CANARY not in written
-    as_written = _as_written(written)
+    output = " ".join(result.output.split())
+    assert "Cannot update" in output, output
+    assert "environment references" in output, output
+    assert "edit it by hand" in output, output
+    assert path.read_bytes() == before
+    as_written = _as_written(path.read_text(encoding="utf-8"))
     assert as_written["project_name"] == "!ENV ${ASH_PROBE_CANARY}"
     assert (
         _gitlab_options(as_written)["language_override"] == "!ENV ${ASH_PROBE_CANARY}"
@@ -565,7 +574,8 @@ def test_ash_config_update_keeps_the_reference(tmp_path, probe_env):
     reloaded = AshConfig.from_file(path)
     assert reloaded.project_name == CANARY
     assert reloaded.reporters.gitlab_cyclonedx.options.language_override == CANARY
-    assert reloaded.fail_on_findings is False
+    # The --set was not applied: the field keeps its default.
+    assert reloaded.fail_on_findings == AshConfig().fail_on_findings
 
 
 def test_a_profile_session_copy_reads_the_value_at_load(tmp_path, probe_env):
