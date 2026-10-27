@@ -819,6 +819,22 @@ runs:
         retention-days: 7
         if-no-files-found: warn
 
+    # On a red run only: each scanner's stderr, which the console above cuts to its
+    # first lines ("[truncated] see ...stderr.log") and the artifact above leaves out.
+    # These are the tools' own diagnostics -- a traceback, an argument the tool
+    # refused, a file it could not read -- not scan findings: a scanner writes its
+    # findings to its stdout or its results file, neither of which is under source/*.stderr.log.
+    # Without them a scanner graded ERROR here is readable only by re-running the
+    # tool's command by hand against the same tree.
+    - name: Collect the scanners' stderr on failure
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      if: failure()
+      with:
+        name: ash_scanner_stderr-${{ inputs.os }}-${{ inputs.method }}-${{ inputs.config-file }}${{ inputs.oci-runner && format('-{0}', inputs.oci-runner) || '' }}${{ inputs.offline == 'true' && '-offline' || '' }}
+        path: .ash/ash_output/scanners/*/source/*.stderr.log
+        retention-days: 7
+        if-no-files-found: ignore
+
     - name: Verify scan completed
       shell: pwsh
       env:
