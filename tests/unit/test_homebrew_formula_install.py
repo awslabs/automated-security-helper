@@ -462,6 +462,7 @@ STAND_IN_HOMEBREW = r"""
 require "fileutils"
 require "json"
 require "pathname"
+require "tmpdir"
 
 module Language
   module Python
@@ -606,6 +607,25 @@ class TestTheInstallLeavesNoBuildPathBehind:
         assert env["UV_PYTHON_DOWNLOADS"] == "never"
         assert env["UV_NO_CONFIG"] == "1"
         assert env["UV_LINK_MODE"] == "copy"
+
+    def test_uv_caches_outside_the_source_tree(self, tmp_path: Path) -> None:
+        """A cache under buildpath raced hatchling's walk of the project root.
+
+        See TestTheBuildBackendSkipsTheUvCache for the walk. The stand-in's
+        buildpath is <prefix>/../build-dir, and uv must see a UV_CACHE_DIR that is
+        not under it. The directory goes with the build: Homebrew deletes its
+        build directory, and a cache elsewhere has to be deleted by the formula.
+        """
+        proc, prefix = self._install(tmp_path)
+
+        assert proc.returncode == 0, proc.stderr
+        env = json.loads((tmp_path / "sync-env.json").read_text(encoding="utf-8"))
+        cache = Path(env["UV_CACHE_DIR"])
+        assert cache.is_absolute()
+        assert not cache.is_relative_to(prefix.parent / "build-dir"), (
+            f"uv's cache {cache} is under the build directory hatchling walks"
+        )
+        assert not cache.exists(), "uv's cache was not deleted after the install"
 
     @pytest.mark.parametrize("dist_infos", [0, 2])
     def test_an_unexpected_layout_fails_the_install(self, tmp_path, dist_infos):
