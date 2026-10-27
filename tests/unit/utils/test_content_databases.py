@@ -602,7 +602,9 @@ class TestTheGrypeStatusErrorIsRedactedBeforeItsCut:
         from automated_security_helper.utils import content_db_staleness as cds
 
         value = "Zq7Kx9Lm2Pw4Nv"
-        status = {"schemaVersion": 5, "pad": "p" * 210, "path": value}
+        # Not under "path": a status naming a path that does not exist is a
+        # missing database (ContentDatabaseAbsent), a branch of its own.
+        status = {"schemaVersion": 5, "pad": "p" * 210, "value": value}
         unredacted = f"`grype db status` reported no build time: {status!r}"
         start = unredacted.index(value)
         assert start < 300 < start + len(value), (
