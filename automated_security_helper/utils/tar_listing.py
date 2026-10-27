@@ -43,7 +43,7 @@ from __future__ import annotations
 import tarfile as _tarfile
 from tarfile import HeaderError, TarFile, TarInfo
 from tarfile import open as open_tar
-from typing import IO, Any, List, Optional, Type
+from typing import IO, Any, List, Optional, Type, cast
 
 #: tarfile's header errors for a block of zeros (EOFHeaderError) and for the end
 #: of the bytes (EmptyHeaderError), which lose nothing. tarfile defines both, but
@@ -213,8 +213,14 @@ def open_tar_listing(
                 return member
 
     handle.seek(0)
+    # tarfile.open is overloaded on Literal mode strings; ``mode`` is any mode
+    # string the caller passes, so it is handed over untyped.
     return open_tar(
-        fileobj=handle, mode=mode, ignore_zeros=True, tarinfo=_Recorded, **options
+        fileobj=handle,
+        mode=cast(Any, mode),
+        ignore_zeros=True,
+        tarinfo=_Recorded,
+        **options,
     )
 
 

@@ -1690,10 +1690,10 @@ async def mcp_scan_directory(
         )
     else:
         if committed:
-            refusal = committed_output_files_error(output_dir, committed)
+            committed_refusal = committed_output_files_error(output_dir, committed)
             refused = create_error_response(
                 error=MCPResourceError(
-                    str(refusal),
+                    str(committed_refusal),
                     context={
                         "directory_path": directory_path,
                         "error_category": ErrorCategory.INVALID_PATH.value,
@@ -2332,7 +2332,7 @@ async def _run_scan(
     scan_id: str,
     directory_path: str,
     output_dir: str,
-    severity_threshold: str,
+    severity_threshold: Optional[str],
     config_path: Optional[str] = None,
     session_id: Optional[str] = None,
     scan_timeout_seconds: Optional[float] = None,

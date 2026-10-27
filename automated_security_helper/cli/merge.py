@@ -2947,7 +2947,7 @@ def merge_command(
     # be the scanned tree's own (a directory beside this one, in no git checkout),
     # and its enabled and destination options for these reporters are replaced
     # with the defaults and the overrides (reporter_trust).
-    operator_config: Optional[AshConfig] = None
+    operator_config = None
     if config or overrides:
         operator_config = apply_config_overrides(
             trusted_config if config else AshConfig(), overrides
