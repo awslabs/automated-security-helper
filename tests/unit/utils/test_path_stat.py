@@ -20,15 +20,26 @@ from automated_security_helper.utils.path_stat import (
 )
 
 
-def _failing_stat(monkeypatch, error):
+def _stat_failing_with(error, path):
+    """``stat_named_path(path)`` with ``os.stat`` raising ``error``, and the
+    paths the stat was asked for.
+
+    ``path_stat.os`` is the process-wide ``os`` module, so the fake stat is
+    installed only around this one call: left in place until the test's own
+    ``monkeypatch`` is undone, it is what every later fixture teardown's stat
+    reached, and those teardowns raised the planted error instead of the test
+    reporting its result.
+    """
     calls = []
 
     def fake(path, *args, **kwargs):
         calls.append(os.fspath(path))
         raise error
 
-    monkeypatch.setattr(path_stat.os, "stat", fake)
-    return calls
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(path_stat.os, "stat", fake)
+        result = stat_named_path(path)
+    return result, calls
 
 
 @pytest.mark.parametrize(
@@ -43,21 +54,19 @@ def _failing_stat(monkeypatch, error):
         (ValueError("embedded null byte"), MISSING, ""),
     ],
 )
-def test_each_stat_failure_is_classified_by_its_own_error(
-    monkeypatch, error, kind, code
-):
-    calls = _failing_stat(monkeypatch, error)
-    result = stat_named_path("named.yaml")
+def test_each_stat_failure_is_classified_by_its_own_error(error, kind, code):
+    result, calls = _stat_failing_with(error, "named.yaml")
     assert isinstance(result, StatProblem), result
     assert (result.kind, result.code) == (kind, code)
     assert calls == ["named.yaml"], calls
     assert not is_regular_file(result)
 
 
-def test_an_errno_without_a_name_is_named_by_its_number(monkeypatch):
+def test_an_errno_without_a_name_is_named_by_its_number():
     unnamed = 1 + max(errno.errorcode)
-    _failing_stat(monkeypatch, OSError(unnamed, "an errno with no name"))
-    result = stat_named_path("named.yaml")
+    result, _ = _stat_failing_with(
+        OSError(unnamed, "an errno with no name"), "named.yaml"
+    )
     assert isinstance(result, StatProblem)
     assert (result.kind, result.code, result.number) == (
         UNREADABLE,
@@ -66,11 +75,10 @@ def test_an_errno_without_a_name_is_named_by_its_number(monkeypatch):
     )
 
 
-def test_the_cause_carries_the_errno_and_never_the_path(monkeypatch):
-    _failing_stat(
-        monkeypatch, PermissionError(errno.EACCES, "Permission denied", "/hidden/x")
+def test_the_cause_carries_the_errno_and_never_the_path():
+    result, _ = _stat_failing_with(
+        PermissionError(errno.EACCES, "Permission denied", "/hidden/x"), "/hidden/x"
     )
-    result = stat_named_path("/hidden/x")
     assert isinstance(result, StatProblem)
     cause = result.cause()
     assert (cause.errno, cause.strerror) == (errno.EACCES, os.strerror(errno.EACCES))
@@ -85,13 +93,10 @@ def test_the_cause_carries_the_errno_and_never_the_path(monkeypatch):
         (OSError(None, "the device went away"), "the device went away"),
     ],
 )
-def test_the_cause_of_an_error_with_no_errno_carries_its_own_strerror(
-    monkeypatch, error, text
-):
+def test_the_cause_of_an_error_with_no_errno_carries_its_own_strerror(error, text):
     """An error that carried no errno is described by its own strerror, or by
     "no error code" when it has none, never by the text "None"."""
-    _failing_stat(monkeypatch, error)
-    result = stat_named_path("named.yaml")
+    result, _ = _stat_failing_with(error, "named.yaml")
     assert isinstance(result, StatProblem)
     cause = result.cause()
     assert (cause.errno, cause.strerror) == (None, text)
