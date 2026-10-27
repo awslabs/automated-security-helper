@@ -989,22 +989,19 @@ class TestEnablementIsTheOperators:
 
 
 def _documented_s3_example_overrides() -> List[str]:
-    """The ``--config-overrides`` values of the S3 example in the ash merge docs."""
-    import shlex
+    """The ``--config-overrides`` values that upload a merge to S3 and nowhere else.
 
-    from tests.utils.helpers import REPO_ROOT
-
-    text = (REPO_ROOT / "docs" / "content" / "docs" / "cli-reference.md").read_text(
-        encoding="utf-8"
-    )
-    section = text.split(
-        "#### Settings a shard's recorded configuration cannot choose", 1
-    )[1]
-    block = section.split("```bash\n", 1)[1].split("```", 1)[0]
-    words = shlex.split(block.replace("\\\n", " "))
-    assert words[:2] == ["ash", "merge"], words
+    The merge page of the old CLI reference spelled these out as one example. The
+    rewritten docs state the rule instead (scale-large-repos.md: the AWS reporters
+    send the merged findings only with their ``enabled`` and destination options in
+    ``ash merge``'s ``--config-overrides``, and the merge names their package), so
+    the values live here.
+    """
     return [
-        words[i + 1] for i, word in enumerate(words) if word == "--config-overrides"
+        f'ash_plugin_modules+=["{AWS}"]',
+        "reporters.s3.enabled=true",
+        "reporters.s3.options.bucket_name=my-bucket",
+        "reporters.s3.options.aws_region=us-east-1",
     ]
 
 
