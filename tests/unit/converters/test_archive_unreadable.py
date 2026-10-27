@@ -262,8 +262,8 @@ def test_an_unreadable_archive_fails_the_completeness_gate(
 
     listed = incomplete_converters(model)
 
-    assert [n for n, _ in listed] == ["archive"]
-    assert name in listed[0][1]
+    assert [row.name for row in listed] == ["archive"]
+    assert name in listed[0].reason
 
 
 @pytest.mark.parametrize("name, data", EXTRACTED_IN_PART)
