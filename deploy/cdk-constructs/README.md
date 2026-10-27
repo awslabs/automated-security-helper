@@ -302,7 +302,7 @@ aws codebuild start-build --project-name my-scan \
   --environment-variables-override name=<version variable>,value=<git ref>,type=PLAINTEXT
 ```
 
-The install phase's first command checks that `ASH_VERSION` is a plain git ref, as
+The install phase's first command checks that the version variable is a plain git ref, as
 described above, and fails the build when it is not.
 
 ## Development
