@@ -621,15 +621,25 @@ class TestTheGrypeStatusErrorIsRedactedBeforeItsCut:
 
 
 class TestTheProbeContextCarriesThePluginsValues:
-    def test_the_hooks_values_reach_the_context(self):
+    def test_the_hooks_values_reach_the_context(self, tmp_path):
         """The probe's excerpts are redacted with ProbeContext.values, and
         the builder wires the plugin's _values_to_redact into it: a context
         built with values=() leaves every probe excerpt unredacted while
         every committed cell stays green (the MO2 wiring mutant)."""
         from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 
+        class _Context:
+            source_dir = tmp_path / "source"
+            output_dir = tmp_path / "output"
+            config = None
+
         class _Scanner:
             command = ""
+            # The rest of what the builder reads: the recorded cache directory,
+            # and the directories the probe's working directory is chosen from.
+            _content_db_cache_dir = None
+            results_dir = None
+            context = _Context()
 
             def _values_to_redact(self):
                 return ("Zq7Kx9Lm2Pw4Nv",)
