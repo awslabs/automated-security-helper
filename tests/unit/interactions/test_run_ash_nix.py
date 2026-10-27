@@ -441,8 +441,11 @@ class TestRunAshNix:
         monkeypatch.delenv(ASH_IN_NIX_ENV_VAR, raising=False)
         monkeypatch.delenv("ASH_ALLOW_IN_TREE_TOOLS", raising=False)
         monkeypatch.setenv(ASH_NIX_FLAKE_REF_ENV_VAR, "path:/repo")
+        # A child's PATH keeps only anchored entries, and "/usr/bin" has no drive
+        # letter on Windows, so the system entry is built with abspath.
+        system = os.path.abspath("/usr/bin")
         monkeypatch.setenv(
-            "PATH", os.pathsep.join([str(repo / ".venv" / "bin"), "/usr/bin"])
+            "PATH", os.pathsep.join([str(repo / ".venv" / "bin"), system])
         )
         monkeypatch.setattr(
             "automated_security_helper.interactions.run_ash_nix.find_executable",
