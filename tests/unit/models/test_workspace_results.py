@@ -97,20 +97,16 @@ class TestWorkspaceExitCode:
             == WorkspaceExitCode.INVALID_PROJECT_CONFIG
         )
 
-    def test_findings_outrank_a_failed_project(self):
-        """Reverses an earlier ordering, deliberately.
+    def test_a_failed_project_outranks_findings(self):
+        """1 ahead of 2, the order a single-directory scan uses.
 
-        This used to assert INTERNAL_ERROR, on the reasoning that "we do not know
-        whether this project is clean" is worse news than "this project is not
-        clean". Sound about severity, wrong about consequence: a CI gate that
-        treats 1 as retryable infrastructure trouble and 2 as blocking would
-        retry a workspace with real findings and never block on them. A finding
-        is a certainty and a failed project is an unknown; an unknown must not
-        suppress a certainty.
+        Reverses this test's earlier expectation (ACTIONABLE_FINDINGS), by design.
+        That ordering let a workspace answer "2, clear these" while a project had
+        not been scanned at all; ``ash --source-dir`` on that project answers 1.
         """
         assert (
             workspace_exit_code([_completed("a", exceeds=True), _failed("b")])
-            == WorkspaceExitCode.ACTIONABLE_FINDINGS
+            == WorkspaceExitCode.INTERNAL_ERROR
         )
 
     def test_a_failed_project_still_shows_when_nothing_exceeded(self):
@@ -133,18 +129,22 @@ class TestWorkspaceExitCode:
             == WorkspaceExitCode.INVALID_PROJECT_CONFIG
         )
 
-    def test_the_failed_project_is_still_disclosed_in_the_payload(self):
-        """The reordering hides the failure from the exit code, not from the file."""
+    def test_the_failure_and_the_findings_are_both_disclosed_in_the_payload(self):
+        """The exit code carries one of the two; the file carries both."""
+        projects = [_completed("a", exceeds=True), _failed("b", "scanner blew up")]
         results = WorkspaceResults(
             workspace_file="/w/x.code-workspace",
             workspace_root="/w",
-            exit_code=WorkspaceExitCode.ACTIONABLE_FINDINGS,
-            projects=[_completed("a", exceeds=True), _failed("b", "scanner blew up")],
+            exit_code=workspace_exit_code(projects),
+            projects=projects,
         )
         payload = results.model_dump(mode="json")
         failed = [p for p in payload["projects"] if p["status"] == "failed"]
         assert len(failed) == 1
         assert failed[0]["error"] == "scanner blew up"
+        over = [p for p in payload["projects"] if p["exceeds_threshold"]]
+        assert [p["project"] for p in over] == ["a"]
+        assert over[0]["actionable_finding_count"] == 1
 
     def test_a_no_changes_skip_does_not_colour_the_exit_code(self):
         assert (

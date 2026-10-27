@@ -122,7 +122,9 @@ def test_one_child_answers_the_whole_batch(tmp_path, monkeypatch):
     calls: List[List[str]] = []
     _patch_spawn(monkeypatch, _fake_child(answers, calls))
     outdir = tmp_path / "out"
-    with cdk_nag_worker.cdk_nag_worker_batch([str(t) for t in templates], outdir):
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, values=()
+    ):
         results = [_call(t, outdir) for t in templates]
     assert results == [None, None, None]
     assert len(calls) == 1, "a child per template would pay jsii startup each time"
@@ -133,7 +135,7 @@ def test_the_scratch_directory_is_removed(tmp_path, monkeypatch):
     template = _templates(tmp_path, 1)[0]
     _patch_spawn(monkeypatch, _fake_child({template.as_posix(): NOT_CFN}, []))
     outdir = tmp_path / "out"
-    with cdk_nag_worker.cdk_nag_worker_batch([str(template)], outdir):
+    with cdk_nag_worker.cdk_nag_worker_batch([str(template)], outdir, values=()):
         _call(template, outdir)
     assert not (outdir / ".cdk-nag-worker").exists()
 
@@ -145,7 +147,9 @@ def test_a_child_that_died_before_answering_fails_everything_once(
     calls: List[List[str]] = []
     _patch_spawn(monkeypatch, _fake_child(None, calls, returncode=1))
     outdir = tmp_path / "out"
-    with cdk_nag_worker.cdk_nag_worker_batch([str(t) for t in templates], outdir):
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, values=()
+    ):
         for t in templates:
             with pytest.raises(RuntimeError) as raised:
                 _call(t, outdir)
@@ -170,7 +174,9 @@ def test_a_child_that_died_part_way_keeps_its_answers(tmp_path, monkeypatch):
 
     _patch_spawn(monkeypatch, fake)
     outdir = tmp_path / "out"
-    with cdk_nag_worker.cdk_nag_worker_batch([str(t) for t in templates], outdir):
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, values=()
+    ):
         assert _call(templates[0], outdir) is None
         with pytest.raises(RuntimeError, match="exited 139"):
             _call(templates[1], outdir)
@@ -178,7 +184,17 @@ def test_a_child_that_died_part_way_keeps_its_answers(tmp_path, monkeypatch):
     assert len(calls) == 2
 
 
-def test_a_timed_out_child_fails_what_it_had_not_answered(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "limit,token",
+    [
+        pytest.param(7.5, r"'7\.5' s", id="fraction"),
+        # A whole limit prints whole, never '1e+06'.
+        pytest.param(1000000, r"'1000000' s", id="large"),
+    ],
+)
+def test_a_timed_out_child_fails_what_it_had_not_answered(
+    tmp_path, monkeypatch, limit, token
+):
     templates = _templates(tmp_path, 3)
     answers = {t.as_posix(): NOT_CFN for t in templates}
     calls: List[List[str]] = []
@@ -192,13 +208,99 @@ def test_a_timed_out_child_fails_what_it_had_not_answered(tmp_path, monkeypatch)
     _patch_spawn(monkeypatch, fake)
     outdir = tmp_path / "out"
     with cdk_nag_worker.cdk_nag_worker_batch(
-        [str(t) for t in templates], outdir, timeout=7.5
+        [str(t) for t in templates], outdir, timeout=limit, values=()
     ):
         assert _call(templates[0], outdir) is None
         for t in templates[1:]:
-            with pytest.raises(RuntimeError, match=r"timed out after 7\.5s"):
+            with pytest.raises(RuntimeError, match=rf"timed out after {token}"):
                 _call(t, outdir)
-    assert timeouts == [7.5], "the timeout reaches the spawn and is not retried"
+    assert timeouts == [limit], "the timeout reaches the spawn and is not retried"
+
+
+def test_the_timeout_line_prints_the_shared_limit_token(tmp_path, monkeypatch):
+    """The worker's timeout line prints its limit through the one formatter
+    every timeout message uses (error_text.timeout_limit_token), so it cannot
+    drift from the others: a stand-in token is what the line shows. The cell
+    above pins what that token prints for a whole and a fractional limit."""
+    from automated_security_helper.utils import error_text
+
+    monkeypatch.setattr(
+        error_text, "timeout_limit_token", lambda limit, values: "<the shared token>"
+    )
+    templates = _templates(tmp_path, 2)
+    answers = {t.as_posix(): NOT_CFN for t in templates}
+    _patch_spawn(
+        monkeypatch,
+        _fake_child(answers, [], returncode=124, answer_first=1, timed_out=True),
+    )
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, timeout=67, values=()
+    ):
+        assert _call(templates[0], outdir) is None
+        with pytest.raises(RuntimeError, match="timed out after <the shared token>"):
+            _call(templates[1], outdir)
+
+
+def _could_not_stop_child(answers_by_template, answer_first: int):
+    """A child killed at the timeout whose stop failed: the flag kept, no code."""
+    inner = _fake_child(
+        answers_by_template,
+        [],
+        returncode=124,
+        answer_first=answer_first,
+        timed_out=True,
+    )
+
+    def fake(command, **kwargs):
+        outcome = inner(command, **kwargs)
+        outcome["returncode"] = None
+        outcome["could_not_stop"] = True
+        outcome["could_not_stop_pid"] = 4242
+        return outcome
+
+    return fake
+
+
+def test_a_timeout_the_worker_could_not_stop_is_never_said_killed(
+    tmp_path, monkeypatch
+):
+    """The worker's timeout line, like every sibling site: "was killed" only
+    when the stop worked. A stop that failed left the child running, and the
+    reason must say so instead."""
+    templates = _templates(tmp_path, 2)
+    answers = {t.as_posix(): NOT_CFN for t in templates}
+    _patch_spawn(monkeypatch, _could_not_stop_child(answers, answer_first=1))
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, timeout=5, values=()
+    ):
+        assert _call(templates[0], outdir) is None
+        with pytest.raises(RuntimeError) as excinfo:
+            _call(templates[1], outdir)
+    message = str(excinfo.value)
+    assert "may still be running" in message, message
+    assert "was killed" not in message, message
+
+
+def test_a_stopped_worker_timeout_keeps_was_killed(tmp_path, monkeypatch):
+    """The control: a timeout whose stop worked IS a killed child."""
+    templates = _templates(tmp_path, 2)
+    answers = {t.as_posix(): NOT_CFN for t in templates}
+    _patch_spawn(
+        monkeypatch,
+        _fake_child(answers, [], returncode=124, answer_first=1, timed_out=True),
+    )
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, timeout=5, values=()
+    ):
+        assert _call(templates[0], outdir) is None
+        with pytest.raises(RuntimeError) as excinfo:
+            _call(templates[1], outdir)
+    message = str(excinfo.value)
+    assert "was killed" in message, message
+    assert "may still be running" not in message, message
 
 
 def test_the_scanner_passes_its_scan_timeout():
@@ -224,7 +326,9 @@ def test_a_malformed_response_fails_the_batch_once(tmp_path, monkeypatch, conten
 
     _patch_spawn(monkeypatch, fake)
     outdir = tmp_path / "out"
-    with cdk_nag_worker.cdk_nag_worker_batch([str(t) for t in templates], outdir):
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, values=()
+    ):
         for t in templates:
             with pytest.raises(RuntimeError):
                 _call(t, outdir)
@@ -250,7 +354,7 @@ def test_a_symlinked_response_is_not_followed(tmp_path, monkeypatch):
 
     _patch_spawn(monkeypatch, fake)
     outdir = tmp_path / "out"
-    with cdk_nag_worker.cdk_nag_worker_batch([str(template)], outdir):
+    with cdk_nag_worker.cdk_nag_worker_batch([str(template)], outdir, values=()):
         with pytest.raises(RuntimeError):
             _call(template, outdir)
 
@@ -264,7 +368,9 @@ def test_every_spelling_of_a_template_shares_the_batch(tmp_path, monkeypatch):
     calls: List[List[str]] = []
     _patch_spawn(monkeypatch, _fake_child(answers, calls))
     outdir = tmp_path / "out"
-    with cdk_nag_worker.cdk_nag_worker_batch([t.as_posix() for t in templates], outdir):
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [t.as_posix() for t in templates], outdir, values=()
+    ):
         assert _call(templates[0], outdir) is None
         assert _call(Path(str(templates[1])), outdir) is None
         assert _call(str(templates[2]), outdir) is None
@@ -272,6 +378,48 @@ def test_every_spelling_of_a_template_shares_the_batch(tmp_path, monkeypatch):
     assert cdk_nag_worker._key(Path("C:/x/t.yaml")) == cdk_nag_worker._key(
         "C:/x/t.yaml"
     )
+
+
+def test_control_a_child_that_keeps_sys_path_0_imports_from_the_scanned_directory(
+    tmp_path, monkeypatch
+):
+    """The test below, with the bootstrap's first statement removed.
+
+    The child changes into ASH's working directory, and under ``-c`` the ``''``
+    entry follows it, so the planted ``cdk_nag.py`` is what it imports. Shows the
+    test below can fail.
+    """
+    first_statement = "sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]; "
+    assert first_statement in cdk_nag_worker._CHILD_BOOTSTRAP
+    monkeypatch.setattr(
+        cdk_nag_worker,
+        "_CHILD_BOOTSTRAP",
+        cdk_nag_worker._CHILD_BOOTSTRAP.replace(first_statement, ""),
+    )
+    marker = _run_from_a_planted_repository(tmp_path, monkeypatch)
+    assert "cdk_nag" in marker.read_text()
+
+
+def _run_from_a_planted_repository(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    marker = tmp_path / "IMPORTED"
+    for name in ("yaml", "cdk_nag", "pydantic"):
+        (repo / f"{name}.py").write_text(
+            f"open({str(marker)!r}, 'a').write({name!r})\n", encoding="utf-8"
+        )
+    monkeypatch.chdir(repo)
+    monkeypatch.delenv("PYTHONSAFEPATH", raising=False)
+    template = tmp_path / "t.yaml"
+    template.write_text(
+        "Resources:\n  B:\n    Type: AWS::S3::Bucket\n", encoding="utf-8"
+    )
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch([str(template)], outdir):
+        # The planted cdk_nag has no packs, so the child's answer is re-raised here.
+        with pytest.raises(Exception, match="Unknown cdk-nag pack"):
+            _call(template, outdir)
+    return marker
 
 
 def test_the_child_does_not_import_from_the_scanned_directory(tmp_path, monkeypatch):
@@ -297,7 +445,7 @@ def test_the_child_does_not_import_from_the_scanned_directory(tmp_path, monkeypa
         "Resources:\n  B:\n    Type: AWS::S3::Bucket\n", encoding="utf-8"
     )
     outdir = tmp_path / "out"
-    with cdk_nag_worker.cdk_nag_worker_batch([str(template)], outdir):
+    with cdk_nag_worker.cdk_nag_worker_batch([str(template)], outdir, values=()):
         response = _call(template, outdir)
     assert not marker.exists(), f"the child imported {marker.read_text()} from its cwd"
     assert response is not None and response.failure is not None
@@ -331,7 +479,7 @@ def test_an_exception_keeps_its_name_text_and_base(
     }
     _patch_spawn(monkeypatch, _fake_child(answers, []))
     outdir = tmp_path / "out"
-    with cdk_nag_worker.cdk_nag_worker_batch([str(template)], outdir):
+    with cdk_nag_worker.cdk_nag_worker_batch([str(template)], outdir, values=()):
         with pytest.raises(base) as raised:
             _call(template, outdir)
     assert type(raised.value).__name__ == type_name
@@ -429,7 +577,7 @@ def test_logs_are_replayed_with_their_origin(tmp_path, monkeypatch, caplog):
     _patch_spawn(monkeypatch, _fake_child(answers, []))
     outdir = tmp_path / "out"
     with caplog.at_level(logging.DEBUG, logger="ash"):
-        with cdk_nag_worker.cdk_nag_worker_batch([str(template)], outdir):
+        with cdk_nag_worker.cdk_nag_worker_batch([str(template)], outdir, values=()):
             _call(template, outdir)
     records = [
         r for r in caplog.records if r.getMessage() == "cdk-nag could not be imported"
@@ -474,7 +622,7 @@ def test_a_real_child_reports_a_failed_cdk_nag_import(tmp_path, monkeypatch, cap
     )
     outdir = tmp_path / "out"
     with caplog.at_level(logging.ERROR, logger="ash"):
-        with cdk_nag_worker.cdk_nag_worker_batch([str(template)], outdir):
+        with cdk_nag_worker.cdk_nag_worker_batch([str(template)], outdir, values=()):
             response = _call(template, outdir)
     assert isinstance(response, CdkNagWrapperResponse)
     assert response.failure is not None
@@ -522,7 +670,7 @@ def test_the_child_is_started_through_the_sandbox_choke_point(tmp_path):
     template = _templates(tmp_path, 1)[0]
     outdir = tmp_path / "out"
     with sandbox_scope(scope):
-        with cdk_nag_worker.cdk_nag_worker_batch([str(template)], outdir):
+        with cdk_nag_worker.cdk_nag_worker_batch([str(template)], outdir, values=()):
             with pytest.raises(RuntimeError, match="exited 3"):
                 _call(template, outdir)
     assert seen and seen[0][:3] == [
@@ -553,3 +701,51 @@ def test_the_worker_refuses_a_request_from_another_protocol(tmp_path, capsys):
     assert cdk_nag_worker.main([str(request), str(tmp_path / "response.jsonl")]) == 2
     assert not (tmp_path / "response.jsonl").exists()
     assert "protocol" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("stale", ["file", "link"])
+def test_a_response_already_there_is_an_error_result_not_a_traceback(
+    tmp_path, capsys, stale
+):
+    """The child creates its response file; anything at the name is refused."""
+    request = tmp_path / "request.json"
+    request.write_text(
+        json.dumps(
+            {
+                "protocol": cdk_nag_worker.PROTOCOL_VERSION,
+                "cwd": tmp_path.as_posix(),
+                "log_level": logging.WARNING,
+                "options": {},
+                "templates": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    response = tmp_path / "response.jsonl"
+    elsewhere = tmp_path / "elsewhere.txt"
+    elsewhere.write_text("kept\n")
+    if stale == "file":
+        response.write_text("stale\n")
+    else:
+        response.symlink_to(elsewhere)
+
+    assert cdk_nag_worker.main([str(request), str(response)]) == 2
+
+    err = capsys.readouterr().err
+    assert "already exists" in err and "Traceback" not in err, err
+    assert elsewhere.read_text() == "kept\n"
+    if stale == "file":
+        assert response.read_text() == "stale\n"
+
+
+def test_each_child_gets_a_directory_of_its_own(tmp_path, monkeypatch):
+    """A retry's directory is new: one already at its name is not reused."""
+    import uuid
+
+    outdir = tmp_path / "out"
+    taken = uuid.UUID(int=1)
+    (outdir / ".cdk-nag-worker" / taken.hex).mkdir(parents=True)
+    monkeypatch.setattr(cdk_nag_worker.uuid, "uuid4", lambda: taken)
+
+    with pytest.raises(FileExistsError):
+        cdk_nag_worker._run_child(["t.yaml"], {}, outdir, tmp_path, None)

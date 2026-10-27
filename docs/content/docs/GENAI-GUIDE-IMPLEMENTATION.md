@@ -33,10 +33,10 @@ This document describes the implementation of the ASH GenAI Integration Guide, a
 
 **Usage**:
 ```bash
-# Download to default location
+# Write to the default location
 ash get-genai-guide
 
-# Download to custom location
+# Write to another location
 ash get-genai-guide -o /path/to/guide.md
 ash get-genai-guide --output custom-name.md
 ```
@@ -45,7 +45,7 @@ ash get-genai-guide --output custom-name.md
 - Extracts the guide from the installed package
 - Works in both installed and development modes
 - Provides helpful output with file size and usage tips
-- Fallback to GitHub URL if file cannot be located
+- Exits 1 and names `--from-github` when the installation has no copy, and downloads nothing
 
 ### 3. Documentation Integration
 
@@ -60,21 +60,19 @@ ash get-genai-guide --output custom-name.md
 
 GenAI tools often struggle with ASH results because they:
 1. Parse HTML reports instead of JSON (inefficient, error-prone)
-2. Don't understand severity discrepancies between formats
-3. Create malformed suppressions
-4. Use incorrect jq queries that fail repeatedly
-5. Miss the CycloneDX SBOM for dependency analysis
-6. Waste tokens/credits on trial-and-error
+2. Create malformed suppressions
+3. Use incorrect jq queries that fail repeatedly
+4. Miss the CycloneDX SBOM for dependency analysis
+5. Waste tokens/credits on trial-and-error
 
 ### Solution Benefits
 
 With this guide, GenAI tools can:
 1. **Use correct formats**: JSON files are the source of truth
-2. **Handle discrepancies**: Understand that markdown may show "CRITICAL" while JSON shows "HIGH"
-3. **Create valid suppressions**: Proper YAML syntax with all required fields
-4. **Query efficiently**: Pre-tested jq queries for common tasks
-5. **Analyze dependencies**: Use CycloneDX SBOM correctly
-6. **Avoid pitfalls**: Learn from documented known issues
+2. **Create valid suppressions**: Proper YAML syntax with all required fields
+3. **Query efficiently**: Pre-tested jq queries for common tasks
+4. **Analyze dependencies**: Use CycloneDX SBOM correctly
+5. **Avoid pitfalls**: Learn from documented known issues
 
 ## Key Features of the Guide
 
@@ -84,14 +82,7 @@ Explicitly tells GenAI tools:
 - **DO**: Use `ash_aggregated_results.json`, `ash.flat.json`, `ash.sarif`, `ash.cdx.json`
 - **DO NOT**: Parse HTML, Markdown, or Text summaries
 
-### 2. Severity Discrepancies
-
-Explains that:
-- Different report formats may show different severities
-- `ash_aggregated_results.json` is the source of truth
-- Provides examples of the discrepancy
-
-### 3. Suppression Best Practices
+### 2. Suppression Best Practices
 
 Shows how to:
 - Structure suppressions correctly in YAML
@@ -100,7 +91,7 @@ Shows how to:
 - Set expiration dates
 - Provide clear reasons
 
-### 4. Working Examples
+### 3. Working Examples
 
 Includes:
 - jq queries for common tasks
@@ -108,11 +99,11 @@ Includes:
 - CI/CD pipeline examples
 - Dependency analysis workflows
 
-### 5. Troubleshooting
+### 4. Troubleshooting
 
 Documents:
 - Common pitfalls (HTML parsing, suppression issues)
-- Known issues (severity discrepancies, missing scanners)
+- Known issues (missing scanners)
 - Solutions and workarounds
 
 ## Usage Scenarios
@@ -120,14 +111,14 @@ Documents:
 ### Scenario 1: User Provides Guide to AI Assistant
 
 ```bash
-# User downloads the guide
+# User writes the guide to a file
 ash get-genai-guide -o ash-guide.md
 
 # User provides it to their AI assistant
 "Here's the ASH integration guide. Please use it when analyzing my scan results."
 ```
 
-### Scenario 2: AI Assistant Downloads Guide Automatically
+### Scenario 2: AI Assistant Gets the Guide Itself
 
 If the AI assistant has access to the ASH CLI:
 ```bash
@@ -153,18 +144,19 @@ The guide includes specific sections for MCP server integration:
 **File**: `automated_security_helper/cli/main.py`
 
 **Key Features**:
-- Uses `importlib.resources` for package resource access
-- Fallback to filesystem for development mode
-- Fallback to GitHub URL if file not found
+- Reads a clone's `docs/content/docs/genai-steering-guide.md`, else the copy
+  `hatch_build.py` packages at `automated_security_helper/assets/genai-steering-guide.md`
+- With neither, exits 1 and names `--from-github`; it never downloads on its own
+- `--from-github` downloads the guide from GitHub, from `main` or `--branch`
 - Helpful output with usage tips
 
 **Code Structure**:
 ```python
 @app.command(name="get-genai-guide")
 def get_genai_guide(output_path: str = "ash-genai-guide.md"):
-    # Try to read from installed package
-    # Fallback to development mode
-    # Fallback to GitHub URL
+    # Read the clone's docs/ copy, else the packaged assets/ copy
+    # Neither: exit 1, naming --from-github
+    # --from-github: download from GitHub (main, or --branch)
     # Write to output file
     # Display helpful information
 ```

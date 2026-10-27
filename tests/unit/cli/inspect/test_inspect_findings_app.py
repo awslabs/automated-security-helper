@@ -6,7 +6,7 @@ Textual rendering internals are not tested.
 """
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -18,6 +18,7 @@ from automated_security_helper.cli.inspect.inspect_findings_app import (
     extract_findings,
     map_level_to_severity,
 )
+from automated_security_helper.core.constants import ASH_DEFAULT_CONFIG_FILE_NAME
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -142,7 +143,8 @@ class TestAppInitialization:
     def test_default_config_path(self, sample_findings, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         default = FindingsExplorerApp(sample_findings)
-        assert default.config_path == tmp_path / ".ash.yaml"
+        # A new config gets the name discovery treats as current, not .ash.yaml.
+        assert default.config_path == tmp_path / ASH_DEFAULT_CONFIG_FILE_NAME
 
     def test_suppress_dialog_uses_config_path(
         self, sample_findings, tmp_path, monkeypatch
@@ -170,9 +172,109 @@ class TestAppInitialization:
         query_one = MagicMock(side_effect=[status_bar, table])
         monkeypatch.setattr(custom, "query_one", query_one)
 
-        custom._on_suppress_result(True)
+        custom._on_suppress_result(SuppressDialog.SAVED)
 
         status_bar.update.assert_called_once_with(f"Suppression saved to {config_path}")
+
+    def test_a_duplicate_is_not_reported_as_saved(
+        self, sample_findings, tmp_path, monkeypatch
+    ):
+        config_path = tmp_path / ".ashrc.yaml"
+        custom = FindingsExplorerApp(sample_findings, config_path=config_path)
+        status_bar = MagicMock()
+        table = MagicMock(cursor_row=None)
+        monkeypatch.setattr(
+            custom, "query_one", MagicMock(side_effect=[status_bar, table])
+        )
+
+        custom._on_suppress_result(SuppressDialog.ALREADY_SUPPRESSED)
+
+        (content,), _ = status_bar.update.call_args
+        message = content.plain  # the status bar gets text content, not markup
+        assert "saved" not in message.lower(), message
+        assert "already suppressed" in message.lower(), message
+        assert str(config_path) in message, message
+
+    def test_the_save_status_shows_a_path_newline_as_an_escape(
+        self, sample_findings, tmp_path, monkeypatch
+    ):
+        """The one-line status bar names the config path after a save and
+        after a repeat. A newline a path component carries must draw as its
+        escape: kept, it clips the rest of the message off the bar."""
+        config_path = tmp_path / ("line1" + chr(10) + "line2") / ".ash.yaml"
+        custom = FindingsExplorerApp(sample_findings, config_path=config_path)
+        for result in (SuppressDialog.SAVED, SuppressDialog.ALREADY_SUPPRESSED):
+            status_bar = MagicMock()
+            table = MagicMock(cursor_row=None)
+            monkeypatch.setattr(
+                custom, "query_one", MagicMock(side_effect=[status_bar, table])
+            )
+
+            custom._on_suppress_result(result)
+
+            ((content,), _) = status_bar.update.call_args
+            assert "\n" not in content.plain, (result, repr(content.plain))
+
+    def test_the_dialog_saves_a_second_line_and_reports_a_repeat(self, tmp_path):
+        """Two findings of one rule in one file, then the first one again."""
+        config_path = tmp_path / ".ashrc.yaml"
+        outcomes = []
+        for line in ("10", "20", "10"):
+            finding = {"rule_id": "B101", "file": "src/app.py", "line": line}
+            dialog = SuppressDialog(finding, config_path)
+            inputs = {
+                "#reason_input": MagicMock(value="asserts in tests"),
+                "#expiration_input": MagicMock(value=""),
+            }
+            dialog.query_one = lambda selector, _type=None: inputs[selector]
+            dialog.dismiss = MagicMock()
+
+            dialog.on_button_pressed(MagicMock(button=MagicMock(id="btn_suppress")))
+
+            ((outcome,), _) = dialog.dismiss.call_args
+            outcomes.append(outcome)
+
+        assert outcomes == [
+            SuppressDialog.SAVED,
+            SuppressDialog.SAVED,
+            SuppressDialog.ALREADY_SUPPRESSED,
+        ]
+
+    def test_the_dialog_reports_a_failed_save_as_failed(self, tmp_path, monkeypatch):
+        """A write the file does not take is not SAVED and not a repeat: the
+        dialog reports the failure in its own error field and stays open with
+        the operator's input kept, and the config keeps its earlier bytes."""
+        from automated_security_helper.config import ash_config as config_module
+
+        config_path = tmp_path / ".ashrc.yaml"
+        before = "project_name: t\nglobal_settings:\n  suppressions: []\n"
+        config_path.write_text(before, encoding="utf-8")
+        monkeypatch.setattr(
+            config_module,
+            "_serialize_entry_lines",
+            lambda entry, indent: [f"{indent}- ]broken\n"],
+        )
+        dialog = SuppressDialog(
+            {"rule_id": "B101", "file": "src/app.py", "line": "10"}, config_path
+        )
+        error_field = MagicMock()
+        inputs = {
+            "#reason_input": MagicMock(value="asserts in tests"),
+            "#expiration_input": MagicMock(value=""),
+            "#suppression-error": error_field,
+        }
+        dialog.query_one = lambda selector, _type=None: inputs[selector]
+        dialog.dismiss = MagicMock()
+        # The failure report goes through the app; the dialog is not mounted.
+        monkeypatch.setattr(SuppressDialog, "app", MagicMock(), raising=False)
+
+        dialog.on_button_pressed(MagicMock(button=MagicMock(id="btn_suppress")))
+
+        # The dialog stays open (no dismissal), so the typed reason is kept.
+        assert dialog.dismiss.call_args is None, dialog.dismiss.call_args
+        ((error_text,), _) = error_field.update.call_args
+        assert "Could not save the suppression." in str(error_text), error_text
+        assert config_path.read_text(encoding="utf-8") == before
 
     def test_empty_findings(self, empty_app):
         assert empty_app.findings == []
@@ -184,6 +286,165 @@ class TestAppInitialization:
 
     def test_get_unique_scanners_empty(self, empty_app):
         assert empty_app._get_unique_scanners() == []
+
+
+# ---------------------------------------------------------------------------
+# Suppress dialog: the expiration date
+# ---------------------------------------------------------------------------
+
+
+def _one_finding() -> dict:
+    return {
+        "rule_id": "B101",
+        "severity": "high",
+        "scanner": "bandit",
+        "message": "Use of exec detected",
+        "file": "src/app.py",
+        "line": 10,
+        "suppressed": False,
+    }
+
+
+async def _save_with_expiration(tmp_path, expiration: str) -> tuple[dict, Path]:
+    """Open the suppress dialog over one finding, fill it in, press Save."""
+    from textual.widgets import Button, Input
+
+    finding = _one_finding()
+    config_path = tmp_path / ".ash.yaml"
+    app = FindingsExplorerApp([finding], config_path=config_path)
+    async with app.run_test(size=(120, 36)) as pilot:
+        await pilot.pause()
+        await pilot.press("x")
+        await pilot.pause()
+        app.screen.query_one("#reason_input", Input).value = "asserts in tests"
+        app.screen.query_one("#expiration_input", Input).value = expiration
+        app.screen.query_one("#btn_suppress", Button).press()
+        await pilot.pause()
+        await pilot.pause()
+    return finding, config_path
+
+
+class TestSuppressDialogExpiration:
+    """The dialog's handling of the expiration date, against models/core.py.
+
+    The model refuses an expiration that is not a YYYY-MM-DD date with
+    EXPIRATION_RULE, and an entry whose date has been reached stops applying
+    at the start of that day (``is_expired``), so a save with a passed date
+    would write an entry no scan applies. A mistyped date is the likely
+    failure, and the dialog's error field is the operator's feedback for it.
+    """
+
+    def test_a_date_that_is_not_yyyy_mm_dd_shows_the_rule(self, tmp_path, monkeypatch):
+        """A mistyped date gets the model's one wording for the rule, not a
+        pydantic dump of the refused input, and nothing is written."""
+        config_path = tmp_path / ".ashrc.yaml"
+        dialog = SuppressDialog(
+            {"rule_id": "B101", "file": "src/app.py", "line": "10"}, config_path
+        )
+        error_field = MagicMock()
+        inputs = {
+            "#reason_input": MagicMock(value="asserts in tests"),
+            "#expiration_input": MagicMock(value="next tuesday"),
+            "#suppression-error": error_field,
+        }
+        dialog.query_one = lambda selector, _type=None: inputs[selector]
+        dialog.dismiss = MagicMock()
+        monkeypatch.setattr(SuppressDialog, "app", MagicMock(), raising=False)
+
+        dialog.on_button_pressed(MagicMock(button=MagicMock(id="btn_suppress")))
+
+        ((shown,), _) = error_field.update.call_args
+        assert shown.plain == "Invalid expiration date format. Use YYYY-MM-DD", (
+            shown.plain
+        )
+        assert dialog.dismiss.call_args is None, dialog.dismiss.call_args
+        assert not config_path.exists()
+
+    @pytest.mark.asyncio
+    async def test_the_date_format_stays_named_while_typing(self, tmp_path):
+        """The YYYY-MM-DD form is in a label, so it is still readable once the
+        operator has typed over the input's placeholder."""
+        from textual.widgets import Input, Label
+
+        app = FindingsExplorerApp([_one_finding()], config_path=tmp_path / ".ash.yaml")
+        async with app.run_test(size=(120, 36)) as pilot:
+            await pilot.pause()
+            await pilot.press("x")
+            await pilot.pause()
+            app.screen.query_one("#expiration_input", Input).focus()
+            await pilot.press("2", "0", "2")
+            labels = [str(label.render()) for label in app.screen.query(Label)]
+        assert any("YYYY-MM-DD" in text for text in labels), labels
+
+    @pytest.mark.asyncio
+    async def test_a_passed_date_does_not_mark_the_row_suppressed(self, tmp_path):
+        """An entry whose date has been reached does not apply (models/core.py),
+        so a save attempt with one leaves the finding active."""
+        finding, _ = await _save_with_expiration(tmp_path, "2001-01-02")
+        assert finding["suppressed"] is False
+
+    @pytest.mark.asyncio
+    async def test_a_later_date_saves_and_marks_the_row(self, tmp_path):
+        finding, config_path = await _save_with_expiration(tmp_path, "2099-01-02")
+        assert finding["suppressed"] is True
+        assert config_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# Suppress dialog: the outcome on the status bar
+# ---------------------------------------------------------------------------
+
+
+async def _status_after_saving_the_selected_row(config_path: Path) -> tuple[dict, str]:
+    """Open the suppress dialog on the selected finding, save it with a reason,
+    and read the status bar once the dialog's result has been handled."""
+    from textual.widgets import Button, DataTable, Input, Static
+
+    finding = _one_finding()
+    app = FindingsExplorerApp([finding], config_path=config_path)
+    async with app.run_test(size=(120, 36)) as pilot:
+        await pilot.pause()
+        assert app.query_one("#findings_table", DataTable).cursor_row == 0
+        await pilot.press("x")
+        await pilot.pause()
+        assert isinstance(app.screen, SuppressDialog), app.screen
+        app.screen.query_one("#reason_input", Input).value = "asserts in tests"
+        app.screen.query_one("#btn_suppress", Button).press()
+        await pilot.pause()
+        await pilot.pause()
+        assert not isinstance(app.screen, SuppressDialog), app.screen
+        shown = str(app.query_one("#status_bar", Static).render())
+    return finding, shown
+
+
+class TestTheSaveOutcomeStaysOnTheStatusBar:
+    """A save from the selected row marks the row suppressed and repopulates the
+    table, and the repopulate writes the view's counts to the status bar. The
+    bar must still name the outcome afterwards: the operator's only word that
+    the suppression was written, or that an identical one was already there."""
+
+    @pytest.mark.asyncio
+    async def test_a_save_is_named_after_the_table_is_repopulated(self, tmp_path):
+        config_path = tmp_path / ".ash.yaml"
+
+        finding, shown = await _status_after_saving_the_selected_row(config_path)
+
+        # Marked only on the selected-row path, the one that repopulates.
+        assert finding["suppressed"] is True
+        assert shown == f"Suppression saved to {config_path}", shown
+
+    @pytest.mark.asyncio
+    async def test_a_repeat_is_named_after_the_table_is_repopulated(self, tmp_path):
+        config_path = tmp_path / ".ash.yaml"
+        await _status_after_saving_the_selected_row(config_path)
+
+        finding, shown = await _status_after_saving_the_selected_row(config_path)
+
+        assert finding["suppressed"] is True
+        assert shown == (
+            f"Already suppressed: {config_path} has an identical suppression, "
+            "so nothing was written"
+        ), shown
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +505,29 @@ class TestFiltering:
         app.current_filter = "scanner:nonexistent"
         app._apply_filters()
         assert len(app.filtered_findings) == 0
+
+    def test_severity_and_scanner_filters_combine(self, app):
+        """Picking a scanner narrows the severity filter instead of replacing
+        it: the result is the intersection of the two criteria."""
+        app.show_suppressed = True
+        app.severity_filter = "severity:medium"
+        app.scanner_filter = "scanner:bandit"
+        app._apply_filters()
+        assert [f["id"] for f in app.filtered_findings] == [2]
+
+    def test_disjoint_severity_and_scanner_filters_match_nothing(self, app):
+        app.show_suppressed = True
+        app.severity_filter = "severity:critical"
+        app.scanner_filter = "scanner:bandit"
+        app._apply_filters()
+        assert app.filtered_findings == []
+
+    def test_suppression_criterion_combines_with_a_scanner(self, app):
+        app.show_suppressed = True
+        app.suppression_filter = "suppressed"
+        app.scanner_filter = "scanner:trivy"
+        app._apply_filters()
+        assert [f["id"] for f in app.filtered_findings] == [3]
 
 
 # ---------------------------------------------------------------------------
@@ -653,8 +937,10 @@ class TestFindingDetailScreen:
 
 
 class TestMapLevelToSeverity:
-    def test_error_maps_to_high(self):
-        assert map_level_to_severity("error") == "high"
+    def test_error_maps_to_critical(self):
+        # As the gate reads it; inspect showed "high" for a finding the scan
+        # failed as critical.
+        assert map_level_to_severity("error") == "critical"
 
     def test_warning_maps_to_medium(self):
         assert map_level_to_severity("warning") == "medium"
@@ -662,11 +948,13 @@ class TestMapLevelToSeverity:
     def test_note_maps_to_low(self):
         assert map_level_to_severity("note") == "low"
 
-    def test_unknown_maps_to_info(self):
-        assert map_level_to_severity("unknown") == "info"
+    def test_unknown_reads_as_the_missing_level(self):
+        """An unrecognised level is read as MISSING_SARIF_LEVEL, as everywhere."""
+        assert map_level_to_severity("unknown") == "medium"
 
-    def test_none_maps_to_info(self):
-        assert map_level_to_severity(None) == "info"
+    def test_a_missing_level_reads_as_the_missing_level(self):
+        """It was info here, CRITICAL in memory and LOW at the gate."""
+        assert map_level_to_severity(None) == "medium"
 
 
 # ---------------------------------------------------------------------------
@@ -723,7 +1011,7 @@ class TestExtractFindings:
         findings = extract_findings(model)
         assert len(findings) == 1
         assert findings[0]["rule_id"] == "B101"
-        assert findings[0]["severity"] == "high"
+        assert findings[0]["severity"] == "critical"
         assert findings[0]["scanner"] == "bandit"
         assert findings[0]["message"] == "Use of exec"
 
@@ -855,7 +1143,10 @@ class TestSuppressionConfigPath:
 
     def test_falls_back_to_root_config(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        assert _resolve_suppression_config_path() == tmp_path / ".ash.yaml"
+        assert (
+            _resolve_suppression_config_path()
+            == tmp_path / ASH_DEFAULT_CONFIG_FILE_NAME
+        )
 
 
 class TestFindingsCommand:
@@ -886,9 +1177,15 @@ class TestFindingsCommand:
 
         findings_command(output_dir=tmp_path, report_file="report.json")
 
+        # The report is not under a .ash/ash_output, so no scanned directory.
         mock_app_cls.assert_called_once_with(
-            mock_extract.return_value, config_path=config_path
+            mock_extract.return_value,
+            config_path=config_path,
+            mask_source=ANY,
+            scan_root=None,
         )
+        # The masker is built from the results the command shows.
+        assert callable(mock_app_cls.call_args.kwargs["mask_source"])
         mock_app_cls.return_value.run.assert_called_once_with()
 
     @patch(
@@ -990,9 +1287,125 @@ class TestFindingsCommand:
 # ---------------------------------------------------------------------------
 
 
+class TestSnippetsReadFromSourceAreMasked:
+    """A finding with no snippet shows lines read from disk, masked like the results.
+
+    The browser opens the finding's file and shows five lines either side of it.
+    Those lines are not from the masked results, so a secret on a neighboring
+    line was shown in clear.
+    """
+
+    def _model_and_app(self, tmp_path):
+        import hashlib
+        import string
+
+        from automated_security_helper.cli.inspect.inspect_findings_app import (
+            extract_findings,
+        )
+        from automated_security_helper.models.asharp_model import AshAggregatedResults
+        from automated_security_helper.schemas.sarif_schema_model import SarifReport
+        from automated_security_helper.utils.secret_masking import (
+            source_snippet_masker,
+        )
+
+        alphabet = string.ascii_lowercase + string.digits
+        digest = hashlib.sha256(b"inspect-source-value").digest()
+        value = "".join(alphabet[byte % len(alphabet)] for byte in digest)[:14]
+        source = tmp_path / "code.py"
+        source.write_text(
+            "import os\n"
+            "def run():\n"
+            '    token = "' + value + '"\n'
+            "    return os.system(token)\n",
+            encoding="utf-8",
+        )
+        uri = str(source)
+        model = AshAggregatedResults()
+        model.sarif = SarifReport.model_validate(
+            {
+                "version": "2.1.0",
+                "runs": [
+                    {
+                        "tool": {"driver": {"name": "test"}},
+                        "results": [
+                            {
+                                "ruleId": "SECRET-KEYWORD",
+                                "level": "error",
+                                "message": {
+                                    "text": "Secret of type 'Keyword' detected"
+                                },
+                                "properties": {"tags": ["secret"]},
+                                "locations": [
+                                    {
+                                        "physicalLocation": {
+                                            "artifactLocation": {"uri": uri},
+                                            "region": {"startLine": 3, "endLine": 3},
+                                        }
+                                    }
+                                ],
+                            },
+                            {
+                                "ruleId": "B605",
+                                "level": "warning",
+                                "message": {"text": "Starting a process with a shell"},
+                                "properties": {"tags": ["bandit"]},
+                                "locations": [
+                                    {
+                                        "physicalLocation": {
+                                            "artifactLocation": {"uri": uri},
+                                            "region": {"startLine": 4},
+                                        }
+                                    }
+                                ],
+                            },
+                        ],
+                    }
+                ],
+            }
+        )
+        app = FindingsExplorerApp(
+            extract_findings(model), mask_source=source_snippet_masker(model)
+        )
+        return app, value
+
+    def test_a_neighboring_secret_line_is_masked(self, tmp_path):
+        from automated_security_helper.utils.secret_masking import MASKED_LINE
+
+        app, value = self._model_and_app(tmp_path)
+        finding = next(f for f in app.findings if f["rule_id"] == "B605")
+        app.filtered_findings = [finding]
+        mock_table = MagicMock()
+        mock_table.row_count = 1
+        mock_table.cursor_row = 0
+        app.query_one = MagicMock(return_value=mock_table)
+        app.push_screen = MagicMock()
+
+        app.action_view_selected()
+
+        snippet = finding["code_snippet"]
+        assert value not in snippet
+        assert MASKED_LINE in snippet
+        # Control: the finding's own line is shown, with its number and marker.
+        assert "→ 4:     return os.system(token)" in snippet
+
+    def test_the_row_selected_path_masks_too(self, tmp_path):
+        app, value = self._model_and_app(tmp_path)
+        finding = next(f for f in app.findings if f["rule_id"] == "B605")
+        app.filtered_findings = [finding]
+        app.push_screen = MagicMock()
+        event = MagicMock()
+        event.row_key.value = 0
+
+        app.on_data_table_row_selected(event)
+
+        assert value not in finding["code_snippet"]
+        assert "return os.system(token)" in finding["code_snippet"]
+
+
 class TestCodeSnippetExtraction:
     def test_view_selected_extracts_snippet_from_file(self, app, tmp_path):
-        """action_view_selected reads surrounding lines from the file."""
+        """action_view_selected reads surrounding lines from the file, which is in
+        the scanned directory."""
         # Create a temporary source file
         src_file = tmp_path / "code.py"
         lines = [f"line {i}\n" for i in range(1, 20)]
@@ -1003,12 +1416,13 @@ class TestCodeSnippetExtraction:
             "rule_id": "TEST",
             "severity": "high",
             "scanner": "test",
-            "file": str(src_file),
+            "file": "code.py",
             "line": 10,
             "message": "test issue",
         }
         app.findings = [finding]
         app.filtered_findings = [finding]
+        app.scan_root = tmp_path
 
         # Mock the Textual widgets
         mock_table = MagicMock()
@@ -1152,6 +1566,91 @@ class TestExtractFindingsRuleIndex:
         assert [f["rule_id"] for f in findings] == ["R0"]
 
 
+class TestExtractFindingsOptionalParts:
+    def test_a_result_without_properties_has_an_unknown_scanner(self):
+        """properties is optional in SARIF. The scanner name was read from it
+        unguarded, so a result without one raised AttributeError and inspect
+        listed nothing."""
+        findings = _findings_from_result(properties=None)
+
+        assert [f["scanner"] for f in findings] == ["unknown"]
+
+    def test_the_scanners_own_name_wins_over_the_tool_name(self):
+        """properties can carry both scanner_name and scanner_details.tool_name.
+        The scanner's own name is the one shown; the tool name is only the
+        fallback for results without it."""
+        findings = _findings_from_result(
+            properties={
+                "scanner_name": "bandit-sast",
+                "scanner_details": {"tool_name": "bandit"},
+            }
+        )
+
+        assert [f["scanner"] for f in findings] == ["bandit-sast"]
+
+    def test_a_null_scanner_details_reads_as_unknown(self):
+        """properties can carry scanner_details as an explicit null.
+        ``.get("scanner_details", {})`` covers only an absent key, so the
+        ``.get`` on the None raised AttributeError, findings_command caught
+        it, and the whole explorer showed "Error loading model or report"."""
+        findings = _findings_from_result(properties={"scanner_details": None})
+
+        assert [f["scanner"] for f in findings] == ["unknown"]
+
+    def test_a_scanner_details_that_is_not_a_mapping_reads_as_unknown(self):
+        """A results file's properties are its own text: a scanner_details
+        that is not a mapping holds no tool_name, and reading one from it
+        raised the same way."""
+        findings = _findings_from_result(properties={"scanner_details": "bandit"})
+
+        assert [f["scanner"] for f in findings] == ["unknown"]
+
+    def test_properties_are_dumped_once_per_result(self):
+        """The scanner fallback dumped properties twice for every result
+        without a scanner_name, doubling the dump cost over a large report."""
+        result_obj = MagicMock()
+        result_obj.ruleIndex = 0
+        result_obj.ruleId = "R0"
+        result_obj.message.root = MagicMock(text="m")
+        result_obj.properties.model_dump.return_value = {
+            "scanner_details": {"tool_name": "bandit"}
+        }
+        result_obj.suppressions = None
+        result_obj.locations = []
+        result_obj.codeFlows = []
+        model = MagicMock()
+        model.sarif = MagicMock()
+        model.sarif.runs = [MagicMock(results=[result_obj])]
+
+        findings = extract_findings(model)
+
+        assert [f["scanner"] for f in findings] == ["bandit"]
+        assert result_obj.properties.model_dump.call_count == 1
+
+    def test_a_code_flow_snippet_is_used_when_the_locations_have_none(self):
+        """A code flow's physicalLocation is the schema's RootModel, so looking
+        for a region on it, rather than on its root, found none: the snippet
+        a code flow carries never reached the finding."""
+        location = {
+            "physicalLocation": {
+                "artifactLocation": {"uri": "a.py"},
+                "region": {"startLine": 3},
+            }
+        }
+        flow_location = {
+            "physicalLocation": {
+                "artifactLocation": {"uri": "a.py"},
+                "region": {"startLine": 3, "snippet": {"text": "eval(x)"}},
+            }
+        }
+        findings = _findings_from_result(
+            locations=[location],
+            codeFlows=[{"threadFlows": [{"locations": [{"location": flow_location}]}]}],
+        )
+
+        assert [f.get("code_snippet") for f in findings] == ["eval(x)"]
+
+
 # ---------------------------------------------------------------------------
 # Findings without a location, driven through the running app
 # ---------------------------------------------------------------------------
@@ -1185,10 +1684,9 @@ class TestFindingWithoutLocation:
             table = app.query_one("#findings_table", DataTable)
             assert table.row_count == 1
             row = self._row(table, 0)
-            # ID, Rule ID, Severity, Scanner, File, Line, Message
-            assert row[1] == "NOLOC"
-            assert row[4] == "N/A"
-            assert row[5] == "N/A"
+            # Severity, finding (rule and message), location.
+            assert row[1].startswith("NOLOC\n")
+            assert row[2] == "N/A"
 
     @pytest.mark.asyncio
     async def test_suppressed_row_renders_placeholder_location(self, tmp_path):
@@ -1202,8 +1700,8 @@ class TestFindingWithoutLocation:
             await pilot.pause()
             table = app.query_one("#findings_table", DataTable)
             row = self._row(table, 0)
-            assert "N/A" in row[4]
-            assert "N/A" in row[5]
+            assert row[0] == "SUPPRESSED"
+            assert row[2] == "N/A"
 
     @pytest.mark.asyncio
     async def test_detail_screen_opens_for_locationless_finding(self, tmp_path):
@@ -1215,3 +1713,112 @@ class TestFindingWithoutLocation:
             await pilot.press("v")
             await pilot.pause()
             assert isinstance(app.screen, FindingDetailScreen)
+
+
+class TestResetFilters:
+    @pytest.mark.asyncio
+    async def test_reset_restores_the_active_view(self, sample_findings, tmp_path):
+        """r clears every criterion and the search text, back to the active
+        (unsuppressed) findings."""
+        app = FindingsExplorerApp(sample_findings, config_path=tmp_path / ".ash.yaml")
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.show_suppressed = True
+            app.current_filter = "severity:high"
+            app.severity_filter = "severity:high"
+            app.scanner_filter = "scanner:bandit"
+            app.suppression_filter = "suppressed"
+            app.search_query = "exec"
+            app._populate_table()
+            assert len(app.filtered_findings) < 4  # the control: narrowed
+
+            app.action_reset_filters()
+            await pilot.pause()
+
+            assert app.current_filter == "all"
+            assert app.severity_filter == "all"
+            assert app.scanner_filter == "all"
+            assert app.suppression_filter == "all"
+            assert app.show_suppressed is False
+            assert app.search_query == ""
+            # Every active finding, none suppressed (the view re-sorts them).
+            assert {f["id"] for f in app.filtered_findings} == {1, 2, 4, 5}
+
+
+class TestTableColumnsPerWidth:
+    """Which columns _configure_table builds at each terminal width."""
+
+    @staticmethod
+    def _labels(app):
+        from textual.widgets import DataTable
+
+        table = app.query_one("#findings_table", DataTable)
+        return [str(column.label) for column in table.columns.values()]
+
+    @pytest.mark.asyncio
+    async def test_a_narrow_app_keeps_severity_and_finding_only(
+        self, sample_findings, tmp_path
+    ):
+        app = FindingsExplorerApp(sample_findings, config_path=tmp_path / ".ash.yaml")
+        async with app.run_test(size=(60, 24)) as pilot:
+            await pilot.pause()
+            assert self._labels(app) == ["Severity", "Finding"]
+
+    @pytest.mark.asyncio
+    async def test_a_standard_app_adds_the_location(self, sample_findings, tmp_path):
+        app = FindingsExplorerApp(sample_findings, config_path=tmp_path / ".ash.yaml")
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            assert self._labels(app) == ["Severity", "Finding", "Location"]
+
+    @pytest.mark.asyncio
+    async def test_a_wide_app_adds_the_scanner(self, sample_findings, tmp_path):
+        app = FindingsExplorerApp(sample_findings, config_path=tmp_path / ".ash.yaml")
+        async with app.run_test(size=(130, 30)) as pilot:
+            await pilot.pause()
+            assert self._labels(app) == ["Severity", "Finding", "Scanner", "Location"]
+
+    @pytest.mark.asyncio
+    async def test_a_resize_across_buckets_rebuilds_the_columns(
+        self, sample_findings, tmp_path
+    ):
+        """The Resize event's own size decides the layout. ``self.size`` is one
+        event stale when the handler runs, so a 120-to-100 resize kept the wide
+        columns, and the resize after it applied the previous event's width."""
+        app = FindingsExplorerApp(sample_findings, config_path=tmp_path / ".ash.yaml")
+        async with app.run_test(size=(120, 36)) as pilot:
+            await pilot.pause()
+            await pilot.resize_terminal(100, 36)
+            for _ in range(4):
+                await pilot.pause()
+            assert self._labels(app) == ["Severity", "Finding", "Location"]
+
+    @pytest.mark.asyncio
+    async def test_a_resize_inside_a_bucket_fits_the_columns_in_place(
+        self, sample_findings, tmp_path
+    ):
+        """A width change inside one layout bucket fits the existing columns to
+        the new width without rebuilding the table. A terminal drag is a stream
+        of Resize events, and each full repopulate re-filters, re-sorts and
+        re-adds every row (this module documents resize stalls of 1-36 s); it
+        also wrote over the status bar's selection text."""
+        from textual.widgets import DataTable, Static
+
+        app = FindingsExplorerApp(sample_findings, config_path=tmp_path / ".ash.yaml")
+        async with app.run_test(size=(120, 36)) as pilot:
+            await pilot.pause()
+            app.action_next_finding()  # writes the selection into the status bar
+            selected = str(app.query_one("#status_bar", Static).render())
+            assert selected.startswith("Selected:"), selected
+            await pilot.resize_terminal(130, 36)
+            for _ in range(4):
+                await pilot.pause()
+            table = app.query_one("#findings_table", DataTable)
+            widths = {str(key.value): col.width for key, col in table.columns.items()}
+            assert widths == {
+                "Severity": 10,
+                "Finding": 58,
+                "Scanner": 14,
+                "Location": 32,
+            }
+            assert str(app.query_one("#status_bar", Static).render()) == selected

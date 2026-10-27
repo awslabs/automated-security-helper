@@ -46,6 +46,7 @@ from automated_security_helper.workspace.execution import (
     WorkspaceRunResult,
 )
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
+from tests.utils.env_assertions import environ_names, environ_value
 
 
 def _plan(tmp_path: Path) -> WorkspacePlan:
@@ -167,7 +168,7 @@ def test_the_variable_is_removed_again_when_it_was_not_set_before(
 
     _run(_plan(tmp_path), _settings(tmp_path, offline=True))
 
-    assert "ASH_OFFLINE" not in os.environ
+    assert "ASH_OFFLINE" not in environ_names()
 
 
 def test_an_ambient_value_survives_an_offline_scan(observed, tmp_path, monkeypatch):
@@ -182,7 +183,7 @@ def test_an_ambient_value_survives_an_offline_scan(observed, tmp_path, monkeypat
 
     _run(_plan(tmp_path), _settings(tmp_path, offline=True))
 
-    assert os.environ.get("ASH_OFFLINE") == "TRUE"
+    assert environ_value("ASH_OFFLINE") == "TRUE"
 
 
 def test_the_variable_is_restored_even_when_execution_raises(tmp_path, monkeypatch):
@@ -197,7 +198,7 @@ def test_the_variable_is_restored_even_when_execution_raises(tmp_path, monkeypat
     with pytest.raises(RuntimeError, match="scan blew up"):
         _run(_plan(tmp_path), _settings(tmp_path, offline=True))
 
-    assert "ASH_OFFLINE" not in os.environ
+    assert "ASH_OFFLINE" not in environ_names()
 
 
 def test_settings_offline_is_still_carried_to_execute_workspace(tmp_path, monkeypatch):

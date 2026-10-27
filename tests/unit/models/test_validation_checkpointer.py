@@ -75,28 +75,29 @@ class TestValidationCheckpointerExecutionCompletion:
 
 
 class TestRetryRegistrationRemoved:
+    """There is no ``retry_scanner_registration``, a stub that returned [] and re-queued nothing.
+
+    Neither the checkpointer nor the facade has it, and scan_phase.py does not call
+    it (``TestFacadeExposesEveryMethodScanPhaseCalls`` below would fail if it did).
+    """
+
     def test_retry_scanner_registration_not_on_checkpointer(self):
         assert not hasattr(ValidationCheckpointer, "retry_scanner_registration"), (
             "retry_scanner_registration must not exist on ValidationCheckpointer"
         )
 
-    def test_retry_scanner_registration_still_on_facade(self):
-        # The facade keeps it for backward compat with scan_phase.py caller
-        assert hasattr(ScannerValidationManager, "retry_scanner_registration"), (
-            "ScannerValidationManager facade must still expose retry_scanner_registration"
+    def test_retry_scanner_registration_not_on_facade(self):
+        assert not hasattr(ScannerValidationManager, "retry_scanner_registration"), (
+            "ScannerValidationManager exposes retry_scanner_registration again. A retry "
+            "that re-queues nothing makes the scan log claim one; record the missing "
+            "scanner instead, as handle_queue_validation_errors does."
         )
-
-    def test_retry_returns_empty_list(self):
-        ctx = MagicMock()
-        mgr = ScannerValidationManager(ctx)
-        result = mgr.retry_scanner_registration(["bandit"])
-        assert result == []
 
 
 class TestFacadeExposesEveryMethodScanPhaseCalls:
     """The facade's surface, against the real caller rather than by inspection.
 
-    ``TestRetryRegistrationRemoved`` above already guards one method this way,
+    ``TestRetryRegistrationRemoved`` above once guarded one method this way,
     which is the right instinct -- the split into StateTracker/Checkpointer can
     silently drop a facade method and nothing else notices. It guarded one of
     three. ``report_execution_discrepancies`` and ``report_result_completeness``

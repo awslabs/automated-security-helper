@@ -209,7 +209,13 @@ export class AshRuntimeConfig extends Construct {
    * `ASH_MCP_HOST` is pinned to `0.0.0.0` because AgentCore requires it and
    * because a container that bound loopback would be unreachable from any load
    * balancer. The DNS-rebinding consequence of that is handled by
-   * `McpAllowedHost`, not by the bind address.
+   * `McpAllowedHost`, not by the bind address, or on AgentCore by the
+   * `ASH_MCP_TRUST_UPSTREAM_HOST_CHECK` statement that stack adds.
+   *
+   * `ASH_MCP_TRANSPORT` names the transport the entrypoint starts. ASH reads it as
+   * the operator's statement of how it is served, so every caller is treated as
+   * remote even on code paths that read the transport from the environment rather
+   * than from the running server. The Terraform modules set the same variable.
    */
   public mcpEnvironment(): Record<string, string> {
     if (!this.statelessHttp || !this.mountPath || !this.allowedHost || !this.authHeaderName || !this.headerAuthCondition) {
@@ -218,6 +224,7 @@ export class AshRuntimeConfig extends Construct {
     return {
       ASH_CONFIG: ASH_MATERIALIZED_CONFIG_PATH,
       ASH_BASE_CONFIG_SSM_PARAMETER: this.configParameterNameOrEmpty(),
+      ASH_MCP_TRANSPORT: 'streamable-http',
       ASH_MCP_HOST: '0.0.0.0',
       ASH_MCP_PORT: '8000',
       ASH_MCP_MOUNT_PATH: this.mountPath.valueAsString,
@@ -247,39 +254,40 @@ export class AshRuntimeConfig extends Construct {
   }
 
   /**
-   * Let a principal read the config parameter and the auth secret.
+   * Let a principal read the config parameter, and on the MCP targets the auth
+   * secret.
    *
-   * The first two grants are unconditional even when the corresponding value is a
-   * placeholder. That is the price of keeping the resources unconditional, and it
-   * grants nothing an adopter did not deploy: the principal can read one
-   * parameter and one secret that this stack owns.
+   * The parameter grant is unconditional even when the value is a placeholder.
+   * That is the price of keeping the resource unconditional, and it grants nothing
+   * an adopter did not deploy: the principal can read one parameter this stack owns.
    *
-   * The third is narrower than the other two, in both dimensions: it exists only
-   * when `KmsKeyArn` was set, and only on the targets that actually READ the
-   * secret. See `grantCustomerKeyDecrypt`.
+   * The secret grant follows the secret ARN, which reaches a container only through
+   * `mcpEnvironment()`. On the sharded executor and the pull-request gate nothing
+   * reads the secret, so they get no `GetSecretValue` on it: on the gate the role
+   * that can approve pull requests would otherwise hold a grant no code path uses.
+   *
+   * The decrypt grant is narrower still: it exists only when `KmsKeyArn` was set,
+   * and only on the targets that read the secret. See `grantCustomerKeyDecrypt`.
    */
   public grantRead(grantee: iam.IGrantable): void {
     this.configParameter.grantRead(grantee);
-    this.authSecret.grantRead(grantee);
+    if (this.includeMcpParameters) {
+      this.authSecret.grantRead(grantee);
+    }
 
     /*
-     * The decrypt grant follows the secret ARN, not the secret.
+     * The decrypt grant follows the secret ARN, not the secret, and so does the
+     * `GetSecretValue` grant above.
      *
-     * A principal can only need `kms:Decrypt` here if something hands it the ARN and
-     * it calls `GetSecretValue`. The ARN reaches a container through exactly one
-     * path, `mcpEnvironment()`, which throws unless `includeMcpParameters` is true.
-     * So on the sharded executor and the pull-request gate the secret is the
-     * placeholder nothing reads, and a decrypt grant there would be permission on a
-     * value no code path touches. Verified against the synthesized templates:
-     * neither AshCodeCommitGate nor AshDistributedPipeline mentions
-     * `ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN` anywhere.
-     *
-     * The `GetSecretValue` grant above IS still unconditional, and that asymmetry is
-     * deliberate rather than an oversight - it is the existing cost of keeping this
-     * construct one shape, documented at the top of this file. The consequence to
-     * know: if a future change gives one of those two targets the secret ARN, it
-     * must also move to `includeMcpParameters: true`, or `GetSecretValue` will
-     * succeed and the KMS decrypt behind it will not.
+     * A principal can only need either if something hands it the ARN. The ARN
+     * reaches a container through exactly one path, `mcpEnvironment()`, which throws
+     * unless `includeMcpParameters` is true. So on the sharded executor and the
+     * pull-request gate the secret is the placeholder nothing reads, and a grant
+     * there would be permission on a value no code path touches. Verified against
+     * the synthesized templates: neither AshCodeCommitGate nor
+     * AshDistributedPipeline mentions `ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN`
+     * anywhere. A future change that gives one of those targets the ARN has to move
+     * it to `includeMcpParameters: true` to get both grants.
      */
     if (this.includeMcpParameters) {
       this.grantCustomerKeyDecrypt(grantee);

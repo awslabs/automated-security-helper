@@ -47,14 +47,18 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
-def _scanner(source_dir: Path, output_dir: Path) -> GrypeScanner:
+def _scanner(
+    source_dir: Path, output_dir: Path, config_file: Path | None = None
+) -> GrypeScanner:
     return GrypeScanner(
         context=PluginContext(
             source_dir=source_dir,
             output_dir=output_dir,
             config=get_default_config(),
         ),
-        config=GrypeScannerConfig(options=GrypeScannerConfigOptions()),
+        config=GrypeScannerConfig(
+            options=GrypeScannerConfigOptions(config_file=config_file)
+        ),
     )
 
 
@@ -127,22 +131,21 @@ def test_a_missing_config_is_not_an_error_here(tmp_path):
     assert GrypeScanner._output_restricting_keys(tmp_path / "absent.yaml") == []
 
 
-def test_the_scanner_warns_when_the_discovered_config_restricts_output(
-    tmp_path, caplog
-):
+def test_the_scanner_warns_when_the_operators_config_restricts_output(tmp_path, caplog):
     """The warning has to reach the run, which is the whole point.
 
     ``_process_config_options`` runs from ``model_post_init``, so constructing
-    the scanner against a source directory holding the config is what emits it.
+    the scanner with the operator's config_file is what emits it.
     """
     source_dir = tmp_path / "src"
     source_dir.mkdir()
-    (source_dir / ".grype.yaml").write_text("only-fixed: true\n")
+    operator = tmp_path / "grype.yaml"
+    operator.write_text("only-fixed: true\n")
     output_dir = tmp_path / "out"
     output_dir.mkdir()
 
     with caplog.at_level(logging.WARNING):
-        _scanner(source_dir, output_dir)
+        _scanner(source_dir, output_dir, operator)
 
     logged = " ".join(caplog.messages)
     assert "only-fixed" in logged, (
@@ -155,12 +158,13 @@ def test_the_scanner_stays_quiet_for_a_config_that_removes_nothing(tmp_path, cap
     """Control: the warning must be about the key, not about having a config."""
     source_dir = tmp_path / "src"
     source_dir.mkdir()
-    (source_dir / ".grype.yaml").write_text("output: sarif\n")
+    operator = tmp_path / "grype.yaml"
+    operator.write_text("output: sarif\n")
     output_dir = tmp_path / "out"
     output_dir.mkdir()
 
     with caplog.at_level(logging.WARNING):
-        _scanner(source_dir, output_dir)
+        _scanner(source_dir, output_dir, operator)
 
     logged = " ".join(caplog.messages)
     assert "restrict" not in logged.lower(), (

@@ -48,5 +48,7 @@ def test_syft_subprocess_receives_merged_env(syft_scanner_offline):
     assert subprocess_env is not None
     assert subprocess_env["SYFT_CHECK_FOR_APP_UPDATE"] == "false"
     assert subprocess_env["SYFT_LOG_QUIET"] == "true"
-    # Verify os.environ was merged in (PATH is always present)
-    assert "PATH" in subprocess_env
+    # Verify os.environ was merged in (PATH is always present). By its names: a
+    # failure would print the whole environment.
+    names = set(subprocess_env)
+    assert "PATH" in names

@@ -18,6 +18,7 @@ from automated_security_helper.core.sharding import (
     ShardSelectionError,
     partition_scanners,
     scanners_to_exclude,
+    shown_shard_text,
     validate_shard_selection,
     verify_shard_coverage,
 )
@@ -524,3 +525,148 @@ class TestSelectedScannersIsVerified:
             {"shard_index": 0, "shard_count": 1, "assigned_scanners": ["bandit"]}
         )
         assert restored.selected_scanners is None
+
+
+class TestShownShardText:
+    """What a refusal or a warning prints for text a shard or the operator chose."""
+
+    @pytest.mark.parametrize(
+        "value, shown",
+        [
+            pytest.param("x\x1b[31m", "x\\x1b[31m", id="esc"),
+            pytest.param("a\nb\tc\rd", "a\\x0ab\\x09c\\x0dd", id="newline-tab-cr"),
+            pytest.param("a\x9b31m", "a\\x9b31m", id="c1-csi"),
+            pytest.param("a\x85b", "a\\x85b", id="next-line"),
+            # Written as \U escapes, so this file holds none of these characters.
+            pytest.param("a\U0000202eb", "a\\u202eb", id="right-to-left-override"),
+            pytest.param("a\U00002066b\U00002069", "a\\u2066b\\u2069", id="isolates"),
+            pytest.param(
+                "a\U0000200bb\U0000200f", "a\\u200bb\\u200f", id="zero-width-and-mark"
+            ),
+            pytest.param("a\U0000061cb", "a\\u061cb", id="arabic-letter-mark"),
+            pytest.param("a\U0000feffb", "a\\ufeffb", id="byte-order-mark"),
+            pytest.param("a\U00002028b\U00002029", "a\\u2028b\\u2029", id="separators"),
+            pytest.param("a\U000e0041b", "a\\U000e0041b", id="tag-character"),
+            pytest.param("a\U0000d800b", "a\\ud800b", id="lone-surrogate"),
+            # Built with chr(), so this file holds none of these characters.
+            pytest.param("a" + chr(0xE000) + "b", "a\\ue000b", id="private-use"),
+            pytest.param(
+                "a" + chr(0xF0000) + chr(0x10FFFD),
+                "a\\U000f0000\\U0010fffd",
+                id="supplementary-private-use",
+            ),
+            pytest.param("a" + chr(0x0378) + "b", "a\\u0378b", id="unassigned"),
+            pytest.param("a" + chr(0x10FFFE), "a\\U0010fffe", id="noncharacter"),
+        ],
+    )
+    def test_a_character_a_terminal_acts_on_is_written_out(self, value, shown):
+        assert shown_shard_text(value) == shown
+
+    @pytest.mark.parametrize(
+        "value, shown",
+        [
+            pytest.param("C:\\x1b", "C:\\\\x1b", id="x-lookalike"),
+            pytest.param("C:\\x1B", "C:\\\\x1B", id="x-lookalike-upper-hex"),
+            pytest.param("a\\u202eb", "a\\\\u202eb", id="u-lookalike"),
+            pytest.param("a\\U000e0041", "a\\\\U000e0041", id="U-lookalike"),
+        ],
+    )
+    def test_text_that_reads_as_an_escape_is_not_shown_as_one(self, value, shown):
+        """The text "\\x1b" and a real ESC must not print alike: the backslash of
+        the text is doubled, one to one."""
+        assert shown_shard_text(value) == shown
+        assert shown_shard_text(value) != shown_shard_text(chr(0x1B))
+
+    @pytest.mark.parametrize(
+        "value, shown",
+        [
+            # Both runners find these with IndexOf, anywhere in a line: GitHub
+            # Actions' legacy "##[name]" form and Azure Pipelines' "##vso[".
+            pytest.param("##[error]v1", "\\x23#[error]v1", id="legacy-command"),
+            pytest.param(
+                "a ##vso[task.complete result=Failed]x",
+                "a \\x23#vso[task.complete result=Failed]x",
+                id="azure-pipelines",
+            ),
+            pytest.param("##teamcity[x]", "\\x23#teamcity[x]", id="teamcity"),
+        ],
+    )
+    def test_a_ci_command_form_is_broken_wherever_it_is(self, value, shown):
+        assert shown_shard_text(value) == shown
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "semgrep",
+            "with space",
+            "caf\xe9",
+            "\U000065e5\U0000672c",
+            "a\xa0b",
+            "arn:aws:iam::aws:policy/ReadOnlyAccess",
+            "## heading",
+            "x[0]",
+        ],
+    )
+    def test_printable_text_is_left_alone(self, value):
+        """Mid-line "::" is GitHub's only when a line starts with it, as an ARN's is not."""
+        assert shown_shard_text(value) == value
+
+    def test_any_value_is_shown_as_text(self):
+        assert shown_shard_text(3) == "3"
+
+
+class TestRefusalsShowShardChosenNames:
+    """A scanner name in a coverage refusal is shown, not obeyed.
+
+    The names come from the shard results, which any job in the matrix wrote. Each
+    refusal below named them raw: "x\\n##[error]v1" assigned on two shards put a line
+    "##[error]v1 (shards 0 and 1)..." on stdout through ``ash merge``, which GitHub
+    Actions reads as an error annotation, and an ESC sequence reached the terminal.
+    """
+
+    HOSTILE = "x\n##[error]v1\x1b[31m"
+    SHOWN = "x\\x0a\\x23#[error]v1\\x1b[31m"
+
+    @staticmethod
+    def _shard(index, assigned, candidates=None, selected=None):
+        return ShardAssignment(
+            shard_index=index,
+            shard_count=2,
+            assigned_scanners=list(assigned),
+            candidate_scanners=None if candidates is None else list(candidates),
+            selected_scanners=None if selected is None else list(selected),
+        )
+
+    def _refusals(self):
+        h = self.HOSTILE
+        return {
+            "overlap": [self._shard(0, ["a", h]), self._shard(1, ["b", h])],
+            "trespass": [
+                self._shard(0, ["a"], ["a", "b", h], ["a", h]),
+                self._shard(1, ["b", h], ["a", "b", h], ["b", h]),
+            ],
+            "different-sets": [
+                self._shard(0, ["a", h], ["a", "b", h]),
+                self._shard(1, ["b"], ["a", "b"]),
+            ],
+            "uncovered": [
+                self._shard(0, ["a"], ["a", "b", h]),
+                self._shard(1, ["b"], ["a", "b", h]),
+            ],
+            "unexpected": [
+                self._shard(0, ["a", h], ["a", "b"]),
+                self._shard(1, ["b"], ["a", "b"]),
+            ],
+        }
+
+    @pytest.mark.parametrize(
+        "refusal", ["overlap", "trespass", "different-sets", "uncovered", "unexpected"]
+    )
+    def test_the_name_is_shown(self, refusal):
+        with pytest.raises(ShardCoverageError) as excinfo:
+            verify_shard_coverage(self._refusals()[refusal])
+
+        message = str(excinfo.value)
+        assert self.SHOWN in message, message
+        assert "\n" not in message and "\x1b" not in message, repr(message)
+        assert "##[" not in message, message

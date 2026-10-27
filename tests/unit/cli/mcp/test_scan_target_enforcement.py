@@ -21,6 +21,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from automated_security_helper.cli.mcp.scan_target import ASH_MCP_ALLOWED_ROOTS_ENV
+from tests.utils.scan_task_stubs import (
+    closing_scan_task_start,
+    completed_task_create,
+)
 
 
 @pytest.fixture
@@ -116,9 +120,11 @@ class TestRunAshScanEnforcement:
         """Positive control for the pair of assertions above.
 
         Same tool, same fixture, same ``clean_output=True``. Only the allowlist
-        differs. This half must reach the scan and must delete the stale file,
-        which is what distinguishes a policy that decides from one that refuses
-        everything it is given.
+        differs. This half must reach the scan and must move the stale file out of
+        the way, which is what distinguishes a policy that decides from one that
+        refuses everything it is given. The real mcp_scan_directory runs, because
+        that is where clean_output acts: only once the registry has given the
+        scan the directory. Only the scan task itself is not started.
         """
         from automated_security_helper.cli.mcp_server import run_ash_scan
 
@@ -127,22 +133,20 @@ class TestRunAshScanEnforcement:
 
         with (
             patch(
-                "automated_security_helper.cli.mcp_server.mcp_scan_directory",
-                new_callable=AsyncMock,
-                return_value={"success": True, "scan_id": "scan-allowed"},
-            ) as mock_scan,
+                "automated_security_helper.cli.mcp_tools._start_scan_task",
+                side_effect=closing_scan_task_start(),
+            ) as started,
             patch(
                 "automated_security_helper.cli.mcp_server.asyncio.create_task"
             ) as mock_task,
         ):
-            mock_task.return_value = MagicMock()
+            mock_task.side_effect = completed_task_create()
             result = await run_ash_scan(
                 ctx=mock_ctx, source_dir=str(project), clean_output=True
             )
 
         assert result["success"] is True
-        assert result["scan_id"] == "scan-allowed"
-        mock_scan.assert_called_once()
+        started.assert_called_once()
         assert not results.exists()
 
 
@@ -169,7 +173,7 @@ class TestMcpScanDirectoryEnforcement:
         with patch(
             "automated_security_helper.cli.mcp_tools.asyncio.create_task"
         ) as mock_task:
-            mock_task.return_value = MagicMock()
+            mock_task.side_effect = completed_task_create()
             result = await mcp_scan_directory(directory_path=str(project))
 
         assert result["success"] is False
@@ -240,7 +244,7 @@ class TestMcpScanDirectoryEnforcement:
         with patch(
             "automated_security_helper.cli.mcp_tools.asyncio.create_task"
         ) as mock_task:
-            mock_task.return_value = MagicMock()
+            mock_task.side_effect = completed_task_create()
             without = await mcp_scan_directory(directory_path=str(session))
             with_id = await mcp_scan_directory(
                 directory_path=str(session), session_id="session-7"
@@ -262,7 +266,7 @@ class TestMcpScanDirectoryEnforcement:
         with patch(
             "automated_security_helper.cli.mcp_tools.asyncio.create_task"
         ) as mock_task:
-            mock_task.return_value = MagicMock()
+            mock_task.side_effect = completed_task_create()
             result = await mcp_scan_directory(directory_path=str(project))
 
         assert result["success"] is True

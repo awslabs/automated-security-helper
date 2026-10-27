@@ -28,6 +28,8 @@ from automated_security_helper.utils.process_env import (
     restore_environ,
     snapshot_environ,
 )
+from tests.utils.env_assertions import differing_names, environ_names, environ_value
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
 # The same three variables cdk_nag_wrapper sets around every evaluation.
 _JSII_OVERRIDES = {
@@ -40,6 +42,20 @@ _SPAWNS = 300
 
 # What the churn thread must leave behind once it stops.
 _ORIGINAL_ENV = {key: os.environ.get(key) for key in _JSII_OVERRIDES}
+
+
+@pytest.fixture(autouse=True)
+def _unresolved_names_reach_the_mocked_spawn(monkeypatch):
+    """Hand names that resolve nowhere to the mocked spawn on every platform.
+
+    These tests replace the process boundary and pass it programs that are not
+    installed. On Windows ASH refuses such a name before spawning it
+    (subprocess_utils._refuse_unresolved_on_windows); these tests are about what
+    happens after the spawn, so that decision is set aside here.
+    """
+    from automated_security_helper.utils import subprocess_utils as _subprocess_utils
+
+    monkeypatch.setattr(_subprocess_utils, "_refuse_unresolved_on_windows", False)
 
 
 def _vfork_race_possible() -> bool:
@@ -65,12 +81,17 @@ def _trivial_command() -> list:
     "spawn",
     [
         pytest.param(
-            lambda cmd: subprocess_utils.run_command(cmd, log_level=5),
+            lambda cmd: subprocess_utils.run_command(
+                cmd, log_level=5, timeout=CHILD_TIMEOUT_SECONDS
+            ),
             id="run_command",
         ),
         pytest.param(
             lambda cmd: subprocess_utils.run_command_with_output_handling(
-                cmd, stdout_preference="return", stderr_preference="return"
+                cmd,
+                stdout_preference="return",
+                stderr_preference="return",
+                timeout=CHILD_TIMEOUT_SECONDS,
             ),
             id="run_command_with_output_handling",
         ),
@@ -124,7 +145,19 @@ def test_spawn_survives_concurrent_environ_mutation(spawn):
         f"({len(efault)} with EFAULT / errno {errno.EFAULT}); first: {failures[:1]}"
     )
     for key in _JSII_OVERRIDES:
-        assert os.environ.get(key) == _ORIGINAL_ENV.get(key)
+        before = _ORIGINAL_ENV.get(key)
+        assert environ_value(key) == before, key
+
+
+def _assert_a_copy_of_the_environment(env) -> None:
+    """``env`` is a copy of os.environ: not None, not os.environ itself, and with
+    the same names and values. Each check prints names only when it fails, not the
+    environment (tests/utils/env_assertions.py)."""
+    passed_none = env is None
+    assert not passed_none, "the helper passed no environment"
+    passed_live = env is os.environ
+    assert not passed_live, "the helper passed the live environ, not a copy"
+    assert differing_names(env, os.environ) == []
 
 
 class TestSpawnHelpersPassExplicitEnv:
@@ -136,22 +169,16 @@ class TestSpawnHelpersPassExplicitEnv:
             yield
 
     def test_run_command(self):
-        with patch.object(subprocess_utils.subprocess, "run") as mock_run:
+        with patch.object(subprocess_utils, "_run_plain") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(["x"], 0, "", "")
             subprocess_utils.run_command(["x"])
-        env = mock_run.call_args.kwargs["env"]
-        assert env is not None
-        assert env is not os.environ
-        assert env == dict(os.environ)
+        _assert_a_copy_of_the_environment(mock_run.call_args.kwargs["env"])
 
     def test_run_command_with_output_handling(self):
-        with patch.object(subprocess_utils.subprocess, "run") as mock_run:
+        with patch.object(subprocess_utils, "_run_plain") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(["x"], 0, "", "")
             subprocess_utils.run_command_with_output_handling(["x"])
-        env = mock_run.call_args.kwargs["env"]
-        assert env is not None
-        assert env is not os.environ
-        assert env == dict(os.environ)
+        _assert_a_copy_of_the_environment(mock_run.call_args.kwargs["env"])
 
     def test_run_command_stream_output(self):
         process = MagicMock()
@@ -162,25 +189,20 @@ class TestSpawnHelpersPassExplicitEnv:
             subprocess_utils.subprocess, "Popen", return_value=process
         ) as mock_popen:
             subprocess_utils.run_command_stream_output(["x"])
-        env = mock_popen.call_args.kwargs["env"]
-        assert env is not None
-        assert env is not os.environ
-        assert env == dict(os.environ)
+        _assert_a_copy_of_the_environment(mock_popen.call_args.kwargs["env"])
 
     def test_create_process_with_pipes(self):
         with patch.object(subprocess_utils.subprocess, "Popen") as mock_popen:
             subprocess_utils.create_process_with_pipes(["x"])
-        env = mock_popen.call_args.kwargs["env"]
-        assert env is not None
-        assert env is not os.environ
-        assert env == dict(os.environ)
+        _assert_a_copy_of_the_environment(mock_popen.call_args.kwargs["env"])
 
     def test_explicit_env_is_passed_through_unchanged(self):
         explicit = {"ONLY": "this"}
-        with patch.object(subprocess_utils.subprocess, "run") as mock_run:
+        with patch.object(subprocess_utils, "_run_plain") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(["x"], 0, "", "")
             subprocess_utils.run_command(["x"], env=explicit)
-        assert mock_run.call_args.kwargs["env"] is explicit
+        passed_through = mock_run.call_args.kwargs["env"] is explicit
+        assert passed_through, "the explicit env was not passed through unchanged"
 
 
 class TestProcessEnvHelpers:
@@ -190,7 +212,7 @@ class TestProcessEnvHelpers:
         monkeypatch.delenv(self._KEY, raising=False)
         with environ_overrides({self._KEY: "1"}):
             assert os.environ[self._KEY] == "1"
-        assert self._KEY not in os.environ
+        assert self._KEY not in environ_names()
 
     def test_overrides_restore_a_previous_value(self, monkeypatch):
         monkeypatch.setenv(self._KEY, "before")
@@ -203,19 +225,20 @@ class TestProcessEnvHelpers:
         with pytest.raises(RuntimeError):
             with environ_overrides({self._KEY: "1"}):
                 raise RuntimeError("boom")
-        assert self._KEY not in os.environ
+        assert self._KEY not in environ_names()
 
     def test_none_value_removes_and_restores(self, monkeypatch):
         monkeypatch.setenv(self._KEY, "kept")
         previous = apply_environ_overrides({self._KEY: None})
-        assert self._KEY not in os.environ
+        assert self._KEY not in environ_names()
         restore_environ(previous)
         assert os.environ[self._KEY] == "kept"
 
     def test_snapshot_is_an_independent_dict(self, monkeypatch):
         monkeypatch.setenv(self._KEY, "x")
         snap = snapshot_environ()
-        assert type(snap) is dict
-        assert snap == dict(os.environ)
+        is_a_dict = type(snap) is dict
+        assert is_a_dict, "snapshot_environ did not return a dict"
+        assert differing_names(snap, os.environ) == []
         snap[self._KEY] = "changed"
         assert os.environ[self._KEY] == "x"

@@ -37,10 +37,14 @@ from automated_security_helper.utils.cfn_template_model import (
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.schemas.sarif_schema_model import Location
 from cfn_tools import dump_yaml
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, MARKUP, escape_markup
 from automated_security_helper.utils.process_env import (
     apply_environ_overrides,
     restore_environ,
+)
+from automated_security_helper.utils.subprocess_utils import (
+    lookup_for_scan,
+    started_from_working_directory,
 )
 
 
@@ -722,7 +726,30 @@ def run_cdk_nag_against_cfn_template(
             "JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION",
             "JSII_SILENCE_WARNING_DEPRECATED_NODE_VERSION",
         )
-        _original_jsii_env = apply_environ_overrides(dict.fromkeys(_jsii_env_keys, "1"))
+        jsii_env = dict.fromkeys(_jsii_env_keys, "1")
+        # jsii starts JSII_NODE, or "node" by name, which on Windows is looked for
+        # in the working directory first; this process runs in ASH's, usually the
+        # repository being scanned. So it is given the node ASH resolved, as an
+        # absolute path. With none, it is left to start "node" itself unless that
+        # would find one through the working directory. An explicit JSII_NODE is
+        # the operator's choice and is kept.
+        if not os.environ.get("JSII_NODE"):
+            node, refusal = lookup_for_scan(
+                "node", scan_root if scan_root is not None else Path.cwd()
+            )
+            if node is not None:
+                jsii_env["JSII_NODE"] = node
+            elif refusal is not None:
+                # Left unset, jsii would start "node" by name and find that copy.
+                raise RuntimeError(refusal)
+            else:
+                local = started_from_working_directory("node")
+                if local is not None:
+                    raise RuntimeError(
+                        "node is not on PATH, and the copy found through the "
+                        f"working directory, {local}, is not run"
+                    )
+        _original_jsii_env = apply_environ_overrides(jsii_env)
 
         # Suppress JSII stack traces by redirecting stderr for entire function
         import sys
@@ -949,19 +976,15 @@ def run_cdk_nag_against_cfn_template(
                     f".ash-cfn-include{Path(template_path).suffix}"
                 )
                 # Created fresh and never through a link: anything already at the
-                # name is removed, and O_EXCL|O_NOFOLLOW refuses whatever appears in
-                # its place before the open.
-                include_file.unlink(missing_ok=True)
-                include_fd = os.open(
-                    include_file,
-                    os.O_WRONLY
-                    | os.O_CREAT
-                    | os.O_EXCL
-                    | getattr(os, "O_NOFOLLOW", 0)
-                    | getattr(os, "O_BINARY", 0),
-                    0o600,
+                # name is removed, and open_for_write refuses a link that appears in
+                # its place, or at any directory on the way to it below the output
+                # directory.
+                from automated_security_helper.utils.sandbox.fs_guard import (
+                    open_for_write,
                 )
-                with os.fdopen(include_fd, "w", encoding="utf-8") as include:
+
+                include_file.unlink(missing_ok=True)
+                with open_for_write(include_file, mode=0o600) as include:
                     include.write(template_text)
                 try:
                     stack = WrapperStack(
@@ -1086,6 +1109,13 @@ def run_cdk_nag_against_cfn_template(
                     resource_log_id = line.resource_id.split("/")[-1]
 
                     cfn_file_rel_path = get_shortest_name(input=template_path)
+                    # The URIs name the template absolutely, as the template path the
+                    # scanner passes does. get_shortest_name is relative to the working
+                    # directory, so with ASH run from an ancestor of the source
+                    # directory a URI read "proj/t.yaml", which the path sanitizer then
+                    # took as relative to the source directory. An absolute URI is made
+                    # relative to the source directory there, wherever ASH runs.
+                    cfn_file_uri = Path(os.path.abspath(template_path)).as_posix()
                     cfn_resource_matches = [
                         item
                         for resource_id, item in model.Resources.items()
@@ -1130,11 +1160,15 @@ def run_cdk_nag_against_cfn_template(
                         else None
                     )
                     if template_suppression is not None:
+                        # Styles its reason, so it asks for markup and escapes
+                        # every value: all four come from the template.
                         ASH_LOGGER.verbose(
-                            f"Suppressing rule '{line.rule_id}' on resource "
-                            f"'{resource_log_id}' in '{cfn_file_rel_path}' based on the "
+                            f"Suppressing rule '{escape_markup(line.rule_id)}' on "
+                            f"resource '{escape_markup(resource_log_id)}' in "
+                            f"'{escape_markup(cfn_file_rel_path)}' based on the "
                             f"template's own cdk_nag metadata: "
-                            f"[yellow]{template_suppression}[/yellow]"
+                            f"[yellow]{escape_markup(template_suppression)}[/yellow]",
+                            extra=MARKUP,
                         )
                     finding = Result(
                         suppressions=(
@@ -1174,7 +1208,7 @@ def run_cdk_nag_against_cfn_template(
                             )
                         ),
                         analysisTarget=ArtifactLocation(
-                            uri=cfn_file_rel_path,
+                            uri=cfn_file_uri,
                         ),
                         locations=[
                             Location(
@@ -1182,7 +1216,7 @@ def run_cdk_nag_against_cfn_template(
                                 physicalLocation=PhysicalLocation(
                                     root=PhysicalLocation2(
                                         artifactLocation=ArtifactLocation(
-                                            uri=get_shortest_name(input=template_path),
+                                            uri=cfn_file_uri,
                                         ),
                                         region=Region(
                                             startLine=(resource_line or 1),

@@ -120,7 +120,7 @@ The following diagram shows how configuration flows through the built-in scanner
 
 ```mermaid
 flowchart TD
-    A[.ash/.ash.yaml] --> B[Configuration Parser]
+    A[ASH config file] --> B[Configuration Parser]
     C[CLI Arguments] --> B
     B --> D[ASH Configuration]
     D --> E[Scanner Configuration]

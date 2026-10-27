@@ -13,6 +13,7 @@ See docs/content/docs/scanner-sandbox.md for what each backend can and cannot hi
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import platform
@@ -28,9 +29,15 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.policy import (
     SandboxPolicy,
     SandboxUnavailable,
+    _distinct_home,
+    _home_link_targets,
+    _passwd_home,
 )
 
 PROBE_TIMEOUT_SECONDS = 20
+
+#: The shared temporary directory firejail's --private-tmp and /tmp whitelists cover.
+_TMP_ROOT = Path("/tmp")  # nosec B108 - compared against, never written
 
 #: The Landlock wrapper, which bwrap and firejail also run inside their sandbox for
 #: its seccomp socket filter alone (``--socket-filter``).
@@ -76,7 +83,7 @@ def _private_caches(
     a fresh directory under the results directory, the one place the scanner may
     write, removed once the process has exited. A tool redirected this way starts
     from an empty cache, so online it fetches what it needs and offline it has
-    nothing cached. A cache that is only read, such as a vulnerability database,
+    nothing cached. A cache that is only read, such as a scanner's database,
     is not redirected and stays read-only.
     """
     if not policy.cache_env:
@@ -108,7 +115,13 @@ class SpawnPlan:
             try:
                 fn()
             except Exception as e:  # pragma: no cover - best effort
-                ASH_LOGGER.debug(f"Sandbox cleanup failed: {e}")
+                # The exception can name a path an option chose: redacted
+                # with the active scope's env-read values before it is logged.
+                from automated_security_helper.utils.sandbox.scope import (
+                    scope_shown_text,
+                )
+
+                ASH_LOGGER.debug(scope_shown_text(f"Sandbox cleanup failed: {e}"))
 
 
 class SandboxBackend:
@@ -135,16 +148,73 @@ class SandboxBackend:
         raise NotImplementedError
 
 
+def _other_home(policy: SandboxPolicy) -> Optional[Path]:
+    """The passwd entry's home when it is a directory other than ``policy.home``."""
+    return _distinct_home(policy.home, _passwd_home())
+
+
+def _hidden_around(root: Path, shown: Sequence[Path]) -> List[Path]:
+    """What to blacklist so that ``root`` shows only ``shown`` and the way to them.
+
+    firejail whitelists only inside the home and a few system directories, so a
+    directory a link at the top of a home names (policy._home_link_targets) is hidden
+    with --blacklist: all of it, or, where the policy grants paths inside it, every
+    entry beside the way to those paths. Links among the entries are left alone,
+    since firejail would blacklist the directory they point to.
+    """
+    inside = [p for p in shown if p == root or _is_within(p, root)]
+    if not inside:
+        return [root]
+    if root in inside:
+        return []
+    try:
+        entries = sorted(root.iterdir())
+    except OSError:
+        return [root]
+    hidden: List[Path] = []
+    for entry in entries:
+        if entry.is_symlink():
+            continue
+        if any(p == entry or _is_within(p, entry) for p in inside):
+            hidden += _hidden_around(entry, inside)
+        else:
+            hidden.append(entry)
+    return hidden
+
+
+def _probe_env() -> Dict[str, str]:
+    """The environment a probe runs with: PATH, and the home directory.
+
+    The home is this process's usable one (``core.constants.usable_home``), as
+    HOME, or USERPROFILE on Windows, so that ``~`` in the probe is the operator's.
+    With no usable home (an empty or relative HOME) the probe gets none: a
+    relative one would be read against the probe's working directory.
+    """
+    from automated_security_helper.core.constants import usable_home
+
+    env = {"PATH": os.environ.get("PATH", "")}
+    home = usable_home()
+    if home is not None:
+        env["USERPROFILE" if os.name == "nt" else "HOME"] = str(home)
+    return env
+
+
 def _probe_process(
     argv: Sequence[str], env: Optional[Mapping[str, str]] = None
 ) -> "subprocess.CompletedProcess[str]":
-    """Run ``argv`` with its output captured, as a probe."""
+    """Run ``argv`` with its output captured, as a probe.
+
+    Plain subprocess.run, as for every probe in this module: bounded by
+    PROBE_TIMEOUT_SECONDS, one running when an MCP server stops ends on its own
+    soon after (subprocess_utils.run_ended_with_the_server is for longer runs).
+    """
     return subprocess.run(  # nosec B603 - fixed argv built in this module
         list(argv),
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         timeout=PROBE_TIMEOUT_SECONDS,
-        env=dict(env) if env is not None else {"PATH": os.environ.get("PATH", "")},
+        env=dict(env) if env is not None else _probe_env(),
         check=False,
     )
 
@@ -164,8 +234,23 @@ def _probe_run(
     return _exit_failure(_probe_process(argv, env))
 
 
+def _sandbox_program(name: str) -> Optional[str]:
+    """A program the sandbox itself runs, never one from the scanned tree or the cwd.
+
+    Not ``shutil.which``: with an empty or ``.`` PATH entry that answers from the
+    working directory, which is usually the repository being scanned, and the
+    sandbox's own programs decide what a scanner can reach. See
+    ``subprocess_utils.find_trusted_executable``.
+    """
+    from automated_security_helper.utils.subprocess_utils import (
+        find_trusted_executable,
+    )
+
+    return find_trusted_executable(name)
+
+
 def _true() -> str:
-    return shutil.which("true") or "/bin/true"
+    return _sandbox_program("true") or "/bin/true"
 
 
 def _real(path: Path) -> Path:
@@ -213,7 +298,7 @@ class BwrapBackend(SandboxBackend):
         self._overlay = False
 
     def _probe(self) -> Optional[str]:
-        found = shutil.which("bwrap")
+        found = _sandbox_program("bwrap")
         if not found:
             return "bwrap is not installed (install the 'bubblewrap' package)"
         self._executable = found
@@ -292,6 +377,18 @@ class BwrapBackend(SandboxBackend):
             else:
                 args = ["--bind", src, dst]
             ops.append((len(real.parts), mode, args))
+        # A directory the tool may not read, inside one mounted to show something
+        # else (a checkout under /opt), gets an empty directory over it. Ordered like
+        # the home tmpfs: after the mount around it, before what is mounted inside it,
+        # such as the results directory.
+        unread = sorted({_real(p) for p in policy.unread}, key=lambda p: len(p.parts))
+        for index, real in enumerate(unread):
+            covered = any(_is_within(real, outer) for outer in unread[:index])
+            shown = any(
+                real != mounted and _is_within(real, mounted) for mounted in mounts
+            )
+            if real != Path("/") and shown and not covered:
+                ops.append((len(real.parts), 0, ["--tmpfs", real.as_posix()]))
         ops.sort(key=lambda op: (op[0], op[1]))
 
         cmd: List[str] = [
@@ -383,12 +480,12 @@ class FirejailBackend(SandboxBackend):
         self._executable: Optional[str] = None
 
     def _probe(self) -> Optional[str]:
-        found = shutil.which("firejail")
+        found = _sandbox_program("firejail")
         if not found:
             return "firejail is not installed"
         readlink = next(
             (path for path in _SYSTEM_READLINK if os.access(path, os.X_OK)), None
-        ) or shutil.which("readlink")
+        ) or _sandbox_program("readlink")
         if not readlink:
             return (
                 "readlink is not installed, so ASH cannot check that firejail "
@@ -466,8 +563,13 @@ class FirejailBackend(SandboxBackend):
     ) -> SpawnPlan:
         if not self._executable:
             raise RuntimeError(f"{self.name}: probe() must succeed before plan()")
-        home = _real(policy.home)
-        tmp_root = _real(Path("/tmp"))  # nosec B108 - compared against, never written
+        # firejail is setuid, so it takes the home it makes private, and the one a
+        # whitelist inside $HOME applies to, from the passwd entry, never from HOME
+        # (init_cfg in firejail's main.c). Its whitelists are decided against that
+        # home. HOME's own directory, when it is another one, is blacklisted below.
+        home = _real(_passwd_home() or policy.home)
+        home_variable = _real(policy.home)
+        tmp_root = _real(_TMP_ROOT)
         cmd = [self._executable, "--quiet", *_FIREJAIL_CONFINEMENT]
         if not policy.network:
             cmd.append("--net=none")
@@ -507,6 +609,28 @@ class FirejailBackend(SandboxBackend):
             cmd.append("--private-tmp")
         for p in whitelisted:
             cmd.append(f"--whitelist={p.as_posix()}")
+        # HOME names a directory firejail does not treat as the home: the scanner is
+        # told its home is there, and its ~/.ssh and ~/.aws would stay readable.
+        # Under /tmp it is already hidden by --private-tmp or by the /tmp whitelists.
+        # A policy path inside it is blacklisted with it, so a tool kept there fails
+        # to start rather than the directory being shown.
+        if (
+            home_variable != home
+            and home_variable != Path("/")
+            and not _is_within(home_variable, tmp_root)
+        ):
+            cmd.append(f"--blacklist={home_variable.as_posix()}")
+        # A directory a link at the top of either home names (~/.local kept on
+        # another disk) is part of that home but outside it, where firejail shows
+        # everything: it is blacklisted, all but the policy's own paths inside it.
+        homes = [home] + (
+            [home_variable] if home_variable not in (home, Path("/")) else []
+        )
+        for target in _home_link_targets(homes):
+            if _is_within(target, tmp_root):
+                continue
+            for hidden in _hidden_around(target, readable + writable):
+                cmd.append(f"--blacklist={hidden.as_posix()}")
         # A whitelisted path is mounted read-write whatever --read-only=/ said, so
         # every readable path is made read-only again here, and only then are the
         # writable ones (the results directory, inside the read-only output and
@@ -531,6 +655,40 @@ class FirejailBackend(SandboxBackend):
 # ---------------------------------------------------------------------------
 
 
+#: The first Landlock ABI that controls truncation (Linux 6.2). Below it a scanner
+#: can truncate a file it may only read, so the source tree is not read-only, and
+#: the backend counts as unavailable.
+MIN_LANDLOCK_ABI = 3
+
+
+def _landlock_program(name: str) -> str:
+    """The absolute path the Landlock wrapper starts for ``name``.
+
+    The wrapper starts its command with ``os.execve``, which does not search PATH: a
+    name with no leading slash is read against the working directory, which is usually
+    the tree being scanned. An unsandboxed spawn, bwrap and firejail search PATH for
+    the name instead (anchored entries only), and a tool that is not installed is not
+    found in any of them. So a name that is not absolute is resolved here the way
+    ASH's own lookup resolves it, and one that resolves nowhere is the
+    ``FileNotFoundError`` a spawn of a program that is not installed raises, never a
+    name handed to the wrapper.
+
+    Raises:
+        FileNotFoundError: ``name`` is not an absolute path and no program of that
+            name was found outside the scanned tree.
+    """
+    if os.path.isabs(name):
+        return name
+    found = _sandbox_program(name)
+    if found is not None:
+        return found
+    from automated_security_helper.utils.subprocess_utils import in_tree_refusal
+
+    raise FileNotFoundError(
+        errno.ENOENT, in_tree_refusal(name) or f"{name} was not found on PATH", name
+    )
+
+
 class LandlockBackend(SandboxBackend):
     name = "landlock"
     platforms = ("linux",)
@@ -544,15 +702,14 @@ class LandlockBackend(SandboxBackend):
         )
         if failure:
             return f"Landlock is not available ({failure})"
-        result = subprocess.run(  # nosec B603 - fixed argv
-            [sys.executable, "-I", str(LANDLOCK_EXEC), "--abi"],
-            capture_output=True,
-            text=True,
-            timeout=PROBE_TIMEOUT_SECONDS,
-            env={"PATH": os.environ.get("PATH", "")},
-            check=False,
-        )
+        result = _probe_process([sys.executable, "-I", str(LANDLOCK_EXEC), "--abi"])
         self._abi = int(result.stdout.strip() or 0)
+        if self._abi < MIN_LANDLOCK_ABI:
+            return (
+                f"Landlock ABI {self._abi} is below {MIN_LANDLOCK_ABI} (Linux 6.2), so "
+                "it cannot stop a scanner from truncating files it may only read, and "
+                "the source tree would not be read-only"
+            )
         policy = json.dumps({"read_only": ["/"], "writable": [], "network": False})
         failure = _probe_run(
             [
@@ -577,15 +734,14 @@ class LandlockBackend(SandboxBackend):
     def plan(
         self, argv: Sequence[str], env: Mapping[str, str], policy: SandboxPolicy
     ) -> SpawnPlan:
+        # First, so a program that is not found is refused with nothing made.
+        resolved_argv0 = _landlock_program(argv[0])
         private_root = Path(tempfile.mkdtemp(prefix="ash-sandbox-"))
         private_tmp = private_root / "tmp"
         private_home = private_root / "home"
         private_tmp.mkdir()
         private_home.mkdir()
         _link_policy_paths_into(private_home, policy)
-        resolved_argv0 = (
-            argv[0] if os.path.isabs(argv[0]) else (shutil.which(argv[0]) or argv[0])
-        )
         document = {
             # Caches are read-only: Landlock cannot discard a write, so one in place
             # would change what later runs read. See _private_caches.
@@ -755,6 +911,7 @@ def _system_trust_roots() -> Optional[str]:
         try:
             result = subprocess.run(  # nosec B603 - fixed argv, run by ASH itself
                 ["/usr/bin/security", "find-certificate", "-a", "-p", keychain],
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 timeout=PROBE_TIMEOUT_SECONDS,
@@ -841,6 +998,13 @@ class SandboxExecBackend(SandboxBackend):
         private_uv_cache: Optional[Path] = None,
     ) -> str:
         home = _real(policy.home)
+        # The passwd entry's home too, when HOME names another directory: reading
+        # starts from "/", so a home that is not denied here stays readable.
+        homes = [home] + [h for h in [_other_home(policy)] if h is not None]
+        # And each directory a link at the top of a home names (~/.local kept on
+        # another disk), which is part of that home; the policy's own paths inside
+        # it are allowed again after the denies, as they are inside the homes.
+        denied = homes + _home_link_targets(homes)
         # Caches are read-only here too; see _private_caches.
         readable = " ".join(
             f"(subpath {_sbpl_string(_real(p))})"
@@ -881,11 +1045,27 @@ class SandboxExecBackend(SandboxBackend):
             # directories, then give back the paths the policy lists. In SBPL the
             # last matching rule wins.
             '(allow file-read* (subpath "/"))',
-            f"(deny file-read* (subpath {_sbpl_string(home)}))",
+            *[f"(deny file-read* (subpath {_sbpl_string(h)}))" for h in denied],
             '(deny file-read* (subpath "/private/tmp") (subpath "/private/var/folders"))',
         ]
         if readable:
             lines.append(f"(allow file-read* {readable})")
+        # Then take back what the tool may not read, wherever it is (a checkout under
+        # /opt is otherwise read through "/" or a tool path), and give back what the
+        # policy lists inside it. The results directory comes back with the
+        # writable paths, next.
+        unread = sorted({_real(p) for p in policy.unread})
+        if unread:
+            lines.append(f"(deny file-read* {_sbpl_subpaths(unread)})")
+            listed_inside = sorted(
+                {
+                    _real(p)
+                    for p in list(policy.read_only) + list(policy.cache)
+                    if any(_is_within(_real(p), u) for u in unread)
+                }
+            )
+            if listed_inside:
+                lines.append(f"(allow file-read* {_sbpl_subpaths(listed_inside)})")
         lines.append(f"(allow file-read* file-write* {writable})")
         lines.append(
             '(allow file-read* file-write* (literal "/dev/null") (literal "/dev/zero")'
@@ -897,9 +1077,11 @@ class SandboxExecBackend(SandboxBackend):
             )
         # Last of the file rules, so no path the policy grants can reopen them: the
         # system and login keychains, whatever the keychain daemon would allow.
+        keychains = " ".join(
+            f"(subpath {_sbpl_string(h / 'Library' / 'Keychains')})" for h in homes
+        )
         lines.append(
-            '(deny file-read* file-write* (subpath "/Library/Keychains")'
-            f" (subpath {_sbpl_string(home / 'Library' / 'Keychains')}))"
+            f'(deny file-read* file-write* (subpath "/Library/Keychains") {keychains})'
         )
         if policy.network:
             # IP only. Unix-domain sockets stay denied (Docker Desktop's socket, the

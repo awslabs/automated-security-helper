@@ -84,6 +84,14 @@ To troubleshoot issues in the workflow, you can:
 
 ## Integration Testing
 
+The community plugin legs scan with `.ash/.ash_community_plugins.yaml`. That file is
+inside the scanned tree, and a config file there cannot load the Snyk plugin, so the
+legs pass it with
+`--ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins`
+(see `.github/actions/run-scan-test/action.yml`). `snyk-code` is disabled in that
+file, so the legs install the Snyk CLI and load the plugin without running a Snyk
+Code scan.
+
 The GitHub Actions workflow tests both Snyk and Trivy plugins together to ensure:
 
 - Both tools install correctly on all supported platforms

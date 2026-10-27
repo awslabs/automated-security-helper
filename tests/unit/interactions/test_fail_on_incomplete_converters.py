@@ -47,12 +47,17 @@ import pytest
 
 from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.interactions.run_ash_scan import (
+    IncompleteConverter,
+    ScanIncompleteness,
     ScanOptions,
     _compute_exit_code,
     incomplete_converters,
     print_incompleteness_message,
 )
-from automated_security_helper.models.asharp_model import ConverterStatusInfo
+from automated_security_helper.models.asharp_model import (
+    ConverterStatusInfo,
+    FailedInputInfo,
+)
 
 _MODULE = "automated_security_helper.interactions.run_ash_scan"
 
@@ -101,7 +106,7 @@ class TestIncompleteConvertersAreListed:
         )
 
         assert incomplete_converters(results) == [
-            ("jupyter", "RuntimeError: nbconvert is not on PATH")
+            IncompleteConverter("jupyter", "RuntimeError: nbconvert is not on PATH")
         ]
 
     def test_a_converter_with_unsatisfied_dependencies_is_listed(self, tmp_path):
@@ -112,8 +117,57 @@ class TestIncompleteConvertersAreListed:
         )
 
         listed = incomplete_converters(results)
-        assert [name for name, _ in listed] == ["jupyter"]
+        assert [row[0] for row in listed] == ["jupyter"]
         assert "dependencies" in listed[0][1]
+
+    def test_a_converter_with_failed_inputs_is_listed_with_them(self):
+        """It ran, but some inputs the scanners never saw in converted form."""
+        results = _results(
+            jupyter=ConverterStatusInfo(
+                converted_paths=["converted/ok.py"],
+                failed_inputs=[
+                    FailedInputInfo(
+                        path="[x].ipynb", reason="nbconvert exited with code 1"
+                    )
+                ],
+            )
+        )
+
+        assert incomplete_converters(results) == [
+            ("jupyter", "could not convert 1 input: [x].ipynb")
+        ]
+
+    def test_a_crash_is_reported_ahead_of_its_failed_inputs(self):
+        results = _results(
+            archive=ConverterStatusInfo(
+                failure="OSError: disk full",
+                failed_inputs=[FailedInputInfo(path="a.zip", reason="BadZipFile")],
+            )
+        )
+
+        assert incomplete_converters(results) == [("archive", "OSError: disk full")]
+
+    def test_failed_inputs_read_back_from_a_results_file_still_count(self):
+        """A merged or reloaded row carries plain data; the gate reads it the same."""
+        row = ConverterStatusInfo.model_validate(
+            {"failed_inputs": [{"path": "b.tar", "reason": "ReadError: truncated"}]}
+        )
+
+        assert incomplete_converters(_results(archive=row)) == [
+            ("archive", "could not convert 1 input: b.tar")
+        ]
+
+    def test_failed_inputs_fail_the_exit_code(self, tmp_path):
+        results = _results(
+            jupyter=ConverterStatusInfo(
+                failed_inputs=[FailedInputInfo(path="nb.ipynb", reason="timeout")]
+            )
+        )
+
+        gate_on = _opts(tmp_path, fail_on_incomplete_scanners=True)
+        gate_off = _opts(tmp_path, fail_on_incomplete_scanners=False)
+        assert _exit_code(results, gate_on) == 1
+        assert _exit_code(results, gate_off) == 0
 
     @pytest.mark.parametrize(
         "row",
@@ -139,6 +193,72 @@ class TestIncompleteConvertersAreListed:
         """A model from a version that recorded nothing must not read as broken."""
         assert incomplete_converters(_results()) == []
         assert incomplete_converters(None) == []
+
+
+class TestAnUnknownKindReadsAsTool:
+    """A results shard can carry a record this version did not write, and a
+    converter plugin outside this repository can pass its own kind. Neither may
+    turn into a failed load of the whole results: an unknown kind reads as
+    "tool", which is never accepted, so it can never waive the completeness
+    gate either."""
+
+    def test_a_record_with_an_unknown_kind_validates_as_tool(self):
+        from automated_security_helper.models.asharp_model import FailedInputInfo
+
+        record = FailedInputInfo(path="a.ipynb", reason="refused", kind="parse")
+
+        assert record.kind == "tool"
+
+    def test_a_shard_with_an_unknown_kind_loads_and_counts_against_the_gate(self):
+        row = ConverterStatusInfo.model_validate(
+            {
+                "converted_paths": [],
+                "failed_inputs": [
+                    # accepted rides in from the shard, and must not waive the
+                    # gate: only kind "input" can be accepted, and this kind
+                    # is not known to be one.
+                    {
+                        "path": "a.ipynb",
+                        "reason": "x",
+                        "kind": "zzz",
+                        "accepted": True,
+                    }
+                ],
+            }
+        )
+
+        (listed,) = incomplete_converters(_results(jupyter=row))
+        assert listed.kinds == ("tool",)
+
+    @pytest.mark.parametrize("made", ["constructed", "assigned"])
+    def test_a_record_that_never_passed_validation(self, made, capsys):
+        """A record can skip the validator: built with model_construct, or with
+        its kind assigned after it was made, and ``ash merge`` can carry such
+        records. Its unknown kind reads as "tool" in the row, the payload and
+        the advice, as the validator reads it."""
+        if made == "constructed":
+            record = FailedInputInfo.model_construct(
+                path="a.ipynb", reason="x", kind="weird", accepted=False
+            )
+        else:
+            record = FailedInputInfo(path="a.ipynb", reason="x")
+            record.kind = "weird"  # type: ignore[assignment]
+        # The control: the record holds the unknown kind as given.
+        assert record.kind == "weird"
+        row = ConverterStatusInfo.model_construct(
+            converted_paths=[], failed_inputs=[record]
+        )
+
+        rows = incomplete_converters(_results(jupyter=row))
+
+        (listed,) = rows
+        assert listed.kinds == ("tool",)
+        payload = ScanIncompleteness(converters=tuple(rows)).to_payload()
+        (entry,) = payload["incomplete_converters"]
+        assert entry["failed_input_kinds"] == ["tool"]
+        print_incompleteness_message([], rows)
+        out = " ".join(capsys.readouterr().out.split())
+        assert _TOOL_INPUTS_ADVICE in out, out
 
 
 class TestTheExitCodeSeesAConverterFailure:
@@ -329,7 +449,7 @@ class TestAnUnavailableConverterWithNothingToConvert:
         )
 
         listed = incomplete_converters(results)
-        assert [name for name, _ in listed] == ["jupyter"]
+        assert [row[0] for row in listed] == ["jupyter"]
         assert (
             _exit_code(results, _opts(tmp_path, fail_on_incomplete_scanners=True)) == 1
         )
@@ -352,7 +472,7 @@ class TestAnUnavailableConverterWithNothingToConvert:
         )
 
         listed = incomplete_converters(results)
-        assert [name for name, _ in listed] == ["jupyter"]
+        assert [row[0] for row in listed] == ["jupyter"]
         assert (
             _exit_code(results, _opts(tmp_path, fail_on_incomplete_scanners=True)) == 1
         )
@@ -380,7 +500,7 @@ class TestAnUnavailableConverterWithNothingToConvert:
         results = _results(jupyter=row)
 
         listed = incomplete_converters(results)
-        assert [name for name, _ in listed] == ["jupyter"], (
+        assert [row[0] for row in listed] == ["jupyter"], (
             "a boolean count must not exempt a row; bool is an int subclass so a bare "
             "`== 0` would read False as 'nothing to convert'"
         )
@@ -435,3 +555,254 @@ class TestTheConverterArmHasItsOwnExitMessage:
         out = capsys.readouterr().out
 
         assert "exception" in out.lower()
+
+
+def test_a_bracketed_file_name_is_printed_as_it_is(monkeypatch):
+    """Rich reads ``[x]`` as markup; a converter row names files like that."""
+    import io
+
+    from rich.console import Console
+
+    from automated_security_helper.interactions import run_ash_scan
+
+    buffer = io.StringIO()
+    console = Console(file=buffer, width=200, color_system=None)
+    monkeypatch.setattr(run_ash_scan, "print", lambda *args, **_: console.print(*args))
+
+    run_ash_scan.print_incompleteness_message(
+        [], [("jupyter", "could not convert 1 input: notebooks/[x].ipynb")]
+    )
+
+    assert "jupyter: could not convert 1 input: notebooks/[x].ipynb" in (
+        buffer.getvalue()
+    )
+
+
+def test_the_advice_covers_files_that_could_not_be_converted(monkeypatch):
+    """A corrupt archive is not fixed by installing a tool."""
+    from automated_security_helper.interactions import run_ash_scan
+
+    printed: list = []
+    monkeypatch.setattr(
+        run_ash_scan, "print", lambda *args, **_: printed.append(" ".join(args))
+    )
+
+    run_ash_scan.print_incompleteness_message(
+        [], [("archive", "could not convert 1 input: data.zip")]
+    )
+
+    advice = " ".join(printed)
+    assert (
+        "fix the files it could not convert or exclude them with ignore_paths" in advice
+    )
+
+
+_INPUTS_ADVICE = "fix the listed inputs or add them to ignore_paths"
+_TOOL_ADVICE = "Install the converter's tool"
+
+
+def _failed_inputs_row() -> ConverterStatusInfo:
+    from automated_security_helper.models.asharp_model import FailedInputInfo
+
+    return ConverterStatusInfo(
+        converted_paths=["converted/b.py"],
+        failed_inputs=[
+            FailedInputInfo(path="a.ipynb", reason="nbconvert exited with code 1")
+        ],
+    )
+
+
+class TestTheAdviceFitsWhatWentWrong:
+    """A converter that ran and could not convert some of its inputs is listed
+    too, and its tool is installed: the advice for it is to fix those inputs or
+    ignore them, not to install the tool. The advice for a converter that never
+    ran stays as it is."""
+
+    def _printed(self, capsys, **rows) -> str:
+        print_incompleteness_message([], incomplete_converters(_results(**rows)))
+        return " ".join(capsys.readouterr().out.split())
+
+    def test_failed_inputs_are_not_told_to_install_the_tool(self, capsys):
+        """The row's records are tool failures, and those come two ways: the
+        tool never ran (uv could not run it, the launch failed), or it ran and
+        failed on that input (an exit code, a timeout, no output written) -- as
+        the structure check leaves structurally broken notebooks to nbconvert.
+        Each printed reason says which, so the advice names both remedies and
+        never claims that fixing or ignoring the files does nothing: for a
+        rejected input, fixing it or ignoring it is exactly what clears the
+        gate."""
+        out = self._printed(capsys, jupyter=_failed_inputs_row())
+
+        assert "a.ipynb" in out, out
+        assert _TOOL_INPUTS_ADVICE in out, out
+        assert "fix that input or add it to ignore_paths" in out, out
+        assert "does not scan" not in out, out
+        assert _INPUTS_ADVICE not in out, out
+        assert _TOOL_ADVICE not in out, out
+
+    @pytest.mark.parametrize(
+        "row",
+        [
+            ConverterStatusInfo(dependencies_satisfied=False, converted_paths=[]),
+            ConverterStatusInfo(converted_paths=[], failure="RuntimeError: gone"),
+        ],
+        ids=["unavailable", "failed"],
+    )
+    def test_a_converter_that_did_not_run_is_told_to_install_its_tool(
+        self, capsys, row
+    ):
+        out = self._printed(capsys, jupyter=row)
+
+        assert _TOOL_ADVICE in out, out
+        assert _INPUTS_ADVICE not in out, out
+
+    def test_a_ran_converter_and_an_absent_one_get_their_own_advice(self, capsys):
+        out = self._printed(
+            capsys,
+            jupyter=_failed_inputs_row(),
+            archive=ConverterStatusInfo(
+                dependencies_satisfied=False, converted_paths=[]
+            ),
+        )
+
+        assert _TOOL_INPUTS_ADVICE in out, out
+        assert _TOOL_ADVICE in out, out
+
+    def test_a_long_list_names_five_and_counts_the_rest(self):
+        from automated_security_helper.models.asharp_model import FailedInputInfo
+
+        row = ConverterStatusInfo(
+            converted_paths=[],
+            failed_inputs=[
+                FailedInputInfo(
+                    path=f"n{i}.ipynb", reason="nbconvert exited with code 1"
+                )
+                for i in range(7)
+            ],
+        )
+
+        (listed,) = incomplete_converters(_results(jupyter=row))
+
+        assert listed[1] == (
+            "could not convert 7 inputs: n0.ipynb, n1.ipynb, n2.ipynb, n3.ipynb, "
+            "n4.ipynb and 2 more"
+        )
+
+    def test_a_failure_wins_over_failed_inputs(self, capsys):
+        """A row with both lists the failure, the cause of the rest, and gets
+        the advice for a converter that did not run."""
+        row = _failed_inputs_row()
+        row.failure = "RuntimeError: the converter raised"
+
+        (listed,) = incomplete_converters(_results(jupyter=row))
+        out = self._printed(capsys, jupyter=row)
+
+        assert listed[1] == "RuntimeError: the converter raised"
+        assert _TOOL_ADVICE in out, out
+        assert _INPUTS_ADVICE not in out, out
+
+    def test_a_listed_reason_is_still_the_text_it_was(self):
+        """The row carries its kinds beside the reason, and the reason is the
+        same text: the MCP replies and every caller that prints it read a str."""
+        (listed,) = incomplete_converters(_results(jupyter=_failed_inputs_row()))
+
+        assert listed[0] == "jupyter"
+        assert listed[1] == "could not convert 1 input: a.ipynb"
+        assert isinstance(listed[1], str)
+
+
+_SUPPRESSION_ADVICE = "ash-unconverted-input"
+_TOOL_INPUTS_ADVICE = "make the converter's tool able to run"
+
+
+class TestTheAdviceNamesEachRecordKind:
+    """A row carries the kinds of its non-accepted failed inputs, as data
+    rather than as the reason's type: any string operation or JSON round trip
+    keeps it, and the MCP payload can pass it to clients. The advice is chosen
+    per kind. A converter whose tool failed on its inputs ("uv could not run
+    nbconvert", say) is not told to fix the inputs, and the input-error advice
+    names the acceptance a reviewed file can take."""
+
+    def _row(self, **record_fields) -> ConverterStatusInfo:
+        return ConverterStatusInfo(
+            converted_paths=[],
+            failed_inputs=[
+                FailedInputInfo(path="a.ipynb", reason="it failed", **record_fields)
+            ],
+        )
+
+    def test_rows_carry_the_kinds_of_their_failed_inputs(self):
+        rows = incomplete_converters(
+            _results(
+                jupyter=self._row(kind="input"),
+                bundle=self._row(kind="tool"),
+                archive=ConverterStatusInfo(
+                    converted_paths=[], failure="RuntimeError: gone"
+                ),
+            )
+        )
+
+        kinds = {row[0]: tuple(getattr(row, "kinds", None) or ()) for row in rows}
+        assert kinds == {"jupyter": ("input",), "bundle": ("tool",), "archive": ()}
+
+    def test_input_errors_advice_names_the_acceptance(self, capsys):
+        print_incompleteness_message(
+            [], incomplete_converters(_results(jupyter=self._row(kind="input")))
+        )
+        out = " ".join(capsys.readouterr().out.split())
+
+        assert _INPUTS_ADVICE in out, out
+        assert _SUPPRESSION_ADVICE in out, out
+        assert _TOOL_ADVICE not in out, out
+
+    def test_tool_failures_on_inputs_are_not_told_to_fix_the_inputs(self, capsys):
+        """The tool ran against the input and failed, or could not be run on
+        it: fixing the file or ignoring it does not scan it, and a suppression
+        cannot accept it, so the advice is about the tool."""
+        print_incompleteness_message(
+            [], incomplete_converters(_results(jupyter=self._row(kind="tool")))
+        )
+        out = " ".join(capsys.readouterr().out.split())
+
+        assert _INPUTS_ADVICE not in out, out
+        assert _SUPPRESSION_ADVICE not in out, out
+        assert _TOOL_INPUTS_ADVICE in out, out
+
+    def test_a_mix_of_kinds_gets_both_pieces_of_advice(self, capsys):
+        row = ConverterStatusInfo(
+            converted_paths=[],
+            failed_inputs=[
+                FailedInputInfo(path="a.ipynb", reason="x", kind="input"),
+                FailedInputInfo(path="b.ipynb", reason="y", kind="tool"),
+            ],
+        )
+        print_incompleteness_message([], incomplete_converters(_results(jupyter=row)))
+        out = " ".join(capsys.readouterr().out.split())
+
+        assert _INPUTS_ADVICE in out, out
+        assert _TOOL_INPUTS_ADVICE in out, out
+
+    def test_the_payload_carries_each_rows_kinds(self):
+        """A JSON round trip of the payload keeps the kind, so an MCP client
+        can choose its own advice the way the console does."""
+        incompleteness = ScanIncompleteness(
+            converters=tuple(
+                incomplete_converters(_results(jupyter=self._row(kind="input")))
+            )
+        )
+
+        payload = incompleteness.to_payload()
+        (entry,) = payload["incomplete_converters"]
+        assert entry["converter"] == "jupyter"
+        assert entry["failed_input_kinds"] == ["input"]
+
+    def test_the_gate_does_not_trust_accepted_on_a_tool_failure(self):
+        """A results file can come from any producer (ash merge reads shard
+        files from whatever ASH wrote them), so accepted waives the gate only
+        together with kind "input": the writer never accepts a tool failure,
+        and the reader does not either."""
+        row = self._row(kind="tool", accepted=True)
+
+        listed = incomplete_converters(_results(jupyter=row))
+
+        assert listed != [], "an accepted tool failure passed the completeness gate"

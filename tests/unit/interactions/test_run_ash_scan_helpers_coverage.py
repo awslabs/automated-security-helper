@@ -14,8 +14,8 @@ container that exited non-zero, a results file that will not parse, a scan
 restricted to changed files, precommit mode's scanner injection.
 
 The exit-code contract these tests pin (``core/constants.ASH_EXIT_CODES``):
-0 success, 1 scan errors, 2 actionable findings, 3 invalid config, 4 workspace
-definition or policy error.
+0 success, 1 scan errors, 2 actionable findings, 3 invalid config or refused input,
+4 workspace definition or policy error.
 
 A note on assertions
 --------------------
@@ -37,6 +37,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -52,10 +53,13 @@ from automated_security_helper.core.enums import (
     ScannerStatus,
 )
 from automated_security_helper.interactions import run_ash_scan as ras
+from automated_security_helper.utils.changed_files import (
+    filter_results_to_changed_files,
+)
 from automated_security_helper.interactions.run_ash_scan import (
+    PRECOMMIT_MODE_SCANNERS,
     ScanOptions,
     _compute_exit_code,
-    _filter_results_to_changed_files,
     _print_summary,
     _resolve_config_fail_on_findings,
     _resolve_log_level,
@@ -65,8 +69,10 @@ from automated_security_helper.interactions.run_ash_scan import (
     run_ash_scan,
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from tests.utils.helpers import sarif_report_written
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.subprocess_utils import create_completed_process
+from tests.utils.env_assertions import environ_names
 
 
 # Rich styles its output with ANSI escapes, and it styles *inside* a phrase --
@@ -121,7 +127,9 @@ class _RecordingLogger:
         self.records["warning"].append(str(message))
 
     def error(self, message, **kwargs):
-        self.records["error"].append(str(message))
+        # An error logged with its traceback is recorded as logger.exception's.
+        key = "exception" if kwargs.get("exc_info") else "error"
+        self.records[key].append(str(message))
 
     def exception(self, message, **kwargs):
         self.records["exception"].append(str(message))
@@ -133,13 +141,22 @@ class _RecordingLogger:
 
 
 class _StubOrchestrator:
-    """Stands in for ASHScanOrchestrator: only .config and .execute_scan are read."""
+    """Stands in for ASHScanOrchestrator: .config, .add_metadata,
+    .restrict_to_changed_files and .execute_scan."""
 
     def __init__(self, results, config=None, raises: BaseException | None = None):
         self.config = config
         self._results = results
         self._raises = raises
         self.executed_phases: List[str] | None = None
+        self.added_metadata: Dict[str, Any] = {}
+        self.changed_files = None
+
+    def add_metadata(self, **values):
+        self.added_metadata.update(values)
+
+    def restrict_to_changed_files(self, changed_files):
+        self.changed_files = changed_files
 
     def execute_scan(self, phases):
         self.executed_phases = list(phases)
@@ -287,7 +304,10 @@ def container_result(monkeypatch):
     the call, because ``_run_container_mode`` now removes any results file that predates
     the invocation -- a pre-seeded file is exactly what a previous run leaves behind, and
     the whole point of the removal is that the two cannot be told apart afterwards.
+    The file then gets the completion marker the in-container run writes, as that run
+    would (utils/inner_run_outcome.py).
     """
+    from tests.utils.helpers import mark_inner_run_completed
 
     def install(returncode=0, stdout="", stderr="", results_content=None):
         result = create_completed_process(
@@ -301,9 +321,10 @@ def container_result(monkeypatch):
             if results_content is not None:
                 output_dir = Path(kwargs["output_dir"])
                 output_dir.mkdir(parents=True, exist_ok=True)
-                output_dir.joinpath("ash_aggregated_results.json").write_text(
-                    results_content, encoding="utf-8"
-                )
+                results_file = output_dir.joinpath("ash_aggregated_results.json")
+                results_file.write_text(results_content, encoding="utf-8")
+                # A file that does not parse stays as written.
+                mark_inner_run_completed(results_file, kwargs["outer_run_id"])
             return result
 
         monkeypatch.setattr(ras, "run_ash_container", fake_run_ash_container)
@@ -456,9 +477,14 @@ def local_orchestrator(monkeypatch):
 
 
 class TestRunLocalModeConfigDiscovery:
-    def test_a_discovered_config_is_passed_to_the_orchestrator(
+    def test_discovery_is_left_to_the_orchestrators_resolution(
         self, local_orchestrator, logger, tmp_path
     ):
+        """No second discovery here: the resolution that loads the file finds it.
+
+        run_ash_scan does not discover the file itself, pass its path on and log
+        "Using config file found at" before anything has read it.
+        """
         config_file = tmp_path / ".ash.yaml"
         config_file.write_text("project_name: discovered\n", encoding="utf-8")
         output_dir = tmp_path / "out"
@@ -468,11 +494,11 @@ class TestRunLocalModeConfigDiscovery:
 
         _run_local_mode(opts, logger)
 
-        assert recorded["create_kwargs"][0]["config_path"] == config_file.as_posix()
-        assert any(
-            "Using config file found at" in message
+        assert recorded["create_kwargs"][0]["config_path"] is None
+        assert not any(
+            "config" in message.lower() and "using" in message.lower()
             for message in logger.records["info"]
-        )
+        ), logger.records["info"]
 
     def test_config_overrides_are_announced_and_forwarded(
         self, local_orchestrator, logger, tmp_path
@@ -508,14 +534,17 @@ class TestRunLocalModePrecommit:
         _run_local_mode(opts, logger)
 
         enabled = set(recorded["create_kwargs"][0]["enabled_scanners"])
-        assert {
+        # Equal, not a superset: .pre-commit-hooks.yaml is checked against
+        # PRECOMMIT_MODE_SCANNERS (tests/unit/test_pre_commit_hooks_manifest.py),
+        # so the preset must add exactly that list and nothing beside it.
+        assert enabled == set(PRECOMMIT_MODE_SCANNERS) | {"grype"}
+        assert set(PRECOMMIT_MODE_SCANNERS) == {
             "bandit",
             "detect-secrets",
             "checkov",
             "cdk-nag",
             "npm-audit",
-            "grype",
-        } <= enabled
+        }
 
     def test_local_mode_does_not_add_the_fast_scanner_set(
         self, local_orchestrator, logger, tmp_path
@@ -593,6 +622,46 @@ def git_available() -> bool:
 
 
 class TestRunLocalModeChangedFiles:
+    """What run_ash_scan computes for --changed-files-only and hands the engine.
+
+    run_ash_scan resolves the changed-file set; the scan engine filters the
+    results with it before the summary counts and the reports are written
+    (test_changed_files_only_narrows_every_report.py covers that end to end).
+    These tests pin the set and the metadata handed to the orchestrator, and,
+    where the point is which findings survive, apply the same filter to the set.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _git_stops_at_tmp(self, tmp_path, monkeypatch):
+        """tmp_path is the top git and the nesting walk see.
+
+        These cells pin scan_source for repositories they build under
+        tmp_path, so an ancestor of the basetemp -- a developer checkout
+        that ignores it, say -- must not relabel them
+        (tests/utils/git_isolation.py)."""
+        from tests.utils.git_isolation import isolate_git_at
+
+        isolate_git_at(tmp_path, monkeypatch)
+
+    @staticmethod
+    def _repository_root(tmp_path: Path):
+        from tests.utils.git_isolation import excluding_repository_at
+
+        return excluding_repository_at(tmp_path / "root")
+
+    @staticmethod
+    def _handed(recorded):
+        """The changed-file set and the metadata local mode gave the orchestrator.
+
+        Both after ``create`` returned (restrict_to_changed_files, add_metadata),
+        never to ``create`` itself: working them out starts git, and ``create`` is
+        where a command line ASH refuses stops.
+        """
+        kwargs = recorded["create_kwargs"][0]
+        assert "changed_files" not in kwargs and "metadata" not in kwargs, kwargs
+        orchestrator = recorded["orchestrator"]
+        return orchestrator.changed_files, orchestrator.added_metadata
+
     def test_the_diff_is_anchored_on_the_repository_root(
         self, local_orchestrator, logger, tmp_path, git_available
     ):
@@ -602,7 +671,7 @@ class TestRunLocalModeChangedFiles:
         directory it ran in, so a change to ``services/api/app.py`` arrives as
         that string even when git ran in ``<repo>/services/api``. Joining it onto
         the source dir yielded ``<repo>/services/api/services/api/app.py``, while
-        ``_filter_results_to_changed_files`` resolves the SARIF side's
+        ``filter_results_to_changed_files`` resolves the SARIF side's
         source-relative ``app.py`` to ``<repo>/services/api/app.py``. The two sets
         could not intersect, so the filter dropped every finding.
         """
@@ -619,16 +688,20 @@ class TestRunLocalModeChangedFiles:
         output_dir = tmp_path / "out"
         (output_dir / "reports").mkdir(parents=True)
         results = AshAggregatedResults(sarif=_sarif_with_uris("app.py", "untouched.py"))
-        local_orchestrator(results=results)
+        recorded = local_orchestrator(results=results)
         opts = _opts(
             source_dir, output_dir, changed_files_only=True, base_ref="base-ref"
         )
 
-        returned, _ = _run_local_mode(opts, logger)
+        _run_local_mode(opts, logger)
 
+        changed, metadata = self._handed(recorded)
+        assert changed == {(source_dir / "app.py").resolve()}
+        assert metadata == {"changed_files_only": True, "scan_source": "services/api"}
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
         uris = [
             result.locations[0].physicalLocation.root.artifactLocation.uri
-            for result in returned.sarif.runs[0].results
+            for result in filtered.sarif.runs[0].results
         ]
         assert uris == ["app.py"]
 
@@ -645,9 +718,9 @@ class TestRunLocalModeChangedFiles:
         filter that matches nothing, distinct from ``None``, which means git could
         not answer and the documented fallback is a full scan.
 
-        The on-disk report is rewritten too, for the same reason
-        test_results_and_the_sarif_report_are_both_narrowed exists: leaving the
-        unfiltered SARIF on disk beside an emptied model gives two answers.
+        The empty set is handed to the engine as such, and run_ash_scan does not
+        rewrite ``ash.sarif`` after the report phase: the reports are written
+        once, already filtered.
         """
         if not git_available:
             pytest.skip("git is not available on PATH")
@@ -665,17 +738,20 @@ class TestRunLocalModeChangedFiles:
         (output_dir / "reports").mkdir(parents=True)
         sarif_path = output_dir / "reports" / "ash.sarif"
         sarif_path.write_text("stale placeholder", encoding="utf-8")
-        local_orchestrator(
-            results=AshAggregatedResults(sarif=_sarif_with_uris("app.py"))
-        )
+        results = AshAggregatedResults(sarif=_sarif_with_uris("app.py"))
+        recorded = local_orchestrator(results=results)
         opts = _opts(
             source_dir, output_dir, changed_files_only=True, base_ref="base-ref"
         )
 
-        returned, _ = _run_local_mode(opts, logger)
+        _run_local_mode(opts, logger)
 
-        assert returned.sarif.runs[0].results == []
-        assert "app.py" not in sarif_path.read_text(encoding="utf-8")
+        changed, metadata = self._handed(recorded)
+        assert changed == set()
+        assert metadata == {"changed_files_only": True, "scan_source": "services/api"}
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+        assert filtered.sarif.runs[0].results == []
+        assert sarif_path.read_text(encoding="utf-8") == "stale placeholder"
 
     def test_a_finding_outside_the_source_dir_is_not_revived_by_the_diff(
         self, local_orchestrator, logger, monkeypatch, tmp_path
@@ -712,17 +788,21 @@ class TestRunLocalModeChangedFiles:
             "get_changed_files",
             lambda base_ref, cwd: [Path("docs/README.md")],
         )
-        monkeypatch.setattr(get_scan_set, "git_repository_root", lambda path: repo)
+        monkeypatch.setattr(
+            get_scan_set, "git_repository_root", lambda path, **kwargs: repo
+        )
         output_dir = tmp_path / "out"
         output_dir.mkdir()
-        local_orchestrator(
-            results=AshAggregatedResults(sarif=_sarif_with_uris("../../docs/README.md"))
-        )
+        results = AshAggregatedResults(sarif=_sarif_with_uris("../../docs/README.md"))
+        recorded = local_orchestrator(results=results)
         opts = _opts(source_dir, output_dir, changed_files_only=True)
 
-        returned, _ = _run_local_mode(opts, logger)
+        _run_local_mode(opts, logger)
 
-        assert returned.sarif.runs[0].results == []
+        changed, _ = self._handed(recorded)
+        assert changed == set()
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+        assert filtered.sarif.runs[0].results == []
 
     def test_an_unknown_repository_root_scans_everything(
         self, local_orchestrator, logger, monkeypatch, tmp_path
@@ -738,10 +818,19 @@ class TestRunLocalModeChangedFiles:
         monkeypatch.setattr(
             get_scan_set, "get_changed_files", lambda base_ref, cwd: [Path("app.py")]
         )
-        monkeypatch.setattr(get_scan_set, "git_repository_root", lambda path: None)
+        monkeypatch.setattr(
+            get_scan_set, "git_repository_root", lambda path, **kwargs: None
+        )
+        # The warning carries the diagnosed cause, whatever it is; pinned here so
+        # the test does not depend on whether tmp_path sits inside a repository.
+        monkeypatch.setattr(
+            get_scan_set,
+            "git_repository_root_problem",
+            lambda path, **kwargs: f"{path.as_posix()} is not inside a git repository",
+        )
         output_dir = tmp_path / "out"
         output_dir.mkdir()
-        local_orchestrator(
+        recorded = local_orchestrator(
             results=AshAggregatedResults(
                 sarif=_sarif_with_uris("app.py", "untouched.py")
             )
@@ -750,16 +839,98 @@ class TestRunLocalModeChangedFiles:
 
         returned, _ = _run_local_mode(opts, logger)
 
+        # No changed set; the marker is still written, as an explicit False, so a
+        # full scan is told apart from results that predate the marker. With no
+        # repository root, scan_source is the scanned directory's own path.
+        assert self._handed(recorded) == (
+            None,
+            {
+                "changed_files_only": False,
+                "scan_source": tmp_path.resolve().as_posix(),
+            },
+        )
         assert len(returned.sarif.runs[0].results) == 2
         assert any(
             "not inside a git repository" in message
             for message in logger.records["warning"]
         )
 
-    def test_results_and_the_sarif_report_are_both_narrowed(
+    def test_a_problem_with_rich_markup_in_it_is_printed_verbatim(
+        self, local_orchestrator, monkeypatch, tmp_path
+    ):
+        """git's own first stderr line, or a path, may read as a closing Rich tag."""
+        import io
+
+        from rich.console import Console
+        from rich.logging import RichHandler
+
+        from automated_security_helper.utils import get_scan_set
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        problem = "git could not read the repository root of /src/a[/x] (fatal: [/x])"
+        monkeypatch.setattr(
+            get_scan_set, "git_repository_root", lambda path, **kwargs: None
+        )
+        monkeypatch.setattr(
+            get_scan_set, "git_repository_root_problem", lambda path, **kwargs: problem
+        )
+        output_dir = tmp_path / "out"
+        output_dir.mkdir()
+        local_orchestrator(
+            results=AshAggregatedResults(sarif=_sarif_with_uris("app.py"))
+        )
+        opts = _opts(tmp_path, output_dir, changed_files_only=True)
+        buffer = io.StringIO()
+        handler = RichHandler(
+            console=Console(file=buffer, width=400, color_system=None),
+            markup=True,
+            show_time=False,
+            show_path=False,
+        )
+        saved = list(ASH_LOGGER.handlers)
+        ASH_LOGGER.handlers = [handler]
+        try:
+            _run_local_mode(opts, ASH_LOGGER)
+        finally:
+            ASH_LOGGER.handlers = saved
+        printed = " ".join(buffer.getvalue().split())
+        assert problem in printed, printed
+        assert "reporting every finding" in printed, printed
+
+    @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+    def test_a_missing_git_is_named_rather_than_the_repository(
         self, local_orchestrator, logger, monkeypatch, tmp_path
     ):
-        """Filtering only the in-memory model would leave a stale report on disk."""
+        """git absent said "is not inside a git repository" about a repository."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run([shutil.which("git"), "init", "-q", str(repo)], check=True)  # nosec B603
+        empty = tmp_path / "empty-path"
+        empty.mkdir()
+        monkeypatch.setenv("PATH", str(empty))
+        output_dir = tmp_path / "out"
+        output_dir.mkdir()
+        local_orchestrator(
+            results=AshAggregatedResults(sarif=_sarif_with_uris("app.py"))
+        )
+        opts = _opts(repo, output_dir, changed_files_only=True)
+
+        _run_local_mode(opts, logger)
+
+        warned = " ".join(logger.records["warning"])
+        assert "git is not installed or not on PATH" in warned, warned
+        assert "not inside a git repository" not in warned
+
+    def test_the_changed_set_reaches_the_engine_and_no_report_is_rewritten(
+        self, local_orchestrator, logger, monkeypatch, tmp_path
+    ):
+        """The filter runs once, in the engine, before any report is written.
+
+        run_ash_scan hands the set to the engine and leaves the reports alone.
+        Filtering the returned results after the report phase and rewriting
+        ``ash.sarif`` from them would leave every other report and the summary
+        counts unfiltered.
+        """
         from automated_security_helper.utils import get_scan_set
 
         monkeypatch.setattr(
@@ -767,30 +938,32 @@ class TestRunLocalModeChangedFiles:
         )
         # The source dir is the repository root in this geometry, which is what
         # the stub root asserts; test_the_diff_is_anchored_on_the_repository_root
-        # covers the case where the two differ.
-        monkeypatch.setattr(get_scan_set, "git_repository_root", lambda path: tmp_path)
+        # covers the case where the two differ. The stand-in root is a real
+        # repository below the isolation fixture's top, so the nesting walk can
+        # be asked about it.
+        root = self._repository_root(tmp_path)
+        monkeypatch.setattr(
+            get_scan_set, "git_repository_root", lambda path, **kwargs: root
+        )
         output_dir = tmp_path / "out"
         (output_dir / "reports").mkdir(parents=True)
         sarif_path = output_dir / "reports" / "ash.sarif"
         sarif_path.write_text("stale placeholder", encoding="utf-8")
-
-        results = AshAggregatedResults(
-            sarif=_sarif_with_uris("changed.py", "untouched.py")
+        recorded = local_orchestrator(
+            results=AshAggregatedResults(
+                sarif=_sarif_with_uris("changed.py", "untouched.py")
+            )
         )
-        local_orchestrator(results=results)
-        opts = _opts(tmp_path, output_dir, changed_files_only=True)
+        opts = _opts(root, output_dir, changed_files_only=True)
 
         returned, _ = _run_local_mode(opts, logger)
 
-        uris = [
-            result.locations[0].physicalLocation.root.artifactLocation.uri
-            for result in returned.sarif.runs[0].results
-        ]
-        assert uris == ["changed.py"]
-
-        rewritten = sarif_path.read_text(encoding="utf-8")
-        assert "changed.py" in rewritten
-        assert "untouched.py" not in rewritten
+        changed, metadata = self._handed(recorded)
+        assert changed == {(root / "changed.py").resolve()}
+        assert metadata == {"changed_files_only": True, "scan_source": "."}
+        # What the engine returned is passed on untouched.
+        assert len(returned.sarif.runs[0].results) == 2
+        assert sarif_path.read_text(encoding="utf-8") == "stale placeholder"
 
     def test_no_changed_files_leaves_the_results_alone(
         self, local_orchestrator, logger, monkeypatch, tmp_path
@@ -802,19 +975,235 @@ class TestRunLocalModeChangedFiles:
             get_scan_set, "get_changed_files", lambda base_ref, cwd: None
         )
         # A real root, so this exercises the "diff unavailable" fallback rather
-        # than the "root unavailable" one that would also reach a full scan.
-        monkeypatch.setattr(get_scan_set, "git_repository_root", lambda path: tmp_path)
+        # than the "root unavailable" one that would also reach a full scan. A
+        # real repository below the isolation fixture's top, so the nesting
+        # walk can be asked about it.
+        root = self._repository_root(tmp_path)
+        monkeypatch.setattr(
+            get_scan_set, "git_repository_root", lambda path, **kwargs: root
+        )
         output_dir = tmp_path / "out"
         output_dir.mkdir()
+        recorded = local_orchestrator(
+            results=AshAggregatedResults(
+                sarif=_sarif_with_uris("changed.py", "untouched.py")
+            )
+        )
+        opts = _opts(root, output_dir, changed_files_only=True)
+
+        returned, _ = _run_local_mode(opts, logger)
+
+        # No changed set; the marker is still written, as an explicit False, so a
+        # full scan is told apart from results that predate the marker.
+        assert self._handed(recorded) == (
+            None,
+            {"changed_files_only": False, "scan_source": "."},
+        )
+        assert len(returned.sarif.runs[0].results) == 2
+
+    def test_without_the_flag_nothing_is_handed_over(
+        self, local_orchestrator, logger, monkeypatch, tmp_path
+    ):
+        from automated_security_helper.utils import get_scan_set
+
+        # A real repository below the isolation fixture's top, so scan_source
+        # does not depend on where tmp_path sits.
+        root = self._repository_root(tmp_path)
+        monkeypatch.setattr(
+            get_scan_set, "git_repository_root", lambda path, **kwargs: root
+        )
+        output_dir = tmp_path / "out"
+        output_dir.mkdir()
+        recorded = local_orchestrator(results=AshAggregatedResults())
+
+        _run_local_mode(_opts(root, output_dir), logger)
+
+        # No changed set; the marker is still written, as an explicit False, so a
+        # full scan is told apart from results that predate the marker.
+        assert self._handed(recorded) == (
+            None,
+            {"changed_files_only": False, "scan_source": "."},
+        )
+
+
+@pytest.mark.skipif(
+    os.name == "nt", reason="creating symlinks needs privileges on Windows"
+)
+class TestChangedFilesSarifRewriteIsNotWrittenThroughALink:
+    """The rewrite of ``reports/ash.sarif`` refuses a link there, as reports do.
+
+    With no reporter selected that writes ``ash.sarif`` (``--output-formats yaml``),
+    the report phase does not examine that name, so the rewrite is where a link
+    there is met. Replacing it would remove the link without a word, and the exit
+    code check that refuses a link at that name would then find a regular file.
+    """
+
+    @pytest.mark.parametrize("target", ["outside", "inside"])
+    def test_a_link_at_the_sarif_report_refuses_the_run(
+        self, local_orchestrator, logger, monkeypatch, tmp_path, target
+    ):
+        from automated_security_helper.utils import get_scan_set
+
+        monkeypatch.setattr(
+            get_scan_set, "get_changed_files", lambda base_ref, cwd: ["changed.py"]
+        )
+        monkeypatch.setattr(get_scan_set, "git_repository_root", lambda path: tmp_path)
+        output_dir = tmp_path / "out"
+        reports = output_dir / "reports"
+        reports.mkdir(parents=True)
+        pointed_at = (
+            tmp_path / "outside.sarif"
+            if target == "outside"
+            else reports / "kept.sarif"
+        )
+        pointed_at.write_text("unchanged", encoding="utf-8")
+        link = reports / "ash.sarif"
+        link.symlink_to(pointed_at)
+        local_orchestrator(
+            results=AshAggregatedResults(
+                sarif=_sarif_with_uris("changed.py", "untouched.py")
+            )
+        )
+        opts = _opts(tmp_path, output_dir, changed_files_only=True)
+
+        with pytest.raises(SystemExit) as refused:
+            _run_local_mode(opts, logger)
+
+        assert refused.value.code == 1
+        assert f"{link.as_posix()} is a symlink" in getattr(refused.value, "reason", "")
+        assert link.is_symlink()
+        assert pointed_at.read_text(encoding="utf-8") == "unchanged"
+
+
+class TestChangedFilesRewriteLeavesAnEarlierRunsSarif:
+    def test_a_sarif_report_this_run_did_not_write_is_not_rewritten(
+        self, local_orchestrator, logger, monkeypatch, tmp_path
+    ):
+        """--use-existing with no SARIF reporter: reports/ash.sarif is an earlier run's."""
+        from automated_security_helper.utils import get_scan_set
+
+        monkeypatch.setattr(
+            get_scan_set, "get_changed_files", lambda base_ref, cwd: ["changed.py"]
+        )
+        monkeypatch.setattr(get_scan_set, "git_repository_root", lambda path: tmp_path)
+        output_dir = tmp_path / "out"
+        (output_dir / "reports").mkdir(parents=True)
+        sarif = output_dir / "reports" / "ash.sarif"
+        sarif.write_text("an earlier run's report", encoding="utf-8")
         results = AshAggregatedResults(
             sarif=_sarif_with_uris("changed.py", "untouched.py")
+        )
+        results.validation_checkpoints.append(
+            {"type": "reports_written", "metadata": {"files": ["ash.csv"]}}
         )
         local_orchestrator(results=results)
         opts = _opts(tmp_path, output_dir, changed_files_only=True)
 
-        returned, _ = _run_local_mode(opts, logger)
+        _run_local_mode(opts, logger)
 
-        assert len(returned.sarif.runs[0].results) == 2
+        assert sarif.read_text(encoding="utf-8") == "an earlier run's report"
+
+    def test_the_sarif_reporters_own_file_is_rewritten_under_its_name(
+        self, local_orchestrator, logger, monkeypatch, tmp_path
+    ):
+        """An extension can move the SARIF report aside and put another at ash.sarif."""
+        from automated_security_helper.utils import get_scan_set
+
+        monkeypatch.setattr(
+            get_scan_set, "get_changed_files", lambda base_ref, cwd: ["changed.py"]
+        )
+        monkeypatch.setattr(get_scan_set, "git_repository_root", lambda path: tmp_path)
+        output_dir = tmp_path / "out"
+        reports = output_dir / "reports"
+        reports.mkdir(parents=True)
+        (reports / "ash.sarif").write_text("another reporter's file", encoding="utf-8")
+        renamed = reports / "ash.sarif.orig"
+        renamed.write_text("unfiltered", encoding="utf-8")
+        results = AshAggregatedResults(
+            sarif=_sarif_with_uris("changed.py", "untouched.py")
+        )
+        results.validation_checkpoints.append(
+            {
+                "type": "reports_written",
+                "metadata": {
+                    "files": ["ash.sarif", "ash.sarif.orig"],
+                    "formats": {"ash.sarif": "cyclonedx", "ash.sarif.orig": "sarif"},
+                },
+            }
+        )
+        local_orchestrator(results=results)
+        opts = _opts(tmp_path, output_dir, changed_files_only=True)
+
+        _run_local_mode(opts, logger)
+
+        rewritten = renamed.read_text(encoding="utf-8")
+        assert "changed.py" in rewritten and "untouched.py" not in rewritten
+        assert (reports / "ash.sarif").read_text(
+            encoding="utf-8"
+        ) == "another reporter's file"
+
+
+class TestARunWithoutAReportPhaseRecordsNoReports:
+    def test_the_results_say_no_report_file_was_written(
+        self, local_orchestrator, logger, tmp_path
+    ):
+        """As for ``--phases convert --phases scan``: no report phase, no record.
+
+        A ``reports/ash.sarif`` something other than a reporter wrote is then not
+        read as this run's report.
+        """
+        output_dir = tmp_path / "out"
+        output_dir.mkdir()
+        local_orchestrator(results=AshAggregatedResults())
+
+        _run_local_mode(_opts(tmp_path, output_dir), logger)
+
+        written = json.loads(
+            (output_dir / "ash_aggregated_results.json").read_text(encoding="utf-8")
+        )
+        assert [
+            checkpoint["metadata"]
+            for checkpoint in written["validation_checkpoints"]
+            if checkpoint.get("type") == "reports_written"
+        ] == [{"files": [], "formats": {}}]
+
+
+class TestChangedFilesSarifRewriteIsNotSkippedSilently:
+    def test_a_sarif_report_the_rewrite_may_not_write_refuses_the_run(
+        self, local_orchestrator, logger, monkeypatch, tmp_path
+    ):
+        """Skipping the rewrite would leave the unfiltered ash.sarif as the report.
+
+        ``confined_report_path`` refuses the name only when ``reports/`` or the file
+        is a link, which is refused just before; the check that remains is for the
+        state changing between the two.
+        """
+        from automated_security_helper.base import reporter_plugin
+        from automated_security_helper.utils import get_scan_set
+
+        monkeypatch.setattr(
+            get_scan_set, "get_changed_files", lambda base_ref, cwd: ["changed.py"]
+        )
+        monkeypatch.setattr(get_scan_set, "git_repository_root", lambda path: tmp_path)
+        monkeypatch.setattr(
+            reporter_plugin, "confined_report_path", lambda report_dir, filename: None
+        )
+        output_dir = tmp_path / "out"
+        (output_dir / "reports").mkdir(parents=True)
+        sarif = output_dir / "reports" / "ash.sarif"
+        sarif.write_text("unfiltered", encoding="utf-8")
+        local_orchestrator(
+            results=AshAggregatedResults(
+                sarif=_sarif_with_uris("changed.py", "untouched.py")
+            )
+        )
+        opts = _opts(tmp_path, output_dir, changed_files_only=True)
+
+        with pytest.raises(SystemExit) as refused:
+            _run_local_mode(opts, logger)
+
+        assert refused.value.code == 1
+        assert sarif.as_posix() in getattr(refused.value, "reason", "")
 
 
 class TestRunLocalModeResultPersistence:
@@ -900,6 +1289,34 @@ class TestRunLocalModeFailure:
         assert excinfo.value.code == 3
         assert "ERROR (3) Invalid configuration" in _plain(capsys.readouterr().out)
 
+    @pytest.mark.parametrize(
+        "error_class, code",
+        [
+            ("ASHConfigValidationError", 3),
+            ("ScannerSelectionError", 5),
+            ("RuntimeError", 1),
+        ],
+    )
+    def test_markup_in_the_error_is_printed_as_text(
+        self, local_orchestrator, logger, tmp_path, capsys, error_class, code
+    ):
+        """An ignore path "/x[/bold]" is refused with a message quoting it, printed
+        as text: read as Rich markup, that closing tag would raise MarkupError, a
+        traceback and exit 1, whatever the refusal's own exit code."""
+        from automated_security_helper.core import exceptions
+
+        error = getattr(exceptions, error_class, None) or RuntimeError
+        output_dir = tmp_path / "out"
+        output_dir.mkdir()
+        local_orchestrator(raises=error("The path '/x[/bold]' of an ignore path"))
+        opts = _opts(tmp_path, output_dir)
+
+        with pytest.raises(SystemExit) as excinfo:
+            _run_local_mode(opts, logger)
+
+        assert excinfo.value.code == code
+        assert "'/x[/bold]'" in _plain(capsys.readouterr().out)
+
     def test_the_offline_env_var_is_removed_even_when_the_scan_fails(
         self, local_orchestrator, logger, tmp_path, monkeypatch
     ):
@@ -912,7 +1329,7 @@ class TestRunLocalModeFailure:
         with pytest.raises(SystemExit):
             _run_local_mode(opts, logger)
 
-        assert "ASH_OFFLINE" not in os.environ
+        assert "ASH_OFFLINE" not in environ_names()
 
 
 # ---------------------------------------------------------------------------
@@ -1037,7 +1454,9 @@ class TestComputeExitCodeCorruptSarif:
 
         # One finding is suppressed and the other is a note, which is below the
         # default MEDIUM threshold, so nothing is actionable.
-        assert _compute_exit_code(AshAggregatedResults(), opts) == 0
+        assert (
+            _compute_exit_code(sarif_report_written(AshAggregatedResults()), opts) == 0
+        )
 
 
 class TestComputeExitCodeMinSeverity:
@@ -1048,6 +1467,7 @@ class TestComputeExitCodeMinSeverity:
         unified_metrics(3)
         results = SimpleNamespace(
             ash_config=None,
+            additional_reports={},
             sarif=SimpleNamespace(
                 runs=[
                     SimpleNamespace(
@@ -1071,6 +1491,7 @@ class TestComputeExitCodeMinSeverity:
         unified_metrics(3)
         results = SimpleNamespace(
             ash_config=None,
+            additional_reports={},
             sarif=SimpleNamespace(runs=[SimpleNamespace(results=[object()])]),
         )
         opts = _opts(tmp_path, tmp_path / "out", min_severity="low")
@@ -1083,6 +1504,7 @@ class TestComputeExitCodeMinSeverity:
         unified_metrics(3)
         results = SimpleNamespace(
             ash_config=None,
+            additional_reports={},
             sarif=SimpleNamespace(
                 runs=[
                     SimpleNamespace(
@@ -1140,7 +1562,7 @@ class TestPrintSummary:
 
 
 # ---------------------------------------------------------------------------
-# _filter_results_to_changed_files
+# filter_results_to_changed_files
 # ---------------------------------------------------------------------------
 
 
@@ -1168,7 +1590,7 @@ class TestFilterResultsToChangedFiles:
             )
         )
 
-        filtered = _filter_results_to_changed_files(results, set(), tmp_path)
+        filtered = filter_results_to_changed_files(results, set(), tmp_path)
 
         assert len(filtered.sarif.runs[0].results) == 1
 
@@ -1193,7 +1615,7 @@ class TestFilterResultsToChangedFiles:
             )
         )
 
-        filtered = _filter_results_to_changed_files(results, set(), tmp_path)
+        filtered = filter_results_to_changed_files(results, set(), tmp_path)
 
         assert len(filtered.sarif.runs[0].results) == 1
 
@@ -1204,7 +1626,7 @@ class TestFilterResultsToChangedFiles:
             sarif=_sarif_with_uris("file://" + changed.as_posix(), "untouched.py")
         )
 
-        filtered = _filter_results_to_changed_files(
+        filtered = filter_results_to_changed_files(
             results, {changed.resolve()}, tmp_path
         )
 
@@ -1216,7 +1638,7 @@ class TestFilterResultsToChangedFiles:
 
     def test_results_without_sarif_runs_are_returned_untouched(self, tmp_path):
         results = AshAggregatedResults()
-        assert _filter_results_to_changed_files(results, set(), tmp_path) is results
+        assert filter_results_to_changed_files(results, set(), tmp_path) is results
 
 
 # ---------------------------------------------------------------------------

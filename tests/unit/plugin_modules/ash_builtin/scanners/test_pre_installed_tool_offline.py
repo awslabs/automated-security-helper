@@ -134,7 +134,8 @@ def offline_host(tmp_path, monkeypatch):
             monkeypatch.setenv("ASH_OFFLINE", "YES")
         else:
             monkeypatch.delenv("ASH_OFFLINE", raising=False)
-        monkeypatch.setattr(subprocess, "run", host.run)
+        # Every uv and tool run here starts through ASH's plain runner.
+        monkeypatch.setattr(subprocess_utils, "_run_plain", host.run)
         return host
 
     yield make

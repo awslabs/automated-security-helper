@@ -37,6 +37,7 @@ import pytest
 
 from automated_security_helper.utils.sandbox import clear_backend_cache, resolve_backend
 from automated_security_helper.utils.sandbox.scope import SandboxUnavailable
+from tests.utils.helpers import checkout_env
 
 pytestmark = [
     pytest.mark.integration,
@@ -203,9 +204,7 @@ def _attempt(
     # sandbox hides, and the source tree is always readable.
     shutil.copy(PROBE, source / PROBE.name)
     (source / ".ash").mkdir()
-    (source / ".ash" / ".ash.yaml").write_text(
-        "project_name: sandbox-macos-services\nash_plugin_modules:\n  - escape_plugins\n"
-    )
+    (source / ".ash" / ".ash.yaml").write_text("project_name: sandbox-macos-services\n")
     output = tmp_path / "out"
     spec_file = tmp_path / "spec.json"
     spec_file.write_text(
@@ -240,11 +239,21 @@ def _attempt(
         mode,
         "--offline",
         "--no-progress",
-        "--fail-on-findings",
-        "false",
+        # An on/off flag: `--fail-on-findings false` is refused, since `ash scan`
+        # takes no extra arguments.
+        "--no-fail-on-findings",
+        # The fixture plugin, as an operator installs one. Its module sits in this
+        # git checkout, which an in-tree config may not import from.
+        "--config-overrides",
+        "ash_plugin_modules=[escape_ash_plugins]",
     ]
     result = subprocess.run(  # nosec B603 - fixed argv
-        command, env=env, capture_output=True, text=True, timeout=600, check=False
+        command,
+        env=checkout_env(env),
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
     )
     outcome_file = output / "scanners" / "sandbox-escape" / "source" / "outcome.json"
     assert outcome_file.exists(), (

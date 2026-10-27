@@ -1,20 +1,25 @@
 
  Usage: ash config init [OPTIONS]
 
+ Create a configuration file with every setting at its default.
+
+ Without --config, writes .ashrc.yaml in the current directory, and refuses
+ when the directory already has a config source (.ash/.ash.yaml, an ashrc
+ file, or the tool.ash table of pyproject.toml), since sources are never
+ merged.
+
 ┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
-│ --config   -c                <str>  The path to the configuration file. By default, ASH looks   │
-│                                     for the following config file names in the source directory │
-│                                     of a scan: ['.ash.yml', '.ash.yaml', '.ash.json',           │
-│                                     'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then  │
-│                                     in .ash/), then ['.ashrc.toml', '.ashrc.yaml',              │
-│                                     '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml',    │
-│                                     'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash   │
-│                                     table of pyproject.toml at the root; the first found is     │
-│                                     used. Alternatively, the full path to a config file can be  │
-│                                     provided by setting the ASH_CONFIG environment variable     │
-│                                     before running ASH.                                         │
+│ --config   -c                <str>  Where to write the new config file. By default .ashrc.yaml  │
+│                                     in the current directory, a name a scan of that directory   │
+│                                     reads. Discovery reads these names: ['.ash.yml',            │
+│                                     '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml',            │
+│                                     'ash.json'] (each at the root, then in .ash/), then         │
+│                                     ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', │
+│                                     'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at   │
+│                                     the root, then the tool.ash table of pyproject.toml at the  │
+│                                     root; the first found is used. Can also be set with the     │
+│                                     ASH_CONFIG environment variable.                            │
 │                                     [env var: ASH_CONFIG]                                       │
-│                                     [default: .ash/.ash.yaml]                                   │
 │ --verbose  -v                       Enable verbose logging                                      │
 │ --debug    -d                       Enable debug logging                                        │
 │ --color        --no-color           Enable/disable colorized output [default: color]            │

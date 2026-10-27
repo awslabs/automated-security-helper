@@ -461,8 +461,9 @@ class TestVulnerabilityFindingFaults:
 
         assert finding.finding_info.title == "Error creating finding title"
         assert finding.finding_info.desc == "Error extracting finding description"
-        assert finding.severity_id == SeverityId.integer_4, (
-            "severity comes from result.level and must survive a bad message"
+        assert finding.severity_id == SeverityId.integer_5, (
+            "severity comes from result.level (error is CRITICAL, as in the gate) "
+            "and must survive a bad message"
         )
 
     def test_primary_construction_failure_yields_a_low_unknown_fallback(
@@ -500,11 +501,12 @@ class TestVulnerabilityFindingFaults:
     @pytest.mark.parametrize(
         "level,expected",
         [
-            (Level.error, SeverityId.integer_4),
+            (Level.error, SeverityId.integer_5),
             (Level.warning, SeverityId.integer_3),
             (Level.note, SeverityId.integer_2),
             (Level.none, SeverityId.integer_1),
-            (None, SeverityId.integer_2),
+            # No level is INFO, as the gate's counts read it.
+            (None, SeverityId.integer_3),  # MISSING_SARIF_LEVEL, warning
         ],
         ids=["error", "warning", "note", "none", "unset"],
     )

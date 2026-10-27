@@ -245,6 +245,17 @@ class TestLegitimateMembersShip:
         ), "the declaration-filename exemption is back; it was a live bypass"
         assert _classify(name) is None, name
 
+    def test_the_shared_cfn_nag_rule_helper_is_allowed(self):
+        """The two resource-policy rules load this file with require_relative.
+
+        It requires cfn-model, defines one module and holds no part of cfn-nag. Its name
+        ends in neither Rule.rb nor a scanner's distribution name.
+        """
+        name = (
+            "automated_security_helper/assets/appsec_cfn_rules/AccessPolicyReading.rb"
+        )
+        assert _classify(name) is None, name
+
     @pytest.mark.parametrize(
         "rule_file",
         [
@@ -882,7 +893,7 @@ class TestUnnormalizedPathsCannotDefeatTheAllowlist:
     A reviewer appended each of these to the REAL wheel, ran the gate (exit 0),
     then `uv pip install --no-cache --no-deps` into a fresh venv and confirmed the
     payload landed at site-packages/automated_security_helper/assets/upstream.yaml
-    -- the exact directory the 17-entry allowlist enumerates. The payload was a
+    -- the exact directory the 19-entry allowlist enumerates. The payload was a
     genuine upstream LGPL-2.1 semgrep-registry rule.
 
     The root cause was a single raw-string comparison. Rule 5a tested
@@ -1166,7 +1177,7 @@ class TestAllowlistsAreWhatTheArtifactContains:
     """The allowlists are claims about the built artifact. Pin the claims."""
 
     def test_assets_allowlist_has_the_measured_member_count(self):
-        """17 members in both the wheel and the sdist, measured, not guessed.
+        """19 members in both the wheel and the sdist, measured, not guessed.
 
         A change to this number is a change to what ships in assets/, which is
         the thing the rule exists to make visible.
@@ -1176,8 +1187,18 @@ class TestAllowlistsAreWhatTheArtifactContains:
         hatch_build.py stages beside it -- assets/tool_downloads.py and
         assets/exceptions.py -- because the shipped Dockerfile's build context is
         assets/ and it cannot COPY from outside it.
+
+        Then 17. The one added is assets/genai-steering-guide.md, which
+        hatch_build.py copies from docs/ so that `ash get-genai-guide` from an
+        installed ASH writes that version's guide instead of downloading the
+        `main` branch's.
+
+        Then 18. The one added is assets/appsec_cfn_rules/AccessPolicyReading.rb, which
+        the two resource-policy cfn-nag rules load with require_relative so that they
+        read a parameter, an Fn::If and an Fn::Sub the same way. It is not a rule
+        (cfn-nag runs only the files whose names end in Rule.rb) and it is ASH-authored.
         """
-        assert len(gate.ASSETS_ALLOWLIST) == 17
+        assert len(gate.ASSETS_ALLOWLIST) == 19
 
     @pytest.mark.parametrize("member", sorted(gate.ASSETS_ALLOWLIST))
     def test_every_allowlisted_asset_is_under_the_assets_prefix(self, member):
@@ -1704,7 +1725,7 @@ class TestAllowlistsAreCheckedInBothDirections:
         the rule under test -- quietly ending the single-variable property that every
         neutering experiment depends on. So an artifact carrying nothing under
         `assets/` has nothing asserted about `assets/`. The cost is that deleting
-        ALL 17 at once goes unreported; that is a build catastrophe with louder
+        ALL 19 at once goes unreported; that is a build catastrophe with louder
         symptoms than this gate.
         """
         members = [
@@ -1777,7 +1798,7 @@ class TestKnownGapsArePinned:
         and the same swap succeeded at assets/Gemfile, assets/with-retry.sh,
         assets/appsec_cfn_rules/IamUserExistsRule.rb and __init__.py.
 
-        Not closable with digests: four of the 17 assets are build-generated, so
+        Not closable with digests: five of the 19 assets are build-generated, so
         pinned digests would fail on ordinary work and the gate would get deleted.
         """
         assert (
@@ -2144,8 +2165,8 @@ class TestSelfTestIsTheControl:
         """The accept side of the allowlist, which widening cannot test.
 
         Widening proves the allowlist is what stops the planted member. This
-        proves the 17 pinned entries are what lets ASH's own assets through: drop
-        any one and the clean fixture -- which carries all 17 -- is rejected. An
+        proves the 19 pinned entries are what lets ASH's own assets through: drop
+        any one and the clean fixture -- which carries all 19 -- is rejected. An
         allowlist needs both experiments, because a typo in an entry fails only
         this one.
         """

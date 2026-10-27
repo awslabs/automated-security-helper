@@ -40,6 +40,7 @@ declaration, so a finding reported on a decorator line is inside the symbol.
 
 from __future__ import annotations
 
+import functools
 import importlib
 import re
 import threading
@@ -47,10 +48,55 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
+from automated_security_helper.core.constants import ASH_DOCS_URL
+from automated_security_helper.utils.ash_install import extra_install_command
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.undecodable_text import undecodable_of_text
 
 #: The optional-dependency extra that provides tree-sitter and its grammars.
 SYMBOLS_EXTRA = "symbols"
+
+
+@functools.cache
+def symbols_extra_install_command() -> str:
+    """The command that installs the symbols extra's packages into ASH's environment.
+
+    Used by the scan warning and by the config lint, so ``ash config lint`` and
+    a scan never name different installs. The packages are read from the
+    running distribution's metadata, so the command matches this ASH whatever
+    its version or source.
+
+    Built once per process. Reading the metadata walks every installed
+    distribution (about 0.46 s with 205 of them), and the scan warning is built
+    once per file a symbol suppression is checked against, under the index lock.
+    The answer cannot change while the process runs.
+    """
+    # Names the extra's packages rather than ASH's distribution with the extra
+    # (the earlier "install automated-security-helper[symbols]"): on PyPI that
+    # name belongs to an unrelated project with no such extra, and a git tag
+    # pinned to the version can lack the extra on a build between releases
+    # (v3.7.0 has none).
+    return extra_install_command(SYMBOLS_EXTRA)
+
+
+#: The docs section with the uvx form of the install.
+SYMBOLS_EXTRA_DOCS_URL = f"{ASH_DOCS_URL}/docs/suppressions/#installing-the-extra"
+
+
+def symbols_extra_install_hint() -> str:
+    """The install advice the scan warning and the config lint both print.
+
+    The command runs uv through the interpreter that runs ASH and installs into
+    that interpreter's environment, which covers a virtualenv, a ``uv tool`` or
+    ``pipx`` install and a checkout's ``uv sync`` environment. uvx rebuilds its
+    cached environment from its own arguments, so for uvx the hint links the docs
+    section that gives the uvx form instead.
+    """
+    return (
+        f"install it with `{symbols_extra_install_command()}`, or for an ASH "
+        f"run by uvx see {SYMBOLS_EXTRA_DOCS_URL}"
+    )
+
 
 #: One identifier. ``\w`` is Unicode-aware, so non-ASCII Python identifiers are
 #: allowed; ``$`` covers JavaScript and ``#`` a JavaScript private member.
@@ -390,7 +436,7 @@ def _index_file(path: Path) -> Any:
                 result = _Unresolvable(
                     f"the {grammar.language} grammar is not available ({exc}). "
                     f"Symbol suppressions need the optional '{SYMBOLS_EXTRA}' extra: "
-                    f"install automated-security-helper[{SYMBOLS_EXTRA}]"
+                    f"{symbols_extra_install_hint()}"
                 )
             except SymbolParseError as exc:
                 result = _Unresolvable(f"the file does not parse cleanly: {exc}")
@@ -467,7 +513,10 @@ class SymbolResolver:
         )
 
     def _resolve(self, file_path: str) -> Optional[Path]:
-        candidate = Path(file_path.replace("\\", "/"))
+        # Opened by the name the file has on disk: a finding holds a file name that
+        # is not UTF-8 in its record form (\udcNN, utils/undecodable_text.py), read
+        # back first, so the escape's backslash is not taken for a separator.
+        candidate = Path(undecodable_of_text(file_path).replace("\\", "/"))
         if not candidate.is_absolute():
             candidate = self._source_dir / candidate
         try:

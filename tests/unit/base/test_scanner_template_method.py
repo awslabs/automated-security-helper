@@ -10,6 +10,7 @@ Covers:
 """
 
 import json
+import re
 from pathlib import Path
 from typing import ClassVar, Literal
 from unittest.mock import patch
@@ -288,11 +289,18 @@ class TestTemplateScanInjectsInvocation:
             return ["stub-tool"], sarif_file, None
 
         scanner = _make_scanner(plugin_context, scanner_config, execute_impl)
-        scanner.exit_code = 0
+
+        # scan() resets exit_code to None at its top (a scan that never
+        # reached its tool reports no code), so the invocation's code has to
+        # come from the run itself: the stand-in records it the way a real
+        # _run_subprocess response does.
+        def run_and_record(**kwargs):
+            scanner.exit_code = 0
+            return {"returncode": 0, "stdout": "", "stderr": ""}
 
         with patch.object(scanner, "_pre_scan", return_value=True):
             scanner.dependencies_satisfied = True
-            with patch.object(scanner, "_run_subprocess"):
+            with patch.object(scanner, "_run_subprocess", side_effect=run_and_record):
                 result = scanner.scan(target=target, target_type="source")
 
         assert isinstance(result, SarifReport)
@@ -359,7 +367,7 @@ class TestTemplateScanCallsPostScan:
 
 class TestInjectInvocationHelper:
     def test_attaches_per_result_scanner_details(self, plugin_context, scanner_config):
-        """DA r7 #3 — migrated scanners must populate per-result scanner_details.
+        """Migrated scanners must populate per-result scanner_details.
 
         Before this fix, the template-method path only injected
         runs[0].invocations[0]; per-result properties.scanner_details and
@@ -418,7 +426,7 @@ class TestInjectInvocationHelper:
         assert first_result.properties is not None
         per_result_sd = getattr(first_result.properties, "scanner_details", None)
         assert per_result_sd is not None, (
-            "result.properties.scanner_details missing — DA r7 #3 regression"
+            "result.properties.scanner_details missing on the template-method path"
         )
         per_result_invocation = per_result_sd.get("tool_invocation")
         assert per_result_invocation is not None
@@ -652,31 +660,31 @@ class TestInjectInvocationHelper:
 
 
 class TestNonZeroExitWithAnEmptyResultsFile:
-    """The empty-results branch reads the exit code and then discards it.
-
-    ``scan()`` at ``scanner_plugin.py:608-621`` handles an existing-but-empty
-    results file by interpolating ``self.exit_code`` into a warning string and
-    then ``return self._handle_empty_results()``. The exit code reaches human
-    -readable text and nothing else: the return is a normal one rather than a
-    raise, so ``_inject_invocation`` at ``:626`` -- the only place that computes
-    ``executionSuccessful=(self.exit_code in success_codes)`` -- is never reached
-    on this path.
+    """A tool that exits with a code its scanner rejects has failed, file or no file.
 
     Measured on grype with an empty-but-writable cache and its update endpoint
     refused: grype logs ``failed to load vulnerability db``, exits 1 and writes a
-    zero-byte report, and ASH grades it ``PASSED ... 0 findings`` and exits 0
-    with ``--fail-on-incomplete-scanners`` already passed. The stub below
-    reproduces the shape with grype's own ``success_exit_codes = {0, 2}``, so
-    exit 1 is a failure code for it rather than the base class's accepted 1.
+    zero-byte report. ``scan()`` does not read that file: an empty SARIF from it
+    would grade the scanner ``PASSED ... 0 findings``. The stub below reproduces the
+    shape with grype's own ``success_exit_codes = {0, 2}``, so exit 1 is a failure
+    code for it rather than the base class's accepted 1.
 
-    The consequence for the completeness gate is pinned separately, in
-    ``tests/unit/interactions/test_fail_on_incomplete_scanners.py``:
-    ``TestTheGateCannotSeeAHardFailureGradedPassed``.
+    Required: the run does not read as a successful execution, the scanner's row
+    is ERROR, and the row keeps the exit code and says why. The same rule for every
+    results-file shape and exit code is in
+    ``tests/unit/core/phases/test_scanner_executor_rejected_exit_codes.py``; what the
+    completeness gate does with the ERROR row is in
+    ``tests/unit/interactions/test_fail_on_incomplete_scanners.py``.
     """
 
-    @staticmethod
-    def _failed_tool_writing_an_empty_file(plugin_context, scanner_config, target):
-        """A scanner whose tool exits 1 and leaves a zero-byte results file."""
+    #: What the failed tool leaves in its results file.
+    RESULTS = ""
+
+    def _failed_tool_writing_an_empty_file(
+        self, plugin_context, scanner_config, target
+    ):
+        """A scanner whose tool exits 1 and leaves RESULTS in its results file."""
+        results_text = self.RESULTS
 
         class FailedToolScanner(ScannerPluginBase):
             offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
@@ -697,7 +705,7 @@ class TestNonZeroExitWithAnEmptyResultsFile:
                 results_dir = self.results_dir / target_type
                 results_dir.mkdir(parents=True, exist_ok=True)
                 results_file = results_dir / "failing.sarif"
-                results_file.write_text("", encoding="utf-8")
+                results_file.write_text(results_text, encoding="utf-8")
                 return ["failing-tool", "--scan"], results_file, None
 
         scanner = FailedToolScanner(config=scanner_config, context=plugin_context)
@@ -707,20 +715,50 @@ class TestNonZeroExitWithAnEmptyResultsFile:
         ]
         return scanner
 
-    def test_it_returns_a_report_rather_than_raising(
+    @staticmethod
+    def _tool_response():
+        return {
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "ERROR failed to load the database: database does not exist",
+        }
+
+    def _row(self, plugin_context, scanner_config, tmp_path):
+        """The scanner's row after one run through ScannerExecutor."""
+        from unittest.mock import MagicMock
+
+        from automated_security_helper.core.phases.scanner_executor import (
+            ScannerExecutor,
+        )
+
+        target = plugin_context.source_dir
+        (target / "file.py").write_text("x = 1")
+        scanner = self._failed_tool_writing_an_empty_file(
+            plugin_context, scanner_config, target
+        )
+        executor = ScannerExecutor(
+            plugin_context=plugin_context,
+            progress_display=MagicMock(),
+            scanner_tasks=[],
+        )
+        with patch.object(
+            scanner, "_run_subprocess", return_value=self._tool_response()
+        ):
+            (row,) = executor._execute_scanner(
+                "stub", scanner, [{"path": target, "type": "source"}]
+            )
+        return row
+
+    def test_the_scan_raises_or_reports_the_failed_execution(
         self, plugin_context, scanner_config, tmp_path
     ):
-        """CHARACTERIZATION: asserts the CURRENT behavior, which is wrong.
+        """scan() either raises ScannerError or returns a report that says it failed.
 
-        A tool that exited with a code its own ``success_exit_codes`` excludes,
-        having written no output, yields a valid empty SARIF and no exception.
-        Asserted rather than corrected because correcting it is a change to the
-        shared template every scanner inherits, not to this phase's flag.
-
-        Reverse-reads as the alarm for the fix: when the empty-results branch
-        starts consulting the exit code, this test reddens, and whoever is
-        holding it should update it and drop the xfail below.
+        A report with no run, or with a run whose invocation claims success, is
+        what a clean scan looks like, and is not acceptable here.
         """
+        from automated_security_helper.core.exceptions import ScannerError
+
         target = tmp_path / "src"
         target.mkdir()
         (target / "file.py").write_text("x = 1")
@@ -730,86 +768,57 @@ class TestNonZeroExitWithAnEmptyResultsFile:
 
         with patch.object(scanner, "_pre_scan", return_value=True):
             scanner.dependencies_satisfied = True
-            with patch.object(scanner, "_run_subprocess"):
-                report = scanner.scan(target=target, target_type="source")
+            with patch.object(
+                scanner, "_run_subprocess", return_value=self._tool_response()
+            ):
+                try:
+                    report = scanner.scan(target=target, target_type="source")
+                except ScannerError:
+                    return
 
-        assert isinstance(report, SarifReport), (
-            "the empty-results branch returns _handle_empty_results(), so a hard "
-            "tool failure produces a report rather than raising ScannerError"
-        )
-        assert report.runs == [], (
-            "_handle_empty_results builds SarifReport(runs=[]). Note for whoever "
-            "fixes this: moving _inject_invocation ahead of the early return is "
-            "not sufficient on its own, because it no-ops on an empty runs list. "
-            "There is no run to attach an invocation to. Grype overrides "
-            "_ensure_runs to synthesize one, and that override is also only on "
-            "the parse path."
-        )
-
-    def test_no_invocation_records_the_failure(
-        self, plugin_context, scanner_config, tmp_path
-    ):
-        """CHARACTERIZATION: the exit code survives only as log text.
-
-        Separate from the report-shape assertion above because this is the fact
-        that makes the failure invisible to every downstream reader rather than
-        merely unusual: ``executionSuccessful`` is the one field in the SARIF that
-        would carry it, and no invocation is emitted at all.
-        """
-        target = tmp_path / "src"
-        target.mkdir()
-        (target / "file.py").write_text("x = 1")
-        scanner = self._failed_tool_writing_an_empty_file(
-            plugin_context, scanner_config, target
-        )
-
-        with patch.object(scanner, "_pre_scan", return_value=True):
-            scanner.dependencies_satisfied = True
-            with patch.object(scanner, "_run_subprocess"):
-                report = scanner.scan(target=target, target_type="source")
-
+        assert isinstance(report, SarifReport), f"unexpected result: {report!r}"
         invocations = [inv for run in report.runs for inv in (run.invocations or [])]
-        assert invocations == [], (
-            "if an invocation now appears here the early return was changed -- "
-            "check whether executionSuccessful is False, and drop the xfail on "
-            "test_a_failed_tool_is_not_reported_as_a_successful_execution"
+        assert invocations, (
+            "the tool exited 1, outside success_exit_codes={0, 2}, and scan() "
+            "returned a report with no invocation, which reads as a clean scan"
+        )
+        assert all(inv.executionSuccessful is False for inv in invocations)
+
+    def test_the_failure_is_kept_with_its_exit_code(
+        self, plugin_context, scanner_config, tmp_path
+    ):
+        """The row keeps the exit code, and its errors say the code was rejected."""
+        row = self._row(plugin_context, scanner_config, tmp_path)
+
+        assert row.exit_code == 1
+        assert any(re.search(r"\b1\b", str(error)) for error in row.errors), (
+            "the row of a scanner whose tool exited 1 records why it failed; "
+            f"errors: {row.errors!r}"
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "scan() returns _handle_empty_results() for an empty results file "
-            "before reaching _inject_invocation, which is the only place "
-            "executionSuccessful is computed from the exit code. So a tool that "
-            "exited 1 with success_exit_codes={0, 2} produces a report that "
-            "asserts nothing about its own failure, determine_status derives "
-            "PASSED from its zero findings, and fail_on_incomplete_scanners has "
-            "no ERROR or MISSING status to find. Remove this xfail once the "
-            "empty-results branch consults the exit code."
-        ),
-    )
     def test_a_failed_tool_is_not_reported_as_a_successful_execution(
         self, plugin_context, scanner_config, tmp_path
     ):
-        """The behavior this SHOULD have, recorded so the gap is not only prose.
+        """The scanner's row is ERROR, not PASSED."""
+        from automated_security_helper.core.enums import ScannerStatus
 
-        Either outcome would do: raising, or emitting an invocation with
-        ``executionSuccessful=False``. This asserts the weaker of the two -- that
-        the run does not read as successful -- so that whichever way the fix goes,
-        this passes.
-        """
-        target = tmp_path / "src"
-        target.mkdir()
-        (target / "file.py").write_text("x = 1")
-        scanner = self._failed_tool_writing_an_empty_file(
-            plugin_context, scanner_config, target
+        row = self._row(plugin_context, scanner_config, tmp_path)
+
+        assert row.status == ScannerStatus.ERROR, (
+            "a tool that exited 1 with success_exit_codes={0, 2} and wrote "
+            f"{self.RESULTS!r} was graded {row.status.value}"
         )
 
-        with patch.object(scanner, "_pre_scan", return_value=True):
-            scanner.dependencies_satisfied = True
-            with patch.object(scanner, "_run_subprocess"):
-                report = scanner.scan(target=target, target_type="source")
 
-        invocations = [inv for run in report.runs for inv in (run.invocations or [])]
-        assert invocations, "a scan that ran a tool should record an invocation"
-        assert all(inv.executionSuccessful is False for inv in invocations)
+class TestNonZeroExitWithAOneRunResultsFile(TestNonZeroExitWithAnEmptyResultsFile):
+    """The same failed tool, with a results file holding one well-formed run.
+
+    An empty file is ERROR on its own, so the class above passes without the
+    exit-code rule. With a valid one-run report the rejected exit code is the only
+    thing that makes the row ERROR.
+    """
+
+    RESULTS = (
+        '{"version": "2.1.0", "runs": [{"tool": {"driver": {"name": '
+        '"failing-tool"}}, "results": []}]}'
+    )

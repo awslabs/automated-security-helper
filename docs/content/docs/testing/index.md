@@ -65,7 +65,8 @@ Tests are categorized using pytest markers to allow selective execution:
 - `@pytest.mark.reporter`: Tests related to reporter functionality
 - `@pytest.mark.config`: Tests related to configuration functionality
 - `@pytest.mark.model`: Tests related to data models
-- `@pytest.mark.serial`: Tests that should not run in parallel
+
+There is no marker that takes a test out of the parallel run: every test runs under `-n auto`, so a test has to be safe to run beside the others (see the [parallel testing guide](parallel_testing.md)).
 
 ### UV Migration Tests
 
@@ -117,7 +118,9 @@ The framework provides several common fixtures to simplify test setup:
 - `temp_config_dir`: Creates a temporary directory for configuration files
 - `temp_output_dir`: Creates a temporary directory for output files
 - `temp_project_dir`: Creates a temporary directory with a basic project structure
-- `temp_env_vars`: Sets environment variables for the duration of a test
+- `temp_env_vars`: Sets environment variables for the duration of a test. `temp_env_vars(NAME="value")` sets each one to `str(value)`; after the test, each is back to its previous value, or unset if it had none, and no other variable is touched. It is `monkeypatch.setenv` underneath, which a test can also use directly.
+
+Every test also runs with a home directory of its own. `tests/conftest.py` points `HOME`, `USERPROFILE`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` and `XDG_CACHE_HOME` at an empty temporary directory for each test, and at another for the whole run as soon as pytest loads `tests/conftest.py`, before any other conftest imports ASH, which is where a path a module computes from the home at import time points. The one exception is uv's cache: `UV_CACHE_DIR` stays on the cache uv would use for you, so a test that runs uv does not download again. uv's tool and Python directories follow `XDG_DATA_HOME` into the test's home on Linux and macOS, because `UV_TOOL_DIR`, `UV_TOOL_BIN_DIR`, `UV_PYTHON_INSTALL_DIR`, `UV_PYTHON_BIN_DIR` and `XDG_BIN_HOME` are unset for the run and for each test (on Windows they are under `%APPDATA%`, which is not moved). For the same reason, on Linux and macOS a user-level `uv.toml`, `pip.conf`, `.npmrc` or `~/.netrc` in your home is not read during tests (on Windows only `.npmrc` and the netrc file are missed; `%APPDATA%\uv` and `%APPDATA%\pip` are still read). Behind a package mirror, export the mirror instead, as `UV_DEFAULT_INDEX` (or `UV_INDEX_URL`), `UV_EXTRA_INDEX_URL`, `PIP_INDEX_URL` or `npm_config_registry`, which reach every test unchanged; for a mirror that needs credentials, point `NETRC` at your netrc file, or give uv the index's as `UV_INDEX_<NAME>_USERNAME` and `UV_INDEX_<NAME>_PASSWORD` rather than in the URL. The tools `ash dependencies install` put in `~/.ash/bin` are out of reach too, so the integration tests that need one skip; run with `PATH="$HOME/.ash/bin:$PATH"` (in PowerShell, `$env:PATH = "$HOME\.ash\bin;$env:PATH"`; in cmd, `set "PATH=%USERPROFILE%\.ash\bin;%PATH%"`) to use them (the run's header says so when that directory has tools). Setting `ASH_BIN_PATH` to that directory instead would make it the install target of every test that installs to the default directory, and the run refuses a tool installer it can see heading into your home, and any Python or `ash` child started with `HOME` set to your home. A Python or `ash` child started with an environment that has no `HOME`, which would fall back to your real home, is given the test's home instead; one whose own command line removes `HOME` (`env -i`, `env -u HOME`, `unset HOME;`) or sets it to your home (`HOME=...;`) is refused. These checks are made where `subprocess.Popen` starts a child; a child started another way (`os.posix_spawn`, `os.system`, multiprocessing's spawn and forkserver) is not checked. A test that still writes under your `~/.ash`, through a path that does not come from `HOME` (the passwd database, or a path computed before the run moved `HOME`), is refused the write (a `PermissionError`) and fails at teardown with the paths it tried. A test that needs the real home can be marked `@pytest.mark.real_home`, and the `developer_home` and `developer_environment` fixtures give the values the run started with.
 
 Example:
 ```python
@@ -293,43 +296,38 @@ def test_with_mock_api_server():
 
 ### Configuration
 
-Coverage reporting is configured in `.coveragerc`:
-
-```ini
-[run]
-source = automated_security_helper
-omit =
-    */tests/*
-    */venv/*
-    */site-packages/*
-
-[report]
-exclude_lines =
-    pragma: no cover
-    def __repr__
-    raise NotImplementedError
-    if __name__ == .__main__.:
-    pass
-    raise ImportError
-```
+Coverage is configured in `.coveragerc` (what to measure and where reports go). It is not
+measured by default: `pytest.ini` carries no `--cov` options, so a run of one directory or
+one test passes or fails on its own tests.
 
 ### Running Coverage Reports
 
-To run tests with coverage reporting:
+To see coverage for a run, pass the options yourself:
 
 ```bash
-pytest --cov=automated_security_helper
+uv run pytest tests/unit/core --cov=automated_security_helper --cov-report=term-missing
 ```
 
-To generate an HTML coverage report:
+To generate an HTML coverage report (written to `test-results/coverage_html`):
 
 ```bash
-pytest --cov=automated_security_helper --cov-report=html
+uv run pytest --cov=automated_security_helper --cov-report=html
 ```
 
 ### Coverage Enforcement
 
-Coverage thresholds are enforced in CI pipelines. The minimum coverage threshold is 80% for the overall codebase, with higher thresholds for critical components.
+CI's unit-test step (`.github/actions/run-unit-tests/action.yml`) runs the full suite with
+`--cov-fail-under=80` and fails below 80% total coverage. To run it the same way:
+
+```bash
+uv sync --extra cdk --extra symbols
+ASH_REQUIRE_CDK_EXTRA=1 ASH_REQUIRE_SYMBOLS_EXTRA=1 uv run pytest \
+  --cov=automated_security_helper --cov-config=.coveragerc \
+  --cov-report=term-missing --cov-fail-under=80
+```
+
+The threshold is for the full suite. A partial run with `--cov-fail-under` fails on the code
+it did not exercise.
 
 ## Parallel Test Execution
 
@@ -339,31 +337,24 @@ Parallel test execution is configured in `pytest.ini`:
 
 ```ini
 [pytest]
-addopts = -xvs
 testpaths = tests
 python_files = test_*.py
 python_classes = Test*
 python_functions = test_*
-markers =
-    unit: Unit tests that test individual components in isolation
-    integration: Integration tests that test component interactions
-    slow: Tests that take a long time to run
-    scanner: Tests related to scanner functionality
-    reporter: Tests related to reporter functionality
-    config: Tests related to configuration functionality
-    model: Tests related to data models
-    serial: Tests that should not run in parallel
+addopts =
+    --verbose
+    --junit-xml=test-results/pytest.junit.xml
+    --durations=10
+    -n auto
 ```
 
 ### Running Tests in Parallel
 
-To run tests in parallel:
+`-n auto` in `pytest.ini` already runs the suite in parallel, one worker per CPU. To run tests in a single process instead, for example while debugging one test:
 
 ```bash
-pytest -xvs -n auto
+uv run pytest tests/unit/core/test_progress.py -n 0
 ```
-
-Tests marked with `@pytest.mark.serial` will not run in parallel.
 
 ## Test Selection and Filtering
 
@@ -373,8 +364,8 @@ The framework provides several command-line options for selective test execution
 
 - `--run-slow`: Run slow tests
 - `--run-integration`: Run integration tests
-- `--run-changed-only`: Run only tests for changed files
-- `--base-branch`: Base branch for `--run-changed-only` option (default: `main`)
+- `--run-container-snapshots`: Run the snapshot tests that need a container runtime on this host
+- `--run-nix-snapshots`: Run the snapshot tests that need Nix on this host
 
 Example:
 ```bash
@@ -383,10 +374,10 @@ pytest --run-integration --run-slow
 
 ### Test Selection Utilities
 
-Test selection utilities are available in `tests.utils.test_selection`:
+Test selection utilities are in `tests/utils/selection.py`, importable from the repository root as `tests.utils.selection`:
 
 ```python
-from tests.utils.test_selection import get_changed_files, get_related_test_files
+from tests.utils.selection import get_changed_files, get_related_test_files
 
 
 def test_selection():

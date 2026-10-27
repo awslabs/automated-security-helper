@@ -115,7 +115,9 @@ class WorkspacePolicyConfig(BaseModel):
     ``AshConfig.workspace``.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    # A refused value can be a secret, and an error's text goes wherever the
+    # error is shown, so it is not quoted there.
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     max_severity_threshold: Annotated[
         # A real Literal, not a str with an advertised enum: the enum has to be
@@ -197,7 +199,9 @@ class AshWorkspaceConfig(BaseModel):
     does in a project config.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    # A refused value can be a secret, and an error's text goes wherever the
+    # error is shown, so it is not quoted there.
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     workspace: Annotated[
         WorkspacePolicyConfig,

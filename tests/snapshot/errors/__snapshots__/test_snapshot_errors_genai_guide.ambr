@@ -36,33 +36,26 @@
     'exit_code': 0,
     'stderr': '',
     'stdout': '''
-      ✓ GenAI Integration Guide saved to: <TMP>/guide.md
+      GenAI Integration Guide saved to: <TMP>/guide.md
         Source: local
         File size: 69 bytes
       
       This guide can be provided to AI assistants to help them:
-        • Use the correct ASH output formats (JSON, not HTML)
-        • Handle severity discrepancies properly
-        • Create suppressions correctly
-        • Analyze dependencies using CycloneDX SBOM
-        • Avoid common pitfalls and known issues
+        - Use the correct ASH output formats (JSON, not HTML)
+        - Create suppressions correctly
+        - Analyze dependencies using CycloneDX SBOM
+        - Avoid common pitfalls and known issues
   
     ''',
   })
 # ---
-# name: test_no_local_copy_falls_back_to_github
+# name: test_no_local_copy_is_refused
   dict({
     'exit_code': 1,
     'stderr': '''
-      Error: Could not fetch from GitHub: simulated: network is unreachable
-      
-      You can download it directly from:
-      https://raw.githubusercontent.com/awslabs/automated-security-helper/main/docs/content/docs/genai-steering-guide.md
+      Error: this ASH installation has no readable copy of the GenAI Integration Guide (<TMP>/install/automated_security_helper/assets/genai-steering-guide.md). Pass --from-github to download it, with --branch <tag> for the guide of a given release.
   
     ''',
-    'stdout': '''
-      Fetching GenAI Integration Guide from GitHub (main branch)...
-  
-    ''',
+    'stdout': '',
   })
 # ---

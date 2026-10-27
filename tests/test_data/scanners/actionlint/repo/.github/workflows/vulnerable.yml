@@ -1,0 +1,39 @@
+# Deliberately defective workflow used as an actionlint test fixture.
+# Every finding below is expected; see tests/unit/plugin_modules/ash_builtin/test_actionlint_scanner.py.
+name: vulnerable
+on:
+  issues:
+    types: [opened]
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    services:
+      db:
+        image: postgres:16
+        credentials:
+          username: admin
+          password: hunter2
+    steps:
+      - name: Echo the issue title
+        run: echo "${{ github.event.issue.title }}"
+      - name: Old output command
+        run: echo "::set-output name=result::done"
+      - name: Disabled environment command
+        run: echo "::set-env name=MODE::fast"
+      - name: Guard that is always true
+        if: ${{ github.event_name == 'issues' }} && false
+        run: echo always
+  report:
+    needs: [triage, missing-job]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo report
+      - name: Unquoted variable (shellcheck SC2086, reported only when shellcheck is enabled)
+        run: cat $REPORT_FILE
+  lint:
+    runs-on: ubuntu-99.04
+    timeout-minute: 5
+    steps:
+      - run: echo lint

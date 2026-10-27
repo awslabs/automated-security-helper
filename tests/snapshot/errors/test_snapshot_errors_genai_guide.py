@@ -1,7 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What ``ash get-genai-guide`` prints when it succeeds locally and when GitHub fails.
+"""What ``ash get-genai-guide`` prints when it succeeds locally, when GitHub fails,
+and when the installation has no copy of the guide.
 
 The command finds the guide relative to ``cli/main.py``'s own ``__file__``. Every test
 points that at a temp tree holding a guide this file writes, so the snapshot records
@@ -68,8 +69,11 @@ def test_from_github_http_error(run_cli, snapshot, installed_at, monkeypatch):
     assert run_cli(["get-genai-guide", "--from-github"]) == snapshot
 
 
-def test_no_local_copy_falls_back_to_github(
-    run_cli, snapshot, installed_at, monkeypatch
-):
+def test_no_local_copy_is_refused(run_cli, snapshot, installed_at, monkeypatch):
+    """No checkout copy and no packaged copy: refused, with no download.
+
+    It does not fall back to GitHub's `main` branch, a guide for some other
+    version, which would also need network access.
+    """
     monkeypatch.setattr(requests, "get", _network_down)
     assert run_cli(["get-genai-guide"]) == snapshot

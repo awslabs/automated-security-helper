@@ -71,13 +71,10 @@ class TestCacheEnabled:
     def test_scope_is_per_build_target(self, in_actions):
         """Targets must not share a scope; buildx lets one overwrite the other.
 
-        Worth knowing while reading this: ``build_target`` cannot actually differ
-        on any path that reaches the cache. run_ash_container forces it to "ci"
-        whenever CI is set, and the cache needs ACTIONS_RUNTIME_TOKEN, which only
-        exists inside Actions -- where CI is always set. So "non-root" here is a
-        value the live path cannot produce, and it is asserted only because
-        build_target remains a parameter that a future caller could vary. The
-        discriminators that matter today are architecture and offline, covered by
+        Both reach the cache. CI variables do not choose the stage, so a job inside
+        Actions that passes no ``--build-target`` builds "non-root" and one that
+        passes ``--build-target ci`` builds "ci", each with its own layers. The
+        other discriminators, architecture and offline, are covered by
         ``TestScopeSeparatesWhatCannotBeShared``.
         """
         ci = _gha_layer_cache_args("docker", "ci", force=False, offline=False)

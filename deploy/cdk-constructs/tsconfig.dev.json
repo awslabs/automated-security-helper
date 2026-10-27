@@ -7,7 +7,9 @@
     "experimentalDecorators": true,
     "inlineSourceMap": true,
     "inlineSources": true,
-    "lib": ["es2022"],
+    "lib": [
+      "es2022"
+    ],
     "module": "CommonJS",
     "noEmitOnError": false,
     "noFallthroughCasesInSwitch": true,
@@ -22,8 +24,18 @@
     "strictPropertyInitialization": true,
     "stripInternal": false,
     "target": "es2022",
-    "types": ["node", "jest"]
+    "types": [
+      "node",
+      "jest"
+    ]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"],
-  "exclude": ["node_modules", "lib", "dist"]
+  "exclude": [
+    "node_modules",
+    "lib",
+    "dist"
+  ],
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts"
+  ]
 }

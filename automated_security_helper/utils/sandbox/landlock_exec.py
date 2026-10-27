@@ -31,11 +31,13 @@ import errno
 import json
 import os
 import platform
+import re
 import signal
 import stat
 import struct
 import time
 import sys
+import unicodedata
 from typing import Any, Callable, Dict, List, NoReturn, Tuple
 
 SYS_LANDLOCK_CREATE_RULESET = 444
@@ -71,9 +73,15 @@ FILE_ONLY_RIGHTS = (
 
 PR_SET_NO_NEW_PRIVS = 38
 PR_SET_CHILD_SUBREAPER = 36
-#: How long the wrapper keeps reaping after its scanner exits. Below ASH's
-#: SANDBOX_STOP_GRACE_SECONDS (10), so the wrapper finishes before ASH gives up on it.
+#: How long the wrapper keeps reaping after its scanner exits on its own. Below
+#: ASH's SANDBOX_STOP_GRACE_SECONDS (10), so the wrapper finishes before ASH gives up on it.
 REAP_DEADLINE_SECONDS = 5.0
+#: How long it keeps reaping once ASH has asked it to stop (SIGTERM, SIGINT or
+#: SIGHUP), counted from that signal, if that ends sooner. ASH SIGKILLs a wrapper
+#: still running when its grace after SIGTERM ends, and a wrapper killed while it
+#: reaps leaves what its scanner started running, so a stop is finished well
+#: inside a grace of half a second.
+STOP_REAP_DEADLINE_SECONDS = 0.25
 # prctl(PR_SET_SECCOMP) rather than seccomp(2): the syscall number differs per arch.
 PR_SET_SECCOMP = 22
 SECCOMP_MODE_FILTER = 2
@@ -110,8 +118,64 @@ libc = ctypes.CDLL(None, use_errno=True)
 libc.syscall.restype = ctypes.c_long
 
 
+#: The Unicode categories of the characters written as escapes, not printed:
+#: utils/terminal_text.py's SHOWN_AS_ESCAPES.
+_SHOWN_AS_ESCAPES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
+_ESCAPE_TEXT = re.compile(r"x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}")
+_CANDIDATES = re.compile(
+    r"(?<!\\)(\\+)(?=x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|[^\x20-\x7e])"
+    r"|[^\x20-\x7e]"
+)
+
+
+def _escape_for(character: str) -> str:
+    code = ord(character)
+    if code <= 0xFF:
+        return "\\x%02x" % code
+    if code <= 0xFFFF:
+        return "\\u%04x" % code
+    return "\\U%08x" % code
+
+
+def _shown(text: str) -> str:
+    """*text* on one line, shown and not obeyed: what utils/terminal_text.py's
+    shown_on_one_line writes, inlined since this program imports nothing from ASH.
+
+    Each control, format, separator, surrogate, private-use and unassigned
+    character (tab, newline and carriage return included) as ``\\xNN``,
+    ``\\uNNNN`` or ``\\UNNNNNNNN``, a run of backslashes before text that reads as
+    one of those or before such a character doubled, and each CI command form
+    broken: "::" at the start, and "##" with an optional name and "[" anywhere (a
+    bare "##" is left). The error text and the scanner's path it quotes are the
+    repository's or the tool's. tests/unit/utils/test_landlock_exec_shows_text.py
+    checks that this writes what shown_on_one_line writes.
+    """
+
+    def one(match: "re.Match[str]") -> str:
+        run = match.group(1)
+        if run:
+            after = match.end()
+            if _ESCAPE_TEXT.match(text, after) or (
+                after < len(text)
+                and unicodedata.category(text[after]) in _SHOWN_AS_ESCAPES
+            ):
+                return run * 2
+            return run
+        character = match.group()
+        if unicodedata.category(character) in _SHOWN_AS_ESCAPES:
+            return _escape_for(character)
+        return character
+
+    shown = _CANDIDATES.sub(one, text)
+    shown = re.sub(r"^([^\S\n]*):(?=:)", r"\1\\x3a", shown, flags=re.MULTILINE)
+    return re.sub(
+        r"(\\*)#(?=#[A-Za-z]*\[)", lambda match: match.group(1) * 2 + "\\x23", shown
+    )
+
+
 def fail(message: str) -> NoReturn:
-    sys.stderr.write(f"ash-landlock: {message}\n")
+    # The message quotes policy paths, which name the scanned tree's directories.
+    sys.stderr.write(_shown(f"ash-landlock: {message}") + "\n")
     sys.exit(126)
 
 
@@ -288,7 +352,7 @@ def main(argv: List[str]) -> int:
                 "kernel parameter)\n"
             )
             return 1
-        print(abi)
+        print(abi)  # print-ok: an int, the ABI version the parent reads
         return 0
     if argv[:1] == ["--socket-filter"]:
         if len(argv) < 4 or argv[1] not in ("unix", "all") or argv[2] != "--":
@@ -402,16 +466,26 @@ def run_and_reap(command: List[str], restrict: Callable[[], None]) -> int:
             restrict()
             os.execve(command[0], command, os.environ)
         except OSError as e:
-            sys.stderr.write(f"ash-landlock: exec {command[0]}: {e}\n")
+            # The scanner's path, and the error that quotes it.
+            sys.stderr.write(_shown(f"ash-landlock: exec {command[0]}: {e}") + "\n")
         except BaseException:  # noqa: BLE001 - fail() raises SystemExit
             pass
         # Whatever happened, the child never returns into the wrapper's code; a
         # restriction that failed leaves it here, unrestricted, so it exits.
         os._exit(126)
 
+    stopped_at: List[float] = []
+    scanner_exited = False
+
     def stop(_signum: int, _frame: object) -> None:
-        # ASH asks the wrapper to stop (a timeout, Ctrl-C): end the scanner now,
-        # and the loop below ends everything it started.
+        # ASH asks the wrapper to stop (a timeout, Ctrl-C, a cancelled scan): end
+        # the scanner now, and the loop below ends everything it started, by
+        # STOP_REAP_DEADLINE_SECONDS from the first such signal.
+        if not stopped_at:
+            stopped_at.append(time.monotonic())
+        if scanner_exited:
+            # Reaped, or about to be: its pid may already be another process's.
+            return
         try:
             os.kill(pid, signal.SIGKILL)
         except OSError:
@@ -420,20 +494,37 @@ def run_and_reap(command: List[str], restrict: Callable[[], None]) -> int:
     for signum in stop_signals:
         signal.signal(signum, stop)
     signal.pthread_sigmask(signal.SIG_UNBLOCK, stop_signals)
+    # Waited for without reaping (WNOWAIT): until it is reaped below, the
+    # scanner's pid stays its own, so a stop that kills it in between kills
+    # nothing else.
     while True:
         try:
-            _, status = os.waitpid(pid, 0)
+            os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT)
             break
         except InterruptedError:
             continue
+    scanner_exited = True
+    _, status = os.waitpid(pid, 0)
+    exited_at = time.monotonic()
+
+    def deadline() -> float:
+        if stopped_at:
+            return min(
+                exited_at + REAP_DEADLINE_SECONDS,
+                stopped_at[0] + STOP_REAP_DEADLINE_SECONDS,
+            )
+        return exited_at + REAP_DEADLINE_SECONDS
+
     # An orphan is reparented here only once its own parent has exited, which can
     # trail the scanner's exit, so "no children" has to hold for a short while.
     # Every pass kills the whole remaining tree at once, so depth costs nothing;
-    # bounded by time rather than by a pass count, and well inside the grace ASH
-    # gives a stopping process before it SIGKILLs this wrapper.
+    # bounded by time rather than by a pass count, and inside the grace ASH gives
+    # a stopping process before it SIGKILLs this wrapper. At least one pass is
+    # made, however late a stop left the scanner's exit.
     quiet = 0
-    deadline = time.monotonic() + REAP_DEADLINE_SECONDS
-    while time.monotonic() < deadline:
+    passes = 0
+    while passes == 0 or time.monotonic() < deadline():
+        passes += 1
         leftovers = _descendants()
         if not leftovers:
             quiet += 1

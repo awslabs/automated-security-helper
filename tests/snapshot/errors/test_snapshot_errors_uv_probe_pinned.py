@@ -22,7 +22,7 @@ import pytest
 from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
     SemgrepScanner,
 )
-from automated_security_helper.utils import uv_tool_runner
+from automated_security_helper.utils import subprocess_utils, uv_tool_runner
 from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 from tests.snapshot.conftest import pinned_uv_tool_version
 
@@ -34,23 +34,31 @@ _WARNING = "Could not determine UV tool semgrep version"
 
 @pytest.fixture
 def probe_times_out(monkeypatch):
-    """Every uv subprocess in uv_tool_runner times out, as the slow runner's did."""
+    """Every uv subprocess in uv_tool_runner times out, as the slow runner's did.
+    uv_tool_runner starts each one through ASH's plain runner."""
 
     def _timeout(cmd, *args, **kwargs):
         raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 15))
 
-    monkeypatch.setattr(uv_tool_runner.subprocess, "run", _timeout)
+    monkeypatch.setattr(subprocess_utils, "_run_plain", _timeout)
     monkeypatch.setattr(uv_tool_runner, "_uv_tool_version_cache", {})
 
 
 def _construct_semgrep(monkeypatch, context) -> tuple[SemgrepScanner, list[str]]:
+    """Construct semgrep and run its version probe.
+
+    The probe runs from the dependency check, not the constructor (see
+    UVToolMixin._defer_tool_version_probe); this runs that step on its own.
+    """
     logged: list[str] = []
     monkeypatch.setattr(
         SemgrepScanner,
         "_plugin_log",
         lambda self, message, *args, **kwargs: logged.append(str(message)),
     )
-    return SemgrepScanner(context=context), logged
+    scanner = SemgrepScanner(context=context)
+    scanner._resolve_deferred_tool_version()
+    return scanner, logged
 
 
 def test_a_timed_out_probe_does_not_reach_a_snapshot(

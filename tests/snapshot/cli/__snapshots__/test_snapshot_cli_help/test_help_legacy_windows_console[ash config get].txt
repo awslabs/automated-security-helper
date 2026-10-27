@@ -14,11 +14,17 @@
 │                           environment variable.                                                 │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
-│ --config-overrides                    <str>  Configuration overrides specified as key-value     │
-│                                              pairs (e.g.,                                       │
-│                                              'global_settings.severity_threshold=LOW')          │
-│ --verbose             --no-verbose           Enable verbose logging [default: no-verbose]       │
-│ --debug               --no-debug             Enable debug logging [default: no-debug]           │
-│ --color               --no-color             Enable/disable colorized output [default: color]   │
-│ --help                                       Show this message and exit.                        │
+│ --config            -c                  <str>  The path to the configuration file to get, as    │
+│                                                for `ash scan --config`. The same as the         │
+│                                                positional path; when both name a file on the    │
+│                                                command line they must name the same one. The    │
+│                                                positional path wins over ASH_CONFIG.            │
+│                                                [env var: ASH_CONFIG]                            │
+│ --config-overrides                      <str>  Configuration overrides specified as key-value   │
+│                                                pairs (e.g.,                                     │
+│                                                'global_settings.severity_threshold=LOW')        │
+│ --verbose               --no-verbose           Enable verbose logging [default: no-verbose]     │
+│ --debug                 --no-debug             Enable debug logging [default: no-debug]         │
+│ --color                 --no-color             Enable/disable colorized output [default: color] │
+│ --help                                         Show this message and exit.                      │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘

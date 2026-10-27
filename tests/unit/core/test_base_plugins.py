@@ -26,6 +26,7 @@ from automated_security_helper.models.core import (
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
 
 class TestConverterPlugin:
@@ -42,7 +43,7 @@ class TestConverterPlugin:
         def validate_plugin_dependencies(self) -> bool:
             return True
 
-        def convert(self, target: Path | str) -> list[Path]:
+        def convert(self) -> list[Path]:
             return [Path("test.txt")]
 
     def test_setup_paths_default(self, test_plugin_context, dummy_converter_config):
@@ -123,7 +124,7 @@ class TestConverterPlugin:
         converter = self.DummyConverter(
             context=test_plugin_context, config=dummy_converter_config
         )
-        result = converter.convert(target="test_target")
+        result = converter.convert()
         assert isinstance(result, list)
         assert all(isinstance(p, Path) for p in result)
 
@@ -404,7 +405,7 @@ class TestScannerPlugin:
             command="nonexistent-command",
         )
         final_args = scanner._resolve_arguments(test_source_dir)
-        scanner._run_subprocess(final_args)
+        scanner._run_subprocess(final_args, timeout=CHILD_TIMEOUT_SECONDS)
         # 127, not 1: a command that cannot start never ran, and 1 is an accepted
         # exit code for most scanners.
         assert scanner.exit_code == 127
@@ -430,7 +431,7 @@ class TestScannerPlugin:
             ),
         )
         scanner.results_dir = ash_temp_path
-        scanner._run_subprocess(
+        response = scanner._run_subprocess(
             [
                 "python",
                 "-c",
@@ -440,6 +441,11 @@ class TestScannerPlugin:
             cwd=ash_temp_path,  # Use ash_temp_path as the working directory to avoid directory not found errors
             stderr_preference="both",
             stdout_preference="both",
+            timeout=CHILD_TIMEOUT_SECONDS,
+        )
+        assert response.get("timed_out") is not True, (
+            f"the python child did not exit within {CHILD_TIMEOUT_SECONDS}s and was "
+            f"killed: {response.get('stderr')}"
         )
         assert len(scanner.output) > 0
         assert len(scanner.errors) > 0
@@ -462,7 +468,7 @@ class TestScannerPlugin:
             config=config,
             command="nonexistent-binary",
         )
-        scanner._run_subprocess(["nonexistent-binary"])
+        scanner._run_subprocess(["nonexistent-binary"], timeout=CHILD_TIMEOUT_SECONDS)
         assert scanner.exit_code == 127
         assert scanner.scan_spawn_failure
         assert len(scanner.errors) > 0

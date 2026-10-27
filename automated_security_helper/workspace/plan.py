@@ -67,9 +67,9 @@ Failure modes and known limitations
 
 from __future__ import annotations
 
-from typing import Annotated, Dict, List, Optional
+from typing import Annotated, Dict, List, Optional, Tuple
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, PrivateAttr, computed_field
 
 from automated_security_helper.models.core import (
     AshSuppression,
@@ -146,7 +146,33 @@ class ProjectPlan(BaseModel):
             None,
             description=(
                 "Path of the config file resolved for this project, or null when "
-                "the project has none and took ASH's default config."
+                "the project has none and took ASH's default config. The path the "
+                "project holds it at, not the file a symlink there reaches."
+            ),
+        ),
+    ] = None
+    operator_config: Annotated[
+        Optional[str],
+        Field(
+            None,
+            description=(
+                "The operator's config file layered over config_source: every "
+                "field it sets is final, and the project's own config fills only "
+                "the fields it leaves unset. The --config file on the CLI, or the "
+                "registered profile under the MCP server. Null when the operator "
+                "named none, or when the project has no config of its own, so "
+                "that config_source is the operator's file itself."
+            ),
+        ),
+    ] = None
+    operator_config_digest: Annotated[
+        Optional[str],
+        Field(
+            None,
+            description=(
+                "Digest of the bytes of every file operator_config is built from, "
+                "when the plan was resolved. The scan refuses the project when "
+                "the file it would layer no longer matches."
             ),
         ),
     ] = None
@@ -263,6 +289,19 @@ class ProjectPlan(BaseModel):
             ),
         ),
     ]
+    plugin_module_names: Annotated[
+        Dict[str, str],
+        Field(
+            default_factory=dict,
+            description=(
+                "How a refusal names each of this project's plugin-module "
+                "entries: an entry the config read from the environment maps to "
+                "its masked form, so the value never appears in a message; an "
+                "entry not in the map is named as it is, which covers names "
+                "given on the command line."
+            ),
+        ),
+    ]
     skipped: Annotated[
         bool,
         Field(
@@ -278,6 +317,16 @@ class ProjectPlan(BaseModel):
         Optional[str],
         Field(None, description="Human-readable explanation of the skip."),
     ] = None
+
+    #: The values and keys this project's config read from the environment
+    #: (``error_text.config_environment_values``), set by the resolver. For the
+    #: run's failure handlers, which hold no project config: the prewarm carries
+    #: the union of every project's on an error it raises, so a crash that
+    #: quotes one is redacted. A private attribute, never a field, because the
+    #: values are what must not be shown: model_dump, model_dump_json and repr
+    #: leave it out, the MCP resolve tool dumps every entry, and model_copy
+    #: keeps it.
+    _environment_values: Tuple[str, ...] = PrivateAttr(default=())
 
     @property
     def gate_threshold(self) -> Optional[str]:
@@ -371,7 +420,8 @@ class WorkspacePlan(BaseModel):
                 "Path of the workspace policy file that was applied, or null when "
                 "the workspace declares no policy. Recorded because a ceiling "
                 "changes verdicts, so which file imposed it has to be answerable "
-                "from the output rather than by re-running discovery."
+                "from the output rather than by re-running discovery. The path "
+                "it was found or named at, not the file a symlink there reaches."
             ),
         ),
     ] = None
@@ -397,6 +447,17 @@ class WorkspacePlan(BaseModel):
 
         Layout is not a contract; consumers wanting structure should use
         ``model_dump()``.
+        """
+        return "\n".join(self.render_lines())
+
+    def render_lines(self) -> List[str]:
+        """The lines of :meth:`render`, each one line of the layout.
+
+        A line can quote a path the caller or the tree chose (the workspace
+        file, its root, a project's folder and config file), and a newline in
+        that path is not a line of the layout. A printer that shows each line
+        on one line (``ash scan --dry-run``) keeps the path whole; the joined
+        text cannot tell the two kinds of newline apart.
         """
         skipped = self.skipped_projects
         lines: List[str] = [
@@ -444,6 +505,11 @@ class WorkspacePlan(BaseModel):
                 f"{_INDENT}{'config:':<{_FIELD_WIDTH}}"
                 f"{project.config_source or 'ASH default config'}"
             )
+            if project.operator_config:
+                lines.append(
+                    f"{_INDENT}{'operator:':<{_FIELD_WIDTH}}"
+                    f"{project.operator_config}  (the fields it sets are final)"
+                )
             # Both values when policy moved the threshold, so the reader can see
             # what was declared and what will be enforced. One value otherwise:
             # printing "CRITICAL -> CRITICAL" everywhere would bury the real cases.
@@ -483,4 +549,4 @@ class WorkspacePlan(BaseModel):
         lines.append(
             "Nothing has been scanned. This is a resolution and validation pass only."
         )
-        return "\n".join(lines)
+        return lines

@@ -21,7 +21,13 @@
 │ - *Threshold (Thresh)*: The minimum severity level that will cause a scanner │
 │ to fail                                                                      │
 │   - Thresholds: ALL, LOW, MEDIUM, HIGH, CRITICAL                             │
-│   - Source: (g)lobal, (c)onfig, (s)canner                                    │
+│   - Source: (g)lobal = global_settings or the default, (c)onfig = the        │
+│ scanner's own options                                                        │
+│   - ENV = (narrow terminal) read from an environment reference; the wide     │
+│ table and reports show the reference instead                                 │
+│   - REF = (narrow terminal) a reference ASH did not read in this run (read   │
+│ back from a results file, quoted, or a name ASH refuses to read); the wide   │
+│ table shows it as written                                                    │
 │   - Example: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL    │
 │ severity will cause a failure                                                │
 │ - *Statistics calculation*:                                                  │

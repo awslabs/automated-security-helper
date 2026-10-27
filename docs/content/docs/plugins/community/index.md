@@ -10,6 +10,11 @@ This section is dedicated to community-developed plugins for ASH. Community plug
 - **[Snyk Code Plugin](snyk-plugin.md)** - Integrates Snyk Code for static application security testing (SAST) of source code vulnerabilities
 - **[Trivy Plugin](trivy-plugin.md)** - Integrates Aquasec's Trivy for vulnerability, misconfiguration, secret, and license scanning
 
+These three ship inside ASH. Each takes part in a scan only when that scan names its
+plugin module in `ash_plugin_modules` or `--ash-plugin-modules`, as its page shows.
+The MCP `list_scanners` tool reports them either way; listing one does not add it to
+any scan.
+
 ## Contributing a Community Plugin
 
 We encourage the community to develop and share plugins that extend ASH's capabilities.
@@ -72,7 +77,7 @@ pip install <my-plugin-package-name>
 ### Configuration
 
 ```yaml
-# Example configuration in .ash.yaml
+# Example configuration in your ASH config file (.ashrc.yaml in a new project)
 plugins:
   my-plugin:
     enabled: true

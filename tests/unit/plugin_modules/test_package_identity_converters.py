@@ -21,6 +21,7 @@ the lockfile's directory joined with its ``packages`` key.
 """
 
 import json
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -31,6 +32,9 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
     GrypeScanner,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+    npm_audit_scanner as npm_audit_module,
 )
 from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
     NpmAuditScanner,
@@ -218,9 +222,20 @@ def npm_scanner(test_plugin_context):
 def run_npm_scan(npm_scanner, root: Path, projects: dict):
     """Run NpmAuditScanner.scan over ``projects`` ({dir: audit stdout})."""
     npm_scanner.context.source_dir = root
+    # npm runs from a private copy of each project's manifest and lockfile (see
+    # utils/package_manager_child.py), so the copy each audit ran in is mapped back
+    # to the project it was made from.
+    copied_from: dict = {}
+    real_child = npm_audit_module.package_manager_child
+
+    @contextmanager
+    def recording_child(binary, package_dir, **kwargs):
+        with real_child(binary, package_dir, **kwargs) as child:
+            copied_from[Path(child.cwd)] = Path(package_dir)
+            yield child
 
     def fake_run(command, results_dir, cwd, **kwargs):
-        return {"stdout": projects[Path(cwd)]}
+        return {"stdout": projects[copied_from[Path(cwd)]]}
 
     with (
         patch(
@@ -230,6 +245,7 @@ def run_npm_scan(npm_scanner, root: Path, projects: dict):
         patch.object(npm_scanner, "_pre_scan", return_value=True),
         patch.object(npm_scanner, "_post_scan"),
         patch.object(npm_scanner, "_run_subprocess", side_effect=fake_run),
+        patch.object(npm_audit_module, "package_manager_child", recording_child),
     ):
         return npm_scanner.scan(target=root, target_type="source")
 

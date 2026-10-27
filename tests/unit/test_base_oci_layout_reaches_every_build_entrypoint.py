@@ -43,6 +43,7 @@ from typing import Any, Dict, List
 
 import pytest
 
+from tests.utils.host_ids import with_fixed_ids
 from automated_security_helper.interactions import run_ash_container as rac
 from automated_security_helper.interactions.run_ash_container import (
     BASE_OCI_LAYOUT_CONTEXT,
@@ -292,7 +293,12 @@ def _ash_build(tmp_path: Path, runner_name: str, value: str | None):
     (tmp_path / "src").mkdir(exist_ok=True)
     argv_log = tmp_path / "argv"
 
-    env = {**os.environ, "OCI_RUNNER": str(runner), "ARGV_LOG": str(argv_log)}
+    # An unprivileged `id`, so the default non-root build reaches the runner when the
+    # suite itself runs as root.
+    env = with_fixed_ids(
+        {**os.environ, "OCI_RUNNER": str(runner), "ARGV_LOG": str(argv_log)},
+        tmp_path / "fixed-id-bin",
+    )
     for name in (
         VAR,
         "ASH_BASE_IMAGE_OVERRIDE",
@@ -371,7 +377,11 @@ class TestTheBashEntrypoint:
 
 
 class TestThePowerShellEntrypoint:
-    """``utils/ash_helpers.ps1``: the powershell scan legs. Text assertions; no pwsh here."""
+    """``utils/ash_helpers.ps1``: the powershell scan legs, asserted as text.
+
+    The refusal of a malformed value is also run under pwsh, in
+    tests/unit/test_powershell_wrapper_matches_ash.py ("layout" in _FAILURES).
+    """
 
     @pytest.fixture
     def body(self) -> str:
@@ -387,10 +397,12 @@ class TestThePowerShellEntrypoint:
         branch_at = body.index("if ($ociRunnerName -in @('nerdctl', 'finch'))")
         else_at = body.index("else", branch_at)
         branch = body[branch_at:else_at]
+        # Without embedded quotes: the build command is an argument array handed to the
+        # runner directly, where `"...`" quotes would reach it as literal characters.
         assert (
-            '"--build-context", "`"ash-base-image=oci-layout://$baseLayoutDir`""'
-            in branch
+            '"--build-context", "ash-base-image=oci-layout://$baseLayoutDir"' in branch
         )
+        assert '`"ash-base-image' not in branch
         assert '"--build-arg", "BASE_IMAGE=ash-base-image"' in branch
         assert '"--pull=false"' in branch
 

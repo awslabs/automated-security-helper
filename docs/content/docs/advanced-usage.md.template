@@ -4,7 +4,7 @@ This guide covers advanced features and usage patterns for ASH v3.
 
 ## Execution Modes
 
-ASH v3 supports three execution modes:
+ASH v3 supports four execution modes:
 
 ### Local Mode
 
@@ -12,10 +12,42 @@ ASH v3 supports three execution modes:
 ash --mode local
 ```
 
-- Runs entirely in the local Python process
-- Only uses Python-based scanners by default
-- Fastest execution but limited scanner coverage
+- Runs the scan in the local Python process
+- Runs every enabled scanner, using the scanner tools installed on this machine; a
+  scanner whose tool is missing is reported `MISSING`
+- `--python-only` limits the scan to the scanners that need nothing but Python
 - Ideal for quick checks during development
+
+### Tools inside the scanned directory
+
+ASH does not start a scanner or any other tool that it finds inside the directory it
+is scanning. `uv run ash scan .` puts the repository's `.venv/bin` first on `PATH`,
+and `npm run` does the same with `node_modules/.bin`, so under either a scanner
+installed in the project, such as a `bandit` or `semgrep` dependency, is part of the
+repository being scanned. ASH skips it and uses the next copy on `PATH`, or the one
+`uv tool` installs. If there is none, the scanner is reported as MISSING, with the
+in-tree path in its `missing_reason`, in the log, and in the message the incomplete
+scan exits with.
+
+ASH also never finds a tool through the working directory: not through an empty, `.`
+or relative `PATH` entry, and on Windows not through the working directory that
+`CreateProcess` and `shutil.which` search first. Tools on ordinary absolute `PATH`
+entries are found, including Homebrew, nix profiles, uv and pipx shims,
+asdf and mise shims, conda, Program Files, scoop and Chocolatey. Programs ASH and its
+scanners start are given a `PATH` without the scanned directory's entries, unless you
+allow in-tree tools.
+
+To run tools from inside the scanned directory, pass `--allow-in-tree-tools` (or set
+`"allow_in_tree_tools": true` in a `--cli-json-input` document), or set
+`ASH_ALLOW_IN_TREE_TOOLS` to `1`, `true`, `yes` or `on`. ASH then uses them and logs a
+warning naming each one.
+This also covers the scanner sandbox's own programs (`bwrap`, `firejail`, `readlink`
+and `true`). A
+repository's configuration file cannot turn this on, and `ash mcp` ignores both: an
+MCP client's scans never run a tool from inside a scanned or delivered directory, so
+for MCP use, install scanners outside the repository. See
+[Troubleshooting](troubleshooting.md#a-scanner-is-missing-because-it-was-found-only-inside-the-scanned-tree)
+for the message and the fixes.
 
 ### Container Mode
 
@@ -23,8 +55,8 @@ ash --mode local
 ash --mode container
 ```
 
-- Runs non-Python scanners in a container
-- Provides full scanner coverage
+- Builds the ASH container image and runs the whole scan inside it
+- Provides full scanner coverage, because the image has every scanner tool installed
 - Requires a container runtime (Docker, Podman, etc.)
 - Ideal for comprehensive scans
 
@@ -34,10 +66,26 @@ ash --mode container
 ash --mode precommit
 ```
 
-- Runs a subset of fast scanners
-- Optimized for pre-commit hooks
-- Includes only Python-based scanners + npm audit
+- A local scan that runs only bandit, detect-secrets, checkov, cdk-nag and npm-audit,
+  plus any scanners named with `--scanners`
+- Simplified output and no progress display
+- Scans the whole source directory, not only staged or changed files; add
+  `--changed-files-only` to report only the findings in changed files (every file
+  is still scanned)
+- In workspace mode it changes only the output; it does not narrow the scanner set
 - Ideal for git hooks and quick CI checks
+
+### Nix Mode
+
+```bash
+ash --mode nix
+```
+
+- Runs the scan inside `nix develop`, whose shell supplies every scanner at a pinned
+  version
+- Always runs offline
+- Linux and macOS; on Windows, run it in WSL2
+- See [Nix mode](installation-guide.md#nix-mode)
 
 ## Custom Plugins
 
@@ -109,7 +157,16 @@ ash build-image --offline --offline-semgrep-rulesets p/ci
 
 # Run in offline mode
 ash --mode container --offline
+
+# On a host without network access, run the image without rebuilding it
+ash --mode container --offline --no-build
 ```
+
+Container mode builds the image before every scan unless given `--no-build`.
+Without `--force`, a build upgrades the OS packages and, offline, downloads the
+databases and rulesets once per UTC day, and is served from the build cache for the
+rest of that day, so the first build on a new day needs network access. With
+`--force`, every build does all of it again.
 
 An offline image's databases are frozen at build time, and ASH fails a scan whose
 database is past its bound: grype's 5 days (120h) after it was built, the offline
@@ -126,14 +183,70 @@ Offline mode is decided when each scanner runs, from these sources in order:
 1. ASH's offline mode: `--offline` on `ash scan`, `ASH_OFFLINE=true` in the
    environment, or an image built with `ash build-image --offline`. It applies to
    every scanner, and no scanner option turns it off.
-2. A scanner's own `options.offline: true` (checkov, grype, npm-audit, opengrep,
-   semgrep, syft, trivy-repo). It runs that one scanner offline while the rest of the
-   scan stays online.
+2. A scanner's own `options.offline: true` (checkov, grype, opengrep, semgrep, syft,
+   trivy, trivy-repo). It runs that one scanner offline while the rest of the scan
+   stays online. npm-audit has the option too, and it makes npm-audit `MISSING` (or
+   `SKIPPED` without a lockfile) rather than run it offline; see below.
 
 `options.offline: false` is the default and means "follow ASH's offline mode". It does
 not put a scanner back online during an `--offline` scan; `ash config init` writes
 `offline: false` for every scanner that has the option, so a generated config would
 otherwise undo the flag.
+
+#### What offline mode turns off
+
+Online and offline, trivy, trivy-repo and syft read no config file from the scanned
+tree, because a `trivy.yaml` there can turn on a VEX repository download or
+client/server mode and a `.syft.yaml` remote license and package lookups. trivy always
+gets `--config`, naming the operator's `config_file`, else `TRIVY_CONFIG` when that is
+a file outside the scanned tree, and an empty config ASH ships otherwise; syft runs from outside the tree and is given only a
+`config_file` outside it.
+
+Besides the database and rule downloads, offline mode turns off what the scanners do
+over the network on their own:
+
+- Every scanner tool process ASH starts, the version probes of its dependency check
+  included, gets environment variables that turn off each tool's update, version and
+  telemetry checks: semgrep's version check and metrics
+  (`SEMGREP_ENABLE_VERSION_CHECK=0`, `SEMGREP_SEND_METRICS=off`), checkov's PyPI update
+  check (`CKV_SKIP_PACKAGE_UPDATE_CHECK=true`), npm's update notifier
+  (`npm_config_update_notifier=false`), trivy's version check and telemetry
+  (`TRIVY_SKIP_VERSION_CHECK`, `TRIVY_DISABLE_TELEMETRY`), and the update checks of
+  syft and grype. They also turn off the lookups a tool's own config file can enable:
+  syft's remote license searches, maven lookups and vcpkg git clones, and grype's
+  external sources. On a Go module syft does not run the Go toolchain
+  (`SYFT_GOLANG_USE_PACKAGES_LIB=false`), and the toolchain grype runs gets
+  `GOPROXY=off` and `GOTOOLCHAIN=local`, so it downloads no module and no toolchain.
+  The full list is in `automated_security_helper/utils/offline_tool_env.py`. A scanner
+  set offline by its own `options.offline: true` while ASH runs online gets them too,
+  on its scan and on the version probes of its dependency check.
+- trivy's version check and telemetry are off whatever `disable_telemetry` says, through
+  `TRIVY_SKIP_VERSION_CHECK` and `TRIVY_DISABLE_TELEMETRY` rather than flags, which a
+  trivy too old to know them would refuse.
+- trivy-repo, and trivy when `misconfig` is in its `scanners`, do not run trivy's
+  Terraform checks offline. trivy downloads the source of every `module` block a
+  `.tf` file names (from the Terraform registry, with the host's `git`, or over
+  HTTPS), and has no setting that stops it, so ASH passes `--misconfig-scanners` with
+  trivy's own default list minus `terraform`. If that list cannot be read from
+  `trivy repository --help` (`trivy fs --help` for trivy), trivy's misconfiguration
+  checks are skipped offline. checkov still checks Terraform. Any `git` a tool runs offline gets
+  `GIT_ALLOW_PROTOCOL=file`, so it reaches no remote.
+- npm-audit runs no audit, because npm, pnpm and yarn audit only against the package
+  registry's advisory service: offline `npm audit --offline` reported no advisories for
+  a lockfile with known ones, `pnpm audit --offline` sent the dependency list to the
+  registry anyway, and `yarn npm audit` has no offline mode. Every lockfile it would
+  have audited is listed as not scanned, with the reason, in
+  `ash_aggregated_results.json` (the scanner's `inputs_not_scanned`), the console
+  summary, and the "Inputs not scanned" section of `ash.summary.md` and
+  `ash.summary.txt`. A workspace scan lists every project's, with workspace-relative
+  paths, in each project's `inputs_not_scanned` entry in the workspace results, the
+  merged summaries and the workspace console summary. When there is a lockfile, npm-audit is MISSING, as snyk-code is,
+  so the scan fails under the default completeness gate (exit code 1). To scan a
+  Node.js project offline without it, pass `--exclude-scanners npm-audit`. A project
+  with no lockfile has nothing to audit, and npm-audit is SKIPPED.
+- detect-secrets does not verify candidate secrets with their issuers, whatever the
+  scanned repository's `.secrets.baseline` or any config says. See
+  [Secret verification](configuration-guide.md#secret-verification).
 
 #### Seeding the semgrep and opengrep rule cache
 
@@ -173,6 +286,15 @@ ash --mode local --offline
 Copy the cache directories to the air-gapped host and export the same two variables
 there. Repeat the download at least every 30 days, or the scan fails as stale.
 
+Under `--sandbox`, the sandbox mounts the directory each variable names read-only for
+its scanner, wherever it is, including under `$HOME`, which the sandbox otherwise
+hides. Only the variable in ASH's own environment grants it: a rules path in a
+scanner's options, which the scanned repository can set, is not mounted, and an
+empty or relative value grants nothing. A variable naming a file, `/`, `$HOME` or a
+directory that holds `$HOME` is not mounted either, with a warning; point it at the
+rules directory itself. If semgrep or opengrep still cannot read its rules, it exits 7 and is recorded
+`ERROR`, and the scan exits 1.
+
 ## Customizing Scan Phases
 
 ASH v3 executes scans in phases:
@@ -208,6 +330,14 @@ ASH v3 includes an interactive TUI for exploring findings:
 # Launch the findings explorer
 ash inspect findings --output-dir /path/to/results
 ```
+
+A finding's detail view shows the code snippet its results hold. For a finding with
+none, it shows the lines around the finding from its file, but only when the results
+are in the scanned directory's `.ash/ash_output` (the default output directory), and
+only from a regular file inside that directory. A hard link inside the tree counts as
+a file in it, as it does for the scanners. A FIFO, a device, a path outside the
+directory, a symlink that leads out of it, or results in any other directory show
+"(source not shown)".
 
 ## Container Customization
 
@@ -246,7 +376,7 @@ ash build-image --build-target ci --custom-containerfile ./my-dockerfile
 
 ```bash
 # Complex configuration overrides
-ash --config-overrides 'scanners.semgrep.options.rules=["p/ci", "p/owasp-top-ten"]'
+ash --config-overrides 'scanners.semgrep.options.config=p/owasp-top-ten'
 ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
 ```
 
@@ -306,7 +436,7 @@ suppressions start with `"(ASH)"` while inline suppressions start with
 ### Temporarily Ignoring Suppressions
 
 ```bash
-# Run a scan ignoring all suppression rules
+# Run a scan ignoring all suppression rules, ignore_paths included
 ash --ignore-suppressions
 
 # Useful for verifying if suppressed issues have been fixed
@@ -319,20 +449,60 @@ ASH v3 can be used programmatically in Python:
 
 ```python
 from automated_security_helper.interactions.run_ash_scan import run_ash_scan
-from automated_security_helper.core.enums import RunMode, Strategy
+from automated_security_helper.core.enums import ExecutionStrategy, RunMode
 
 # Run a scan
 results = run_ash_scan(
     source_dir="/path/to/code",
     output_dir="/path/to/output",
     mode=RunMode.local,
-    strategy=Strategy.parallel,
+    strategy=ExecutionStrategy.PARALLEL,
     scanners=["bandit", "semgrep"],
     config_overrides=["scanners.bandit.enabled=true"],
+    # Return the results even when there are actionable findings
+    fail_on_findings=False,
 )
 
 # Access scan results
-print(f"Found {results.summary_stats.total_findings} findings")
+stats = results.metadata.summary_stats
+print(f"Found {stats.total} findings, {stats.actionable} actionable")
+```
+
+`run_ash_scan` takes keyword arguments from its signature only. An unknown one, such
+as a misspelled `fail_on_finding`, raises `TypeError` naming it; earlier versions
+accepted it and ran the scan without it.
+
+The call returns the aggregated results only when the scan's exit code is 0.
+Otherwise it ends the way `ash scan` does, by raising `SystemExit` with that code
+(see [Exit codes](cli-reference.md#exit-codes)): 2 for actionable findings while
+`fail_on_findings` is on, which is the default, and 1 for an incomplete scan, for
+example a selected scanner whose tool is not installed. That exit 1 is a
+`ScanIncompleteExit`, a `SystemExit` subclass whose `incompleteness` attribute names
+what was incomplete (the scanners and converters that did not run, and any stale
+content databases) and whose `results` attribute holds the results. A run ASH refuses
+or gives up (3 for a config that does not validate or files git tracks where the scan
+writes, 5 for a scanner selection that names nothing, 1 for an error during the scan)
+raises `ScanRefusedExit`, a `SystemExit` subclass whose `message` attribute is the
+text `ash scan` prints for it.
+
+### Logging to your own handler
+
+ASH logs through the `ash` logger. A handler your application puts on it stays
+there when a scan sets up ASH's logging, and it gets ASH's records as written:
+file names and tool output from the scanned repository in them included, such as
+a line that starts with `::` or holds `##vso[`, which a CI runner reads as a
+command. To have your handler write them as ASH's own console and log file do,
+with control characters as escapes and CI command lines broken, give it
+`CommandSafeFormatter`:
+
+```python
+import logging
+
+from automated_security_helper.utils.log import CommandSafeFormatter
+
+handler = logging.StreamHandler()
+handler.setFormatter(CommandSafeFormatter("%(levelname)s %(message)s"))
+logging.getLogger("ash").addHandler(handler)
 ```
 
 ## CI/CD Integration
@@ -364,10 +534,15 @@ jobs:
       - name: Run ASH scan
         run: ash --mode local
       - name: Upload scan results
+        # Also when ASH exits non-zero on findings: without a status function
+        # GitHub skips this step after any failed step.
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v3
         with:
           name: ash-results
-          path: .ash/ash_output
+          path: |
+            .ash/ash_output/reports
+            .ash/ash_output/ash_aggregated_results.json
 ```
 
 ### GitLab CI
@@ -380,8 +555,11 @@ ash-scan:
     - ash --mode local
   artifacts:
     paths:
-      - .ash/ash_output
+      - .ash/ash_output/reports
+      - .ash/ash_output/ash_aggregated_results.json
 ```
+
+Both examples keep `scanners/` and `converted/` out of the artifact: those hold each tool's raw output, which is not masked.
 
 ## Performance Optimization
 
@@ -406,7 +584,7 @@ ash --debug
 ash --verbose
 
 # Disable progress display
-ash --progress false
+ash --no-progress
 ```
 
 ### Scanner Validation

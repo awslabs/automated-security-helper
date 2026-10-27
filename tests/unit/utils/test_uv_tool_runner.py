@@ -1,14 +1,18 @@
 """Tests for utils/uv_tool_runner.py — covers UVToolRunner class methods."""
 
+import ast
 import os
 import re
 import subprocess  # nosec B404
 import threading
 import time
+from collections import Counter
 from contextlib import contextmanager
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 import pytest
 
+import automated_security_helper
 from automated_security_helper.utils import uv_tool_runner
 from automated_security_helper.utils.uv_tool_runner import (
     UVToolRunner,
@@ -22,6 +26,28 @@ from automated_security_helper.utils.uv_tool_runner import (
     get_uv_tool_runner,
     invalidate_tool_version_cache,
 )
+from tests.utils.env_assertions import differing_names
+from tests.utils.fake_tool_paths import fake_tool_path
+
+#: The uv the probe tests find. The probe spawns this path with the process boundary
+#: mocked, and ASH starts a program given by path only when the host anchors it: on
+#: Windows a bare ``/opt/uv/bin/uv`` has no drive, is refused before the mocked runner
+#: is reached, and the probe is never seen. Nothing is created at this path.
+UV_PATH = fake_tool_path("/opt/uv/bin/uv")
+
+
+@pytest.fixture(autouse=True)
+def _unresolved_names_reach_the_mocked_spawn(monkeypatch):
+    """Hand names that resolve nowhere to the mocked spawn on every platform.
+
+    These tests replace the process boundary and pass it programs that are not
+    installed. On Windows ASH refuses such a name before spawning it
+    (subprocess_utils._refuse_unresolved_on_windows); these tests are about what
+    happens after the spawn, so that decision is set aside here.
+    """
+    from automated_security_helper.utils import subprocess_utils as _subprocess_utils
+
+    monkeypatch.setattr(_subprocess_utils, "_refuse_unresolved_on_windows", False)
 
 
 @pytest.fixture(autouse=True)
@@ -62,29 +88,149 @@ class TestUVToolRetryConfig:
         assert config.base_delay == 2.0
 
 
+class TestExitDescription:
+    """_exit_description's branches, each built from the code alone. It reads
+    a result object's response flags before the exit code, since a flagged
+    result's code is ASH's fixed one, never the tool's own: "exited 124"
+    would misread a timeout as the command's own exit."""
+
+    @staticmethod
+    def _result(**fields):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(**fields)
+
+    def test_the_timed_out_flag_wins_over_an_exit_code(self):
+        from automated_security_helper.utils.uv_tool_runner import _exit_description
+
+        result = self._result(returncode=124, timed_out=True)
+        assert _exit_description(result) == "the command timed out"
+
+    def test_each_flag_hides_the_code_it_rode_in_with(self):
+        from automated_security_helper.utils.uv_tool_runner import _exit_description
+
+        flagged = {
+            "cancelled": "the run was cancelled",
+            "result_rejected": "ASH rejected the tool's result",
+            "spawn_failed": "the command never started",
+        }
+        for flag, text in flagged.items():
+            result = self._result(returncode=1, **{flag: True})
+            assert _exit_description(result) == text, flag
+
+    def test_a_child_the_stop_did_not_end_has_no_exit(self):
+        from automated_security_helper.utils.uv_tool_runner import _exit_description
+
+        assert _exit_description(self._result(returncode=None)) == (
+            "the command did not exit"
+        )
+
+    def test_a_negative_code_is_a_signal_death(self):
+        from automated_security_helper.utils.uv_tool_runner import _exit_description
+
+        assert _exit_description(self._result(returncode=-15)) == (
+            "the command was ended by signal 15"
+        )
+
+    def test_a_plain_code_reads_as_the_exit(self):
+        from automated_security_helper.utils.uv_tool_runner import _exit_description
+
+        assert _exit_description(self._result(returncode=2)) == "the command exited 2"
+
+    def test_where_signals_do_not_exist_a_negative_code_is_the_exit(self, monkeypatch):
+        # signal_death answers None on Windows, where a negative code is just
+        # a large exit value; the helper then reports the code as written.
+        # Pinned by stubbing signal_death rather than faking os.name, so the
+        # cell measures this helper's fall-through, not the platform gate.
+        from automated_security_helper.utils import uv_tool_runner
+
+        monkeypatch.setattr(uv_tool_runner, "signal_death", lambda rc, cmd: None)
+        result = self._result(returncode=-1073741819)
+        assert uv_tool_runner._exit_description(result) == (
+            "the command exited -1073741819"
+        )
+
+
 class TestIsUvAvailable:
     """Tests for is_uv_available."""
 
     def test_available_when_command_succeeds(self, runner):
-        with patch("subprocess.run") as mock_run:
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain"
+        ) as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
             assert runner.is_uv_available() is True
+            mock_run.assert_called_once()
 
     def test_unavailable_when_command_fails(self, runner):
-        with patch("subprocess.run") as mock_run:
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain"
+        ) as mock_run:
             mock_run.return_value = MagicMock(returncode=1)
             assert runner.is_uv_available() is False
 
     def test_unavailable_on_exception(self, runner):
-        with patch("subprocess.run", side_effect=FileNotFoundError()):
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain",
+            side_effect=FileNotFoundError(),
+        ):
             assert runner.is_uv_available() is False
 
     def test_caches_result(self, runner):
-        with patch("subprocess.run") as mock_run:
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain"
+        ) as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
             runner.is_uv_available()
             runner.is_uv_available()
             assert mock_run.call_count == 1
+
+    def test_a_sandbox_refusal_is_not_remembered(self, runner):
+        """A check refused by a probe's sandbox scope says nothing about uv itself.
+
+        The runner is shared by the whole process, so caching that answer made uv
+        read as missing for every later spawn, sandboxed or not.
+        """
+        from automated_security_helper.utils.sandbox.scope import (
+            RefusingScope,
+            sandbox_scope,
+        )
+
+        with sandbox_scope(RefusingScope("jupyter", "no bwrap here")):  # type: ignore[arg-type]
+            assert runner.is_uv_available() is False
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            assert runner.is_uv_available() is True
+
+    def test_a_sandbox_refusal_is_named_as_the_reason(self, runner):
+        """Not "UV is not available": uv may be installed; the sandbox refused it."""
+        from automated_security_helper.utils.sandbox.scope import (
+            RefusingScope,
+            sandbox_scope,
+        )
+
+        with sandbox_scope(RefusingScope("jupyter", "no bwrap here")):  # type: ignore[arg-type]
+            assert runner.is_uv_available() is False
+            reason = runner.unavailable_reason()
+
+        assert "scanner sandbox refused to run uv" in reason
+        assert "no bwrap here" in reason
+        assert "UV is not available" not in reason
+
+    def test_an_absent_uv_is_named_as_before(self, runner):
+        """Control, and a later check clears an earlier refusal's reason."""
+        from automated_security_helper.utils.sandbox.scope import (
+            RefusingScope,
+            sandbox_scope,
+        )
+
+        with sandbox_scope(RefusingScope("jupyter", "no bwrap here")):  # type: ignore[arg-type]
+            runner.is_uv_available()
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1)
+            assert runner.is_uv_available() is False
+
+        assert runner.unavailable_reason() == "UV is not available"
 
 
 class TestListAvailableTools:
@@ -92,7 +238,9 @@ class TestListAvailableTools:
 
     def test_returns_tool_names(self, runner):
         runner._uv_available_cache = True
-        with patch("subprocess.run") as mock_run:
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain"
+        ) as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="bandit 1.7.0\ncheckov 3.0.0\n"
             )
@@ -108,7 +256,7 @@ class TestListAvailableTools:
     def test_raises_on_subprocess_error(self, runner):
         runner._uv_available_cache = True
         with patch(
-            "subprocess.run",
+            "automated_security_helper.utils.subprocess_utils._run_plain",
             side_effect=subprocess.CalledProcessError(1, "uv"),
         ):
             with pytest.raises(UVToolRunnerError):
@@ -116,7 +264,9 @@ class TestListAvailableTools:
 
     def test_handles_sub_command_lines(self, runner):
         runner._uv_available_cache = True
-        with patch("subprocess.run") as mock_run:
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain"
+        ) as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="bandit 1.7.0\n- bandit-baseline\n"
             )
@@ -129,20 +279,24 @@ class TestIsToolInstalled:
 
     def test_returns_true_when_in_list(self, runner):
         runner._uv_available_cache = True
-        with patch("subprocess.run") as mock_run:
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain"
+        ) as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="bandit 1.7.0\n")
             assert runner.is_tool_installed("bandit") is True
 
     def test_returns_false_when_not_in_list(self, runner):
         runner._uv_available_cache = True
-        with patch("subprocess.run") as mock_run:
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain"
+        ) as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="checkov 3.0.0\n")
             assert runner.is_tool_installed("bandit") is False
 
     def test_returns_false_on_error(self, runner):
         runner._uv_available_cache = True
         with patch(
-            "subprocess.run",
+            "automated_security_helper.utils.subprocess_utils._run_plain",
             side_effect=subprocess.CalledProcessError(1, "uv"),
         ):
             assert runner.is_tool_installed("bandit") is False
@@ -153,7 +307,9 @@ class TestGetToolVersion:
 
     def test_returns_version_string(self, runner):
         runner._uv_available_cache = True
-        with patch("subprocess.run") as mock_run:
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain"
+        ) as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="bandit 1.7.8\n")
             version = runner.get_tool_version("bandit")
             assert version == "bandit 1.7.8"
@@ -164,13 +320,17 @@ class TestGetToolVersion:
 
     def test_returns_none_on_failure(self, runner):
         runner._uv_available_cache = True
-        with patch("subprocess.run") as mock_run:
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain"
+        ) as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="")
             assert runner.get_tool_version("bandit") is None
 
     def test_uses_package_name_in_from_param(self, runner):
         runner._uv_available_cache = True
-        with patch("subprocess.run") as mock_run:
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain"
+        ) as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="1.7.8\n")
             runner.get_tool_version("bandit", package_name="bandit[sarif]")
             cmd = mock_run.call_args[0][0]
@@ -179,8 +339,25 @@ class TestGetToolVersion:
 
     def test_returns_none_on_exception(self, runner):
         runner._uv_available_cache = True
-        with patch("subprocess.run", side_effect=RuntimeError("boom")):
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain",
+            side_effect=RuntimeError("boom"),
+        ):
             assert runner.get_tool_version("bandit") is None
+
+    def test_a_sandbox_refusal_is_not_remembered(self, runner):
+        """A probe its sandbox scope refused did not run, so it measured nothing."""
+        from automated_security_helper.utils.sandbox.scope import (
+            RefusingScope,
+            sandbox_scope,
+        )
+
+        runner._uv_available_cache = True
+        with sandbox_scope(RefusingScope("bandit", "no bwrap here")):  # type: ignore[arg-type]
+            assert runner.get_tool_version("bandit") is None
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="bandit 1.7.8\n")
+            assert runner.get_tool_version("bandit") == "bandit 1.7.8"
 
 
 class TestInstallToolWithVersion:
@@ -188,7 +365,9 @@ class TestInstallToolWithVersion:
 
     def test_skips_already_installed(self, runner):
         runner._uv_available_cache = True
-        with patch("subprocess.run") as mock_run:
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain"
+        ) as mock_run:
             # list_available_tools response
             mock_run.return_value = MagicMock(returncode=0, stdout="bandit 1.7.0\n")
             result = runner.install_tool_with_version("bandit")
@@ -200,7 +379,9 @@ class TestInstallToolWithVersion:
 
     def test_successful_install(self, runner):
         runner._uv_available_cache = True
-        with patch("subprocess.run") as mock_run:
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain"
+        ) as mock_run:
             # First call: list_available_tools (tool not installed)
             # Second call: install command
             mock_run.side_effect = [
@@ -222,7 +403,9 @@ class TestInstallToolWithVersion:
 
     def test_raises_on_timeout(self, runner):
         runner._uv_available_cache = True
-        with patch("subprocess.run") as mock_run:
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain"
+        ) as mock_run:
             mock_run.side_effect = [
                 MagicMock(returncode=0, stdout=""),  # list (tool not present)
                 subprocess.TimeoutExpired("uv", 300),
@@ -240,9 +423,88 @@ class TestInstallToolWithVersion:
                 with pytest.raises(UVToolRunnerError, match="timed out"):
                     runner.install_tool_with_version("bandit", timeout=300)
 
+    def test_a_timed_out_install_drops_the_memoized_version(self, runner):
+        """ASH stops a timed-out install without knowing how far uv got:
+        the tool can be fully installed by the time the stop lands. A
+        version answer memoized before the install (None for a tool that
+        was not installed yet) then no longer describes the environment,
+        so the timeout drops this tool's cache entry exactly as a
+        completed install does, and the next probe asks uv again. Before
+        this, the memoized pre-install None outlived the timed-out
+        install for the rest of the process."""
+        runner._uv_available_cache = True
+        # What a pre-install probe of a missing tool leaves behind.
+        with uv_tool_runner._uv_tool_runner_cache_lock:
+            uv_tool_runner._uv_tool_version_cache["bandit::"] = None
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain"
+        ) as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout=""),  # list (tool not present)
+                subprocess.TimeoutExpired("uv", 300),
+            ]
+            with (
+                patch(
+                    "automated_security_helper.utils.subprocess_utils.find_executable",
+                    return_value=None,
+                ),
+                patch(
+                    "automated_security_helper.core.constants.is_offline_mode",
+                    return_value=False,
+                ),
+            ):
+                with pytest.raises(UVToolRunnerError, match="timed out"):
+                    runner.install_tool_with_version("bandit", timeout=300)
+        with uv_tool_runner._uv_tool_runner_cache_lock:
+            assert "bandit::" not in uv_tool_runner._uv_tool_version_cache, (
+                "the memoized pre-install answer survived the timed-out install"
+            )
+
+    def test_a_timeouts_error_names_no_part_of_the_spec(self, runner):
+        """The timeout's message names the operation and the tool, never the
+        assembled spec: a plugin-built constraint or --with dependency can
+        hold a value its config read from the environment, and neither this
+        function nor the runner holds the values to redact it with --
+        checked_requirement's rule, and the run path's own timeout shape
+        ("uv tool run <tool>"), applied to the install timeout too."""
+        constraint = "==9.9.9rc777"
+        runner._uv_available_cache = True
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain"
+        ) as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout=""),  # list (tool not present)
+                subprocess.TimeoutExpired("uv", 300),
+            ]
+            with (
+                patch(
+                    "automated_security_helper.utils.subprocess_utils.find_executable",
+                    return_value=None,
+                ),
+                patch(
+                    "automated_security_helper.core.constants.is_offline_mode",
+                    return_value=False,
+                ),
+            ):
+                with pytest.raises(UVToolRunnerError) as raised:
+                    runner.install_tool_with_version(
+                        "bandit",
+                        version_constraint=constraint,
+                        with_dependencies=["left-pad==1.0.1rc9"],
+                        timeout=300,
+                    )
+        text = str(raised.value)
+        # The control: the operation and the tool are named.
+        assert "timed out" in text, text
+        assert "uv tool install bandit" in text, text
+        assert constraint not in text, text
+        assert "left-pad" not in text, text
+
     def test_returns_false_in_offline_mode(self, runner):
         runner._uv_available_cache = True
-        with patch("subprocess.run") as mock_run:
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain"
+        ) as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="")
             with (
                 patch(
@@ -259,7 +521,9 @@ class TestInstallToolWithVersion:
 
     def test_with_version_constraint(self, runner):
         runner._uv_available_cache = True
-        with patch("subprocess.run") as mock_run:
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain"
+        ) as mock_run:
             mock_run.side_effect = [
                 MagicMock(returncode=0, stdout=""),  # list
                 MagicMock(returncode=0),  # install
@@ -280,7 +544,9 @@ class TestInstallToolWithVersion:
 
     def test_with_package_extras(self, runner):
         runner._uv_available_cache = True
-        with patch("subprocess.run") as mock_run:
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain"
+        ) as mock_run:
             mock_run.side_effect = [
                 MagicMock(returncode=0, stdout=""),  # list
                 MagicMock(returncode=0),  # install
@@ -313,8 +579,8 @@ def _always_fails_with_reset(attempt_number):
 def _install_harness(runner, outcome_for_attempt):
     """Reduce ``install_tool_with_version`` to just its own install subprocess.
 
-    ``is_tool_installed`` is stubbed out rather than driven through
-    ``subprocess.run`` deliberately: these tests read a *count*, and a count that
+    ``is_tool_installed`` is stubbed out rather than driven through ASH's plain
+    runner deliberately: these tests read a *count*, and a count that
     silently also included the ``uv tool list`` probe could not be read.
 
     ``outcome_for_attempt(n)`` is called with the 1-based attempt number and
@@ -343,7 +609,7 @@ def _install_harness(runner, outcome_for_attempt):
             return_value=False,
         ),
         patch(
-            "automated_security_helper.utils.uv_tool_runner.subprocess.run",
+            "automated_security_helper.utils.subprocess_utils._run_plain",
             side_effect=_run,
         ),
         patch(
@@ -379,6 +645,1277 @@ class TestInstallRetriesActuallyHappen:
     range. Nothing here measures wall clock, which would flake low on a fast
     machine and high on a loaded one.
     """
+
+    def test_an_exhausted_installs_error_has_no_resolver_text_or_argv(
+        self, runner, monkeypatch
+    ):
+        """uv's resolver errors quote the requirement they could not satisfy,
+        and the spec and ``--with`` dependencies are plugin-built and can hold
+        a value their config read from the environment -- the rule the timeout
+        arm already states, and nothing here holds the values to redact with.
+        An exhausted install's error keeps the exit code, the one retriable
+        fact that carries no argv, and names the command by its fixed shape."""
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+
+        def resolver_error(_attempt):
+            return subprocess.CalledProcessError(
+                1,
+                ["uv", "tool", "install", "bandit==REQ-SECRET-9174"],
+                stderr=(
+                    "error: Because there is no version of bandit==REQ-SECRET-9174\n"
+                ),
+            )
+
+        with (
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError) as caught,
+        ):
+            runner.install_tool_with_version("bandit")
+
+        assert len(installs) == 1
+        text = str(caught.value)
+        assert "REQ-SECRET-9174" not in text, text
+        assert "exit code 1" in text, text
+        assert "(uv tool install bandit; arguments not shown)" in text, text
+        assert "Command:" not in text, text
+
+    def test_the_install_timeouts_label_names_no_arguments(self, runner, monkeypatch):
+        """The timeout's message labels the command by its fixed shape, never
+        as a ``Command:`` line: the assembled argv is exactly what it leaves
+        out, so the label must not read as a command that can be rerun as
+        written -- copied, it would reinstall the latest unconstrained tool
+        without its --with dependencies."""
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+
+        def times_out(_attempt):
+            return subprocess.TimeoutExpired(cmd=["uv"], timeout=300)
+
+        with (
+            _install_harness(runner, times_out) as (installs, _),
+            pytest.raises(UVToolRunnerError) as caught,
+        ):
+            runner.install_tool_with_version("bandit", timeout=300)
+
+        assert len(installs) == 1
+        text = str(caught.value)
+        assert "(uv tool install bandit; arguments not shown)" in text, text
+        assert "Command:" not in text, text
+
+    def test_a_failed_installs_stderr_reaches_the_debug_log_without_values(
+        self, runner, monkeypatch, caplog
+    ):
+        """uv's stderr is the only clue to a 5xx, a DNS failure or a resolver
+        conflict, and the retry path exists for exactly those: it reaches the
+        debug log with each plugin-built argument replaced by a placeholder,
+        so a failed install stays diagnosable without the raised text or any
+        log quoting the spec or a --with dependency."""
+        import logging
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+        constraint = "==9.9.9rc777"
+        dep = "left-pad==1.0.1rc9"
+
+        def resolver_error(_attempt):
+            return subprocess.CalledProcessError(
+                1,
+                ["uv"],
+                stderr=(
+                    f"error: Because there is no version of bandit{constraint} "
+                    f"and you require {dep},\nresolution failed."
+                ),
+            )
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version(
+                "bandit",
+                version_constraint=constraint,
+                with_dependencies=[dep],
+            )
+
+        assert len(installs) == 1
+        debug_lines = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.DEBUG
+            and "resolution failed" in record.getMessage()
+        ]
+        assert debug_lines, "the cell shows nothing: no debug line carried the stderr"
+        shown = debug_lines[0]
+        assert "9.9.9rc777" not in shown, shown
+        assert "left-pad" not in shown, shown
+        assert "not shown>" in shown, shown
+        assert "there is no version of" in shown, shown
+        # One record, one console line, like every sibling that logs
+        # tool-written text: a raw newline splits the record at the handler.
+        assert "\n" not in shown, shown
+
+    def test_the_debug_logs_redaction_survives_an_extras_stripped_respelling(
+        self, runner, monkeypatch, caplog
+    ):
+        """uv names a requirement without the extras the spec carried
+        (``bandit[sarif]==X`` comes back as ``bandit==X``), so a whole-spec
+        replace finds nothing: the bare constraint is replaced too, longest
+        token first, and the version never reaches the debug log."""
+        import logging
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+        constraint = "==9.9.9rc777"
+
+        def resolver_error(_attempt):
+            return subprocess.CalledProcessError(
+                1,
+                ["uv"],
+                stderr=(
+                    f"error: Because there is no version of bandit{constraint}, "
+                    f"resolution failed."
+                ),
+            )
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version(
+                "bandit",
+                version_constraint=constraint,
+                package_extras=["sarif"],
+            )
+
+        assert len(installs) == 1
+        debug_lines = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.DEBUG
+            and "resolution failed" in record.getMessage()
+        ]
+        assert debug_lines, "the cell shows nothing: no debug line carried the stderr"
+        shown = debug_lines[0]
+        assert "9.9.9rc777" not in shown, shown
+        assert "sarif" not in shown, shown
+
+    def test_the_debug_logs_redaction_survives_a_respaced_specifier(
+        self, runner, monkeypatch, caplog
+    ):
+        """uv respells a constraint's spacing and order (">= 1.7, < 2" can
+        come back ">=1.7,<2"), and packaging's own normalization REORDERS
+        ("<2,>=1.7"), so no whole-string token in either form matches: each
+        individual specifier, spaces stripped, is a token too, and the pieces
+        match whatever order and spacing the whole came back in."""
+        import logging
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+
+        def resolver_error(_attempt):
+            return subprocess.CalledProcessError(
+                1,
+                ["uv"],
+                stderr="error: no version of bandit satisfies >=1.7,<2 today.",
+            )
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version(
+                "bandit",
+                version_constraint=">= 1.7, < 2",
+                package_extras=["sarif"],
+            )
+
+        assert len(installs) == 1
+        debug_lines = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.DEBUG and "today" in record.getMessage()
+        ]
+        assert debug_lines, "the cell shows nothing: no debug line carried the stderr"
+        shown = debug_lines[0]
+        assert "1.7" not in shown, shown
+        assert "<2" not in shown, shown
+        assert "no version of bandit satisfies" in shown, shown
+
+    def test_the_debug_log_keeps_a_builtin_constraint_diagnosable(
+        self, runner, monkeypatch, caplog
+    ):
+        """With the caller's values in hand, text_without_values is the guard
+        for environment-read material in any spelling: the token layer then
+        hides only tokens that carry one of those values. A builtin constraint
+        is the very thing a resolver conflict is about, and hiding every
+        occurrence of it cost the debug line its purpose."""
+        import logging
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+        constraint = ">=1.7.0,<2.0.0"
+
+        def resolver_error(_attempt):
+            return subprocess.CalledProcessError(
+                1,
+                ["uv"],
+                stderr=(
+                    f"error: you require bandit{constraint} but VAL-9281 was "
+                    f"pinned elsewhere, so resolution failed."
+                ),
+            )
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version(
+                "bandit",
+                version_constraint=constraint,
+                values=("VAL-9281",),
+            )
+
+        assert len(installs) == 1
+        debug_lines = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.DEBUG
+            and "resolution failed" in record.getMessage()
+        ]
+        assert debug_lines, "the cell shows nothing: no debug line carried the stderr"
+        shown = debug_lines[0]
+        assert "VAL-9281" not in shown, shown
+        assert constraint in shown, shown
+
+    def test_a_generator_of_values_redacts_every_attempt(
+        self, runner, monkeypatch, caplog
+    ):
+        """``values`` is normalized to a tuple at entry: passed straight into
+        the retry loop, a generator would be used up by the first attempt and
+        leave every later attempt's debug line unredacted. Today's caller
+        passes a tuple, so this pins the latent trap, as
+        run_command_with_output_handling already does with value_tuple."""
+        import logging
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+
+        def resolver_error(_attempt):
+            return subprocess.CalledProcessError(
+                1,
+                ["uv"],
+                stderr="error: VAL-7733 is not an available version, retrying.",
+            )
+
+        config = UVToolRetryConfig(max_retries=1, base_delay=0.0, jitter=False)
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version(
+                "bandit",
+                version_constraint="==1.0",
+                retry_config=config,
+                values=(value for value in ["VAL-7733"]),
+            )
+
+        assert len(installs) == 2, "the cell shows nothing: no second attempt ran"
+        debug_lines = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.DEBUG and "retrying" in record.getMessage()
+        ]
+        assert len(debug_lines) == 2, debug_lines
+        for shown in debug_lines:
+            assert "VAL-7733" not in shown, shown
+
+    def test_the_debug_log_redacts_a_callers_value_whatever_its_spelling(
+        self, runner, monkeypatch, caplog
+    ):
+        """An env-read constraint can come back from uv in a form no assembled
+        token matches; the caller holds the real values, so the runner takes
+        them and redacts the stderr with text_without_values before any token
+        replacement -- the mixin's own pattern for text it logs."""
+        import logging
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+        value = "9.9.9rc777"
+
+        def resolver_error(_attempt):
+            return subprocess.CalledProcessError(
+                1,
+                ["uv"],
+                # The value alone, in a sentence no assembled token matches.
+                stderr=f"error: {value} is not one of the available versions.",
+            )
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version(
+                "bandit",
+                version_constraint=f"=={value}",
+                package_extras=["sarif"],
+                values=(value,),
+            )
+
+        assert len(installs) == 1
+        debug_lines = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.DEBUG
+            and "available versions" in record.getMessage()
+        ]
+        assert debug_lines, "the cell shows nothing: no debug line carried the stderr"
+        shown = debug_lines[0]
+        assert value not in shown, shown
+
+    @pytest.mark.parametrize(
+        ("constraint", "printed", "forbidden"),
+        [
+            pytest.param(
+                ">=9.9.9rc777,<10",
+                "bandit>=9.9.9rc777, <10",
+                ["9.9.9rc777"],
+                id="respaced",
+            ),
+            pytest.param(
+                ">=9.9.9rc777,<10",
+                "bandit<10, >=9.9.9rc777",
+                ["9.9.9rc777"],
+                id="reordered",
+            ),
+            pytest.param(
+                ">= 55.1, < 77.2",
+                "bandit>=55.1, <77.2",
+                ["55.1", "77.2"],
+                id="value-with-spaces",
+            ),
+        ],
+    )
+    def test_an_env_read_constraints_pieces_hide_however_uv_respells_it(
+        self, runner, monkeypatch, caplog, constraint, printed, forbidden
+    ):
+        """A whole-constraint env value is never a substring of its own
+        space-stripped pieces, so a token filter asking ``value in token``
+        kept nothing and the env-read constraint printed respaced. The filter
+        reads the token's ORIGIN instead: an input that holds one of the
+        caller's values is hidden with every specifier piece parsed from it,
+        whatever spacing or order uv prints them in."""
+        import logging
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+
+        def resolver_error(_attempt):
+            return subprocess.CalledProcessError(
+                1,
+                ["uv"],
+                stderr=(
+                    f"error: there is no version of {printed}, so your "
+                    f"requirements are unsatisfiable."
+                ),
+            )
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version(
+                "bandit",
+                version_constraint=constraint,
+                values=(constraint,),
+            )
+
+        assert len(installs) == 1
+        debug_lines = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.DEBUG
+            and "unsatisfiable" in record.getMessage()
+        ]
+        assert debug_lines, "the cell shows nothing: no debug line carried the stderr"
+        shown = debug_lines[0]
+        for text in forbidden:
+            assert text not in shown, (text, shown)
+
+    @pytest.mark.parametrize("with_value", [True, False])
+    def test_a_respaced_with_specifier_is_hidden(
+        self, runner, monkeypatch, caplog, with_value
+    ):
+        """A --with entry's pieces come from the Requirement fallback (a name
+        plus specifiers is no SpecifierSet), and they hide whether the entry
+        rides in ``values`` (an env-read dependency) or no values were passed
+        at all (unknown provenance, everything plugin-built is hidden)."""
+        import logging
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+        entry = "pyyaml>= 55.1, < 77.2"
+
+        def resolver_error(_attempt):
+            return subprocess.CalledProcessError(
+                1,
+                ["uv"],
+                stderr=(
+                    "error: only pyyaml<=6.0.2 is available and you require "
+                    "pyyaml>=55.1, <77.2, so your requirements are unsatisfiable."
+                ),
+            )
+
+        kwargs = {"values": (entry,)} if with_value else {}
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version(
+                "bandit", with_dependencies=[entry], **kwargs
+            )
+
+        assert len(installs) == 1
+        debug_lines = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.DEBUG
+            and "unsatisfiable" in record.getMessage()
+        ]
+        assert debug_lines, "the cell shows nothing: no debug line carried the stderr"
+        shown = debug_lines[0]
+        assert "55.1" not in shown, shown
+        assert "77.2" not in shown, shown
+
+    @pytest.mark.parametrize(
+        ("kwargs", "values", "printed", "forbidden"),
+        [
+            pytest.param(
+                {"version_constraint": "==9.9.9-RC777"},
+                ("9.9.9-RC777",),
+                "bandit==9.9.9rc777",
+                ["9.9.9rc777"],
+                id="pep440-pre-respelled",
+            ),
+            pytest.param(
+                {"version_constraint": "==9.9.9-post777"},
+                ("9.9.9-post777",),
+                "bandit==9.9.9.post777",
+                ["9.9.9.post777", "post777"],
+                id="pep440-post-respelled",
+            ),
+            pytest.param(
+                {"version_constraint": "==9.9.9-RC777"},
+                ("==9.9.9-RC777",),
+                "bandit==9.9.9rc777",
+                ["9.9.9rc777"],
+                id="pep440-whole-constraint-respelled",
+            ),
+            pytest.param(
+                {"with_dependencies": ["Ruamel.YAML==0.17.777"]},
+                ("Ruamel.YAML==0.17.777",),
+                "ruamel-yaml==0.17.777",
+                ["0.17.777", "ruamel-yaml"],
+                id="name-normalized-whole-entry",
+            ),
+        ],
+    )
+    def test_a_value_uv_normalizes_is_hidden_in_its_normalized_spelling(
+        self, runner, monkeypatch, caplog, kwargs, values, printed, forbidden
+    ):
+        """uv prints a requirement in PEP 440/503 canonical form ("9.9.9-RC777"
+        as "9.9.9rc777", "Ruamel.YAML" as "ruamel-yaml"), which neither the
+        value's own spellings nor an as-written token matches: the canonical
+        forms -- operator plus the parsed Version per piece, canonicalize_name
+        for a name -- are spellings of the value and of each hidden input too.
+        uv's exact canonical output here is inferred, not measured against a
+        real uv; the final wave confirms the shapes."""
+        import logging
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+
+        def resolver_error(_attempt):
+            return subprocess.CalledProcessError(
+                1,
+                ["uv"],
+                stderr=(
+                    f"error: there is no version of {printed} and you require "
+                    f"{printed}, so your requirements are unsatisfiable."
+                ),
+            )
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version("bandit", values=values, **kwargs)
+
+        assert len(installs) == 1
+        debug_lines = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.DEBUG
+            and "unsatisfiable" in record.getMessage()
+        ]
+        assert debug_lines, "the cell shows nothing: no debug line carried the stderr"
+        shown = debug_lines[0]
+        for text in forbidden:
+            assert text not in shown, (text, shown)
+
+    def test_an_explicit_empty_values_tuple_shows_builtin_arguments(
+        self, runner, monkeypatch, caplog
+    ):
+        """An explicit empty ``values`` means the caller checked and its config
+        read nothing from the environment, so every plugin-built input is
+        builtin and stays diagnosable. Only the default -- no ``values``
+        argument at all, unknown provenance -- hides them all; without the
+        distinction the constraint's visibility flipped on unrelated config."""
+        import logging
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+        constraint = "==1.7.5"
+
+        def resolver_error(_attempt):
+            return subprocess.CalledProcessError(
+                1,
+                ["uv"],
+                stderr=(
+                    f"error: there is no version of bandit{constraint}, so "
+                    f"resolution failed."
+                ),
+            )
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version(
+                "bandit", version_constraint=constraint, values=()
+            )
+
+        assert len(installs) == 1
+        debug_lines = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.DEBUG
+            and "resolution failed" in record.getMessage()
+        ]
+        assert debug_lines, "the cell shows nothing: no debug line carried the stderr"
+        assert constraint in debug_lines[0], debug_lines[0]
+
+    def test_a_hidden_name_leaves_other_words_that_contain_it_alone(
+        self, runner, monkeypatch, caplog
+    ):
+        """A requirement NAME is made of word characters, so replacing it as a
+        raw substring mangles every word that contains it: a hidden "toml"
+        turned "pyproject.toml" into noise. On the CHECKED branch -- the
+        caller vouched for ``values``, here the env-read version that makes
+        the entry hidden -- a name-shaped token is replaced only at
+        requirement-name boundaries (PEP 503's name alphabet, letters, digits
+        and ".-_"), so the whole entry and its pieces still hide while uv's
+        surrounding diagnostics stay readable. The unknown-provenance branch
+        keeps raw replacement; its own cell pins that."""
+        import logging
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+        entry = "toml==2.0.77"
+
+        def resolver_error(_attempt):
+            return subprocess.CalledProcessError(
+                1,
+                ["uv"],
+                stderr=(
+                    "error: pyproject.toml could not be parsed, and you "
+                    f"require {entry}, so resolution failed."
+                ),
+            )
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version(
+                "bandit", with_dependencies=[entry], values=("2.0.77",)
+            )
+
+        assert len(installs) == 1
+        debug_lines = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.DEBUG
+            and "resolution failed" in record.getMessage()
+        ]
+        assert debug_lines, "the cell shows nothing: no debug line carried the stderr"
+        shown = debug_lines[0]
+        assert "pyproject.toml" in shown, shown
+        assert "toml==2.0.77" not in shown, shown
+        assert "2.0.77" not in shown, shown
+
+    def test_hide_all_replaces_a_name_wherever_it_appears(
+        self, runner, monkeypatch, caplog
+    ):
+        """The ``values is None`` branch means NOBODY checked where the inputs
+        came from, so hide-all means hide-all: raw replacement, no boundary
+        rules. A name-boundary rule here leaks the input through uv's own
+        respellings -- "-" in a dist file name ("secret-pkg-1.0-py3-none-
+        any.whl") and "." at a sentence's end are both name characters, so a
+        boundary match replaces neither. The readability rule belongs to the
+        checked branch only."""
+        import logging
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+        entry = "secret" + "-pkg"
+
+        def resolver_error(_attempt):
+            return subprocess.CalledProcessError(
+                1,
+                ["uv"],
+                stderr=(
+                    f"Saved {entry}-1.0-py3-none-any.whl, but you require "
+                    f"{entry}. So resolution failed."
+                ),
+            )
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version("bandit", with_dependencies=[entry])
+
+        assert len(installs) == 1
+        debug_lines = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.DEBUG
+            and "resolution failed" in record.getMessage()
+        ]
+        assert debug_lines, "the cell shows nothing: no debug line carried the stderr"
+        shown = debug_lines[0]
+        assert entry not in shown, shown
+        assert "not shown" in shown, shown
+
+    def test_a_short_unrelated_value_does_not_hide_a_builtin_constraint(
+        self, runner, monkeypatch, caplog
+    ):
+        """The origin filter decides whether an input is hidden with the SAME
+        matcher the value layer redacts with, boundary rules included: a raw
+        substring test hid the builtin ">=1.7.4,<2" because an unrelated
+        option read "4" from the environment -- the exact visibility-flips-on-
+        unrelated-config problem the None-vs-() distinction removed. A short
+        value hides an input only where the value layer would hide it there
+        (under four characters, only quoted)."""
+        import logging
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+        constraint = ">=1.7.4,<2"
+
+        def resolver_error(_attempt):
+            return subprocess.CalledProcessError(
+                1,
+                ["uv"],
+                stderr=(
+                    f"error: you require bandit{constraint}, so resolution failed."
+                ),
+            )
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version(
+                "bandit",
+                version_constraint=constraint,
+                values=("4",),
+            )
+
+        assert len(installs) == 1
+        debug_lines = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.DEBUG
+            and "resolution failed" in record.getMessage()
+        ]
+        assert debug_lines, "the cell shows nothing: no debug line carried the stderr"
+        assert constraint in debug_lines[0], debug_lines[0]
+
+    def test_a_value_glued_into_an_input_still_hides_it(
+        self, runner, monkeypatch, caplog
+    ):
+        """The substring arm: a token is hidden where the value layer would
+        hide a value in it, OR where a value of MIN_REDACTED_LENGTH or more
+        characters is a plain substring of it. The boundary-rules-only
+        matcher left "qz4b" glued into "pkgqz4b==1.0" in clear, because a
+        letter neighbors the value on one side; the token is hidden whole, so
+        the substring arm costs only debug readability, never a false reveal
+        of surrounding text."""
+        import logging
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+        entry = "pkg" + "qz4b" + "==1.0"
+
+        def resolver_error(_attempt):
+            return subprocess.CalledProcessError(
+                1,
+                ["uv"],
+                stderr=(
+                    f"error: there is no version of {entry}, so resolution failed."
+                ),
+            )
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version(
+                "bandit", with_dependencies=[entry], values=("qz4b",)
+            )
+
+        assert len(installs) == 1
+        debug_lines = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.DEBUG
+            and "resolution failed" in record.getMessage()
+        ]
+        assert debug_lines, "the cell shows nothing: no debug line carried the stderr"
+        shown = debug_lines[0]
+        assert "qz4b" not in shown, shown
+        assert "not shown" in shown, shown
+
+    def test_a_short_env_read_pin_hides_the_constraint_it_built(
+        self, runner, monkeypatch, caplog
+    ):
+        """The structure arm: a value of ANY length that equals, or
+        canonicalizes to, a version part of one of the input's specifiers
+        hides the input. A short pin sits below the substring floor and
+        inside a boundary ("=" is no word edge the short-value rule accepts),
+        so without this arm the env-read "1.8" printed as "bandit==1.8" at
+        all three matcher sites."""
+        import logging
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+        constraint = "==1.8"
+
+        def resolver_error(_attempt):
+            return subprocess.CalledProcessError(
+                1,
+                ["uv"],
+                stderr=(
+                    f"error: you require bandit{constraint}, so resolution failed."
+                ),
+            )
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version(
+                "bandit",
+                version_constraint=constraint,
+                values=("1.8",),
+            )
+
+        assert len(installs) == 1
+        debug_lines = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.DEBUG
+            and "resolution failed" in record.getMessage()
+        ]
+        assert debug_lines, "the cell shows nothing: no debug line carried the stderr"
+        shown = debug_lines[0]
+        assert constraint not in shown, shown
+        assert "not shown" in shown, shown
+
+    def test_a_value_glued_into_a_hidden_names_file_name_is_hidden(
+        self, runner, monkeypatch, caplog
+    ):
+        """A hidden input's NAME printed inside a larger word -- "pkgqz4b" in
+        "pkgqz4b-1.0.tar.gz", where "-" and "." are name characters the
+        boundary rule respects -- is right for a name with no value in it and
+        wrong when the glued env-read value sits inside the name itself. The
+        substring arm's clause applies to name tokens too: a name holding a
+        value of MIN_REDACTED_LENGTH or more characters is replaced wherever
+        it appears, boundaries or not."""
+        import logging
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+        value = "qz4b"
+        entry = "pkg" + value + "==1.0"
+
+        def resolver_error(_attempt):
+            # Every neighbor shape uv's dist text puts beside a name: the
+            # sdist and wheel file names ("-" neighbor), the metadata
+            # directory ("." neighbor), and a sentence-final period.
+            return subprocess.CalledProcessError(
+                1,
+                ["uv"],
+                stderr=(
+                    f"Saved pkg{value}-1.0.tar.gz and "
+                    f"pkg{value}-1.0-py3-none-any.whl beside "
+                    f"pkg{value}.egg-info, and you require {entry}, "
+                    f"so resolution failed for pkg{value}."
+                ),
+            )
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version(
+                "bandit", with_dependencies=[entry], values=(value,)
+            )
+
+        assert len(installs) == 1
+        debug_lines = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.DEBUG
+            and "resolution failed" in record.getMessage()
+        ]
+        assert debug_lines, "the cell shows nothing: no debug line carried the stderr"
+        shown = debug_lines[0]
+        assert value not in shown, shown
+        assert "not shown" in shown, shown
+
+    def test_a_bare_dependency_gluing_a_value_is_hidden_whole(
+        self, runner, monkeypatch, caplog
+    ):
+        """A bare --with dependency is all name: its whole token is a name
+        token, so under the boundary rule alone the full input escaped in
+        every dist-text form. A bare name holding a glued env-read value is
+        replaced wherever it appears."""
+        import logging
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+        value = "qz4b"
+        entry = "pkg" + value
+
+        def resolver_error(_attempt):
+            return subprocess.CalledProcessError(
+                1,
+                ["uv"],
+                stderr=(
+                    f"Because you require {entry} and saved "
+                    f"{entry}-1.0.tar.gz, resolution failed."
+                ),
+            )
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version(
+                "bandit", with_dependencies=[entry], values=(value,)
+            )
+
+        assert len(installs) == 1
+        debug_lines = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.DEBUG
+            and "resolution failed" in record.getMessage()
+        ]
+        assert debug_lines, "the cell shows nothing: no debug line carried the stderr"
+        shown = debug_lines[0]
+        assert value not in shown, shown
+        assert entry not in shown, shown
+
+    @pytest.mark.parametrize(
+        ("constraint", "value", "hidden"),
+        [
+            # A range constraint is diagnosable context, not a pin: an
+            # env-read "2" that happens to equal the "<2" bound must not
+            # hide the builtin -- the must-stay-visible example.
+            (">=1.7.4,<2", "2", False),
+            # Pinning operators carry the env-read value itself.
+            ("==2", "2", True),
+            ("===1.8", "1.8", True),
+            ("~=1.8", "1.8", True),
+            # A wildcard pin carries the value as its base.
+            ("==1.8.*", "1.8", True),
+        ],
+    )
+    def test_the_structure_arm_reads_only_pinning_operators(
+        self, runner, monkeypatch, caplog, constraint, value, hidden
+    ):
+        """The structure arm applies only to pinning operators (==, ===, ~=):
+        a value equal to a pin's version part IS the env-read value printed
+        back, while a value equal to a range bound (">=1.7.4,<2" against an
+        env-read "2") is a coincidence that would hide the very constraint a
+        resolver conflict is about."""
+        import logging
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+
+        def resolver_error(_attempt):
+            return subprocess.CalledProcessError(
+                1,
+                ["uv"],
+                stderr=(
+                    f"error: you require bandit{constraint}, so resolution failed."
+                ),
+            )
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version(
+                "bandit",
+                version_constraint=constraint,
+                values=(value,),
+            )
+
+        assert len(installs) == 1
+        debug_lines = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.DEBUG
+            and "resolution failed" in record.getMessage()
+        ]
+        assert debug_lines, "the cell shows nothing: no debug line carried the stderr"
+        shown = debug_lines[0]
+        if hidden:
+            assert constraint not in shown, shown
+            assert "not shown" in shown, shown
+        else:
+            assert constraint in shown, shown
+
+    def test_a_short_fragment_matching_no_version_part_stays_shown(
+        self, runner, monkeypatch, caplog
+    ):
+        """The substring floor still governs UNSTRUCTURED fragments: a value
+        shorter than MIN_REDACTED_LENGTH that equals no version part of the
+        constraint decides nothing, so the builtin ">=1.8.2,<2" stays
+        diagnosable while an unrelated option read "1.8" from the
+        environment. Short numeric fragments sit inside almost every
+        constraint; hiding whole inputs over them is the visibility-flips-on-
+        unrelated-config problem again."""
+        import logging
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+        constraint = ">=1.8.2,<2"
+
+        def resolver_error(_attempt):
+            return subprocess.CalledProcessError(
+                1,
+                ["uv"],
+                stderr=(
+                    f"error: you require bandit{constraint}, so resolution failed."
+                ),
+            )
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version(
+                "bandit",
+                version_constraint=constraint,
+                values=("1.8",),
+            )
+
+        assert len(installs) == 1
+        debug_lines = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.DEBUG
+            and "resolution failed" in record.getMessage()
+        ]
+        assert debug_lines, "the cell shows nothing: no debug line carried the stderr"
+        assert constraint in debug_lines[0], debug_lines[0]
+
+    @pytest.mark.parametrize(
+        ("variable", "value"),
+        [("FORCE_COLOR", "1"), ("CLICOLOR_FORCE", "1"), ("COLUMNS", "20")],
+    )
+    def test_uv_installs_under_no_display_variable(
+        self, runner, monkeypatch, caplog, variable, value
+    ):
+        """The install's stderr is parsed by both redaction layers, which read
+        contiguous text, so the install runs under environ_for_parsed_output
+        like the module's other parsed uv calls: uv wraps at COLUMNS and
+        colors under FORCE_COLOR into a pipe, and either breaks a token."""
+        import logging
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+        monkeypatch.setenv(variable, value)
+        environments: list = []
+
+        def _run(cmd, *args, **kwargs):
+            environments.append(kwargs.get("env"))
+            raise subprocess.CalledProcessError(1, ["uv"], stderr="error: x")
+
+        runner._uv_available_cache = True
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            patch.object(runner, "is_tool_installed", return_value=False),
+            patch(
+                "automated_security_helper.utils.subprocess_utils.find_executable",
+                return_value=None,
+            ),
+            patch(
+                "automated_security_helper.core.constants.is_offline_mode",
+                return_value=False,
+            ),
+            patch(
+                "automated_security_helper.utils.subprocess_utils._run_plain",
+                side_effect=_run,
+            ),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version("bandit", version_constraint="==1.7.5")
+
+        assert environments, "the cell shows nothing: the install never spawned"
+        env = environments[0] or {}
+        assert variable not in env, (variable, env.get(variable))
+        assert env.get("NO_COLOR") == "1", env.get("NO_COLOR")
+
+    @pytest.mark.parametrize(
+        "colored",
+        [
+            pytest.param("\x1b[1mbandit==9.9.9rc777\x1b[0m", id="one-span"),
+            pytest.param(
+                "\x1b[1mbandit\x1b[0m\x1b[36m==9.9.9rc777\x1b[39m",
+                id="name-and-range",
+            ),
+            pytest.param(
+                "\x1b[1mbandit\x1b[0m\x1b[36m==\x1b[39m\x1b[36m9.9.9rc777\x1b[39m",
+                id="operator-and-version",
+            ),
+        ],
+    )
+    def test_a_colored_requirement_is_still_hidden(
+        self, runner, monkeypatch, caplog, colored
+    ):
+        """A color code INSIDE a token breaks the contiguous text both layers
+        match, so SGR codes are removed from the stderr before the layers
+        read it; the one-record-one-line step stays the log call site's.
+        environ_for_parsed_output makes colored output unexpected
+        (NO_COLOR=1); this holds the line if uv colors anyway. Where uv puts
+        its codes is inferred, not measured."""
+        import logging
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+
+        def resolver_error(_attempt):
+            return subprocess.CalledProcessError(
+                1,
+                ["uv"],
+                stderr=(
+                    f"error: there is no version of {colored}, so your "
+                    f"requirements are unsatisfiable."
+                ),
+            )
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version(
+                "bandit",
+                version_constraint="==9.9.9rc777",
+                values=("==9.9.9rc777",),
+            )
+
+        assert len(installs) == 1
+        debug_lines = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.DEBUG
+            and "unsatisfiable" in record.getMessage()
+        ]
+        assert debug_lines, "the cell shows nothing: no debug line carried the stderr"
+        shown = debug_lines[0]
+        assert "9.9.9rc777" not in shown, shown
+
+    def test_the_debug_record_is_bounded_with_a_dropped_count(
+        self, runner, monkeypatch, caplog
+    ):
+        """A failed sdist build writes a multi-megabyte stderr, and the record
+        went to the handler whole, per attempt. The record keeps the TAIL --
+        uv's conclusion and hints come last -- at the module's tool-output
+        bound, and the marker counts what was dropped so a reader knows the
+        record is an excerpt."""
+        import logging
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+        stderr = "Downloading build log line\n" * 80000 + "error: final line."
+
+        def resolver_error(_attempt):
+            return subprocess.CalledProcessError(1, ["uv"], stderr=stderr)
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version("bandit", version_constraint="==1.7.5")
+
+        assert len(installs) == 1
+        debug_lines = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.DEBUG
+            and "uv tool install for bandit exited" in record.getMessage()
+        ]
+        assert debug_lines, "the cell shows nothing: no debug line carried the stderr"
+        shown = debug_lines[0]
+        assert len(shown) <= 4096, len(shown)
+        assert "characters not shown" in shown, shown
+        assert "error: final line." in shown, shown[-200:]
+
+    def test_numbering_is_lexicographic_among_equal_lengths(
+        self, runner, monkeypatch, caplog
+    ):
+        """The tiebreak: longest first, then lexicographic, so the
+        <argument N> numbering is the same in every process. Twenty --with
+        entries of one length, printed in reverse: under a set-order tiebreak
+        the chance all twenty land in order is 1/20!."""
+        import logging
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+        entries = [f"pk{n:02d}==1" for n in range(1, 21)]
+        printed = list(reversed(entries))
+
+        def resolver_error(_attempt):
+            return subprocess.CalledProcessError(
+                1, ["uv"], stderr="error: " + " ".join(printed)
+            )
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version("bandit", with_dependencies=entries)
+
+        assert len(installs) == 1
+        debug_lines = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.DEBUG
+            and "uv tool install for bandit exited" in record.getMessage()
+        ]
+        assert debug_lines, "the cell shows nothing: no debug line carried the stderr"
+        expected = " ".join(
+            f"<argument {sorted(entries).index(entry) + 1} not shown>"
+            for entry in printed
+        )
+        assert expected in debug_lines[0], debug_lines[0]
+
+    def test_a_timeout_after_a_failed_attempt_chains_no_argv(
+        self, runner, monkeypatch, caplog
+    ):
+        """The raised text is fixed-shape, but ``raise ... from e`` kept the
+        TimeoutExpired, whose own text quotes the assembled argv -- the spec
+        and --with dependencies that can hold env-read values -- so every
+        traceback printer rendered it. The env-blind raises disavow their
+        chain (``from None``), and this one does too."""
+        import logging
+        import traceback
+
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+        # Held in variables: a traceback renders each frame's source line, so
+        # a literal on the test's own call line would read as a leak.
+        marker = "9.9.9" + "rc777"
+        constraint = "==" + marker
+
+        def outcome(attempt):
+            if attempt == 1:
+                return subprocess.CalledProcessError(
+                    1, ["uv"], stderr=f"error: no version of bandit{constraint}"
+                )
+            return subprocess.TimeoutExpired(
+                ["uv", "tool", "install", f"bandit{constraint}"], 300
+            )
+
+        config = UVToolRetryConfig(max_retries=1, base_delay=0.0, jitter=False)
+        with (
+            caplog.at_level(logging.DEBUG, logger="ash"),
+            _install_harness(runner, outcome) as (installs, _),
+            pytest.raises(UVToolRunnerError) as caught,
+        ):
+            runner.install_tool_with_version(
+                "bandit", version_constraint=constraint, retry_config=config
+            )
+
+        assert len(installs) == 2, "the cell shows nothing: the timeout never ran"
+        assert "timed out" in str(caught.value), str(caught.value)
+        chain = "".join(
+            traceback.format_exception(
+                type(caught.value), caught.value, caught.value.__traceback__
+            )
+        )
+        assert marker not in chain, chain
+
+    @pytest.mark.parametrize(
+        ("offline", "kwargs", "present", "absent"),
+        [
+            pytest.param(
+                True,
+                {
+                    "version_constraint": ">=1.7,<2",
+                    "with_dependencies": ["bandit-sarif-formatter"],
+                },
+                ["--offline", "1 --with dependency", "a version constraint"],
+                [">=1.7", "bandit-sarif-formatter", "an extras list"],
+                id="offline-constraint-one-dep",
+            ),
+            pytest.param(
+                False,
+                {
+                    "package_extras": ["sarif"],
+                    "with_dependencies": ["dep-one==1.0", "dep-two==2.0"],
+                },
+                ["2 --with dependencies", "an extras list"],
+                ["--offline", "sarif", "dep-one", "dep-two", "a version constraint"],
+                id="extras-two-deps",
+            ),
+        ],
+    )
+    def test_the_installs_error_names_value_free_parts_only(
+        self, runner, monkeypatch, offline, kwargs, present, absent
+    ):
+        """The label carries each part that cannot hold a value separately --
+        the offline flag, the --with count with its singular and plural forms,
+        an extras list, a version constraint -- so the message stays
+        diagnosable without quoting the spec or any dependency, and a reader
+        can tell whether a version pin was involved in a resolver failure."""
+        if offline:
+            monkeypatch.setenv("UV_OFFLINE", "1")
+        else:
+            monkeypatch.delenv("UV_OFFLINE", raising=False)
+
+        def resolver_error(_attempt):
+            return subprocess.CalledProcessError(
+                1, ["uv"], stderr="no version of bandit==9.9.9rc777"
+            )
+
+        with (
+            _install_harness(runner, resolver_error) as (installs, _),
+            pytest.raises(UVToolRunnerError) as caught,
+        ):
+            runner.install_tool_with_version("bandit", **kwargs)
+
+        assert len(installs) == 1
+        text = str(caught.value)
+        assert "9.9.9rc777" not in text, text
+        for piece in present:
+            assert piece in text, (piece, text)
+        for piece in absent:
+            assert piece not in text, (piece, text)
 
     def test_a_retry_config_buys_one_attempt_per_configured_retry(self, runner):
         config = UVToolRetryConfig(max_retries=3, base_delay=0.0, jitter=False)
@@ -636,7 +2173,10 @@ class TestTheAttemptCountCannotFallBelowOne:
             "UVToolRunnerError(None) stringifies to the literal 'None': a "
             "failure report with no failure in it"
         )
-        assert "Connection reset by peer" in str(excinfo.value)
+        # The failure is named by its exit code; the stderr text never rides
+        # (a resolver error quotes the requirement it could not satisfy).
+        assert "exit code 1" in str(excinfo.value)
+        assert "Connection reset by peer" not in str(excinfo.value)
 
     @pytest.mark.parametrize("max_retries", [-1, -4, -100])
     def test_the_error_always_names_the_failure_that_happened(
@@ -1120,13 +2660,17 @@ class TestGetInstalledToolVersion:
 
     def test_returns_none_when_not_installed(self, runner):
         runner._uv_available_cache = True
-        with patch("subprocess.run") as mock_run:
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain"
+        ) as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="checkov 3.0\n")
             assert runner.get_installed_tool_version("bandit") is None
 
     def test_returns_version_when_installed(self, runner):
         runner._uv_available_cache = True
-        with patch("subprocess.run") as mock_run:
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain"
+        ) as mock_run:
             mock_run.side_effect = [
                 MagicMock(returncode=0, stdout="bandit 1.7.0\n"),  # list
                 MagicMock(returncode=0, stdout="1.7.0\n"),  # version
@@ -1148,8 +2692,30 @@ def reset_module_caches():
     _reset_uv_tool_runner_caches()
 
 
+@pytest.fixture
+def an_executable(tmp_path):
+    """A real executable file, for tests of the memos: a remembered path is
+    answered only while it is still an executable file."""
+
+    def make(name):
+        path = tmp_path / name
+        path.write_text("#!/bin/sh\n", encoding="utf-8")
+        path.chmod(0o755)
+        return str(path)
+
+    return make
+
+
 class TestFindUvOrNone:
-    """Tests for find_uv_or_none."""
+    """Tests for find_uv_or_none's PATH branch.
+
+    The uv installed with ASH is looked up first (test_uv_installed_with_ash.py);
+    these pin it absent so they keep testing the search that follows it.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_uv_installed_with_ash(self, monkeypatch):
+        monkeypatch.setattr(uv_tool_runner, "bundled_uv_executable", lambda: None)
 
     def test_returns_none_when_uv_not_on_path(self, monkeypatch, reset_module_caches):
         monkeypatch.setenv("PATH", "")
@@ -1162,14 +2728,14 @@ class TestFindUvOrNone:
     def test_returns_path_when_uv_present(self, reset_module_caches):
         with patch(
             "automated_security_helper.utils.subprocess_utils.find_executable",
-            return_value="/opt/uv/bin/uv",
+            return_value=UV_PATH,
         ):
-            assert find_uv_or_none() == "/opt/uv/bin/uv"
+            assert find_uv_or_none() == UV_PATH
 
-    def test_memoizes_result(self, reset_module_caches):
+    def test_memoizes_result(self, reset_module_caches, an_executable):
         with patch(
             "automated_security_helper.utils.subprocess_utils.find_executable",
-            return_value="/opt/uv/bin/uv",
+            return_value=an_executable("uv"),
         ) as mock_find:
             find_uv_or_none()
             find_uv_or_none()
@@ -1193,10 +2759,10 @@ class TestFindExecutable:
         ):
             assert find_executable("nope") is None
 
-    def test_memoizes_result(self, reset_module_caches):
+    def test_memoizes_result(self, reset_module_caches, an_executable):
         with patch(
             "automated_security_helper.utils.subprocess_utils.find_executable",
-            return_value="/usr/local/bin/bandit",
+            return_value=an_executable("bandit"),
         ) as mock_find:
             find_executable("bandit")
             find_executable("bandit")
@@ -1210,10 +2776,10 @@ class TestGetUvToolCommand:
         with (
             patch(
                 "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-                return_value="/opt/uv/bin/uv",
+                return_value=UV_PATH,
             ),
             patch(
-                "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+                "automated_security_helper.utils.subprocess_utils._run_plain"
             ) as mock_run,
         ):
             mock_run.return_value = subprocess.CompletedProcess(
@@ -1238,10 +2804,10 @@ class TestGetUvToolCommand:
         with (
             patch(
                 "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-                return_value="/opt/uv/bin/uv",
+                return_value=UV_PATH,
             ),
             patch(
-                "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+                "automated_security_helper.utils.subprocess_utils._run_plain"
             ) as mock_run,
         ):
             mock_run.return_value = subprocess.CompletedProcess(
@@ -1251,7 +2817,7 @@ class TestGetUvToolCommand:
         probe = mock_run.call_args
         if offline:
             assert probe.args[0] == [
-                "/opt/uv/bin/uv",
+                UV_PATH,
                 "tool",
                 "run",
                 "--offline",
@@ -1261,24 +2827,25 @@ class TestGetUvToolCommand:
             assert probe.kwargs["env"]["UV_OFFLINE"] == "1"
         else:
             assert probe.args[0] == [
-                "/opt/uv/bin/uv",
+                UV_PATH,
                 "tool",
                 "run",
                 "bandit",
                 "--version",
             ]
             # An explicit copy of the environment, never None: see
-            # utils/process_env.py.
-            assert probe.kwargs["env"] == dict(os.environ)
+            # utils/process_env.py. Compared by names, so a failure prints no value.
+            assert probe.kwargs["env"] is not None
+            assert differing_names(probe.kwargs["env"], os.environ) == []
 
     def test_falls_back_to_direct_binary_when_uv_probe_fails(self, reset_module_caches):
         with (
             patch(
                 "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-                return_value="/opt/uv/bin/uv",
+                return_value=UV_PATH,
             ),
             patch(
-                "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+                "automated_security_helper.utils.subprocess_utils._run_plain"
             ) as mock_run,
             patch(
                 "automated_security_helper.utils.uv_tool_runner.find_executable",
@@ -1290,6 +2857,7 @@ class TestGetUvToolCommand:
             )
             cmd = get_uv_tool_command("bandit")
             assert cmd == ["/usr/local/bin/bandit"]
+            mock_run.assert_called_once()
 
     def test_falls_back_to_direct_binary_when_uv_missing(self, reset_module_caches):
         with (
@@ -1322,12 +2890,12 @@ class TestGetUvToolCommand:
         with (
             patch(
                 "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-                return_value="/opt/uv/bin/uv",
+                return_value=UV_PATH,
             ),
             patch(
-                "automated_security_helper.utils.uv_tool_runner.subprocess.run",
+                "automated_security_helper.utils.subprocess_utils._run_plain",
                 side_effect=subprocess.TimeoutExpired(cmd="uv", timeout=30),
-            ),
+            ) as mock_run,
             patch(
                 "automated_security_helper.utils.uv_tool_runner.find_executable",
                 return_value="/usr/local/bin/bandit",
@@ -1335,6 +2903,7 @@ class TestGetUvToolCommand:
         ):
             cmd = get_uv_tool_command("bandit")
             assert cmd == ["/usr/local/bin/bandit"]
+            mock_run.assert_called_once()
 
     def test_uses_fallback_binary_override(self, reset_module_caches):
         with (
@@ -1353,14 +2922,14 @@ class TestGetUvToolCommand:
             assert cmd == ["/usr/local/bin/detect-secrets"]
             mock_find.assert_called_once_with("detect-secrets")
 
-    def test_memoizes_result_no_re_probe(self, reset_module_caches):
+    def test_memoizes_result_no_re_probe(self, reset_module_caches, an_executable):
         with (
             patch(
                 "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-                return_value="/opt/uv/bin/uv",
+                return_value=an_executable("uv"),
             ),
             patch(
-                "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+                "automated_security_helper.utils.subprocess_utils._run_plain"
             ) as mock_run,
         ):
             mock_run.return_value = subprocess.CompletedProcess(
@@ -1371,7 +2940,9 @@ class TestGetUvToolCommand:
             assert first == second == ["uv", "tool", "run", "bandit"]
             assert mock_run.call_count == 1
 
-    def test_memoizes_negative_result(self, reset_module_caches):
+    def test_a_miss_with_no_uv_to_probe_is_looked_up_again(self, reset_module_caches):
+        """Nothing was probed, so a None is not remembered: a tool installed
+        after this lookup is found by the next."""
         with (
             patch(
                 "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
@@ -1384,11 +2955,33 @@ class TestGetUvToolCommand:
         ):
             assert get_uv_tool_command("bandit") is None
             assert get_uv_tool_command("bandit") is None
-            assert mock_find.call_count == 1
+            assert mock_find.call_count == 2
+
+    def test_memoizes_a_failed_probe(self, reset_module_caches):
+        """A None after a probe is remembered: the probe is not run again."""
+        with (
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+                return_value=UV_PATH,
+            ),
+            patch(
+                "automated_security_helper.utils.subprocess_utils._run_plain"
+            ) as mock_run,
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.find_executable",
+                return_value=None,
+            ),
+        ):
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=1, stdout="", stderr="not found"
+            )
+            assert get_uv_tool_command("bandit") is None
+            assert get_uv_tool_command("bandit") is None
+            assert mock_run.call_count == 1
 
 
 class TestGetUvToolCommandThreadSafety:
-    """Concurrency tests for the module-level cache (DA r4 #3).
+    """Concurrency tests for the module-level cache (an earlier review finding).
 
     Twenty threads race on the same cache key with a slow probe. The single
     shared lock around the cache guarantees:
@@ -1398,9 +2991,13 @@ class TestGetUvToolCommandThreadSafety:
     3. No ``None`` value ever leaks to a caller during the racing window.
     """
 
-    def test_probe_runs_exactly_once_under_thread_race(self, reset_module_caches):
+    def test_probe_runs_exactly_once_under_thread_race(
+        self, reset_module_caches, an_executable
+    ):
         import threading
         import time
+
+        uv = an_executable("uv")
 
         call_count = {"n": 0}
         call_lock = threading.Lock()
@@ -1432,10 +3029,10 @@ class TestGetUvToolCommandThreadSafety:
         with (
             patch(
                 "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-                return_value="/opt/uv/bin/uv",
+                return_value=uv,
             ),
             patch(
-                "automated_security_helper.utils.uv_tool_runner.subprocess.run",
+                "automated_security_helper.utils.subprocess_utils._run_plain",
                 side_effect=slow_probe,
             ),
         ):
@@ -1459,14 +3056,14 @@ class TestGetUvToolCommandThreadSafety:
         )
 
     def test_probe_uses_5s_timeout(self, reset_module_caches):
-        """The version probe timeout is 5 s, not 30 s (DA r4 #5)."""
+        """The version probe timeout is 5 s, not 30 s (an earlier review finding)."""
         with (
             patch(
                 "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-                return_value="/opt/uv/bin/uv",
+                return_value=UV_PATH,
             ),
             patch(
-                "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+                "automated_security_helper.utils.subprocess_utils._run_plain"
             ) as mock_run,
         ):
             mock_run.return_value = subprocess.CompletedProcess(
@@ -1524,7 +3121,7 @@ class TestGetToolVersionRunsOneProcessPerTool:
                 seen.append(version)
 
         with patch(
-            "automated_security_helper.utils.uv_tool_runner.subprocess.run",
+            "automated_security_helper.utils.subprocess_utils._run_plain",
             side_effect=slow_probe,
         ):
             threads = [threading.Thread(target=worker) for _ in range(12)]
@@ -1544,7 +3141,7 @@ class TestGetToolVersionRunsOneProcessPerTool:
         """Per-key, not global: two different tools still get their own probe."""
         runner._uv_available_cache = True
         with patch(
-            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+            "automated_security_helper.utils.subprocess_utils._run_plain"
         ) as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="1.0\n")
             runner.get_tool_version("bandit")
@@ -1568,7 +3165,7 @@ class TestGetToolVersionRunsOneProcessPerTool:
         """
         runner._uv_available_cache = True
         with patch(
-            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+            "automated_security_helper.utils.subprocess_utils._run_plain"
         ) as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="")
             assert runner.get_tool_version("jupyter-nbconvert", "nbconvert") is None
@@ -1586,7 +3183,7 @@ class TestGetToolVersionRunsOneProcessPerTool:
         runner._uv_available_cache = True
         spec = "bandit[sarif,toml]>=1.7.0,<2.0.0"
         with patch(
-            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+            "automated_security_helper.utils.subprocess_utils._run_plain"
         ) as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="")
             assert runner.get_tool_version("bandit", spec) is None
@@ -1607,7 +3204,7 @@ class TestGetToolVersionRunsOneProcessPerTool:
         """
         runner._uv_available_cache = True
         with patch(
-            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+            "automated_security_helper.utils.subprocess_utils._run_plain"
         ) as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="")
             assert runner.get_tool_version("jupyter-nbconvert", "nbconvert") is None
@@ -1623,7 +3220,7 @@ class TestGetToolVersionRunsOneProcessPerTool:
                 return_value=None,
             ),
             patch(
-                "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+                "automated_security_helper.utils.subprocess_utils._run_plain"
             ) as mock_run,
         ):
             mock_run.return_value = MagicMock(returncode=0, stdout="")
@@ -1631,7 +3228,7 @@ class TestGetToolVersionRunsOneProcessPerTool:
             assert runner.install_tool_with_version("nbconvert") is True
 
         with patch(
-            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+            "automated_security_helper.utils.subprocess_utils._run_plain"
         ) as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="7.16.6\n")
             assert (
@@ -1646,7 +3243,7 @@ class TestGetToolVersionRunsOneProcessPerTool:
         """
         runner._uv_available_cache = True
         with patch(
-            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+            "automated_security_helper.utils.subprocess_utils._run_plain"
         ) as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="bandit 1.7.0\n")
             assert runner.get_tool_version("bandit") == "bandit 1.7.0"
@@ -1683,7 +3280,7 @@ class TestAMemoizedFailureIsRecoverable:
         """Documents the caching that makes the refresh below necessary."""
         runner._uv_available_cache = True
         with patch(
-            "automated_security_helper.utils.uv_tool_runner.subprocess.run",
+            "automated_security_helper.utils.subprocess_utils._run_plain",
             side_effect=subprocess.TimeoutExpired(cmd="uv", timeout=15),
         ) as mock_run:
             assert runner.get_tool_version("bandit") is None
@@ -1693,13 +3290,13 @@ class TestAMemoizedFailureIsRecoverable:
     def test_validate_cached_tool_re_probes_past_a_memoized_failure(self, runner):
         runner._uv_available_cache = True
         with patch(
-            "automated_security_helper.utils.uv_tool_runner.subprocess.run",
+            "automated_security_helper.utils.subprocess_utils._run_plain",
             side_effect=subprocess.TimeoutExpired(cmd="uv", timeout=15),
         ):
             assert runner.get_tool_version("bandit") is None
 
         with patch(
-            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+            "automated_security_helper.utils.subprocess_utils._run_plain"
         ) as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="bandit 1.9.4\n")
             result = runner.validate_cached_tool("bandit")
@@ -1714,13 +3311,13 @@ class TestAMemoizedFailureIsRecoverable:
         """Recovery must be shared, not private to the refreshing caller."""
         runner._uv_available_cache = True
         with patch(
-            "automated_security_helper.utils.uv_tool_runner.subprocess.run",
+            "automated_security_helper.utils.subprocess_utils._run_plain",
             side_effect=subprocess.TimeoutExpired(cmd="uv", timeout=15),
         ):
             assert runner.get_tool_version("bandit") is None
 
         with patch(
-            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+            "automated_security_helper.utils.subprocess_utils._run_plain"
         ) as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="bandit 1.9.4\n")
             runner.validate_cached_tool("bandit")
@@ -1759,7 +3356,7 @@ class TestProbeLocksAreNamespaced:
         with (
             patch.object(mod, "_get_or_create_probe_lock", recording),
             patch(
-                "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+                "automated_security_helper.utils.subprocess_utils._run_plain"
             ) as mock_run,
         ):
             mock_run.return_value = MagicMock(
@@ -1768,12 +3365,938 @@ class TestProbeLocksAreNamespaced:
             runner.get_tool_version("bandit", "bandit")
             with patch(
                 "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-                return_value="/opt/uv/bin/uv",
+                return_value=UV_PATH,
             ):
                 get_uv_tool_command("bandit")
 
         assert "version::bandit::bandit" in seen
-        assert "command::bandit::bandit" in seen
+        # The command probe's key goes on to name the environment it was made in.
+        assert any(key.startswith("command::bandit::bandit::") for key in seen), seen
         # The collision the namespacing exists to prevent.
         assert "bandit::bandit" not in seen
         assert len(set(seen)) == 2
+
+
+class TestRunToolContract:
+    """What run_tool's callers rely on, pinned against the real method.
+
+    The jupyter converter runs nbconvert through ``run_tool`` with no
+    ``results_dir``, so these pin that branch: a mock accepting any keyword
+    could not show that ``quiet=`` is taken, and only the real method shows
+    where the scan's cancel goes.
+    """
+
+    def test_quiet_rides_the_command_and_is_off_by_default(self, runner, monkeypatch):
+        monkeypatch.setattr(runner, "is_uv_available", lambda: True)
+        commands = []
+
+        def spawn(command, **kwargs):
+            commands.append([str(part) for part in command])
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        monkeypatch.setattr(uv_tool_runner, "spawn_run", spawn)
+
+        result = runner.run_tool(
+            "nbconvert",
+            package_name="nbconvert>=7.16.0,<8.0.0",
+            args=["--help"],
+            quiet=True,
+        )
+        assert result.returncode == 0
+        # uv takes --quiet only between "run" and the tool: after the tool's
+        # name it would ride into nbconvert's own arguments.
+        assert commands[0][:4] == ["uv", "tool", "run", "--quiet"], commands[0]
+        assert commands[0].index("--quiet") < commands[0].index("nbconvert")
+
+        runner.run_tool(
+            "nbconvert", package_name="nbconvert>=7.16.0,<8.0.0", args=["--help"]
+        )
+        assert "--quiet" not in commands[1], commands[1]
+
+    def test_the_scans_cancel_passes_through_unread(self, runner, monkeypatch):
+        """With no results_dir the run goes through spawn_run, which raises
+        ScanCancelled inside a cancelled scan. run_tool reads nothing into it:
+        it reaches the caller as the scan's own stop, never as a run result."""
+        from automated_security_helper.core.cancellation import ScanCancelled
+
+        monkeypatch.setattr(runner, "is_uv_available", lambda: True)
+
+        def cancelled(command, **kwargs):
+            raise ScanCancelled("the server is stopping")
+
+        monkeypatch.setattr(uv_tool_runner, "spawn_run", cancelled)
+
+        with pytest.raises(ScanCancelled):
+            runner.run_tool(
+                "nbconvert", package_name="nbconvert>=7.16.0,<8.0.0", args=["--help"]
+            )
+
+
+def test_a_timeouts_token_matches_subprocess_utils_for_any_value():
+    """The timed-out message quotes the timeout as the caller gave it. Python's
+    general float format turns 1000000 into '1e+06', which reads as a corrupted
+    value in a message meant for a person, and a second copy of the token
+    builder is free to drift from the one subprocess_utils' own messages use."""
+    from automated_security_helper.utils import subprocess_utils
+
+    assert uv_tool_runner._timeout_token(1000000) == "'1000000' s"
+    for value in (60, 60.0, 0.5, 1800, None, 1000000, 1234567.5):
+        assert uv_tool_runner._timeout_token(value) == subprocess_utils._timeout_token(
+            value
+        ), value
+
+
+class TestARefusedRequirementIsLoggedWithoutItsText:
+    """The runner's two requirement refusals name the tool, never the spec.
+
+    The runner is shared by every plugin and holds no config, so it cannot
+    tell which part of a spec a config read from the environment. A plugin
+    that builds its constraint from such a value and hands it over would have
+    the value logged verbatim if the refusal quoted the spec; the refusal's
+    text therefore carries no part of it, and the tool's name comes from the
+    caller's own argument, which is plugin code, not configuration."""
+
+    CANARY = "~~9.9.9rc777"
+
+    @pytest.fixture
+    def runner(self, monkeypatch):
+        monkeypatch.delenv("ASH_OFFLINE", raising=False)
+        built = UVToolRunner(uv_executable="/nonexistent-ash-test/uv")
+        with (
+            patch.object(built, "is_uv_available", return_value=True),
+            patch.object(built, "is_tool_installed", return_value=False),
+        ):
+            yield built
+
+    @pytest.fixture
+    def logged(self):
+        import logging
+
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        class _Lines(logging.Handler):
+            def __init__(self):
+                super().__init__(level=logging.DEBUG)
+                self.lines: list = []
+
+            def emit(self, record):
+                self.lines.append(record.getMessage())
+
+        handler = _Lines()
+        level = ASH_LOGGER.level
+        ASH_LOGGER.addHandler(handler)
+        ASH_LOGGER.setLevel(logging.DEBUG)
+        try:
+            yield handler.lines
+        finally:
+            ASH_LOGGER.removeHandler(handler)
+            ASH_LOGGER.setLevel(level)
+
+    def test_the_install_refusal_logs_the_tool_and_no_constraint_text(
+        self, runner, logged
+    ):
+        assert (
+            runner.install_tool_with_version("bandit", version_constraint=self.CANARY)
+            is False
+        )
+        joined = "\n".join(logged)
+        # The controls: the refusal ran and names the tool.
+        assert "Refusing to pass" in joined, joined
+        assert "bandit" in joined, joined
+        assert "9.9.9rc777" not in joined, joined
+
+    def test_the_version_refusal_logs_the_tool_and_no_constraint_text(
+        self, runner, logged
+    ):
+        assert (
+            runner.get_tool_version("bandit", package_name=f"bandit{self.CANARY}")
+            is None
+        )
+        joined = "\n".join(logged)
+        assert "Refusing to pass" in joined, joined
+        assert "bandit" in joined, joined
+        assert "9.9.9rc777" not in joined, joined
+
+    def test_the_check_still_refuses_and_its_text_holds_no_spec(self):
+        with pytest.raises(UVToolRunnerError) as refused:
+            uv_tool_runner.checked_requirement(f"bandit{self.CANARY}")
+        message = str(refused.value)
+        assert "Refusing to pass" in message, message
+        assert "9.9.9rc777" not in message, message
+        assert "bandit" not in message, message
+
+    def test_the_install_refusal_names_which_with_dependency(self, runner, logged):
+        """A refused install can hold three requirements: the tool spec and
+        each --with dependency. The log names the position of the one that
+        was refused, in fixed value-free words, so the operator knows which
+        entry to fix without the spec itself ever being quoted."""
+        assert (
+            runner.install_tool_with_version(
+                "bandit",
+                with_dependencies=[
+                    "bandit-sarif-formatter",
+                    f"extra{self.CANARY}",
+                ],
+            )
+            is False
+        )
+        joined = "\n".join(logged)
+        assert "Refusing to pass" in joined, joined
+        assert "--with dependency 2" in joined, joined
+        assert "9.9.9rc777" not in joined, joined
+
+    def test_the_run_refusal_names_the_tool(self, runner):
+        """run_tool's --from specs were checked with the bare refusal, which
+        raised with no tool name at all: the only caller-facing text said a
+        requirement was refused, naming nothing to act on. The raise carries
+        the tool's name (the runner's own argument) and the --from position,
+        and still none of the spec."""
+        with pytest.raises(UVToolRunnerError) as refused:
+            runner.run_tool("bandit", package_name=f"bandit{self.CANARY}")
+        message = str(refused.value)
+        assert "Refusing to pass" in message, message
+        assert "bandit" in message, message
+        assert "--from" in message, message
+        assert "9.9.9rc777" not in message, message
+
+    def test_the_run_exit_error_quotes_no_argv_or_stderr(self, runner, tmp_path):
+        """run_tool's non-zero-exit raise stringified a CalledProcessError,
+        whose str quotes the whole argv including the --from spec, which can
+        hold a value a plugin's config read from the environment. The raise
+        names the exit code and the command's fixed shape instead, and uv's
+        stderr, which repeats the requirement it could not satisfy, never
+        rides."""
+        secret = "==9.9.9rc777"
+
+        def refuses_to_resolve(*args, **kwargs):
+            return {
+                "returncode": 2,
+                "stdout": "",
+                "stderr": f"no version of bandit{secret}",
+            }
+
+        with patch(
+            "automated_security_helper.utils.subprocess_utils."
+            "run_command_with_output_handling",
+            side_effect=refuses_to_resolve,
+        ):
+            with pytest.raises(UVToolRunnerError) as raised:
+                runner.run_tool(
+                    "bandit",
+                    package_name=f"bandit{secret}",
+                    check=True,
+                    results_dir=tmp_path,
+                )
+        message = str(raised.value)
+        assert secret not in message, message
+        assert "the command exited 2" in message, message
+        assert "(uv tool run bandit, arguments not shown)" in message, message
+
+    @pytest.mark.parametrize(
+        ("response", "expected", "never"),
+        [
+            pytest.param(
+                {"returncode": -11},
+                "was ended by signal 11",
+                "exited",
+                id="signal",
+            ),
+            pytest.param(
+                {"returncode": 124, "timed_out": True, "error": "timed out"},
+                "the command timed out",
+                "exited",
+                id="timeout",
+            ),
+            pytest.param(
+                {"returncode": None, "error": "stop refused"},
+                "the command did not exit",
+                "None",
+                id="no-exit",
+            ),
+            pytest.param(
+                {"returncode": 3},
+                "the command exited 3",
+                "signal",
+                id="plain-exit",
+            ),
+            pytest.param(
+                {"returncode": 1, "cancelled": True, "error": "cancelled"},
+                "the run was cancelled",
+                "exited",
+                id="cancelled",
+            ),
+            pytest.param(
+                {"returncode": 1, "result_rejected": True, "error": "rejected"},
+                "ASH rejected the tool's result",
+                "exited",
+                id="result-rejected",
+            ),
+            pytest.param(
+                {"returncode": 127, "spawn_failed": True, "error": "never ran"},
+                "the command never started",
+                "exited",
+                id="spawn-failed",
+            ),
+        ],
+    )
+    def test_the_run_exit_error_names_how_the_command_ended(
+        self, runner, tmp_path, response, expected, never
+    ):
+        """A signal death, a timeout and a child the stop did not end are not
+        ordinary exits: "the command exited 124" misreads a timeout, "exited
+        None" reads as nonsense, and the old str(CalledProcessError) at least
+        said "died with <signal>". Each ending is named by its own value-free
+        words."""
+
+        def returns_response(*args, **kwargs):
+            return dict(response)
+
+        with patch(
+            "automated_security_helper.utils.subprocess_utils."
+            "run_command_with_output_handling",
+            side_effect=returns_response,
+        ):
+            with pytest.raises(UVToolRunnerError) as raised:
+                runner.run_tool("bandit", check=True, results_dir=tmp_path)
+        message = str(raised.value)
+        assert expected in message, message
+        assert never not in message, message
+
+    def test_the_fallback_runs_signal_death_is_not_an_exit(self, runner):
+        """The fallback branch sees signal deaths as negative returncodes on
+        the raised CalledProcessError; the same value-free naming applies."""
+
+        def raises_signal_death(cmd, *args, **kwargs):
+            raise subprocess.CalledProcessError(-9, cmd, stderr="killed")
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.spawn_run",
+            side_effect=raises_signal_death,
+        ):
+            with pytest.raises(UVToolRunnerError) as raised:
+                runner.run_tool("bandit", check=True)
+        message = str(raised.value)
+        assert "was ended by signal 9" in message, message
+        assert "exited" not in message, message
+        assert "(uv tool run bandit, arguments not shown)" in message, message
+
+    def test_a_negative_code_on_windows_is_an_exit_not_a_signal(
+        self, runner, monkeypatch, tmp_path
+    ):
+        """Windows has no signal deaths: a negative returncode there is the
+        process's own exit status (an NTSTATUS), so naming it "ended by signal
+        11" would invent a signal. _exit_description takes the platform gate
+        from signal_death rather than re-implementing ``rc < 0`` without it."""
+        from automated_security_helper.utils import subprocess_utils as spu
+
+        class _NtOs:
+            """subprocess_utils' ``os`` with name "nt", the rest the real one."""
+
+            name = "nt"
+
+            def __getattr__(self, attribute):
+                return getattr(os, attribute)
+
+        monkeypatch.setattr(spu, "os", _NtOs())
+        assert spu.signal_death(-11, "x") is None, (
+            "the cell shows nothing: the platform gate was not taken"
+        )
+        with (
+            patch.object(runner, "is_uv_available", return_value=True),
+            patch(
+                "automated_security_helper.utils.subprocess_utils."
+                "run_command_with_output_handling",
+                side_effect=lambda *args, **kwargs: {"returncode": -11},
+            ),
+            pytest.raises(UVToolRunnerError) as raised,
+        ):
+            runner.run_tool("bandit", check=True, results_dir=tmp_path)
+        message = str(raised.value)
+        assert "the command exited -11" in message, message
+        assert "signal" not in message, message
+
+    def test_the_fallback_runs_exit_error_quotes_no_argv_or_stderr(self, runner):
+        """The no-results-dir fallback raised uv's CalledProcessError text
+        whole: the same argv, through the other branch. Same rule, same
+        shape: exit code plus the fixed command name, never the exception's
+        own str or stderr."""
+        secret = "==9.9.9rc777"
+
+        def raises_called_process_error(cmd, *args, **kwargs):
+            raise subprocess.CalledProcessError(
+                2, cmd, stderr=f"no version of bandit{secret}"
+            )
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.spawn_run",
+            side_effect=raises_called_process_error,
+        ):
+            with pytest.raises(UVToolRunnerError) as raised:
+                runner.run_tool("bandit", package_name=f"bandit{secret}", check=True)
+        message = str(raised.value)
+        assert secret not in message, message
+        assert "the command exited 2" in message, message
+        assert "(uv tool run bandit, arguments not shown)" in message, message
+
+
+class TestShownUvOutputOrdersRedactionBeforeTheBound:
+    def test_a_value_straddling_the_kept_tails_edge_leaves_no_fragment(self):
+        """shown_uv_output redacts BEFORE it bounds. Bounding first keeps the
+        RAW text's last _UV_OUTPUT_LIMIT characters, and a value straddling
+        that edge survives as a live fragment at the kept tail's start --
+        a piece the redaction then cannot match, because it matches whole
+        spellings, not pieces. The value here is placed so a bound-first
+        order keeps its last seven characters."""
+        from automated_security_helper.utils.uv_tool_runner import (
+            _UV_OUTPUT_LIMIT,
+            shown_uv_output,
+        )
+
+        value = "RUNSECRET" + "881777"
+        tail = "t" * (_UV_OUTPUT_LIMIT - 7)
+        text = f"head text {value}{tail}"
+        shown = shown_uv_output(text, (value,))
+        assert value not in shown, shown[:120]
+        assert "881777" not in shown, shown[:120]
+        assert "characters not shown" in shown, shown[:120]
+
+
+class TestBuiltinPluginEnvironmentReadsAreAudited:
+    """shown_uv_output's origin filter rests on a contract no production code
+    path enforces: ``values`` is the run's COMPLETE env-read set, so a plugin
+    that reads os.environ itself must contribute the value through
+    _environment_values(), or keep the read's value out of the inputs it
+    builds -- otherwise that input fails the holds-a-value filter and prints
+    at DEBUG, value included. The hide-all ``values is None`` branch never
+    runs in production (_install_uv_tool always passes _values_to_redact()),
+    so until now the contract was held by review alone. This audit makes it
+    measured: every direct environment read in the builtin plugin modules is
+    pinned here with the reason it satisfies the contract, and a new or
+    removed read fails until its entry is justified or dropped. A flag such
+    as ``provenance_checked`` on the call would only rename the trust; the
+    audit measures it. The tripwire reads syntax: ``from os import environ``
+    and ``import os as X`` are flagged as shapes of their own rather than
+    traced, a bare ``os.getenv`` or ``os.environ.get`` reference (rebinding
+    without a call) reads as its own shape, and ``os.environb`` counts like
+    ``os.environ``. What still slips past it is an indirection the syntax
+    does not show -- ``getattr(os, "environ")``, or a helper module exporting
+    a read -- which would have to survive review.
+    """
+
+    #: (path under plugin_modules/ash_builtin, read shape) -> (count, why the
+    #: read satisfies the origin-filter contract).
+    _JUSTIFIED = {
+        ("scanners/_grep_scanner_base.py", "os.environ.get(<dynamic>)"): (
+            2,
+            (
+                "the grep-family offline rules-cache directory"
+                " (cache_dir_env_var()): a path for the tool's own cache,"
+                " validated and handed to the scanner child, never a uv"
+                " install input"
+            ),
+        ),
+        ("scanners/cfn_nag_scanner.py", 'os.environ.get("RI_DEVKIT")'): (
+            1,
+            (
+                "a presence check only; the value itself is never used, so"
+                " nothing of it can print"
+            ),
+        ),
+        ("scanners/grype_scanner.py", "os.environ passed as a value"): (
+            1,
+            (
+                "a read-only view handed to _declared_grype_db_bound, which"
+                " merges operator-declared DB age bounds into the grype"
+                " child's extra_env and receives the run's environment_values"
+                " beside it; not a uv install input"
+            ),
+        ),
+        (
+            "scanners/semgrep_scanner.py",
+            '"SEMGREP_RULES_CACHE_DIR" in os.environ',
+        ): (
+            1,
+            "an offline-mode presence check for the rules cache",
+        ),
+        (
+            "scanners/semgrep_scanner.py",
+            'os.environ["SEMGREP_RULES_CACHE_DIR"]',
+        ): (
+            1,
+            (
+                "the offline rules path, written into SEMGREP_RULES for the"
+                " semgrep child's environment, never a uv install input"
+            ),
+        ),
+    }
+
+    @staticmethod
+    def _reads_in(tree: ast.AST) -> list:
+        """Every direct environment read in *tree*, as a shape string.
+
+        Shapes: ``os.environ.get(key)``, ``os.environ[key]``,
+        ``key in os.environ``, ``os.getenv(key)``, any other attribute of
+        os.environ (``os.environ.copy`` would surface as its own shape, and a
+        bare ``os.environ.get`` rebinding reads as ``os.environ.get``),
+        ``os.environ passed as a value`` for a bare reference, a bare
+        ``os.getenv`` reference, the same set over ``os.environb``, and the
+        import shapes ``from os import environ/environb/getenv`` and
+        ``import os as X``, flagged whole rather than traced. A key that is
+        not a string literal reads as ``<dynamic>``.
+        """
+        parents = {
+            child: parent
+            for parent in ast.walk(tree)
+            for child in ast.iter_child_nodes(parent)
+        }
+
+        def is_os_attr(node, attr: str) -> bool:
+            return (
+                isinstance(node, ast.Attribute)
+                and node.attr == attr
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "os"
+            )
+
+        def key_of(node) -> str:
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                return f'"{node.value}"'
+            return "<dynamic>"
+
+        reads = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module == "os":
+                for alias in node.names:
+                    if alias.name in ("environ", "environb", "getenv"):
+                        reads.append(f"from os import {alias.name}")
+                continue
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "os" and alias.asname:
+                        reads.append(f"import os as {alias.asname}")
+                continue
+            if is_os_attr(node, "getenv"):
+                parent = parents.get(node)
+                if isinstance(parent, ast.Call) and parent.func is node:
+                    first = parent.args[0] if parent.args else None
+                    reads.append(f"os.getenv({key_of(first)})")
+                else:
+                    reads.append("os.getenv")
+                continue
+            mapping = next(
+                (attr for attr in ("environ", "environb") if is_os_attr(node, attr)),
+                None,
+            )
+            if mapping is None:
+                continue
+            parent = parents.get(node)
+            if isinstance(parent, ast.Attribute):
+                call = parents.get(parent)
+                if (
+                    parent.attr == "get"
+                    and isinstance(call, ast.Call)
+                    and call.func is parent
+                ):
+                    first = call.args[0] if call.args else None
+                    reads.append(f"os.{mapping}.get({key_of(first)})")
+                else:
+                    reads.append(f"os.{mapping}.{parent.attr}")
+            elif isinstance(parent, ast.Subscript) and parent.value is node:
+                reads.append(f"os.{mapping}[{key_of(parent.slice)}]")
+            elif isinstance(parent, ast.Compare) and any(
+                isinstance(op, (ast.In, ast.NotIn)) for op in parent.ops
+            ):
+                reads.append(f"{key_of(parent.left)} in os.{mapping}")
+            else:
+                reads.append(f"os.{mapping} passed as a value")
+        return reads
+
+    def test_the_read_classifier_sees_every_shape(self):
+        """Self-test: the classifier is the audit's instrument, so prove it
+        reports each shape before trusting its zero on a real module."""
+        tree = ast.parse(
+            "import os\n"
+            "import os as _os\n"
+            "from os import environ, getenv\n"
+            'a = os.environ.get("NAME")\n'
+            "b = os.environ.get(dynamic)\n"
+            'c = os.environ["NAME"]\n'
+            'd = "NAME" in os.environ\n'
+            'e = os.getenv("NAME")\n'
+            "f = os.environ.copy()\n"
+            "g = consume(os.environ)\n"
+            "h = os.getenv\n"
+            "i = os.environ.get\n"
+            'j = "NAME" in os.environb\n'
+        )
+        assert sorted(self._reads_in(tree)) == sorted(
+            [
+                "import os as _os",
+                "from os import environ",
+                "from os import getenv",
+                'os.environ.get("NAME")',
+                "os.environ.get(<dynamic>)",
+                'os.environ["NAME"]',
+                '"NAME" in os.environ',
+                'os.getenv("NAME")',
+                "os.environ.copy",
+                "os.environ passed as a value",
+                "os.getenv",
+                "os.environ.get",
+                '"NAME" in os.environb',
+            ]
+        )
+
+    def test_every_builtin_environment_read_is_on_the_justified_list(self):
+        root = (
+            Path(automated_security_helper.__file__).parent
+            / "plugin_modules"
+            / "ash_builtin"
+        )
+        files = sorted(root.rglob("*.py"))
+        # Denominator control: an empty or relocated tree must fail, not
+        # pass vacuously.
+        assert any(file.name == "semgrep_scanner.py" for file in files), files
+        found: Counter = Counter()
+        for file in files:
+            tree = ast.parse(file.read_text(encoding="utf-8"))
+            for shape in self._reads_in(tree):
+                found[(file.relative_to(root).as_posix(), shape)] += 1
+        expected = Counter({key: count for key, (count, _) in self._JUSTIFIED.items()})
+        new_reads = found - expected
+        assert not new_reads, (
+            "new direct environment reads in builtin plugins: "
+            f"{dict(new_reads)}. Each read's value must either be"
+            " contributed through _environment_values() (so the run's"
+            " redaction and shown_uv_output's origin filter both see it) or"
+            " provably never flow into a uv install input; add a justified"
+            " entry to _JUSTIFIED once that holds."
+        )
+        stale = expected - found
+        assert not stale, (
+            f"stale _JUSTIFIED entries (the read is gone): {dict(stale)}."
+            " Drop them so the list stays the measured whole."
+        )
+
+
+@pytest.mark.parametrize(
+    ("text", "values", "inputs", "hidden", "kept"),
+    [
+        pytest.param(
+            "you require pkg-tool==9.9.9rc777, so resolution failed",
+            ["9.9.9rc777"],
+            ["pkg-tool==9.9.9rc777"],
+            ["9.9.9rc777", "pkg-tool==9.9.9rc777"],
+            [],
+            id="holds-a-value",
+        ),
+        pytest.param(
+            "Saved pkgqz4b-1.0.tar.gz, and you require pkgqz4b==1.0",
+            ["qz4b"],
+            ["pkgqz4b==1.0"],
+            ["qz4b", "pkgqz4b==1.0"],
+            [],
+            id="substring-glued",
+        ),
+        pytest.param(
+            "you require bandit==1.8, so resolution failed",
+            ["1.8"],
+            ["bandit==1.8"],
+            ["bandit==1.8"],
+            [],
+            id="structure-pin",
+        ),
+        pytest.param(
+            "resolving sarif-tools beside bandit==1.8",
+            ["1.8"],
+            ["bandit==1.8", "sarif-tools"],
+            ["bandit==1.8"],
+            ["sarif-tools"],
+            id="non-holding-input-stays",
+        ),
+        pytest.param(
+            "you require bandit>=1.7.4,<2, so resolution failed",
+            ["2"],
+            ["bandit>=1.7.4,<2"],
+            [],
+            ["bandit>=1.7.4,<2"],
+            id="range-bound-is-not-a-pin",
+        ),
+    ],
+)
+def test_each_hiding_arm_decides_one_table_row(text, values, inputs, hidden, kept):
+    """One table over the three hiding arms and their boundaries: an input the
+    value layer would hide a value inside, a value glued into an input's
+    name, a pinned short value, an input holding no value, and a range bound
+    that must stay visible."""
+    from automated_security_helper.utils.uv_tool_runner import shown_uv_output
+
+    shown = shown_uv_output(
+        text, values, plugin_inputs=inputs, tool_name="bandit", limit=None
+    )
+
+    for piece in hidden:
+        assert piece not in shown, (piece, shown)
+    for piece in kept:
+        assert piece in shown, (piece, shown)
+
+
+def test_the_install_input_builder_names_every_plugin_built_part():
+    """One builder for every record ABOUT an install: the full spec, the base
+    spec (name with extras, no constraint), the bare constraint, and each
+    --with entry -- the parts uv respells and quotes back separately in its
+    stderr. A record site assembling its own subset drifts: the mixin's
+    install record carried only the spec and the constraint, so the sets
+    disagreed about the --with entries. Pointing both sites at the builder
+    was STRUCTURAL (the debug line already named the --with entries, and the
+    attempt record's lines print only the spec and the constraint); the
+    behavior change this cell can catch is the builder's shape itself."""
+    from automated_security_helper.utils.uv_tool_runner import uv_install_inputs
+
+    built = uv_install_inputs("bandit", "==9.9", ["toml", "sarif"], ["tomli==9.9"])
+    assert built.inputs == (
+        "bandit[toml,sarif]==9.9",
+        "bandit[toml,sarif]",
+        "==9.9",
+        "tomli==9.9",
+    ), built.inputs
+    # The spec uv installs is the builder's own, the record set's first
+    # entry: the argv and every record about it are tied to one string.
+    assert built.spec == "bandit[toml,sarif]==9.9", built.spec
+    assert built.spec == built.inputs[0]
+    # Without a constraint the spec IS the base spec, named once, and no
+    # empty-string input rides along to confuse the origin arm.
+    bare = uv_install_inputs("bandit")
+    assert bare.spec == "bandit" and bare.inputs == ("bandit",), bare
+
+
+def test_an_extra_quoted_without_its_constraint_is_hidden():
+    """uv's resolver quotes an extra without its constraint ("Because
+    stub-tool[sarifqz4b] depends on sarif-om"), and an extra can hold a glued
+    env-read value a third-party plugin's config built in. The bare
+    "name[extras]" was no form of the hidden input "stub-tool[sarifqz4b]==1.0",
+    so the glued value printed on every text route. The public tool name
+    stays visible, and uninvolved text stays whole."""
+    from automated_security_helper.utils.uv_tool_runner import shown_uv_output
+
+    shown = shown_uv_output(
+        "Because stub-tool[sarifqz4b] depends on sarif-om, resolution failed "
+        "for stub-tool",
+        ("qz4b",),
+        plugin_inputs=("stub-tool[sarifqz4b]==1.0",),
+        tool_name="stub-tool",
+        limit=None,
+    )
+
+    assert "sarifqz4b" not in shown, shown
+    assert "qz4b" not in shown, shown
+    assert "sarif-om" in shown, shown
+    assert "for stub-tool" in shown, shown
+
+
+def test_a_wheel_file_name_respelling_of_a_hidden_name_is_hidden():
+    """Wheel and sdist file names respell "." and "-" in a package name as
+    "_" (PEP 427, PEP 625): "pkg.aqz4bb" downloads as
+    "pkg_aqz4bb-1.0-py3-none-any.whl". Neither the as-written nor the PEP
+    503 name token matches that spelling, and the glued value "qz4b" sits
+    inside one word, below the value layer's reach. The "_" form is a name,
+    so the boundary rules hold: "pyproject.toml" around a hidden "toml"
+    stays whole."""
+    from automated_security_helper.utils.uv_tool_runner import shown_uv_output
+
+    shown = shown_uv_output(
+        "Downloading pkg_aqz4bb-1.0-py3-none-any.whl (1.2MiB)",
+        ("qz4b",),
+        plugin_inputs=("pkg.aqz4bb==1.0",),
+        tool_name="stub-tool",
+        limit=None,
+    )
+    assert "pkg_aqz4bb" not in shown, shown
+    assert "qz4b" not in shown, shown
+    assert "Downloading" in shown, shown
+
+    # The boundary control: a hidden name's "_" form must not mangle a word
+    # that merely contains the name.
+    control = shown_uv_output(
+        "wrote pyproject.toml for the build",
+        ("qz4b",),
+        plugin_inputs=("toml==1.0qz4b",),
+        tool_name="stub-tool",
+        limit=None,
+    )
+    assert "pyproject.toml" in control, control
+
+
+def test_a_two_extra_spec_quoted_as_written_is_hidden():
+    """``requirement.extras`` is a set, so only a SORTED gluing of
+    "name[extras]" was a form of the hidden input: a spec written
+    "stub-tool[toml,sarifqz4b]" and quoted back as written kept the value
+    glued inside its extra. Both orders are forms now; which one a real uv
+    prints stays unmeasured, so both are hidden."""
+    from automated_security_helper.utils.uv_tool_runner import shown_uv_output
+
+    for quoted in ("stub-tool[toml,sarifqz4b]", "stub-tool[sarifqz4b,toml]"):
+        shown = shown_uv_output(
+            f"Because {quoted} depends on sarif-om, resolution failed",
+            ("qz4b",),
+            plugin_inputs=("stub-tool[toml,sarifqz4b]==1.0",),
+            tool_name="stub-tool",
+            limit=None,
+        )
+        assert "sarifqz4b" not in shown, (quoted, shown)
+        assert "qz4b" not in shown, (quoted, shown)
+        assert "sarif-om" in shown, (quoted, shown)
+
+
+def test_a_hidden_inputs_underscore_name_never_replaces_the_tools_module_name():
+    """The hidden input's name set carries the wheel-name "_" respelling, and
+    the discard of the tool's own name removed only the as-written and
+    canonical forms: the tool's module name in a traceback ("No module named
+    'detect_secrets'") was then replaced by the input layer, against the rule
+    that the tool's name is never replaced by it, and the replacement shifted
+    the argument numbering. The pinned value stays hidden."""
+    from automated_security_helper.utils.uv_tool_runner import shown_uv_output
+
+    shown = shown_uv_output(
+        "ModuleNotFoundError: No module named 'detect_secrets' (pin 1.77rc9)",
+        ("1.77rc9",),
+        plugin_inputs=("detect-secrets==1.77rc9",),
+        tool_name="detect-secrets",
+        limit=None,
+    )
+    assert "detect_secrets" in shown, shown
+    assert "1.77rc9" not in shown, shown
+
+
+def test_the_install_debug_line_hides_a_with_dependency_pinning_a_value(
+    monkeypatch, caplog
+):
+    """uv's resolver stderr quotes --with entries back, and a --with entry can
+    pin an env-read value below the value layer's whole-word band ("9.9"):
+    only the input-origin arm hides it, so an install debug line whose input
+    set drops the --with entries prints the pin in clear. The set comes from
+    the one install-input builder."""
+    import logging as logging_module
+
+    pin = "9.9"
+    with_dep = f"tomli=={pin}"
+
+    def _spawn_run(command, **kwargs):
+        raise subprocess.CalledProcessError(
+            1, command, output="", stderr=f"no solution: {with_dep} cannot be satisfied"
+        )
+
+    runner = UVToolRunner(uv_executable="uv")
+    runner._uv_available_cache = True
+    monkeypatch.setattr(runner, "is_tool_installed", lambda *a, **k: False)
+    monkeypatch.setattr(uv_tool_runner, "spawn_run", _spawn_run)
+    monkeypatch.setattr(
+        "automated_security_helper.core.constants.is_offline_mode", lambda: False
+    )
+
+    with caplog.at_level(logging_module.DEBUG, logger="ash"):
+        with pytest.raises(UVToolRunnerError):
+            runner.install_tool_with_version(
+                "stub-tool", with_dependencies=[with_dep], values=(pin,)
+            )
+
+    line = next((text for text in caplog.messages if "stderr (redacted" in text), None)
+    assert line is not None, caplog.messages
+    assert "no solution" in line, line
+    assert with_dep not in line, line
+
+
+def test_the_uv_layer_strips_a_non_color_escape_inside_a_value():
+    """shown_uv_output stripped only color codes before its layers, so a
+    non-color escape inside a value split the match the same way it did on
+    the neutral layer. The strip takes every complete escape code."""
+    from automated_security_helper.utils.uv_tool_runner import shown_uv_output
+
+    value = "EDGESECRET-9912"
+    shown = shown_uv_output(
+        "uv saw EDGE\x1b[KSECRET-9912 while resolving",
+        (value,),
+        plugin_inputs=(),
+        tool_name="bandit",
+        limit=None,
+    )
+
+    assert value not in shown, shown
+    assert "EDGE" not in shown, shown
+    assert "\x1b" not in shown, shown
+
+
+def test_a_placeholder_is_never_read_as_a_token_by_a_later_replacement():
+    """Every plugin-built token is replaced in turn, longest first, with a
+    numbered placeholder. A later token made of digits -- the bare pin "1" of
+    "pk01==1" -- is also a piece of an earlier placeholder's own text, so it
+    was found inside "<argument 1 not shown>" and renumbered it. The
+    placeholders are written so that no token can match them, and spelled out
+    after the last replacement."""
+    from automated_security_helper.utils.uv_tool_runner import shown_uv_output
+
+    shown = shown_uv_output(
+        "error: pk01==1 is unsatisfiable",
+        None,
+        plugin_inputs=("pk01==1",),
+        tool_name="stub-tool",
+        limit=None,
+    )
+
+    assert shown == "error: <argument 1 not shown> is unsatisfiable", shown
+
+
+def test_a_text_that_uses_up_the_private_marks_still_hides_every_input():
+    """The placeholders borrow private-use characters that appear in neither
+    the text nor a token. A text that holds every one of them leaves none to
+    borrow, and the input is still hidden: the fallback writes the numbered
+    placeholders as it goes."""
+    from automated_security_helper.utils.uv_tool_runner import shown_uv_output
+
+    every_mark = "".join(chr(code) for code in range(0xE000, 0xF900))
+    shown = shown_uv_output(
+        f"{every_mark} error: pk01==1 is unsatisfiable",
+        None,
+        plugin_inputs=("pk01==1",),
+        tool_name="stub-tool",
+        limit=None,
+    )
+
+    assert "pk01" not in shown, shown
+    assert "<argument" in shown, shown
+
+
+def test_an_unchecked_installs_output_hides_the_pinned_version_in_a_file_name():
+    """Control for the version answer below: by default an input's pinned
+    version is hidden where uv prints it inside a wheel or sdist file name."""
+    from automated_security_helper.utils.uv_tool_runner import shown_uv_output
+
+    shown = shown_uv_output(
+        "Downloading pkg-9.9.9-py3-none-any.whl (1.2MiB)",
+        None,
+        plugin_inputs=("pkg==9.9.9",),
+        tool_name="stub-tool",
+        limit=None,
+    )
+
+    assert "9.9.9" not in shown, shown
+    assert "Downloading" in shown, shown
+
+
+def test_a_tools_own_version_answer_keeps_its_version_and_hides_the_spec():
+    """A tool's ``--version`` line is the answer, not an argument uv printed:
+    with ``pinned_versions`` off the pinned version stays in it, while the
+    spec the tool echoes back is still hidden."""
+    from automated_security_helper.utils.uv_tool_runner import shown_uv_output
+
+    shown = shown_uv_output(
+        "vtool 1.0 vtool==1.0",
+        None,
+        plugin_inputs=("vtool==1.0",),
+        tool_name="vtool",
+        limit=None,
+        pinned_versions=False,
+    )
+
+    assert shown.startswith("vtool 1.0 "), shown
+    assert "==1.0" not in shown, shown

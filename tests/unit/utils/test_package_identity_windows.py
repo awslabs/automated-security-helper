@@ -279,7 +279,9 @@ class TestMatchTimeNormalization:
                 "deploy\\cdk\\node_modules\\aws-cdk-lib\\node_modules\\brace-expansion",
                 True,
             ),
-            ("deploy\\cdk\\" + BUNDLED_KEY.replace("/", "\\"), EXPECTED, True),
+            # A backslash in the path is part of a name, not a separator: ASH
+            # reports package_path with forward slashes on every platform.
+            ("deploy\\cdk\\" + BUNDLED_KEY.replace("/", "\\"), EXPECTED, False),
             (EXPECTED, "deploy/cdk/node_modules/*/node_modules/brace-expansion", True),
             (
                 EXPECTED,

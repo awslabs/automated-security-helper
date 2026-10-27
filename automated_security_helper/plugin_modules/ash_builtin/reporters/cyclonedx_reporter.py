@@ -11,6 +11,11 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
+from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import (
+    AggregateType,
+    Compositions,
+    CycloneDXReport,
+)
 
 
 class CycloneDXReporterConfigOptions(ReporterOptionsBase):
@@ -41,12 +46,10 @@ class CycloneDXReporter(ReporterPluginBase[CycloneDXReporterConfig]):
     There is also a mechanical consequence worth naming, because it is what makes
     the ruling safe rather than merely principled. The unified workspace file
     carries no ``cyclonedx`` at all -- ``WorkspaceAggregator`` omits it for
-    exactly the reason above -- so ``model.cyclonedx.model_dump_json()`` here
-    would raise ``AttributeError`` on ``None``. ``ReportPhase`` catches reporter
-    exceptions and logs them, so at workspace level this would have produced no
-    artefact and no clear reason, which is the silence this contract exists to
-    prevent. Declaring per project means the reporter is never invoked with that
-    model, so the crash is unreachable rather than merely unlikely.
+    exactly the reason above. :meth:`report` writes an empty SBOM for a model
+    without one, so at workspace level it would publish a document saying the
+    workspace has no components, which is false. Declaring per project means the
+    reporter is never invoked with that model.
     """
 
     workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
@@ -57,9 +60,41 @@ class CycloneDXReporter(ReporterPluginBase[CycloneDXReporterConfig]):
         return super().model_post_init(context)
 
     def report(self, model: "AshAggregatedResults") -> str:
-        """Format ASH model in CycloneDX."""
+        """Format ASH model in CycloneDX.
 
-        return model.cyclonedx.model_dump_json(
+        With no SBOM scanner in the run, ``model.cyclonedx`` is the default
+        ``CycloneDXReport()``. Nothing in it is set, so ``exclude_unset`` alone
+        would dump ``{}``, which lacks the ``bomFormat`` and ``specVersion`` the
+        CycloneDX schema requires, and a consumer given the file refuses it. A
+        results file read back by ``ash report`` stores those defaults explicitly
+        but no ``components``, which would be a second, different document for the
+        same scan. Both give the envelope with an empty component list, and a
+        ``compositions`` entry with aggregate ``unknown``: no SBOM scanner produced
+        an inventory (it was missing, skipped or failed), so an empty list is not
+        a statement that the project has no components. An SBOM a scanner
+        produced already sets these fields, carries its own metadata, and is
+        dumped unchanged.
+        """
+        bom = (
+            model.cyclonedx.model_copy()
+            if model.cyclonedx is not None
+            else CycloneDXReport()
+        )
+        # Every SBOM a scanner writes has metadata or a serial number; the default
+        # model and its dump read back from a results file have neither.
+        no_sbom = (
+            bom.metadata is None and bom.serialNumber is None and not bom.components
+        )
+        # Assigning a field marks it set, so exclude_unset keeps it. The copy keeps
+        # the model the other reporters read untouched.
+        bom.bomFormat = bom.bomFormat
+        bom.specVersion = bom.specVersion
+        bom.version = bom.version
+        if bom.components is None:
+            bom.components = []
+        if no_sbom and bom.compositions is None:
+            bom.compositions = [Compositions(aggregate=AggregateType.unknown)]
+        return bom.model_dump_json(
             by_alias=True,
             exclude_unset=True,
             exclude_none=True,

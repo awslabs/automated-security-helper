@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for get_changed_files() and _filter_results_to_changed_files()."""
+"""Tests for get_changed_files() and filter_results_to_changed_files()."""
 
 import logging
 import os
@@ -13,8 +13,9 @@ import pytest
 
 
 from automated_security_helper.utils.get_scan_set import get_changed_files
-from automated_security_helper.interactions.run_ash_scan import (
-    _filter_results_to_changed_files,
+from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.changed_files import (
+    filter_results_to_changed_files,
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -30,13 +31,69 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Tool,
     ToolComponent,
 )
+from tests.utils.env_assertions import differing_names
+from tests.utils.git_fixture import run_git
+
+
+@pytest.fixture(autouse=True)
+def _resolved_git(monkeypatch):
+    """Pin the resolved git to the bare name, so the argv assertions below do not
+    depend on where this machine installs git. The resolution itself is
+    _git_executable's, checked in its own tests."""
+    from automated_security_helper.utils import get_scan_set
+
+    monkeypatch.setattr(get_scan_set, "_git_executable", lambda: "git")
+
+
+def _diff_argv(base_ref: str) -> list[str]:
+    """The diff get_changed_files runs: NUL-separated names, none quoted, with
+    git_argv's options ahead of it and a trailing "--" so git reads the range
+    only as revisions (a working-tree file named like the range is not taken
+    in its place when the base ref is missing)."""
+    return [
+        "git",
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "core.quotepath=false",
+        "diff",
+        "--name-only",
+        "-z",
+        f"{base_ref}...HEAD",
+        "--",
+    ]
+
+
+def _assert_ran_the_diff(mock_run: MagicMock, base_ref: str) -> None:
+    """get_changed_files ran the diff once: its argv, cwd and stdin, and an explicit
+    copy of the environment, never the live environ (utils/process_env.py).
+
+    Compared part by part, the environment by names: assert_called_once_with
+    prints the call's whole environment when it fails (tests/utils/env_assertions.py).
+    """
+    assert mock_run.call_count == 1
+    args, kwargs = mock_run.call_args
+    assert args == (_diff_argv(base_ref),)
+    others = {name: value for name, value in kwargs.items() if name != "env"}
+    assert others == {
+        "capture_output": True,
+        "stdin": subprocess.DEVNULL,
+        "timeout": 30,
+        "cwd": None,
+    }
+    env = kwargs.get("env")
+    copied = env is not None and env is not os.environ
+    assert copied, "the diff was not given an explicit copy of the environment"
+    assert differing_names(env, os.environ) == []
 
 
 class TestGetChangedFiles:
     """Unit tests for the get_changed_files helper."""
 
     def test_returns_paths_on_success(self):
-        fake_output = "src/app.py\nREADME.md\nlib/utils.js\n"
+        fake_output = b"src/app.py\0README.md\0lib/utils.js\0"
         mock_result = MagicMock(returncode=0, stdout=fake_output)
         with patch(
             "automated_security_helper.utils.get_scan_set.subprocess.run",
@@ -44,19 +101,11 @@ class TestGetChangedFiles:
         ) as mock_run:
             result = get_changed_files("origin/main")
 
-        mock_run.assert_called_once_with(
-            ["git", "diff", "--name-only", "origin/main...HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=None,
-            # An explicit copy, never the live environ: see utils/process_env.py.
-            env=dict(os.environ),
-        )
+        _assert_ran_the_diff(mock_run, "origin/main")
         assert result == [Path("src/app.py"), Path("README.md"), Path("lib/utils.js")]
 
     def test_returns_empty_list_when_no_changes(self):
-        mock_result = MagicMock(returncode=0, stdout="\n")
+        mock_result = MagicMock(returncode=0, stdout=b"")
         with patch(
             "automated_security_helper.utils.get_scan_set.subprocess.run",
             return_value=mock_result,
@@ -64,6 +113,19 @@ class TestGetChangedFiles:
             result = get_changed_files()
 
         assert result == []
+
+    def test_returns_none_without_running_anything_when_git_is_not_found(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "automated_security_helper.utils.get_scan_set._git_executable",
+            lambda: None,
+        )
+        with patch(
+            "automated_security_helper.utils.get_scan_set.subprocess.run"
+        ) as mock_run:
+            assert get_changed_files("origin/main") is None
+        mock_run.assert_not_called()
 
     def test_returns_none_when_git_not_found(self):
         with patch(
@@ -94,26 +156,19 @@ class TestGetChangedFiles:
         assert result is None
 
     def test_custom_base_ref(self):
-        mock_result = MagicMock(returncode=0, stdout="file.txt\n")
+        mock_result = MagicMock(returncode=0, stdout=b"file.txt\0")
         with patch(
             "automated_security_helper.utils.get_scan_set.subprocess.run",
             return_value=mock_result,
         ) as mock_run:
             result = get_changed_files("origin/develop")
 
-        mock_run.assert_called_once_with(
-            ["git", "diff", "--name-only", "origin/develop...HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=None,
-            # An explicit copy, never the live environ: see utils/process_env.py.
-            env=dict(os.environ),
-        )
+        _assert_ran_the_diff(mock_run, "origin/develop")
         assert result == [Path("file.txt")]
 
-    def test_strips_blank_lines(self):
-        fake_output = "\n  a.py  \n\nb.py\n\n"
+    def test_splits_on_nul_and_keeps_each_name_whole(self):
+        """Only NUL separates names: spaces, newlines and tabs are part of one."""
+        fake_output = b"  a.py  \0b\nc.py\0tab\tname.py\0"
         mock_result = MagicMock(returncode=0, stdout=fake_output)
         with patch(
             "automated_security_helper.utils.get_scan_set.subprocess.run",
@@ -121,7 +176,52 @@ class TestGetChangedFiles:
         ):
             result = get_changed_files()
 
-        assert result == [Path("a.py"), Path("b.py")]
+        assert result == [Path("  a.py  "), Path("b\nc.py"), Path("tab\tname.py")]
+
+
+def _git(cwd: Path, *args: str) -> None:
+    run_git(*args, cwd=cwd, check=True, timeout=30)
+
+
+class TestNamesFromARealRepository:
+    """What a real ``git diff`` prints for names it would quote."""
+
+    NAMES = ["\u00fcn\u00efcode.py", "dir with space/a b.py", " leading.py", "plain.py"]
+
+    def test_quoted_names_come_back_as_the_files(self, tmp_path, monkeypatch):
+        probe = run_git("--version")
+        if probe.returncode != 0:
+            pytest.skip("git is not available on PATH")
+        # The real git, by ASH's own lookup.
+        monkeypatch.setattr(
+            "automated_security_helper.utils.get_scan_set._git_executable",
+            lambda: find_executable("git"),
+        )
+        # The host's git configuration must not decide the outcome; a global
+        # core.quotepath=false would hide the quoting this test is about.
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+        monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "base.txt").write_text("base\n", encoding="utf-8")
+        _git(repo, "init", "-q", "-b", "main")
+        _git(repo, "config", "user.email", "fixture@example.invalid")
+        _git(repo, "config", "user.name", "Fixture")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-q", "-m", "base")
+        _git(repo, "checkout", "-q", "-b", "change")
+        for name in self.NAMES:
+            path = repo / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("x = 1\n", encoding="utf-8")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-q", "-m", "change")
+
+        changed = get_changed_files(base_ref="main", cwd=repo)
+
+        assert changed is not None
+        assert sorted(changed) == sorted(Path(name) for name in self.NAMES)
+        assert all((repo / path).is_file() for path in changed)
 
 
 def _make_result(uri: str) -> Result:
@@ -206,7 +306,7 @@ def ash_warnings(caplog):
 
 
 class TestFilterResultsToChangedFiles:
-    """Unit tests for _filter_results_to_changed_files."""
+    """Unit tests for filter_results_to_changed_files."""
 
     def test_keeps_results_matching_changed_files(self, tmp_path):
         source_dir = tmp_path / "repo"
@@ -220,7 +320,7 @@ class TestFilterResultsToChangedFiles:
             ]
         )
 
-        filtered = _filter_results_to_changed_files(results, changed, source_dir)
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
         run_results = filtered.sarif.runs[0].results
         assert len(run_results) == 1
         uri = run_results[0].locations[0].physicalLocation.root.artifactLocation.uri
@@ -238,7 +338,7 @@ class TestFilterResultsToChangedFiles:
             ]
         )
 
-        filtered = _filter_results_to_changed_files(results, changed, source_dir)
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
         assert len(filtered.sarif.runs[0].results) == 1
 
     def test_strips_file_triple_slash_prefix(self, tmp_path):
@@ -253,7 +353,7 @@ class TestFilterResultsToChangedFiles:
         uri = "file://" + str(abs_path)
         results = _make_results_with_sarif([_make_result(uri)])
 
-        filtered = _filter_results_to_changed_files(results, changed, source_dir)
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
         assert len(filtered.sarif.runs[0].results) == 1
 
     def test_empty_changed_set_removes_all(self, tmp_path):
@@ -267,7 +367,7 @@ class TestFilterResultsToChangedFiles:
             ]
         )
 
-        filtered = _filter_results_to_changed_files(results, set(), source_dir)
+        filtered = filter_results_to_changed_files(results, set(), source_dir)
         assert filtered.sarif.runs[0].results == []
 
     def test_empty_changed_set_says_so_and_counts_what_it_discarded(
@@ -293,7 +393,7 @@ class TestFilterResultsToChangedFiles:
             ]
         )
 
-        _filter_results_to_changed_files(results, set(), source_dir)
+        filter_results_to_changed_files(results, set(), source_dir)
 
         warnings = ash_warnings()
         assert warnings, "an empty changed-file set discarded every result in silence"
@@ -319,7 +419,7 @@ class TestFilterResultsToChangedFiles:
             ]
         )
 
-        _filter_results_to_changed_files(results, changed, source_dir)
+        filter_results_to_changed_files(results, changed, source_dir)
 
         assert ash_warnings() == []
 
@@ -331,15 +431,15 @@ class TestFilterResultsToChangedFiles:
         no_loc_result = Result(message=Message1(text="no location"), locations=[])
         results = _make_results_with_sarif([no_loc_result])
 
-        filtered = _filter_results_to_changed_files(results, changed, source_dir)
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
         assert len(filtered.sarif.runs[0].results) == 1
 
     def test_returns_results_unchanged_when_sarif_is_none(self):
         results = AshAggregatedResults()
         results.sarif = None
-        out = _filter_results_to_changed_files(results, set(), Path("/tmp"))  # nosec B108
+        out = filter_results_to_changed_files(results, set(), Path("/tmp"))  # nosec B108
         assert out is results
 
     def test_none_results_returns_none(self):
-        out = _filter_results_to_changed_files(None, set(), Path("/tmp"))  # nosec B108
+        out = filter_results_to_changed_files(None, set(), Path("/tmp"))  # nosec B108
         assert out is None

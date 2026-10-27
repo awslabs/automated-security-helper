@@ -30,14 +30,18 @@ This example leaves `create_approval_rule_template` at its default of `false`,
 so it does not change your repository's settings either. Turning it on adds an
 approval rule template association, which is a settings change and is reversible.
 
-## Why `--changed-files-only`
+## Why the whole tree is scanned
 
-Lambda's timeout ceiling is 900 seconds and is not adjustable. A full scan of a
-sizable repository does not fit, and the clone alone can take a large share of
-the budget. `--changed-files-only --base-ref origin/main` scales the scan with
-the size of the change instead.
-
-Adjust `--base-ref` to your default branch name.
+Lambda's timeout ceiling is 900 seconds and is not adjustable, and this gate scans
+the whole checked-out tree of the pull request. Narrowing the scan through
+`ash_scan_extra_args` is refused: the handler reserves `--changed-files-only`,
+and it reserves `--base-ref`, because with them findings outside the diff stop
+counting, and so does every finding in a file whose name git prints quoted, which
+can turn a failing pull request into a pass. A deployment passing either one ends
+every pull request in outcome `error`, so this example leaves `ash_scan_extra_args`
+unset. For a repository that does not fit, raise
+`lambda_memory_mb` (Lambda scales CPU with memory) or use the
+`codepipeline-executor` module.
 
 ## When a scan cannot finish
 

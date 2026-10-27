@@ -13,8 +13,10 @@ same snapshots. Locally: build the image, then
         --run-container-snapshots --no-cov -n 0
 
 Inputs: ``OCI_RUNNER`` (default ``docker``), ``OCI_RUNNER_WRAPPER`` (``sudo`` for
-finch in CI) and ``ASH_IMAGE_NAME`` (default ``automated-security-helper:ci``, which
-is what every CI leg builds). ``pwsh`` must be on PATH for the PowerShell wrapper
+finch in CI) and ``ASH_IMAGE_NAME`` (default ``automated-security-helper:ci``, the
+tag of the ``ci`` stage: every leg that runs this module builds its image with
+``--build-target ci``, and the scans below ask for that stage, since CI variables
+do not select it). ``pwsh`` must be on PATH for the PowerShell wrapper
 tests; it is on the hosted Linux runners these legs use.
 
 A scan through the image prints the inner ASH's whole log first, and that log
@@ -33,6 +35,7 @@ semgrep read advisory and rule data that changes daily.
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import shutil
 import subprocess  # nosec B404 - running the real OCI runner is the point of this module
@@ -41,6 +44,7 @@ from pathlib import Path
 import pytest
 
 from tests.snapshot.support.normalize import REPO_ROOT, pinned_terminal_env
+from tests.utils.pwsh_env import QUIET_PWSH, inherited_env, scratch_home
 
 pytestmark = [
     pytest.mark.container_runtime,
@@ -48,6 +52,8 @@ pytestmark = [
     pytest.mark.snapshot_masking(mask_durations=True),
 ]
 
+# The ``ci`` stage's tag, which every leg running this module builds with an explicit
+# ``--build-target ci``; see the module docstring.
 IMAGE = os.environ.get("ASH_IMAGE_NAME") or "automated-security-helper:ci"
 RUNNER = os.environ.get("OCI_RUNNER") or "docker"
 RUNNER_PREFIX = [
@@ -93,10 +99,29 @@ def _last_line(text: str) -> str:
     return next((line for line in reversed(text.splitlines()) if line.strip()), "")
 
 
-def _first_line(text: str) -> str:
-    """PowerShell's error record after its first line is a source excerpt whose layout
-    depends on the pwsh version and console width, so only the message is kept."""
-    return next((line for line in text.splitlines() if line.strip()), "")
+def _error_message(text: str) -> str:
+    """The message of the error PowerShell printed, without its location or excerpt.
+
+    For an error thrown in a script, PowerShell's ConciseView prints
+    ``<category>: <script>:<line>``, ``Line |``, the source line, and a ``~~~``
+    underline, then the message on ``|`` lines wrapped to the console width. The
+    location and the excerpt change with every edit to the wrapper and the wrapping
+    with the console, so only the message is kept, unwrapped. An error printed without
+    an excerpt is one ``<category>: <message>`` line, kept as it is.
+    """
+    lines = [
+        line
+        for line in re.sub(r"\x1b\[[0-9;]*m", "", text).splitlines()
+        if line.strip()
+    ]
+    for index, line in enumerate(lines):
+        if set(line.replace("|", "").strip()) == {"~"}:
+            return " ".join(
+                rest.split("|", 1)[1].strip()
+                for rest in lines[index + 1 :]
+                if "|" in rest
+            )
+    return lines[0] if lines else ""
 
 
 @pytest.fixture(autouse=True)
@@ -115,7 +140,9 @@ def test_build_image_help_in_image(text_snapshot):
     assert result["stdout"] == text_snapshot("txt")
 
 
-def test_container_scan_of_the_fixture(run_cli, snapshot, fixture_repo, local_checkout):
+def test_container_scan_of_the_fixture(
+    run_cli, snapshot, fixture_repo, project_build_files_in_cwd
+):
     result = run_cli(
         [
             "scan",
@@ -140,7 +167,7 @@ def test_container_scan_of_the_fixture(run_cli, snapshot, fixture_repo, local_ch
 
 
 def test_container_exit_status_for_an_invalid_config(
-    run_cli, snapshot, fixture_repo, local_checkout
+    run_cli, snapshot, fixture_repo, project_build_files_in_cwd
 ):
     (fixture_repo / ".ash" / ".ash.yaml").write_text(BAD_CONFIG, encoding="utf-8")
     result = run_cli(
@@ -165,7 +192,11 @@ def test_container_exit_status_for_an_invalid_config(
 
 
 def _wrapper_env() -> dict[str, str]:
-    env = {**os.environ, "OCI_RUNNER": RUNNER}
+    # No shell startup file of the developer's: ./ash is a bash script, and pwsh can
+    # be one too, and a startup file could set OCI_RUNNER again. HOME and the XDG
+    # directories are kept here, because the real runner reads its configuration (and
+    # podman its image store) from them.
+    env = {**inherited_env(), **QUIET_PWSH, "OCI_RUNNER": RUNNER}
     if ":" in IMAGE:
         env["ASH_IMAGE_NAME"] = IMAGE
     return env
@@ -238,25 +269,34 @@ def test_powershell_wrapper_scan_of_the_fixture(snapshot, fixture_repo, in_tmp):
 
 def test_powershell_wrapper_without_a_runner(snapshot, in_tmp):
     (in_tmp / "src").mkdir()
-    env = {**_wrapper_env(), "ASH_OCI_RUNNER": "no-such-oci-runner"}
+    # No runner runs here, so pwsh gets a HOME of the test's own as well.
+    env = {
+        **_wrapper_env(),
+        **scratch_home(in_tmp),
+        "OCI_RUNNER": "no-such-oci-runner",
+    }
+    env.pop("ASH_OCI_RUNNER", None)
+    # -NoRun: this PATH holds the leg's real runner, so a wrapper that ignored the
+    # missing one named here would otherwise go on to start a container with it.
     result = _pwsh(
-        "Invoke-ASH -NoBuild -SourceDir src -OutputDir out; exit $LASTEXITCODE",
+        "Invoke-ASH -NoBuild -NoRun -SourceDir src -OutputDir out; exit $LASTEXITCODE",
         in_tmp,
         env,
     )
     assert {
         "exit_code": result.returncode,
-        "first_error_line": _first_line(result.stderr),
+        "error_message": _error_message(result.stderr),
     } == snapshot
 
 
 def test_powershell_wrapper_default_runner_discovery(snapshot, fixture_repo, in_tmp):
-    # No -OCIRunner and no ASH_OCI_RUNNER. Invoke-ASH tries docker, finch, nerdctl
-    # and podman in turn, and every leg running this has at least one of them;
-    # -NoRun stops before it would be used, so the record is the same on all. The
-    # parameter is a [string] defaulting to $env:ASH_OCI_RUNNER, which PowerShell
+    # No -OCIRunner, no OCI_RUNNER, and no ASH_OCI_RUNNER. Invoke-ASH tries finch,
+    # docker, nerdctl, and podman in turn, and every leg running this has at least one
+    # of them; -NoRun stops before it would be used, so the record is the same on all.
+    # The parameter is a [string] defaulting to $env:OCI_RUNNER, which PowerShell
     # binds as "" rather than $null; the wrapper treats that empty value as unset.
     env = _wrapper_env()
+    env.pop("OCI_RUNNER", None)
     env.pop("ASH_OCI_RUNNER", None)
     result = _pwsh(
         "Invoke-ASH -NoBuild -NoRun -SourceDir src -OutputDir out; "
@@ -266,5 +306,5 @@ def test_powershell_wrapper_default_runner_discovery(snapshot, fixture_repo, in_
     )
     assert {
         "exit_code": result.returncode,
-        "first_error_line": _first_line(result.stderr),
+        "error_message": _error_message(result.stderr),
     } == snapshot

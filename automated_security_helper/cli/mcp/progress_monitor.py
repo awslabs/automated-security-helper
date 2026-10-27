@@ -17,6 +17,7 @@ from automated_security_helper.cli.mcp_tools import (
     mcp_get_scan_results,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.terminal_text import raw_controls_on_one_line
 
 logger = ASH_LOGGER
 
@@ -56,18 +57,31 @@ async def _safe_send(
         return False
 
 
+def _in_session(session_id: Optional[str]) -> Dict[str, str]:
+    """The keyword that reads the scan in the session that started it.
+
+    The registry shows a scan only to its own session, so the monitor asks as
+    that session. Omitted when there is none, which is the default session.
+    """
+    return {} if session_id is None else {"session_id": session_id}
+
+
 async def _fetch_initial_scan_info(
-    ctx: Context, scan_id: str
+    ctx: Context, scan_id: str, session_id: Optional[str] = None
 ) -> Optional[Tuple[Path, Path, Path]]:
     """Resolve the scan's working directory or report the failure to the client.
 
     Returns ``(directory_path, output_dir, ash_aggregated_results)`` on success,
     or ``None`` when the registry lookup fails or the directory path is missing.
     """
-    registry_info = await mcp_get_scan_progress(scan_id=scan_id)
+    registry_info = await mcp_get_scan_progress(
+        scan_id=scan_id, **_in_session(session_id)
+    )
     if not registry_info.get("success", False):
         await ctx.error(
-            f"Failed to get scan info: {registry_info.get('error', 'Unknown error')}"
+            raw_controls_on_one_line(
+                f"Failed to get scan info: {registry_info.get('error', 'Unknown error')}"
+            )
         )
         return None
 
@@ -125,7 +139,7 @@ async def _handle_scan_completed(
 
     return await _safe_send(
         connection_alive,
-        lambda: ctx.info(summary),
+        lambda: ctx.info(raw_controls_on_one_line(summary)),
         "Failed to send completion summary",
     )
 
@@ -140,7 +154,7 @@ async def _handle_terminal_status(
         lambda: ctx.report_progress(
             progress=1.0,
             total=1.0,
-            message=f"Scan {status}",
+            message=raw_controls_on_one_line(f"Scan {status}"),
         ),
         "Failed to send final status progress",
     )
@@ -149,7 +163,9 @@ async def _handle_terminal_status(
         error_message = progress_info.get("error_message", "Unknown error")
         connection_alive = await _safe_send(
             connection_alive,
-            lambda: ctx.error(f"Scan failed: {error_message}"),
+            lambda: ctx.error(
+                raw_controls_on_one_line(f"Scan failed: {error_message}")
+            ),
             "Failed to send completion message",
         )
     elif status == "incomplete":
@@ -160,8 +176,10 @@ async def _handle_terminal_status(
         connection_alive = await _safe_send(
             connection_alive,
             lambda: ctx.warning(
-                "Scan finished with incomplete coverage; its results are partial"
-                + (f". Did not complete: {names}" if names else "")
+                raw_controls_on_one_line(
+                    "Scan finished with incomplete coverage; its results are partial"
+                    + (f". Did not complete: {names}" if names else "")
+                )
             ),
             "Failed to send completion message",
         )
@@ -212,14 +230,17 @@ async def _emit_scanner_progress(
         lambda: ctx.report_progress(
             progress=progress,
             total=1.0,
-            message=message,
+            message=raw_controls_on_one_line(message),
         ),
         "Failed to send progress update",
     )
     connection_alive = await _safe_send(
         connection_alive,
         lambda: ctx.debug(
-            f"Scanner progress: {scanner_name}/{target_type} - {int(progress * 100)}%"
+            raw_controls_on_one_line(
+                f"Scanner progress: {scanner_name}/{target_type} - "
+                f"{int(progress * 100)}%"
+            )
         ),
         "Failed to send debug message",
     )
@@ -270,7 +291,7 @@ async def _process_scanner_result(
         logger.warning(warning_message)
         connection_alive = await _safe_send(
             connection_alive,
-            lambda: ctx.warning(warning_message),
+            lambda: ctx.warning(raw_controls_on_one_line(warning_message)),
             "Failed to send warning message",
         )
 
@@ -293,7 +314,7 @@ async def _emit_heartbeat(
         lambda: ctx.report_progress(
             progress=progress,
             total=1.0,
-            message=(
+            message=raw_controls_on_one_line(
                 f"Scan in progress ({len(completed_scanners)}/"
                 f"{total_scanners_estimate} scanners completed)"
             ),
@@ -338,6 +359,7 @@ async def _run_monitor_loop(
     output_dir: Path,
     ash_aggregated_results: Path,
     connection_alive: bool,
+    session_id: Optional[str] = None,
 ) -> None:
     """Poll-and-emit loop until the scan finishes, fails, cancels, or times out."""
     completed_scanners: set = set()
@@ -350,7 +372,9 @@ async def _run_monitor_loop(
 
         if current_time - start_time > _MAX_WAIT_SECONDS:
             await ctx.warning(
-                f"Scan monitoring timed out after {_MAX_WAIT_SECONDS} seconds"
+                raw_controls_on_one_line(
+                    f"Scan monitoring timed out after {_MAX_WAIT_SECONDS} seconds"
+                )
             )
             return
 
@@ -363,7 +387,9 @@ async def _run_monitor_loop(
             await _handle_scan_completed(ctx, output_dir, connection_alive)
             return
 
-        progress_info = await mcp_get_scan_progress(scan_id=scan_id)
+        progress_info = await mcp_get_scan_progress(
+            scan_id=scan_id, **_in_session(session_id)
+        )
         if progress_info.get("status") in ["failed", "incomplete", "cancelled"]:
             await _handle_terminal_status(ctx, progress_info, connection_alive)
             return
@@ -456,7 +482,9 @@ async def monitor_workspace_progress(
         lambda: report_progress(
             progress=0.0,
             total=float(total),
-            message=f"Workspace scan started: 0/{total} projects complete",
+            message=raw_controls_on_one_line(
+                f"Workspace scan started: 0/{total} projects complete"
+            ),
         ),
         "Failed to send initial workspace progress update",
     )
@@ -475,7 +503,9 @@ async def monitor_workspace_progress(
                 lambda k=key, done=len(completed): report_progress(
                     progress=float(done),
                     total=float(total),
-                    message=f"{k} complete ({done}/{total} projects)",
+                    message=raw_controls_on_one_line(
+                        f"{k} complete ({done}/{total} projects)"
+                    ),
                 ),
                 "Failed to send workspace progress update",
             )
@@ -486,7 +516,9 @@ async def monitor_workspace_progress(
         await asyncio.sleep(poll_interval)
 
 
-async def monitor_scan_progress(ctx: Context, scan_id: str) -> None:
+async def monitor_scan_progress(
+    ctx: Context, scan_id: str, session_id: Optional[str] = None
+) -> None:
     """
     Monitor scan progress and report updates via the MCP context.
 
@@ -496,10 +528,12 @@ async def monitor_scan_progress(ctx: Context, scan_id: str) -> None:
     Args:
         ctx: MCP context for reporting progress/log messages.
         scan_id: The scan ID returned by run_ash_scan.
+        session_id: The session that started the scan, which is the only one
+            the registry shows it to. None is the default session.
     """
     connection_alive = True
     try:
-        scan_info = await _fetch_initial_scan_info(ctx, scan_id)
+        scan_info = await _fetch_initial_scan_info(ctx, scan_id, session_id)
         if scan_info is None:
             return
         _, output_dir, ash_aggregated_results = scan_info
@@ -512,6 +546,7 @@ async def monitor_scan_progress(ctx: Context, scan_id: str) -> None:
             output_dir,
             ash_aggregated_results,
             connection_alive,
+            session_id,
         )
     except asyncio.CancelledError:
         logger.info(f"Scan monitoring cancelled for scan_id: {scan_id}")
@@ -528,6 +563,6 @@ async def monitor_scan_progress(ctx: Context, scan_id: str) -> None:
         logger.exception(error_message)
         await _safe_send(
             connection_alive,
-            lambda: ctx.error(error_message),
+            lambda: ctx.error(raw_controls_on_one_line(error_message)),
             "Failed to send error message to client",
         )

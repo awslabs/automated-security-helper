@@ -89,6 +89,9 @@ def full_results():
                     }
                 ]
             },
+            # What scan_tracking.get_scan_results puts beside the SARIF. ALL, so
+            # that every unsuppressed result here is actionable whatever its level.
+            "severity_thresholds": {"": "ALL"},
         },
         "scanner_reports": {
             "bandit": {"report": "bandit-data"},
@@ -211,6 +214,75 @@ class TestFilterActionableOnly:
     def test_sets_content_filter_metadata(self, full_results):
         result = filter_actionable_only(full_results)
         assert result["_content_filters"]["actionable_only"] is True
+
+
+def _judged(thresholds: dict) -> dict:
+    """bandit HIGH, MEDIUM and LOW findings and a semgrep LOW, judged by *thresholds*."""
+
+    def result(rule: str, scanner: str, severity: str) -> dict:
+        return {
+            "ruleId": rule,
+            "level": "note",
+            "properties": {"scanner_name": scanner, "issue_severity": severity},
+        }
+
+    return {
+        "raw_results": {
+            "sarif": {
+                "runs": [
+                    {
+                        "results": [
+                            result("B-HIGH", "bandit", "HIGH"),
+                            result("B-MEDIUM", "bandit", "MEDIUM"),
+                            result("B-LOW", "bandit", "LOW"),
+                            result("S-LOW", "semgrep", "LOW"),
+                        ]
+                    }
+                ]
+            },
+            "severity_thresholds": thresholds,
+        }
+    }
+
+
+class TestFilterActionableOnlyJudgesByTheThreshold:
+    """Actionable is unsuppressed AND at or above the threshold, as for exit 2.
+
+    The MCP tool's own tests (tests/unit/cli/mcp/test_actionable_only_matches_the_exit_code.py)
+    compare this with ``_compute_exit_code``; these pin the filter's reading of
+    the thresholds map.
+    """
+
+    def test_below_the_threshold_is_dropped_and_at_it_is_kept(self):
+        result = filter_actionable_only(_judged({"": "MEDIUM"}))
+        assert _rule_ids(result) == ["B-HIGH", "B-MEDIUM"]
+
+    def test_a_scanners_own_threshold_decides_its_results(self):
+        result = filter_actionable_only(
+            _judged({"": "MEDIUM", "bandit": "HIGH", "semgrep": "LOW"})
+        )
+        assert _rule_ids(result) == ["B-HIGH", "S-LOW"]
+
+    def test_a_scanner_missing_from_the_map_is_judged_by_the_global(self):
+        result = filter_actionable_only(_judged({"": "LOW", "bandit": "HIGH"}))
+        assert _rule_ids(result) == ["B-HIGH", "S-LOW"]
+
+    def test_sarif_without_its_thresholds_is_refused(self):
+        """Keeping everything or nothing would each read as an answer."""
+        results = _judged({})
+        del results["raw_results"]["severity_thresholds"]
+
+        with pytest.raises(ValueError, match="severity_thresholds"):
+            filter_actionable_only(results)
+
+    def test_results_without_sarif_need_no_thresholds(self, full_results):
+        """summary and minimal never load the SARIF; only the counts change."""
+        del full_results["raw_results"]["sarif"]
+        del full_results["raw_results"]["severity_thresholds"]
+
+        result = filter_actionable_only(full_results)
+
+        assert result["summary_stats"]["suppressed"] == 0
 
 
 class TestApplyContentFilters:
@@ -345,3 +417,51 @@ class TestFiltersReadTheSerializedSummaryStats:
         assert counts["medium"] == 0
         assert counts["low"] == 0
         assert counts["info"] == 0
+
+
+def _sarif_results() -> dict:
+    """Two HIGH bandit findings in the SARIF, one of them suppressed."""
+
+    def result(rule: str, suppressed: bool) -> dict:
+        entry = {
+            "ruleId": rule,
+            "level": "error",
+            "properties": {"scanner_name": "bandit", "issue_severity": "HIGH"},
+        }
+        if suppressed:
+            entry["suppressions"] = [{"kind": "external", "justification": "test"}]
+        return entry
+
+    return {
+        "raw_results": {
+            "sarif": {
+                "runs": [{"results": [result("B602", False), result("B101", True)]}]
+            }
+        }
+    }
+
+
+def _rule_ids(filtered: dict) -> list:
+    runs = filtered["raw_results"]["sarif"]["runs"]
+    return sorted(r["ruleId"] for run in runs for r in run["results"])
+
+
+class TestTheSeverityFilterPutsSuppressedFindingsInTheirOwnBucket:
+    """A suppressed finding is counted under ``suppressed``, not under its severity.
+
+    The SARIF filter follows the counts: ``severities="high"`` leaves out a
+    suppressed HIGH finding and ``severities="suppressed"`` keeps it. Removing
+    that rule from _sarif_result_selected passed every other test.
+    """
+
+    def test_a_severity_leaves_out_its_suppressed_findings(self):
+        filtered = apply_content_filters(_sarif_results(), severities="high")
+        assert _rule_ids(filtered) == ["B602"]
+
+    def test_suppressed_selects_the_suppressed_findings(self):
+        filtered = apply_content_filters(_sarif_results(), severities="suppressed")
+        assert _rule_ids(filtered) == ["B101"]
+
+    def test_both_select_both(self):
+        filtered = apply_content_filters(_sarif_results(), severities="high,suppressed")
+        assert _rule_ids(filtered) == ["B101", "B602"]

@@ -48,6 +48,7 @@ as a general normalizer.
 from __future__ import annotations
 
 import re
+import uuid
 from pathlib import Path
 
 #: The characters a validated id may hold: ASCII letters, digits, and
@@ -90,7 +91,9 @@ def validated_path_component(value: str, what: str = "session_id") -> str:
 
     Raises:
         ValueError: if ``value`` is empty, longer than ``MAX_COMPONENT_LEN``,
-            holds a character outside the allowlist, or is ``.`` or ``..``.
+            holds a character outside the allowlist, is ``.`` or ``..``, or has
+            exactly the shape of a hidden delete name
+            (``.<name>.deleting-<uuid4>``, :func:`hidden_deleting_name`).
 
     Refused rather than sanitized. Sanitizing maps two distinct ids onto one
     component, which silently merges two callers' directories -- a quieter and
@@ -115,6 +118,14 @@ def validated_path_component(value: str, what: str = "session_id") -> str:
         raise ValueError(
             f"{what} may contain only letters, digits and the characters "
             f"'.', '_', '-', '~', '+', '=': {value!r}"
+        )
+    if is_a_deleting_name(value):
+        # The name a workspace is renamed to for its delete. The TTL sweep clears
+        # such a directory as the leftover of an ended session, so an id of this
+        # shape would name a live tree the sweep takes for one.
+        raise ValueError(
+            f"{what} must not have the shape of a hidden delete name "
+            f"('.<name>{DELETING_INFIX}<uuid>'): {value!r}"
         )
     return value
 
@@ -158,6 +169,46 @@ def joined_inside(parent: Path, component: str, what: str = "session_id") -> Pat
     return joined
 
 
+#: File ASH writes into every session workspace it creates. The TTL sweep removes
+#: only directories that carry it, so anything else under the workspace root is
+#: never touched.
+SESSION_MARKER = ".ash-mcp-session"
+
+
+def mark_session_workspace(directory: Path) -> Path:
+    """Create ``directory`` as a session workspace, with its marker, and return it."""
+
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / SESSION_MARKER).touch(exist_ok=True)
+    return directory
+
+
+#: Where the uuid of a hidden delete name starts: ``.<session id>.deleting-<uuid4>``.
+DELETING_INFIX = ".deleting-"
+
+_UUID4_TEXT = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+_DELETING_NAME = re.compile(
+    r"\.[A-Za-z0-9._~+=-]+" + re.escape(DELETING_INFIX) + _UUID4_TEXT
+)
+
+
+def hidden_deleting_name(session_id: str) -> str:
+    """The name a session workspace is renamed to before it is deleted.
+
+    A hidden sibling of the workspace, ``.<session id>.deleting-<uuid4>``: the
+    rename is instant, so the session's own path is free for the whole delete,
+    and a second end of the same session gets a name of its own.
+    """
+
+    return f".{session_id}{DELETING_INFIX}{uuid.uuid4()}"
+
+
+def is_a_deleting_name(name: str) -> bool:
+    """True if ``name`` has the shape :func:`hidden_deleting_name` gives."""
+
+    return _DELETING_NAME.fullmatch(name) is not None
+
+
 def session_directory(parent: Path, session_id: str, what: str = "session_id") -> Path:
     """Return ``parent``'s subdirectory for ``session_id``, both layers applied.
 
@@ -170,7 +221,12 @@ def session_directory(parent: Path, session_id: str, what: str = "session_id") -
 
 
 __all__ = [
+    "DELETING_INFIX",
     "MAX_COMPONENT_LEN",
+    "SESSION_MARKER",
+    "hidden_deleting_name",
+    "is_a_deleting_name",
+    "mark_session_workspace",
     "joined_inside",
     "session_directory",
     "validated_path_component",

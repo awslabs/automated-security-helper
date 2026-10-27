@@ -3,10 +3,22 @@
 
 """Tests for mcp_list_scanners."""
 
+import json
+import stat
+import subprocess  # nosec B404 - the snapshot runs this test's own interpreter
+import sys
+import textwrap
+from dataclasses import dataclass
+from importlib.metadata import version as distribution_version
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
 import pytest
 
+import automated_security_helper
 from automated_security_helper.cli.mcp_tools import mcp_list_scanners
 from automated_security_helper.core.enums import OfflineStrategy
+from tests.utils.helpers import importing_this_checkout
 
 KNOWN_SCANNERS = {
     "bandit",
@@ -34,22 +46,258 @@ REQUIRED_KEYS = {
 VALID_OFFLINE_STRATEGIES = {s.value for s in OfflineStrategy}
 
 
-@pytest.fixture(scope="module")
-def scanners():
-    """One real mcp_list_scanners() snapshot, shared by every test that reads it.
+# ---------------------------------------------------------------------------
+# The snapshot: the real scanner classes, asking stand-in tools
+# ---------------------------------------------------------------------------
+#
+# A snapshot from mcp_list_scanners() run against whatever the host has
+# installed would start a real process per dependency check and version probe:
+# `uv tool run bandit|checkov|detect-secrets|semgrep --version`, `uv tool list`,
+# and cfn_nag_scan, grype, npm, opengrep, syft and trivy `--version` -- 18
+# processes on one machine. What the tests below read would then be a fact about
+# that machine, and a unit test cannot depend on which tools a host has.
+#
+# Every tool the scanners ask about is a stand-in: a shell script that logs
+# its argv and prints a version. The stand-in uv reports bandit and checkov as
+# installed and semgrep as not, so the snapshot holds a tool a first scan would
+# install. snyk and node have no stand-in, so snyk_code and cdk_nag report their
+# dependencies unsatisfied. The versions are distinct, so each one in the snapshot
+# can be traced to the stand-in that printed it.
 
-    Module-scoped because the call is no longer cheap: it instantiates all 13
-    scanners and runs each dependency check, and checkov and semgrep together
-    account for about 6.6 of the 7.3 seconds -- they detect their versions during
-    construction, which is the same cost a real scan pays at startup.
+#: Tools the stand-in uv reports as installed, and the version each one prints.
+UV_INSTALLED_TOOLS = {"bandit": "1.99.1", "checkov": "3.99.2"}
 
-    Calling it per test cost roughly 15 x 7.3s and took this file from a couple of
-    seconds to 26. Sharing one snapshot loses nothing: every test below asserts
-    about a single observation of one environment, and none of them mutates it. The
-    stub-injection tests deliberately do NOT use this fixture -- they replace the
-    discovered scanner set, so they need their own call.
+#: Stand-ins on PATH, and what each prints for ``--version``.
+PATH_TOOLS = {
+    "cfn_nag_scan": "0.99.4",
+    "ferret-scan": "ferret-scan version 2.5.99",
+    "grype": "grype 0.99.5",
+    "npm": "10.99.6",
+    "opengrep": "1.99.7",
+    "syft": "syft 1.99.8",
+    "trivy": "Version: 0.99.9",
+}
+
+#: Every uv-managed scanner's tool, installed or not. Each one is asked about.
+UV_ASKED_TOOLS = ("bandit", "checkov", "semgrep")
+
+#: What the stand-in log records when ASH's uv lookup reached the stand-in.
+WITNESS = "stand-in-witness"
+
+_STAND_IN_LOG_VAR = "LIST_SCANNERS_STAND_IN_LOG"
+
+
+def _stand_in_script(name: str, answers: List[Tuple[str, str]]) -> str:
+    """A POSIX shell stand-in for ``name``.
+
+    It appends ``name`` and its arguments to the log, prints the output paired with
+    the first ``case`` pattern its arguments match, and fails anything else with
+    exit 2. Only shell builtins: PATH holds nothing but stand-ins.
     """
-    return mcp_list_scanners()
+    branches = []
+    for pattern, output in answers:
+        assert "'" not in output, output
+        lines = " ".join(f"'{line}'" for line in output.splitlines())
+        branches.append(f"  {pattern}) printf '%s\\n' {lines}; exit 0 ;;")
+    return (
+        "#!/bin/sh\n"
+        f'printf \'%s\\n\' "{name} $*" >> "${_STAND_IN_LOG_VAR}"\n'
+        'case "$*" in\n' + "\n".join(branches) + "\nesac\n"
+        f'echo "stand-in {name} refuses: $*" >&2\n'
+        "exit 2\n"
+    )
+
+
+def _uv_answers() -> List[Tuple[str, str]]:
+    """``uv --version``, ``uv tool list``, and an offline ``tool run`` per tool."""
+    listing = "\n".join(
+        f"{tool} v{release}\n- {tool}" for tool, release in UV_INSTALLED_TOOLS.items()
+    )
+    answers = [("--version", "uv 0.9.99"), ('"tool list"', listing)]
+    for tool, release in UV_INSTALLED_TOOLS.items():
+        # With or without --from: the constructor's probe names the scan's spec.
+        answers.append(
+            (f'"tool run --offline"*" {tool} --version"', f"{tool} {release}")
+        )
+    return answers
+
+
+def _install_stand_ins(directory: Path) -> None:
+    directory.mkdir()
+    scripts = {"uv": _stand_in_script("uv", _uv_answers())}
+    for tool, output in PATH_TOOLS.items():
+        scripts[tool] = _stand_in_script(tool, [("--version", output)])
+    for tool, text in scripts.items():
+        path = directory / tool
+        path.write_text(text, encoding="utf-8")
+        path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+@dataclass(frozen=True)
+class _Snapshot:
+    entries: List[dict]
+    #: Every process the snapshot's code started: phase, argv, and the executable
+    #: the argv resolved to.
+    spawned: List[dict]
+    stand_ins: Path
+    #: What the stand-ins logged, one call per line.
+    calls: List[str]
+    #: The uv ASH's own lookup returned once the inventory had run.
+    uv_found: Optional[str]
+
+    def started(self, phase: str) -> List[dict]:
+        return [record for record in self.spawned if record["phase"] == phase]
+
+    def is_stand_in(self, record: dict) -> bool:
+        resolved = record["resolved"]
+        return (
+            resolved is not None
+            and Path(resolved).resolve().parent == self.stand_ins.resolve()
+        )
+
+
+#: Runs mcp_list_scanners() in the child and writes what it returned, every process
+#: it started, and the uv ASH's lookup found, to the file named by argv[2].
+_SNAPSHOT_DRIVER = textwrap.dedent(
+    f"""\
+    import json
+    import os
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    # The package the test imported, not whichever copy -I finds first.
+    sys.path.insert(0, sys.argv[1])
+    output = Path(sys.argv[2])
+
+    spawned = []
+    phase = "inventory"
+    popen_init = subprocess.Popen.__init__
+
+
+    def recording_init(self, args, *rest, **kwargs):
+        argv = [args] if isinstance(args, (str, bytes, os.PathLike)) else list(args)
+        argv = [os.fsdecode(arg) for arg in argv]
+        program = os.fsdecode(kwargs.get("executable") or argv[0])
+        env = kwargs.get("env")
+        if env is None:
+            env = os.environ
+        resolved = shutil.which(program, path=env.get("PATH", os.defpath))
+        spawned.append({{"phase": phase, "argv": argv, "resolved": resolved}})
+        return popen_init(self, args, *rest, **kwargs)
+
+
+    subprocess.Popen.__init__ = recording_init
+
+    from automated_security_helper.utils import subprocess_utils, uv_tool_runner
+
+    # find_executable falls back to ASH's bin directory and /usr/local/bin whatever
+    # PATH says, so a tool installed there would answer instead of a stand-in.
+    subprocess_utils.path_independent_dirs = lambda: []
+    # ASH can look for the uv installed beside this interpreter before PATH.
+    if hasattr(uv_tool_runner, "bundled_uv_executable"):
+        uv_tool_runner.bundled_uv_executable = lambda: None
+
+    from automated_security_helper.cli.mcp_tools import mcp_list_scanners
+
+    entries = mcp_list_scanners()
+
+    phase = "control"
+    uv_found = uv_tool_runner.find_uv_or_none()
+    if uv_found:
+        subprocess.run([uv_found, "{WITNESS}"], capture_output=True, check=False)
+    subprocess.run([sys.executable, "-c", "pass"], check=False)
+
+    output.write_text(
+        json.dumps({{"entries": entries, "spawned": spawned, "uv_found": uv_found}}),
+        encoding="utf-8",
+    )
+    """
+)
+
+
+def _take_snapshot(root: Path) -> _Snapshot:
+    """mcp_list_scanners() in a child whose PATH holds only the stand-ins.
+
+    A child rather than this process because the answers are cached at module
+    level -- ``find_executable``'s lookups, ``find_uv_or_none``, the shared
+    ``UVToolRunner``'s "is uv available" -- so an in-process run could be served a
+    real tool another test had already found, and would leave stand-in paths in
+    the caches for every later test on this worker. The child starts with empty
+    caches and takes them with it.
+
+    Its environment is built from nothing: HOME, TMPDIR and ASH's bin directory are
+    scratch directories, and no ASH_OFFLINE, UV_* or XDG_* setting of this process
+    reaches it. The entries come back as JSON, which is also how an MCP client
+    receives them.
+    """
+    stand_ins = root / "stand-ins"
+    _install_stand_ins(stand_ins)
+    for scratch in ("home", "tmp", "ash-bin", "cwd"):
+        (root / scratch).mkdir()
+    log = root / "stand-ins.log"
+    log.write_text("", encoding="utf-8")
+    result_file = root / "snapshot.json"
+    package_parent = Path(automated_security_helper.__file__).resolve().parent.parent
+
+    result = subprocess.run(  # nosec B603 - fixed argv, this test's own interpreter
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            importing_this_checkout(_SNAPSHOT_DRIVER),
+            str(package_parent),
+            str(result_file),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        cwd=root / "cwd",
+        env={
+            "PATH": str(stand_ins),
+            "HOME": str(root / "home"),
+            "TMPDIR": str(root / "tmp"),
+            "ASH_BIN_PATH": str(root / "ash-bin"),
+            _STAND_IN_LOG_VAR: str(log),
+        },
+    )
+    if result.returncode != 0:
+        pytest.fail(
+            f"the snapshot child exited {result.returncode}:\n{result.stderr[-4000:]}"
+        )
+    data = json.loads(result_file.read_text(encoding="utf-8"))
+    return _Snapshot(
+        entries=data["entries"],
+        spawned=data["spawned"],
+        stand_ins=stand_ins,
+        calls=[line for line in log.read_text(encoding="utf-8").splitlines() if line],
+        uv_found=data["uv_found"],
+    )
+
+
+@pytest.fixture(scope="module")
+def snapshot(tmp_path_factory) -> _Snapshot:
+    if sys.platform == "win32":
+        pytest.skip("the stand-ins are POSIX shell scripts")
+    return _take_snapshot(tmp_path_factory.mktemp("list-scanners"))
+
+
+@pytest.fixture(scope="module")
+def scanners(snapshot):
+    """One mcp_list_scanners() snapshot, shared by every test that reads it.
+
+    Taken against stand-ins (see ``_take_snapshot``), so it is the same on every
+    machine. Module-scoped because each snapshot is a child process that imports
+    ASH and constructs all 13 scanners, and every test below asserts about the one
+    observation without changing it. The stub-injection tests deliberately do NOT
+    use it -- they replace the discovered scanner set, so they need their own call.
+
+    What the host's real tools report is asserted in
+    tests/integration/scanners/test_list_scanners_installed_tools.py, which runs
+    only with ``--run-integration``.
+    """
+    return snapshot.entries
 
 
 class TestListScannersSchema:
@@ -315,36 +563,141 @@ class TestVersionIsMeasured:
         assert entries["late_version"]["version"] == "7.7.7"
 
 
-class TestMeasuredAgainstThisEnvironment:
-    """Value assertions against the real scanner set, not stubs.
+class TestTheSnapshotStartsOnlyStandIns:
+    """Nothing the snapshot ran reached a tool on the host."""
+
+    def test_no_process_but_a_stand_in_was_started(self, snapshot):
+        started = snapshot.started("inventory")
+        assert started, (
+            "the inventory started no process at all, so this check would pass "
+            "without having watched anything"
+        )
+        outside = [
+            f"{' '.join(record['argv'])} -> {record['resolved']}"
+            for record in started
+            if not snapshot.is_stand_in(record)
+        ]
+        assert not outside, (
+            f"mcp_list_scanners() started {len(outside)} process(es) that are not "
+            "stand-ins:\n" + "\n".join(outside)
+        )
+
+    def test_the_guard_reports_a_process_that_is_not_a_stand_in(self, snapshot):
+        """The control: after the inventory, the child starts its own interpreter.
+
+        Without it, the test above could pass because the recording missed every
+        spawn, or because every resolved path happened to compare as a stand-in.
+        """
+        control = [
+            record
+            for record in snapshot.started("control")
+            if record["argv"][1:] == ["-c", "pass"]
+        ]
+        assert len(control) == 1, snapshot.spawned
+        assert not snapshot.is_stand_in(control[0]), control
+
+    def test_ash_finds_the_stand_in_uv(self, snapshot):
+        """ASH's uv lookup may try the uv installed beside the interpreter first.
+
+        The child turns that lookup off, then calls whatever uv ASH finds with
+        WITNESS. Only the stand-in logs it.
+        """
+        assert snapshot.uv_found is not None
+        assert (
+            Path(snapshot.uv_found).resolve() == (snapshot.stand_ins / "uv").resolve()
+        )
+        assert f"uv {WITNESS}" in snapshot.calls, snapshot.calls
+
+    def test_each_stand_in_on_path_was_asked_its_version(self, snapshot):
+        unasked = [
+            tool for tool in PATH_TOOLS if f"{tool} --version" not in snapshot.calls
+        ]
+        assert not unasked, snapshot.calls
+
+    def test_uv_was_asked_about_each_uv_managed_tool(self, snapshot):
+        assert "uv tool list" in snapshot.calls, snapshot.calls
+        for tool in UV_ASKED_TOOLS:
+            asked = [
+                call
+                for call in snapshot.calls
+                if call.startswith("uv tool run --offline ")
+                and call.endswith(f" {tool} --version")
+            ]
+            assert asked, f"uv was never asked for {tool}'s version: {snapshot.calls}"
+
+
+def _expected_entries() -> Dict[str, Tuple[Optional[str], Optional[bool], bool]]:
+    """Each scanner's (version, dependencies_satisfied, installs_on_first_scan).
+
+    Two versions come from ASH's own Python dependencies rather than a stand-in:
+    detect-secrets runs in-process from the installed library, and cdk_nag reports
+    the cdk-nag distribution when the ``cdk`` extra is installed.
+    """
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        cdk_nag_scanner,
+    )
+
+    cdk_nag_version = (
+        distribution_version("cdk-nag") if cdk_nag_scanner._CDK_AVAILABLE else None
+    )
+    return {
+        "bandit": ("1.99.1", True, False),
+        # No node stand-in, so unsatisfied with or without the cdk extra.
+        "cdk_nag": (cdk_nag_version, False, False),
+        "cfn_nag": ("0.99.4", True, False),
+        "checkov": ("3.99.2", True, False),
+        "detect_secrets": (distribution_version("detect-secrets"), True, False),
+        "ferret_scan": ("2.5.99", True, False),
+        "grype": ("0.99.5", True, False),
+        "npm_audit": ("10.99.6", True, False),
+        "opengrep": ("1.99.7", True, False),
+        # Not installed in uv, uv is present and the run is online: a scan
+        # installs it, and the inventory says so instead of installing it.
+        "semgrep": (None, False, True),
+        "snyk_code": (None, False, False),
+        "syft": ("1.99.8", True, False),
+        "trivy_repo": ("0.99.9", True, False),
+    }
+
+
+class TestMeasuredAgainstTheStandIns:
+    """Value assertions against the real scanner classes, not stubs.
 
     The stub tests prove the fields are computed. These prove the computation is
     wired to the actual scanners -- a correct ``_describe_scanner`` that
-    ``mcp_list_scanners`` never called would pass every test above.
+    ``mcp_list_scanners`` never called would pass every test above -- and, because
+    every value traces to one stand-in, that each scanner asked its own tool.
     """
 
-    def test_bandit_reports_its_dependencies_as_satisfied(self, scanners):
-        """bandit is a direct Python dependency of ASH.
+    def test_every_scanner_reports_what_its_stand_in_answered(self, scanners):
+        reported = {
+            entry["name"]: (
+                entry["version"],
+                entry["dependencies_satisfied"],
+                entry["installs_on_first_scan"],
+            )
+            for entry in scanners
+        }
+        assert reported == _expected_entries()
 
-        If ASH is running these tests, bandit is importable, so this is stable
-        wherever the suite runs. It is also the sharpest single assertion against
-        the old behaviour: the hardcoded value was False and the true value here is
-        True.
+    def test_bandit_reports_its_dependencies_as_satisfied(self, scanners):
+        """The sharpest single assertion against the old behavior.
+
+        The hardcoded value was False; the stand-in uv lists bandit as installed,
+        so the measured value is True.
         """
         entry = next(e for e in scanners if e["name"] == "bandit")
         assert entry["dependencies_satisfied"] is True
 
-    def test_bandit_reports_a_version(self, scanners):
+    def test_bandit_reports_the_version_its_tool_printed(self, scanners):
         entry = next(e for e in scanners if e["name"] == "bandit")
-        assert isinstance(entry["version"], str) and entry["version"].strip()
+        assert entry["version"] == UV_INSTALLED_TOOLS["bandit"]
 
     def test_not_every_scanner_reports_the_same_dependency_state(self, scanners):
-        """The scanner set spans bundled Python deps and external binaries.
+        """The stand-ins leave snyk, node and uv's semgrep out on purpose.
 
-        bandit, checkov, detect-secrets and semgrep ship with ASH; grype, syft and
-        trivy are separate binaries that a plain checkout does not have. So a
-        uniform answer across all 13 means the field is not being measured -- which
-        is the exact shape of the original defect.
+        So a uniform answer across all 13 means the field is not being measured --
+        which is the exact shape of the original defect.
         """
         states = {e["dependencies_satisfied"] for e in scanners}
         assert len(states) > 1, (

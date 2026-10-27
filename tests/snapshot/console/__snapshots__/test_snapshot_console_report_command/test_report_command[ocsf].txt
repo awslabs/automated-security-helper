@@ -44,7 +44,7 @@ $ ash report --format ocsf --log-level ERROR
           "uid": "B602"
         },
         "desc": "subprocess call with shell=True",
-        "severity": "ERROR",
+        "severity": "HIGH",
         "title": "B602"
       }
     ]
@@ -69,7 +69,7 @@ $ ash report --format ocsf --log-level ERROR
       },
       "version": "1.1.0"
     },
-    "severity_id": 4,
+    "severity_id": 3,
     "status": "New",
     "status_id": 1,
     "time": 1768480200000,
@@ -92,7 +92,7 @@ $ ash report --format ocsf --log-level ERROR
           "uid": "B105"
         },
         "desc": "Possible hardcoded password",
-        "severity": "ERROR",
+        "severity": "MEDIUM",
         "title": "B105"
       }
     ]
@@ -117,7 +117,7 @@ $ ash report --format ocsf --log-level ERROR
       },
       "version": "1.1.0"
     },
-    "severity_id": 4,
+    "severity_id": 3,
     "status": "New",
     "status_id": 1,
     "time": 1768480200000,
@@ -140,7 +140,7 @@ $ ash report --format ocsf --log-level ERROR
           "uid": "B108"
         },
         "desc": "Probable insecure usage of temp file",
-        "severity": "ERROR",
+        "severity": "MEDIUM",
         "title": "B108"
       }
     ]
@@ -165,7 +165,7 @@ $ ash report --format ocsf --log-level ERROR
       },
       "version": "1.1.0"
     },
-    "severity_id": 4,
+    "severity_id": 2,
     "status": "New",
     "status_id": 1,
     "time": 1768480200000,
@@ -188,7 +188,7 @@ $ ash report --format ocsf --log-level ERROR
           "uid": "B101"
         },
         "desc": "Use of assert detected",
-        "severity": "ERROR",
+        "severity": "LOW",
         "title": "B101"
       }
     ]
@@ -213,7 +213,7 @@ $ ash report --format ocsf --log-level ERROR
       },
       "version": "1.1.0"
     },
-    "severity_id": 4,
+    "severity_id": 2,
     "status": "Suppressed",
     "status_detail": "kind: external; justification: Accepted risk: test fixture",
     "status_id": 3,
@@ -237,7 +237,7 @@ $ ash report --format ocsf --log-level ERROR
           "uid": "B311"
         },
         "desc": "Standard pseudo-random generator",
-        "severity": "ERROR",
+        "severity": "LOW",
         "title": "B311"
       }
     ]
@@ -262,7 +262,7 @@ $ ash report --format ocsf --log-level ERROR
       },
       "version": "1.1.0"
     },
-    "severity_id": 4,
+    "severity_id": 5,
     "status": "New",
     "status_id": 1,
     "time": 1768480200000,
@@ -285,7 +285,7 @@ $ ash report --format ocsf --log-level ERROR
           "uid": "python.lang.security.eval"
         },
         "desc": "Detected use of eval()",
-        "severity": "ERROR",
+        "severity": "CRITICAL",
         "title": "python.lang.security.eval"
       }
     ]
@@ -310,7 +310,7 @@ $ ash report --format ocsf --log-level ERROR
       },
       "version": "1.1.0"
     },
-    "severity_id": 4,
+    "severity_id": 1,
     "status": "New",
     "status_id": 1,
     "time": 1768480200000,
@@ -333,7 +333,7 @@ $ ash report --format ocsf --log-level ERROR
           "uid": "generic.secrets.gitleaks"
         },
         "desc": "Example key in docs",
-        "severity": "ERROR",
+        "severity": "INFO",
         "title": "generic.secrets.gitleaks"
       }
     ]
@@ -358,7 +358,7 @@ $ ash report --format ocsf --log-level ERROR
       },
       "version": "1.1.0"
     },
-    "severity_id": 4,
+    "severity_id": 1,
     "status": "New",
     "status_id": 1,
     "time": 1768480200000,
@@ -381,7 +381,7 @@ $ ash report --format ocsf --log-level ERROR
           "uid": "python.lang.best-practice.open"
         },
         "desc": "open() without encoding",
-        "severity": "ERROR",
+        "severity": "INFO",
         "title": "python.lang.best-practice.open"
       }
     ]
@@ -430,7 +430,7 @@ $ ash report --format ocsf --log-level ERROR
           "uid": "python.flask.debug"
         },
         "desc": "Flask debug mode",
-        "severity": "ERROR",
+        "severity": "HIGH",
         "title": "python.flask.debug"
       }
     ]
@@ -455,7 +455,7 @@ $ ash report --format ocsf --log-level ERROR
       },
       "version": "1.1.0"
     },
-    "severity_id": 4,
+    "severity_id": 3,
     "status": "Suppressed",
     "status_detail": "kind: external; justification: Accepted risk: test fixture",
     "status_id": 3,
@@ -479,7 +479,7 @@ $ ash report --format ocsf --log-level ERROR
           "uid": "python.requests.no-timeout"
         },
         "desc": "Request without timeout",
-        "severity": "ERROR",
+        "severity": "MEDIUM",
         "title": "python.requests.no-timeout"
       }
     ]
@@ -504,7 +504,7 @@ $ ash report --format ocsf --log-level ERROR
       },
       "version": "1.1.0"
     },
-    "severity_id": 4,
+    "severity_id": 2,
     "status": "New",
     "status_id": 1,
     "time": 1768480200000,
@@ -527,7 +527,7 @@ $ ash report --format ocsf --log-level ERROR
           "uid": "CKV_AWS_18"
         },
         "desc": "S3 access logging disabled",
-        "severity": "ERROR",
+        "severity": "LOW",
         "title": "CKV_AWS_18"
       }
     ]
@@ -552,7 +552,7 @@ $ ash report --format ocsf --log-level ERROR
       },
       "version": "1.1.0"
     },
-    "severity_id": 4,
+    "severity_id": 2,
     "status": "New",
     "status_id": 1,
     "time": 1768480200000,
@@ -575,7 +575,7 @@ $ ash report --format ocsf --log-level ERROR
           "uid": "CKV_AWS_21"
         },
         "desc": "S3 versioning disabled",
-        "severity": "ERROR",
+        "severity": "LOW",
         "title": "CKV_AWS_21"
       }
     ]
@@ -600,7 +600,7 @@ $ ash report --format ocsf --log-level ERROR
       },
       "version": "1.1.0"
     },
-    "severity_id": 4,
+    "severity_id": 1,
     "status": "New",
     "status_id": 1,
     "time": 1768480200000,
@@ -623,7 +623,7 @@ $ ash report --format ocsf --log-level ERROR
           "uid": "CKV_AWS_144"
         },
         "desc": "Cross-region replication off",
-        "severity": "ERROR",
+        "severity": "INFO",
         "title": "CKV_AWS_144"
       }
     ]
@@ -671,7 +671,7 @@ $ ash report --format ocsf --log-level ERROR
           "uid": "javascript.express.xss"
         },
         "desc": "Unescaped user input",
-        "severity": "ERROR",
+        "severity": "HIGH",
         "title": "javascript.express.xss"
       }
     ]

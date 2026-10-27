@@ -3,12 +3,11 @@
 
 """``ash report --format <f>`` for every ``ExportFormat`` value, through the real CLI.
 
-``report_command`` prints a reporter's output three different ways depending on the format:
-``rich.print_json`` (re-indented, for the JSON-shaped formats), ``rich.Markdown`` (rendered,
-for markdown) and plain ``rich.print`` (which still interprets rich markup and wraps at the
-console width). Formats with no reporter plugin print an error and the list of formats that do
-exist. Every one of those is a different document on the operator's terminal, so each format
-gets its own snapshot, headed by the command line and the exit code.
+``report_command`` writes a reporter's output to stdout exactly as the reporter produced it
+when stdout is not a terminal, which it never is here (it pretty-prints JSON and renders
+Markdown only on an interactive terminal). Formats with no reporter plugin print an error and
+the list of formats that do exist, to stderr, recorded under a ``[stderr]`` heading. Each
+format gets its own snapshot, headed by the command line and the exit code.
 
 The results file is written the way a scan leaves it: metrics populated by
 ``populate_metrics_from_unified_source``, then ``AshAggregatedResults.save_model`` into
@@ -84,9 +83,13 @@ def test_report_command(
         ],
     )
 
+    # stdout is the report alone; an error goes to stderr, so a format with no
+    # reporter records its message under a separate heading.
     document = (
         f"$ ash report --format {report_format} --log-level ERROR\n"
         f"[exit {result.exit_code}]\n"
         f"{result.stdout}"
     )
+    if result.stderr:
+        document += f"\n[stderr]\n{result.stderr}"
     assert document == text_snapshot("txt")

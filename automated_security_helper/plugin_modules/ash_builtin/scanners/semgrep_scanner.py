@@ -102,6 +102,10 @@ class SemgrepScannerConfig(ScannerPluginConfigBase):
 class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
     """SemgrepScanner implements code scanning using Semgrep."""
 
+    #: semgrep is a Python package ASH runs through uv. See
+    #: ScannerPluginBase.python_only.
+    python_only: ClassVar[bool | None] = True
+
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         network=True,
         cache_paths=("~/.semgrep",),
@@ -112,6 +116,8 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         # semgrep-core loads root certificates through OCaml's ca-certs, which on
         # macOS runs /usr/bin/security against the system keychains.
         system_trust_roots=True,
+        # The offline rule cache ASH checked before the scan and passes as --config.
+        read_path_env=("SEMGREP_RULES_CACHE_DIR",),
     )
 
     def model_post_init(self, context):
@@ -123,6 +129,9 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         self.tool_type = ScannerToolType.SAST
 
         self._setup_uv_tool_install_commands()
+        # Under a scan phase the probe is deferred until the dependency check
+        # asks (uv_tool_mixin.deferred_tool_version_probes), so nothing runs
+        # here then; see resolve_deferred_tool_version.
         self.tool_version = self._get_uv_tool_version("semgrep")
         self.args = ToolArgs(
             format_arg=None,

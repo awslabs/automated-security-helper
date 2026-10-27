@@ -111,7 +111,8 @@ def _targets() -> list[str]:
 
 
 def _render(template_text: str) -> str:
-    return template_text.replace(PLACEHOLDER, _packaged_version())
+    """What `generate` writes: version blocks resolved, then the placeholder filled."""
+    return VersionTemplateManager(REPO_ROOT).render(template_text, _packaged_version())
 
 
 class TestTemplatesRenderToTheCommittedDocs:

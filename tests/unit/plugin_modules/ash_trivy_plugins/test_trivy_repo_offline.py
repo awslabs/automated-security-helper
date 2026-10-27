@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
@@ -47,7 +49,6 @@ def _make_scanner(offline: bool, tmp_path: Path) -> TrivyRepoScanner:
 OFFLINE_FLAGS = [
     "--skip-db-update",
     "--skip-java-db-update",
-    "--offline-scan",
     "--skip-check-update",
 ]
 
@@ -71,6 +72,13 @@ class TestTrivyOfflineFlagInjection:
         arg_keys = [a.key for a in scanner.args.extra_args]
         for flag in OFFLINE_FLAGS:
             assert flag not in arg_keys, f"Unexpected {flag} in args when offline=False"
+
+    @pytest.mark.parametrize("offline", [False, True])
+    def test_every_scan_stays_off_package_registries(self, tmp_path, offline):
+        scanner = _make_scanner(offline=offline, tmp_path=tmp_path)
+        scanner._process_config_options()
+        arg_keys = [a.key for a in scanner.args.extra_args]
+        assert "--offline-scan" in arg_keys
 
 
 # ---------------------------------------------------------------------------
@@ -106,8 +114,10 @@ class TestTrivySubprocessEnvPassthrough:
                 with patch.object(scanner, "_post_scan"):
                     scanner.scan(target=source_dir, target_type="source")
 
-        assert "TRIVY_OFFLINE_TEST" in captured_env
-        assert len(captured_env) > 1  # merged with os.environ
+        # By names: a failure would print the whole environment.
+        names = set(captured_env)
+        assert "TRIVY_OFFLINE_TEST" in names
+        assert len(names) > 1  # merged with os.environ
 
 
 # ---------------------------------------------------------------------------

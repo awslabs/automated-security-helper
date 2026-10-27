@@ -61,14 +61,12 @@ Validates that all expected scanners have tasks in the execution queue.
 - Creates validation checkpoint with queue validation results
 - Logs detailed queue validation summary and any discrepancies
 
-##### `retry_scanner_registration(missing_scanners: List[str]) -> List[str]`
+##### `handle_queue_validation_errors(validation_checkpoint, scan_results=None) -> None`
 
-Attempts to retry registration for scanners missing from the task queue.
+Records why a scanner missing from the task queue did not run. Nothing re-queues it.
 
-- Re-validates scanner dependencies and configuration
-- Attempts to re-enable scanners that can be recovered
-- Updates scanner states with retry outcomes
-- Returns list of successfully re-enabled scanners
+- Sets each missing scanner's failure reason to "Scanner was expected to be queued but was not found in task queue" and logs a warning with the count
+- Logs each error the checkpoint carries
 
 ##### `ensure_complete_results(aggregated_results: AshAggregatedResults) -> ValidationCheckpoint`
 
@@ -186,15 +184,9 @@ class ValidationCheckpoint:
 
 ## Error Handling and Recovery
 
-### Registration Retry Logic
+### Scanners Missing from the Task Queue
 
-When scanners are missing from the task queue, the system attempts recovery:
-
-1. **Dependency Re-validation**: Check if missing dependencies have been resolved
-2. **Configuration Re-check**: Verify scanner configuration hasn't changed
-3. **Re-enablement**: Attempt to re-enable scanners that can be recovered
-4. **State Updates**: Update scanner states with retry outcomes
-5. **Logging**: Log all retry attempts and results for debugging
+ASH does not retry a scanner that is enabled but has no task. It does not run in that scan. `handle_queue_validation_errors` records "Scanner was expected to be queued but was not found in task queue" as its failure reason, the scan logs which scanners have no task, and the result completeness check later adds the scanner to the results and records a discrepancy such as "Scanner 'semgrep' was missing from results: Scanner was expected to be queued but was not found in task queue".
 
 ### Graceful Degradation
 
@@ -213,7 +205,7 @@ The Scanner Validation System provides comprehensive logging at multiple levels:
 
 - **DEBUG**: Detailed state transitions and checkpoint creation
 - **INFO**: Validation summaries, scanner counts, and status information
-- **WARNING**: Missing scanners, retry attempts, and validation discrepancies
+- **WARNING**: Missing scanners and validation discrepancies
 - **ERROR**: Critical validation failures and unrecoverable errors
 
 ### Example Log Output
@@ -292,9 +284,8 @@ def _execute_phase(self, aggregated_results, **kwargs):
     queue_contents = self._populate_task_queue(enabled)
     # checkpoint = self.validation_manager.validate_task_queue(queue_contents)
 
-    # 4. Retry missing scanners if needed (planned)
-    # if checkpoint.get_missing_scanners():
-    #     self.validation_manager.retry_scanner_registration(checkpoint.get_missing_scanners())
+    # 4. Record why missing scanners will not run (planned)
+    # self.validation_manager.handle_queue_validation_errors(checkpoint)
 
     # 5. Execute scanners
     completed = self._execute_scanners(queue_contents)
@@ -372,7 +363,7 @@ The `ScanPhase` class includes several validation methods that integrate with th
 
 #### `_validate_task_queue(aggregated_results)`
 - Extracts queue contents and validates against expected scanners
-- Handles retry logic for missing scanners
+- Reports scanners with no task and records why they will not run
 - Adds validation checkpoints to aggregated results
 - Provides comprehensive error handling
 
@@ -525,45 +516,36 @@ The validation system adds a comprehensive summary to the scan metadata:
 ```json
 {
   "validation_summary": {
-    "registration_validation": {
-      "timestamp": "2023-01-01T12:00:00",
-      "total_registered": 6,
-      "has_issues": false
-    },
-    "enablement_validation": {
-      "timestamp": "2023-01-01T12:00:01",
-      "enabled_count": 4,
-      "excluded_count": 1,
-      "dependency_error_count": 1,
-      "has_issues": true
-    },
-    "task_queue_validation": {
+    "scanner_tasks_validation": {
       "timestamp": "2023-01-01T12:00:02",
       "expected_count": 4,
       "actual_count": 3,
       "missing_count": 1,
-      "successfully_retried": 0,
-      "has_issues": true
+      "has_issues": false
     },
     "execution_completion_validation": {
       "timestamp": "2023-01-01T12:00:30",
-      "expected_count": 4,
-      "completed_count": 4,
+      "expected_count": 3,
+      "completed_count": 3,
       "missing_count": 0,
+      "unexpected_count": 0,
       "completion_rate": 1.0,
       "has_issues": false
     },
     "result_completeness_validation": {
       "timestamp": "2023-01-01T12:00:31",
-      "originally_registered": 6,
-      "in_results": 6,
-      "added_missing": 2,
-      "completeness_rate": 1.0,
-      "has_issues": false
+      "expected_count": 4,
+      "final_count": 3,
+      "missing_count": 1,
+      "unexpected_count": 0,
+      "completeness_rate": 0.75,
+      "has_issues": true
     }
   }
 }
 ```
+
+In this scan one of four enabled scanners got no task. `has_issues` counts a checkpoint's discrepancies and errors, so the scanner tasks entry counts the scanner in `missing_count` without setting `has_issues`. The scanner does not run, and the execution completion entry expects only the three that were queued. The result completeness check then adds it to the results and records a discrepancy for it, which is what sets `has_issues` there.
 
 ### Accessing Validation Information
 
@@ -599,9 +581,8 @@ The Scanner Validation System provides several key benefits:
 1. **Reliability**: Ensures all expected scanners are included in scans
 2. **Visibility**: Provides clear insight into scanner status throughout the scan process
 3. **Debugging**: Comprehensive logging helps troubleshoot intermittent scanner issues
-4. **Recovery**: Automatic retry logic can recover from transient failures
-5. **Completeness**: Guarantees all registered scanners appear in final results
-6. **Consistency**: Standardized validation approach across all scan phases
+4. **Completeness**: Guarantees all registered scanners appear in final results
+5. **Consistency**: Standardized validation approach across all scan phases
 
 ## Future Enhancements
 

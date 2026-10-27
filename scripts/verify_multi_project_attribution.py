@@ -119,7 +119,10 @@ Known limitations
   gate that silently tests nothing is worse than a red one.
 * The suppression assertion needs the suppressed rule to actually fire. If a
   bandit release stops reporting it at all, the gate says so explicitly rather
-  than treating "absent everywhere" as "correctly suppressed".
+  than treating "absent everywhere" as "correctly suppressed". The same holds for
+  the suppressing project alone: the rule missing from it while present in the
+  others is reported, because that project has to show the rule with its
+  suppression on it.
 """
 
 from __future__ import annotations
@@ -143,8 +146,9 @@ STATUS_ERROR = "ERROR"
 STATUS_MISSING = "MISSING"
 STATUS_SKIPPED = "SKIPPED"
 
-# Workspace exit codes: 0 success, 1 internal error, 2 actionable findings above
-# threshold, 3 invalid project config, 4 workspace definition or policy error.
+# Workspace exit codes: 0 success, 1 internal error, 2 actionable findings at or
+# above threshold, 3 invalid project config, 4 workspace definition or policy error,
+# 5 a usage error (for example a --scanners selection no project could run).
 # The fixture is built to produce actionable findings in project-a and project-b,
 # so 2 is expected, and 0 is tolerated in case a future default turns
 # fail_on_findings off.
@@ -450,6 +454,10 @@ class RunEvidence:
     raw_uris: Tuple[str, ...] = ()
     #: project keys named by results inside this run
     result_projects: Tuple[str, ...] = ()
+    #: one (workspace_uri, artifact uris of the same result) pair for every result
+    #: that carries a workspace_uri, in encounter order. ``workspace_uris`` and
+    #: ``raw_uris`` are flat, so only this field can say which file a value is for.
+    located_results: Tuple[Tuple[str, Tuple[str, ...]], ...] = ()
 
 
 @dataclass
@@ -632,6 +640,7 @@ def collect_runs(results: Mapping[str, Any]) -> Tuple[RunEvidence, ...]:
         workspace_uris: List[str] = []
         raw_uris: List[str] = []
         result_projects: List[str] = []
+        located_results: List[Tuple[str, Tuple[str, ...]]] = []
 
         for result in run.get("results") or []:
             if not isinstance(result, Mapping):
@@ -650,10 +659,14 @@ def collect_runs(results: Mapping[str, Any]) -> Tuple[RunEvidence, ...]:
             project = _result_property(result, "workspace_project")
             if project:
                 result_projects.append(project)
+            result_uris: List[str] = []
             for location in result.get("locations") or []:
                 uri = _location_uri(location)
                 if uri:
                     raw_uris.append(uri)
+                    result_uris.append(uri)
+            if workspace_uri:
+                located_results.append((workspace_uri, tuple(result_uris)))
 
         evidence.append(
             RunEvidence(
@@ -664,6 +677,7 @@ def collect_runs(results: Mapping[str, Any]) -> Tuple[RunEvidence, ...]:
                 workspace_uris=tuple(workspace_uris),
                 raw_uris=tuple(raw_uris),
                 result_projects=tuple(result_projects),
+                located_results=tuple(located_results),
             )
         )
     return tuple(evidence)
@@ -808,6 +822,29 @@ def check_one_run_per_project(
     return violations
 
 
+def _forward_slashes(text: str) -> str:
+    """``text`` with every backslash written as a separator."""
+    return text.replace("\\", "/")
+
+
+def _is_the_findings_own_path(
+    workspace_uri: str, project_path: str, artifact_uris: Sequence[str]
+) -> bool:
+    """Whether ``workspace_uri`` is ``project_path`` plus one of ``artifact_uris``.
+
+    The aggregator keeps artifact uris project-relative inside a run and writes the
+    workspace-relative form beside them (``workspace/aggregation.py``), so for a
+    plain relative uri the two differ by exactly the project's path. Backslashes
+    are read as separators on both sides, the way
+    ``check_result_paths_resolve_against_their_run_root`` reads them, because the
+    aggregator turns a Windows project's backslashes into separators. A finding
+    may offer several locations and the aggregator uses the first one it can
+    place, so any one of them can be the source.
+    """
+    candidates = {f"{project_path}/{_forward_slashes(uri)}" for uri in artifact_uris}
+    return _forward_slashes(workspace_uri) in candidates
+
+
 def check_findings_are_attributed_to_their_own_project(
     runs: Sequence[RunEvidence],
 ) -> List[str]:
@@ -823,6 +860,11 @@ def check_findings_are_attributed_to_their_own_project(
     The check that can actually fail today is
     ``check_each_project_shows_only_its_own_marker_rule``. Read that one for the
     attribution guarantee; this one is a consistency assertion about the payload.
+
+    It also compares each ``workspace_uri`` with the artifact path of the result it
+    sits on. A prefix test alone cannot fail for the project named ``src``, whose
+    fixture files all begin with ``src/`` already, and it never reads the rest of
+    the value.
     """
     violations: List[str] = []
     for run in runs:
@@ -867,6 +909,24 @@ def check_findings_are_attributed_to_their_own_project(
                 f"SARIF run {run.index} is attributed to "
                 f"'{run.attributed_project}' (at '{expected_prefix}') but has "
                 f"workspace_uri value(s) outside that project: {wrong_prefix[:5]}"
+            )
+        # A value that failed the prefix test is reported above, once. One that
+        # passed it must also be the project's path plus the artifact path of its
+        # own result: the prefix cannot fail for 'src' and never reads the rest.
+        not_own_path = sorted(
+            {
+                f"{uri} (finding at {', '.join(artifacts) or 'no location'})"
+                for uri, artifacts in run.located_results
+                if uri.startswith(f"{expected_prefix}/")
+                and not _is_the_findings_own_path(uri, expected_prefix, artifacts)
+            }
+        )
+        if not_own_path:
+            violations.append(
+                f"SARIF run {run.index} is attributed to "
+                f"'{run.attributed_project}' (at '{expected_prefix}') but has "
+                f"workspace_uri value(s) that are not '{expected_prefix}/' plus "
+                f"the finding's own artifact path: {not_own_path[:5]}"
             )
     return violations
 
@@ -1065,6 +1125,14 @@ def check_suppression_is_project_scoped(runs: Sequence[RunEvidence]) -> List[str
     projects, so a leak that reached only those two would have passed. The nested
     project is exactly the one most likely to be reached by a path-matching bug,
     and it was one of the two going unexamined.
+
+    In the suppressing project itself the proof is positive: the rule has to be
+    there with a suppression on it, and no other rule may carry one. "No
+    unsuppressed occurrence" alone was accepted as proof, but it is also what a
+    shared file that was never scanned in that project looks like, and what a
+    finding dropped rather than marked suppressed looks like. The project
+    configures one rule at one path (CONFIG_WITH_SUPPRESSION_TEMPLATE), so a
+    suppression on any other rule has reached beyond what was configured.
     """
     violations: List[str] = []
     suppressing_rules = _rule_counts(runs, SUPPRESSING_PROJECT)
@@ -1109,7 +1177,9 @@ def check_suppression_is_project_scoped(runs: Sequence[RunEvidence]) -> List[str
                 f"silenced by another project's configuration"
             )
 
-    live_in_suppressing, _ = suppressing_rules.get(SUPPRESSED_RULE_ID, (0, 0))
+    live_in_suppressing, suppressed_in_suppressing = suppressing_rules.get(
+        SUPPRESSED_RULE_ID, (0, 0)
+    )
     if live_in_suppressing:
         violations.append(
             f"rule {SUPPRESSED_RULE_ID} has {live_in_suppressing} unsuppressed "
@@ -1117,6 +1187,27 @@ def check_suppression_is_project_scoped(runs: Sequence[RunEvidence]) -> List[str
             f"suppression for it at '{FIXTURE_RELATIVE_PATH}'. The project's own "
             f"suppression did not apply"
         )
+    elif not suppressed_in_suppressing:
+        # Neither unsuppressed nor suppressed: the rule is not in this project's
+        # run at all, which is not a suppression that applied.
+        violations.append(
+            f"rule {SUPPRESSED_RULE_ID} does not appear in '{SUPPRESSING_PROJECT}' "
+            f"at all, neither unsuppressed nor suppressed, so nothing shows that its "
+            f"suppression applied. A missing finding is also what a shared file "
+            f"that was never scanned looks like, or a finding dropped rather than "
+            f"marked suppressed. Rules seen in '{SUPPRESSING_PROJECT}': "
+            f"{sorted(suppressing_rules)}"
+        )
+
+    for rule, (_, suppressed_count) in sorted(suppressing_rules.items()):
+        if rule != SUPPRESSED_RULE_ID and suppressed_count:
+            violations.append(
+                f"rule {rule} is suppressed in '{SUPPRESSING_PROJECT}', whose "
+                f"configuration suppresses only {SUPPRESSED_RULE_ID} at "
+                f"'{FIXTURE_RELATIVE_PATH}'. The suppression reached beyond its own "
+                f"rule and path -- a silent false negative inside the project that "
+                f"configures it"
+            )
     return violations
 
 
@@ -1442,7 +1533,8 @@ def check_exit_code(exit_code: int) -> List[str]:
         (
             f"the workspace scan exited {exit_code}; expected one of "
             f"{list(TOLERATED_EXIT_CODES)} (0 success, 2 actionable findings). "
-            "1 is an internal error and 3 is an invalid project config"
+            "1 is an internal error, 3 is an invalid project config and 5 is a "
+            "usage error: ASH refused this script's command line"
         )
     ]
 

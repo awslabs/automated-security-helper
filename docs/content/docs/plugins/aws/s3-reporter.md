@@ -14,6 +14,8 @@ The S3 Reporter provides:
 
 ## Configuration
 
+This reporter is disabled by default: it sends findings to AWS with the host's credentials, so it runs only when your config sets `enabled: true` for it (see [Enabling the AWS reporters](index.md#enabling-the-aws-reporters)).
+
 ### Basic Configuration
 
 ```yaml
@@ -34,18 +36,19 @@ reporters:
   s3:
     enabled: true
     options:
-      # Use environment variables to insert the bucket name. The braces and the
-      # default are both required: `!ENV ASH_S3_BUCKET_NAME` resolves to the
-      # literal string "ASH_S3_BUCKET_NAME", and so does `${ASH_S3_BUCKET_NAME}`.
+      # Use environment variables to insert the bucket name. The braces are
+      # required: `!ENV ASH_S3_BUCKET_NAME` resolves to the literal string
+      # "ASH_S3_BUCKET_NAME". With no default, `${ASH_S3_BUCKET_NAME}` refuses
+      # the configuration when the variable is not set; `:None` allows it.
       bucket_name: !ENV ${ASH_S3_BUCKET_NAME:None}
       aws_region: !ENV ${AWS_REGION:None}
       aws_profile: !ENV ${AWS_PROFILE:None}
       file_format: json
       key_prefix: security-scans/
       # Retry configuration
-      max_retries: 5      # Default: 3
-      base_delay: 2.0     # Default: 1.0 seconds
-      max_delay: 120.0    # Default: 60.0 seconds
+      max_retries: 5      # Default: 3, at most 10
+      base_delay: 2.0     # Default: 1.0 seconds, at most max_delay
+      max_delay: 30.0     # Default: 60.0 seconds, at most 60
 ```
 
 ### Environment Variables
@@ -60,6 +63,31 @@ export AWS_REGION="us-east-1"
 # Optional: AWS profile
 export AWS_PROFILE="my-profile"
 ```
+
+### Where these options can be set
+
+`aws_region`, `aws_profile`, `bucket_name` and `key_prefix` choose where reports are
+uploaded and which credentials upload them, and `max_retries`, `base_delay` and
+`max_delay` how long the reporter keeps calling S3 when it is refused, so they are the
+operator's. They take
+effect only from the defaults (the environment variables above, and `AWS_DEFAULT_REGION`),
+`--config-overrides`, or a config file outside the scanned tree, which is where the
+advanced configuration above belongs. A config file inside the scanned tree, or one an
+MCP client delivered, cannot set them: from the tree they are ignored with a warning,
+and under the MCP server they are default `denied_paths` entries, so a delivered config
+that changes one is refused.
+
+Whether the reporter runs is the operator's too: a config file inside the scanned tree
+neither turns it on nor turns it off, and under the MCP server the whole section,
+`/reporters/s3/**`, is a default `denied_paths` entry, so a delivered config or a
+client's runtime override that turns it on, or changes any of its settings,
+`file_format` included, is refused. A client's `enabled: false` is not refused, but
+the server's `enabled` applies. See
+[Settings only the operator can set](index.md#settings-only-the-operator-can-set).
+
+The reporter is in the `ash_aws_plugins` package, which only the operator can load,
+with `--ash-plugin-modules`, `ASH_PLUGIN_MODULES` or the operator's own config, never
+a repository's. See [Loading the plugins](index.md#loading-the-plugins).
 
 ## Prerequisites
 
@@ -225,6 +253,11 @@ The S3 reporter uploads ASH aggregated results in the specified format (JSON or 
 - **Summary statistics**: Counts by severity level
 - **Scanner details**: Information about which scanners were run
 
+Its `ash_config` is the configuration the results record, as the settings that
+were set. When the results record no configuration, `ash_config` is `null`. ASH's
+defaults, or the file `ASH_CONFIG` names where `ash report` runs, are never put in
+its place.
+
 ### File Naming
 
 Files are uploaded with the following naming pattern:
@@ -262,6 +295,12 @@ The reporter also creates a local copy of the uploaded report in:
 }
 ```
 
+`local_copy` is `null` when the local copy could not be written, for example
+because the reports directory is not writable. A warning is logged and the upload
+still counts. If a symlink or directory junction is at `s3-report.json` (or
+`s3-report.yaml`) when the report phase starts, the run stops with exit 1 before any
+reporter writes, so nothing is uploaded.
+
 If the upload fails, no receipt is written and the reporter is logged as having
 produced no report.
 
@@ -294,7 +333,11 @@ ash /path/to/code --reporters s3 --log-level DEBUG
 
 ### Retry Configuration
 
-The reporter includes built-in retry logic. You can configure retry behavior:
+The reporter includes built-in retry logic. The operator configures it, with
+`--config-overrides` or a config file outside the scanned tree, like the options in
+[Where these options can be set](#where-these-options-can-be-set). `max_retries` is
+at most 10, `max_delay` at most 60 seconds, and `base_delay` at most `max_delay`; a
+larger value is a validation error naming the option and its limit.
 
 ```yaml
 reporters:
@@ -304,9 +347,9 @@ reporters:
       bucket_name: "my-security-reports"
       aws_region: "us-east-1"
       # Retry configuration
-      max_retries: 5      # Default: 3
-      base_delay: 2.0     # Default: 1.0 seconds
-      max_delay: 120.0    # Default: 60.0 seconds
+      max_retries: 5      # Default: 3, at most 10
+      base_delay: 2.0     # Default: 1.0 seconds, at most max_delay
+      max_delay: 30.0     # Default: 60.0 seconds, at most 60
 ```
 
 ## Best Practices

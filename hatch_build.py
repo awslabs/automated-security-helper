@@ -2,10 +2,27 @@
 Custom Hatch build hook to stage build assets.
 """
 
+import os
+import re
 import shutil
 import subprocess  # nosec B404 - This code is run during package build
+import sys
 from pathlib import Path
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
+
+
+def _say(message: str) -> None:
+    """print(), with any character the console cannot encode written as an escape.
+
+    pip runs a build hook with its output on a pipe, and on Windows a pipe takes
+    the ANSI code page (cp1252 and the like), which has no form for most of
+    Unicode. A plain print of a path or of git's message then raised
+    UnicodeEncodeError, and the handler below recorded "build-error" in place of
+    the commit it had already found.
+    """
+    encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+    print(message.encode(encoding, "backslashreplace").decode(encoding))
+
 
 ASH_REPO_ROOT: Path = Path(__file__).parent
 ASH_ASSETS_PATH: Path = ASH_REPO_ROOT.joinpath("automated_security_helper", "assets")
@@ -29,6 +46,15 @@ DOCKERFILE_STAGED_PACKAGE_FILES: tuple = (
     ("core/exceptions.py", "exceptions.py"),
 )
 
+# The GenAI guide `ash get-genai-guide` writes out. It lives in docs/, which no
+# artifact ships, so it is added to both the sdist and the wheel at this path inside
+# the package; cli/main.py reads it from there. Without it a wheel install had no
+# copy of its own and downloaded the `main` branch's guide from GitHub instead.
+GENAI_GUIDE_SOURCE: Path = ASH_REPO_ROOT.joinpath(
+    "docs", "content", "docs", "genai-steering-guide.md"
+)
+GENAI_GUIDE_PACKAGE_PATH = "automated_security_helper/assets/genai-steering-guide.md"
+
 
 class CustomBuildHook(BuildHookInterface):
     """Build hook to stage build assets before packaging."""
@@ -39,6 +65,40 @@ class CustomBuildHook(BuildHookInterface):
         """Run the asset staging script."""
         # Stage assets immediately during initialization
         self._stage_assets()
+        self._include_genai_guide(build_data)
+
+    def _include_genai_guide(self, build_data):
+        """Stage the GenAI guide at GENAI_GUIDE_PACKAGE_PATH and force-include it.
+
+        Staged into the tree and included from there, like the Dockerfile's staged
+        files, rather than included straight from docs/: hatchling reserves a
+        force-include's source path and not its target, so a copy already at the
+        target (from an earlier build, or by hand) would ship beside it, twice in
+        the sdist. Overwriting it and including it as its own source ships one copy,
+        the current one. The path is gitignored for the same reason.
+
+        Through build_data rather than a force-include in pyproject.toml, because a
+        static force-include of a missing file fails the build. A wheel built from
+        the sdist has no docs/, and uses the copy the sdist build staged; a tree
+        with neither builds without the guide and says so. The `uv build` inside
+        the image has the docs copy, through the exception for it in
+        .dockerignore. The artifact gate in .github/scripts/assert-artifact-contents.py
+        pins the path, so a released wheel or sdist without it fails CI.
+        """
+        packaged = ASH_REPO_ROOT.joinpath(*GENAI_GUIDE_PACKAGE_PATH.split("/"))
+        if GENAI_GUIDE_SOURCE.is_file():
+            packaged.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(GENAI_GUIDE_SOURCE, packaged)
+            print(f"Staged the GenAI guide at {GENAI_GUIDE_PACKAGE_PATH}")
+        elif packaged.is_file():
+            print(f"Using the GenAI guide already at {GENAI_GUIDE_PACKAGE_PATH}")
+        else:
+            print(
+                f"Warning: {GENAI_GUIDE_SOURCE} not found; this build carries no "
+                "GenAI guide, and `ash get-genai-guide` from it needs --from-github"
+            )
+            return
+        build_data["force_include"][str(packaged)] = GENAI_GUIDE_PACKAGE_PATH
 
     def _stage_assets(self):
         """Stage the build assets."""
@@ -74,59 +134,97 @@ class CustomBuildHook(BuildHookInterface):
                         f"COPY automated_security_helper/{source_rel}",
                         f"COPY {staged_name}",
                     )
-                    print(f"Staged {source_rel} into assets/{staged_name}")
+                    _say(f"Staged {source_rel} into assets/{staged_name}")
                 dockerfile_copy_path.write_text(content)
-                print("Successfully generated assets/Dockerfile from root Dockerfile")
+                _say("Successfully generated assets/Dockerfile from root Dockerfile")
             else:
-                print(f"Warning: Dockerfile not found at {dockerfile_path}")
+                _say(f"Warning: Dockerfile not found at {dockerfile_path}")
                 if dockerfile_copy_path.exists():
-                    print("Using existing Dockerfile in assets directory")
+                    _say("Using existing Dockerfile in assets directory")
                 else:
-                    print(
+                    _say(
                         "No Dockerfile available - this may be expected for wheel-only builds"
                     )
 
             # Handle Git commit SHA
             commit_sha = self._get_commit_sha()
             ASH_INSTALLED_REVISION_PATH.write_text(commit_sha)
-            print(
+            _say(
                 f"Successfully wrote git details '{commit_sha}' to {ASH_INSTALLED_REVISION_PATH}"
             )
 
         except Exception as e:
-            print(f"Unexpected error in build hook: {e}")
+            _say(f"Unexpected error in build hook: {e}")
             # Ensure we have some revision file even if there's an error
             try:
                 ASH_INSTALLED_REVISION_PATH.write_text("build-error")
             except Exception:  # nosec B110 — build must continue even if revision file write fails
                 pass
-            print("Continuing build despite asset staging error")
+            _say("Continuing build despite asset staging error")
 
     def _get_commit_sha(self) -> str:
-        """Get the Git commit SHA, with fallbacks for different build scenarios."""
+        """Get the Git commit SHA, with fallbacks for different build scenarios.
+
+        The full commit id of the checkout being built. A container image built
+        from the installed package installs this commit (run_ash_container reads it
+        through core/constants.py, and the Dockerfile builds a commit id that a
+        branch or tag of ASH reaches). A branch name (`git rev-parse --abbrev-ref
+        HEAD`) would not do: a package built on `main` would put main's tip at
+        image build time in the image, and one built on a detached checkout would
+        record the literal "HEAD", which cannot be cloned.
+
+        Only the repository whose top level is this directory counts: an ASH
+        source tree unpacked inside some other repository is not a commit of ASH.
+        `--show-prefix` prints the directory's path below the top level, which is
+        empty exactly at the top level, so no path has to be read or compared. A
+        path printed by `--show-toplevel` could hold a space, a line break or any
+        other character, and splitting it on whitespace, then on lines, both cut
+        some paths in two.
+
+        git sees none of the caller's GIT_* variables except
+        GIT_CEILING_DIRECTORIES. So a tree that has no .git of its own, built with
+        GIT_DIR (and GIT_WORK_TREE) naming its repository from outside, is
+        treated as a tree with no git metadata: it keeps an earlier record or
+        records "unknown-commit". That is accepted: the alternative would read whichever repository the caller's
+        environment named, which inside a `git commit` hook is the one being
+        committed to, not this tree's.
+        """
         git_path = shutil.which("git")
         if not git_path:
-            print("Warning: git command not found")
+            _say("Warning: git command not found")
             return "no-git-available"
 
-        # Try to get commit details from current directory (source repo build)
+        # Try to get commit details from current directory (source repo build).
+        # With no GIT_* variable from the caller: git exports GIT_DIR (and others) to
+        # its hooks, and pre-commit builds hook environments inside `git commit`, so
+        # git would read the repository being committed to instead of this tree.
+        # GIT_WORK_TREE alone moved the top level, and GIT_COMMON_DIR alone hid the
+        # repository. GIT_CEILING_DIRECTORIES is kept: it only stops git looking
+        # for a repository above the directories it names, so it can turn a tree
+        # unpacked inside another repository into no repository at all, never into
+        # a commit of the wrong one.
+        git_env = {
+            k: v
+            for k, v in os.environ.items()
+            if not k.startswith("GIT_") or k == "GIT_CEILING_DIRECTORIES"
+        }
         try:
             git_result_full = subprocess.run(  # nosec B603 - This code is run during package build
-                # NOTE - This needs to be the branch, otherwise certain actions in the
-                # Dockerfile will not work as expected once distributed.
-                [git_path, "rev-parse", "--abbrev-ref", "HEAD"],
+                [git_path, "rev-parse", "--show-prefix", "HEAD"],
                 capture_output=True,
-                text=True,
                 cwd=ASH_REPO_ROOT.as_posix(),
+                env=git_env,
                 check=True,
             )
-            git_result = git_result_full.stdout.strip()
-            if git_result:
-                return git_result
+            # An empty prefix line, then the commit id: nothing else is the top level.
+            at_top_level = re.fullmatch(rb"\n([0-9a-f]{40})\n", git_result_full.stdout)
+            if at_top_level:
+                return at_top_level.group(1).decode("ascii")
+            _say(f"Not a commit of this source tree: {git_result_full.stdout!r}")
         except subprocess.CalledProcessError as e:
-            print(f"Git command failed in current directory: {e}")
+            _say(f"Git command failed in current directory: {e}")
             if hasattr(e, "stderr") and e.stderr:
-                print(f"stderr: {e.stderr}")
+                _say(f"stderr: {e.stderr.decode('utf-8', 'replace').strip()}")
 
         # Fallback: Check if we already have a revision file (from sdist build)
         if ASH_INSTALLED_REVISION_PATH.exists():
@@ -137,9 +235,9 @@ class CustomBuildHook(BuildHookInterface):
                 and existing_sha
                 not in ["unknown-commit", "no-git-available", "build-error"]
             ):
-                print(f"Using existing commit SHA from previous build: {existing_sha}")
+                _say(f"Using existing commit SHA from previous build: {existing_sha}")
                 return existing_sha
 
         # Final fallback
-        print("Unable to determine commit SHA, using fallback")
+        _say("Unable to determine commit SHA, using fallback")
         return "unknown-commit"

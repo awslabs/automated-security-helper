@@ -62,7 +62,7 @@ pip install git+https://github.com/awslabs/automated-security-helper.git@v{{VERS
 Navigate to your project directory and run:
 
 ```bash
-# Run a scan in local mode (Python-based scanners only)
+# Run a scan in local mode (the scanner tools installed on this machine)
 ash --mode local
 
 # Run a scan in container mode (all scanners)
@@ -72,12 +72,13 @@ ash --mode container
 ash --mode precommit
 ```
 
-The `precommit` mode runs a subset of fast scanners:
+The `precommit` mode runs only these scanners, plus any named with `--scanners`, over
+the whole source directory:
 - bandit
 - detect-secrets
 - checkov
 - cdk-nag
-- npm-audit (if available)
+- npm-audit
 
 ### Specifying Source and Output Directories
 
@@ -115,7 +116,7 @@ ASH uses a YAML configuration file. Create a basic configuration:
 ash config init
 ```
 
-This creates `.ash/.ash.yaml` with default settings. Edit this file to customize your scan:
+This creates `.ashrc.yaml` with default settings. Edit this file to customize your scan:
 
 ```yaml
 # yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json
@@ -176,7 +177,7 @@ ash --exclude-scanners cfn-nag,cdk-nag
 
 ```bash
 # Generate specific report formats
-ash --output-formats markdown,html,json
+ash --output-formats markdown,html,flat-json
 
 # Generate a report from existing results
 ash report --format html --output-dir ./my-scan-results
@@ -191,14 +192,16 @@ repos:
   - repo: https://github.com/awslabs/automated-security-helper
     rev: v{{VERSION}}
     hooks:
-      - id: ash-simple-scan
+      - id: ash
 ```
 
 Run with:
 
 ```bash
-pre-commit run ash-simple-scan --all-files
+pre-commit run ash --all-files
 ```
+
+The `ash` hook runs bandit, detect-secrets, checkov, cdk-nag and npm-audit. It needs pre-commit running on Python 3.10 to 3.14, and Node.js and npm on `PATH` for cdk-nag and npm-audit. `ash-simple-scan` is the same hook under its earlier id. See [Using ASH with pre-commit](../tutorials/using-ash-with-pre-commit.md) for running without Node.js and for the container hook, `ash-full-scan`.
 
 ## Next Steps
 

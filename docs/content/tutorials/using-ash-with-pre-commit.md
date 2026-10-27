@@ -1,46 +1,103 @@
-# Using `ash` with `pre-commit`
+# Using ASH with pre-commit
 
-The `ash` tool can be used interactively on a workstation or run using the [`pre-commit`](https://pre-commit.com/) command.
-If `pre-commit` is used to run `ash`, then the `pre-commit` processing takes care of installing
-a copy of the `ash` git repository and setting up to run the `ash` program from that installed
-repository.  Using `pre-commit` still requires usage of WSL 2 when running on Windows.
+The ASH repository is a [pre-commit](https://pre-commit.com/) hook repository. pre-commit clones it at the `rev` you pin, installs ASH into a Python environment of its own, and runs ASH from the root of your repository. The hooks are defined in [.pre-commit-hooks.yaml](https://github.com/awslabs/automated-security-helper/blob/main/.pre-commit-hooks.yaml).
 
-Using `ash` as a [`pre-commit`](https://pre-commit.com/) hook enables development teams to use the `ash` tool
-in two ways.  First, developers can use `ash` as a part of their local development process on whatever
-development workstation or environment they are using.  Second, `ash` can be run in a build automation stage
-by running `pre-commit run --hook-stage manual ash` in build automation stage.
-When using `pre-commit`, run the `pre-commit` commands while in a folder/directory within the git repository that is
-configured with `pre-commit` hooks.
+| Hook id | Runs | Needs on the host |
+|---|---|---|
+| `ash` | `ashv3 --mode=precommit`: bandit, detect-secrets, checkov, cdk-nag and npm-audit, locally | Node.js and npm on `PATH` (for cdk-nag and npm-audit) |
+| `ash-simple-scan` | The same hook as `ash`, under the id earlier versions of these docs used | Same as `ash` |
+| `ash-full-scan` | `ashv3 --mode=container --simple`: builds the ASH container image and runs every scanner inside it | finch, docker, nerdctl or podman |
 
-Refer to the [pre-commit-hooks](https://github.com/awslabs/automated-security-helper/blob/main/.pre-commit-hooks.yaml) file for information about the `pre-commit`
-hook itself.
+## Requirements
+
+- pre-commit running on Python 3.10 to 3.14. pre-commit builds a Python hook's environment with the interpreter it runs under, so a pre-commit running on any other Python fails while installing the hook. `uv tool install --python 3.12 pre-commit` installs one that runs on a supported interpreter.
+- Network access on the first run. pre-commit downloads ASH's dependencies, including the `cdk` extra that cdk-nag needs (the `ash` hook installs it for you), and ASH installs bandit and checkov with `uv` the first time it scans.
+- For the `ash` hook, Node.js and npm on `PATH`. cdk-nag runs on Node.js, and npm-audit runs `npm`. Without them both scanners are reported MISSING and the hook fails; see [Running without Node.js](#running-without-nodejs).
 
 ## Configuration
 
-To configure a git repository to use the `ash` hook, start with the following `pre-commit-config` configuration:
+Add the hook to `.pre-commit-config.yaml` in your repository:
 
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.4.1  # update with the latest tagged version in the repository
+    rev: v3.7.0  # an ASH release tag
     hooks:
-      - id: ash-simple-scan
+      - id: ash
 ```
 
-## Running the Pre-commit Hook
-
-Once the `.pre-commit-config.yaml` file is updated, the `ash` tool can be run using the following command:
+Then install the git hook, or run it on demand:
 
 ```bash
-pre-commit run ash-simple-scan --all-files
+pre-commit install                 # run ASH on every `git commit`
+pre-commit run ash --all-files     # run it now, on the whole repository
 ```
 
-## Output Files
+ASH scans the repository directory, not the list of staged files, so a run takes the same time whichever files changed. To run it only when you ask, add `stages: [manual]` to the hook in your configuration and run `pre-commit run --hook-stage manual ash`.
 
-Results from the run of the `ash` tool can be found in the `.ash/ash_output/` directory:
+Options after the hook id go in `args`, for example `args: [--config, security/ash.yaml]`.
 
-- `ash_aggregated_results.json`: Complete machine-readable results
-- `reports/ash.summary.txt`: Human-readable text summary
+### Pinning `rev:` to a commit
+
+`pre-commit autoupdate --freeze` writes a commit SHA as `rev:`. The hook scans the whole repository, `.pre-commit-config.yaml` included, and detect-secrets reports a 40-character hex string as a high-entropy secret (`SECRET-HEX-HIGH-ENTROPY-STRING`, severity HIGH), so the hook fails with exit 2. Keep a release tag in `rev:`, or suppress that rule for that file in `.ash/.ash.yaml`:
+
+```yaml
+global_settings:
+  suppressions:
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: .pre-commit-config.yaml
+      reason: pre-commit autoupdate --freeze pins hooks to commit SHAs, which are not secrets
+```
+
+The finding is then reported as suppressed and no longer fails the hook.
+
+### Running without Node.js
+
+Exclude the two scanners that need it. They are then reported SKIPPED instead of MISSING, and the hook passes or fails on the other three:
+
+```yaml
+      - id: ash
+        args: [--exclude-scanners, cdk-nag, --exclude-scanners, npm-audit]
+```
+
+### Adding Python dependencies to the hook
+
+`additional_dependencies` in your configuration replaces the hook's own list rather than adding to it. The `ash` hook's list is `.[cdk]`, which installs the `cdk` extra cdk-nag needs, so keep it in yours:
+
+```yaml
+      - id: ash
+        additional_dependencies: [".[cdk]", "your-package"]
+```
+
+## Exit codes
+
+The hook fails when ASH exits non-zero:
+
+- `0`: no actionable findings. The hook passes.
+- `2`: at least one finding at or above the severity threshold.
+- `1`: the scan was incomplete, for example a scanner was MISSING because a tool it needs is not installed. The message names the scanner.
+
+## Container scan (`ash-full-scan`)
+
+`ash-full-scan` builds the ASH container image from the same source pre-commit installed, then scans your repository inside it with every scanner the image carries. It needs a container runtime on the host (finch, docker, nerdctl or podman, found in that order), and the first run takes several minutes to build the image.
+
+```yaml
+      - id: ash-full-scan
+        stages: [manual]
+```
+
+```bash
+pre-commit run --hook-stage manual ash-full-scan --all-files
+```
+
+## Output files
+
+Results are written to `.ash/ash_output/` in your repository:
+
+- `ash_aggregated_results.json`: complete machine-readable results
+- `reports/ash.summary.txt`: human-readable text summary
 - `reports/ash.summary.md`: Markdown summary for GitHub PRs and other platforms
-- `reports/ash.html`: Interactive HTML report
+- `reports/ash.html`: interactive HTML report
 - `reports/ash.csv`: CSV report for filtering and sorting findings
+
+Add `.ash/ash_output/` to your `.gitignore` so the output is not committed. Ignore that directory rather than all of `.ash/`, which also holds the `.ash/.ash.yaml` you commit.

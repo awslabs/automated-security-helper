@@ -132,8 +132,10 @@ _ISO_INSTANT = re.compile(
     r"(?:Z|[+-]\d{2}:?\d{2}|\s?UTC)?\b"
 )
 
-# ReportMetadata.report_id is "ASH-" + a UTC date or date-time stamp.
-_REPORT_ID = re.compile(r"\bASH-\d{8}(?:\d{6})?\b")
+# ReportMetadata.report_id is "ASH-" + a UTC date-time stamp + "-" + 12 random hex
+# digits (models/asharp_model.py new_report_id). The date-only and suffix-less forms
+# are older results files.
+_REPORT_ID = re.compile(r"\bASH-\d{8}(?:\d{6})?(?:-[0-9a-f]{12})?\b")
 
 # RichHandler's default log_time_format "[%x %X]" in the C locale: [10/05/26 17:22:49].
 # Masked before durations, which would otherwise take the HH:MM:SS half alone.

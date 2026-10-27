@@ -51,6 +51,19 @@ class AwsStub:
                 "nextSequenceToken": "fixture-sequence-token-1"
             },
             ("s3", "PutObject"): lambda params: {"ETag": '"fixture-etag"'},
+            ("securityhub", "BatchImportFindings"): lambda params: {
+                "FailedCount": 0,
+                "SuccessCount": len(params["Findings"]),
+                "FailedFindings": [],
+            },
+            # Nothing imported yet, so nothing for the reporter to archive.
+            ("securityhub", "GetFindings"): lambda params: {"Findings": []},
+            # aws-security-hub asks whose credentials these are before it sends.
+            ("sts", "GetCallerIdentity"): lambda params: {
+                "Account": "123456789012",
+                "Arn": "arn:aws:iam::123456789012:user/snapshot-fixture",
+                "UserId": "AIDASNAPSHOTFIXTURE",
+            },
             ("bedrock-runtime", "Converse"): self._converse,
         }
 
@@ -173,9 +186,13 @@ def _pinned_config(name: str):
 
     if name == "aws-security-hub":
         return securityhub.SecurityHubReporterConfig(
+            enabled=True,
             options=securityhub.SecurityHubReporterConfigOptions(
-                aws_region=REGION, aws_profile=None, account_id="123456789012"
-            )
+                aws_region=REGION,
+                aws_profile=None,
+                account_id="123456789012",
+                findings_scope="snapshot-fixture",
+            ),
         )
     if name == "cloudwatch-logs":
         return cwlogs.CloudWatchLogsReporterConfig(
@@ -213,6 +230,25 @@ def test_aws_reporter_output_and_payload(
     reporter = reporter_classes()[reporter_name](
         context=context, config=_pinned_config(reporter_name)
     )
+
+    if reporter_name == "aws-security-hub" and model.workspace is not None:
+        # A workspace's unified results span projects and record no scan time,
+        # config or changed-files marker, so the reporter refuses them before
+        # any AWS call and names the per-project results to use instead.
+        from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_reporter import (
+            SecurityHubImportError,
+        )
+
+        with pytest.raises(SecurityHubImportError, match="ash_aggregated_results.json"):
+            reporter.report(model)
+        assert aws_stub.recorded_calls() == []
+        return
+
+    if reporter_name == "aws-security-hub":
+        # The scope's directory is what the scan recorded, not what this host
+        # computes: the golden must not depend on running inside a git checkout.
+        model = model.model_copy(deep=True)
+        model.metadata.scan_source = "tests/test_data/snapshot_fixture/repo"
 
     document = reporter.report(model)
 

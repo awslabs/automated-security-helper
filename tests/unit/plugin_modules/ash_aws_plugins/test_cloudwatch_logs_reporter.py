@@ -1,7 +1,7 @@
 """Unit tests for the CloudWatch Logs reporter plugin."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 import json
 import os
 from datetime import datetime, timezone
@@ -60,7 +60,8 @@ def test_cloudwatch_logs_reporter_config_defaults():
     config = CloudWatchLogsReporterConfig()
     assert config.name == "cloudwatch-logs"
     assert config.extension == "cwlog.json"
-    assert config.enabled is True
+    # Off by default: it sends findings to AWS, so only the operator turns it on.
+    assert config.enabled is False
     assert isinstance(config.options, CloudWatchLogsReporterConfigOptions)
 
 
@@ -245,7 +246,7 @@ def test_cloudwatch_logs_reporter_report_success(
         result = reporter.report(model)
 
     # Verify CloudWatch Logs calls
-    mock_boto3.client.assert_called_with("logs", region_name="us-west-2")
+    mock_boto3.client.assert_called_with("logs", region_name="us-west-2", config=ANY)
     mock_cwlogs_client.create_log_stream.assert_called_once_with(
         logGroupName="test-log-group", logStreamName="test-stream"
     )

@@ -826,7 +826,10 @@ def test_a_policy_scanner_that_never_ran_is_named_in_a_warning(tmp_path):
     exists to avoid, reached by a typo rather than by a bug.
     """
     _project(tmp_path, "api", "global_settings:\n  severity_threshold: HIGH\n")
-    _policy(tmp_path, "workspace:\n  additional_scanners:\n    - detectsecrets\n")
+    # A misspelling no plugin answers to: "detectsecrets" is detect-secrets to the
+    # plugin lookup (it drops the hyphen), and "detect-secrts" is not a substring
+    # of that name, so a warning about the real scanner cannot satisfy the check.
+    _policy(tmp_path, "workspace:\n  additional_scanners:\n    - detect-secrts\n")
     plan = resolve_workspace(_workspace(tmp_path, ["api"]))
 
     import logging
@@ -835,7 +838,7 @@ def test_a_policy_scanner_that_never_ran_is_named_in_a_warning(tmp_path):
         _run(tmp_path, plan)
 
     messages = [r.getMessage() for r in records if r.levelno >= logging.WARNING]
-    assert any("detectsecrets" in m for m in messages), (
+    assert any("detect-secrts" in m for m in messages), (
         f"the policy scanner that never ran was not named in any warning; "
         f"warnings={messages}"
     )
@@ -883,7 +886,33 @@ def test_a_policy_scanner_that_did_run_produces_no_warning(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_a_real_scan_runs_the_policy_scanner_and_tags_what_it_finds(tmp_path):
+@pytest.fixture
+def no_tool_starts(tmp_path_factory, monkeypatch):
+    """Recording stand-ins first on PATH for every tool a scanner starts by name.
+
+    The policy scanner is the only one these tests are about, and it runs
+    in-process. Any other default scanner the orchestrator ran would start the
+    host's semgrep (``--config p/ci``, a registry download) or checkov (an update
+    check) and write under the real HOME, so each test asserts nothing started.
+    Building the registered scanners also probes uv and opengrep, and
+    detect-secrets asks ``uv tool run detect-secrets --version`` for a log line;
+    those are answered as on a host without the tools (``stub_tool_probes``).
+    """
+    from tests.utils.tool_guard import (
+        install_tool_guard,
+        reset_tool_lookup_caches,
+        stub_tool_probes,
+    )
+
+    guard = install_tool_guard(monkeypatch, tmp_path_factory.mktemp("guard-bin"))
+    stub_tool_probes(monkeypatch)
+    yield guard
+    reset_tool_lookup_caches()
+
+
+def test_a_real_scan_runs_the_policy_scanner_and_tags_what_it_finds(
+    tmp_path, no_tool_starts
+):
     """The assertion the classifier tests could not make.
 
     Everything above this line goes through a double, so all of it would still
@@ -906,7 +935,11 @@ def test_a_real_scan_runs_the_policy_scanner_and_tags_what_it_finds(tmp_path):
     _policy(tmp_path, f"workspace:\n  additional_scanners:\n    - {SCANNER}\n")
     plan = resolve_workspace(_workspace(tmp_path, ["api"]))
 
-    outcome = _run(tmp_path, plan, factory=None)
+    # Only the policy scanner is allowed into the run. The allowlist does not
+    # enable it: ScanPhase runs a scanner that is allowlisted AND enabled, so it
+    # is the policy that has to turn it back on, and the control below shows the
+    # project's "enabled: false" still holds without the policy.
+    outcome = _run(tmp_path, plan, factory=None, enabled_scanners=(SCANNER,))
     entry = _results_of(outcome)
 
     assert entry.status.value == "completed", entry.error
@@ -927,9 +960,15 @@ def test_a_real_scan_runs_the_policy_scanner_and_tags_what_it_finds(tmp_path):
         f"a real policy-scanner finding is untagged; origins={origins}"
     )
     assert entry.policy_origin_finding_count == len(findings)
+    assert no_tool_starts.started == [], (
+        f"the real scan started tools besides {SCANNER}'s library: "
+        f"{no_tool_starts.started}"
+    )
 
 
-def test_a_real_scan_without_the_policy_does_not_run_the_scanner(tmp_path):
+def test_a_real_scan_without_the_policy_does_not_run_the_scanner(
+    tmp_path, no_tool_starts
+):
     """The control for the real-scan test, and the one that proves causation.
 
     Same project, same file, no policy. If the scanner reported here too, the
@@ -947,7 +986,8 @@ def test_a_real_scan_without_the_policy_does_not_run_the_scanner(tmp_path):
     )
     plan = resolve_workspace(_workspace(tmp_path, ["api"]))
 
-    outcome = _run(tmp_path, plan, factory=None)
+    # The same allowlist as the test above, so the policy is the only difference.
+    outcome = _run(tmp_path, plan, factory=None, enabled_scanners=(SCANNER,))
     entry = _results_of(outcome)
 
     assert entry.status.value == "completed", entry.error
@@ -959,4 +999,7 @@ def test_a_real_scan_without_the_policy_does_not_run_the_scanner(tmp_path):
     assert not findings, (
         "the project disabled this scanner and no policy re-enabled it, but it "
         f"reported {len(findings)} findings"
+    )
+    assert no_tool_starts.started == [], (
+        f"the real scan started tools: {no_tool_starts.started}"
     )

@@ -8,12 +8,23 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, TypeVar
 
-from automated_security_helper.models.core import AshSuppression
-from automated_security_helper.utils.path_matching import _recursive_glob_match
+from automated_security_helper.models.core import (
+    PACKAGE_SUPPRESSION_FIELDS,
+    AshSuppression,
+    IgnorePathWithReason,
+    current_date,
+    expiration_has_passed,
+)
+from automated_security_helper.utils.path_matching import (
+    _path_pattern_matches,
+    _recursive_glob_match,
+    directory_spelling,
+    ignore_path_pattern,
+)
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, escape_markup
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
     open_in_scanned_tree,
@@ -81,36 +92,63 @@ def file_path_matches(
     Supports ``**`` as a recursive glob that matches zero or more directories,
     e.g. ``tests/**/*.py`` matches both ``tests/test_foo.py`` and
     ``tests/sub/test_bar.py``.
+
+    The matcher ``AshSuppression.matches`` and ``IgnorePathWithReason`` use
+    (``path_matching._path_pattern_matches``), so every reader of a pattern gives
+    the same answer: case-sensitive, a backslash in the pattern a separator and
+    one in the path part of a name, and ``""``, ``.``, ``./`` and ``.\\`` matching
+    nothing.
+
+    A pattern containing ``**`` goes to ``_recursive_glob_match``, which matches
+    whole path components. Any other goes to ``fnmatchcase``, whose ``*`` is not
+    stopped by a separator: ``fnmatch.translate("*")`` is ``(?s:.*)``, so
+    ``src/*.py`` also matches ``src/sub/deep/a.py`` and a suppression written that
+    way covers subdirectories too.
     """
-    if finding_file_path is None:
-        return False
+    return _path_pattern_matches(finding_file_path, suppression_file_path)
 
-    # Normalize to lowercase for OS-independent case-insensitive matching.
-    finding_lower = finding_file_path.lower()
-    suppression_lower = suppression_file_path.lower()
 
-    if finding_lower == suppression_lower:
-        return True
+def ignore_path_matches(file_path: Optional[str], ignore_path: str) -> bool:
+    """Whether ``file_path`` is under the global ignore path ``ignore_path``.
 
-    # A pattern containing "**" is routed to _recursive_glob_match instead of
-    # fnmatch.
-    #
-    # Not because fnmatch's "*" stops at a path separator -- it does not.
-    # fnmatch.translate("*") is "(?s:.*)", so "*" matches any run of characters
-    # including "/". The practical consequence is that the plain fnmatch call
-    # below OVER-matches rather than under-matches: the pattern "src/*.py" also
-    # matches "src/sub/deep/a.py", so a suppression written that way silently
-    # covers subdirectories too.
-    #
-    # "**" needs its own matcher because fnmatch has no notion of path
-    # components at all, so it cannot express the per-segment anchoring a
-    # recursive glob implies. _recursive_glob_match splits the pattern on "**"
-    # and requires each segment to match whole path components in order,
-    # allowing any number of components (including zero) in place of each "**".
-    if "**" in suppression_lower:
-        return _recursive_glob_match(finding_lower, suppression_lower)
+    ``file_path_matches``, with the pattern read as ``path_matching.
+    ignore_path_pattern`` reads it: one ending in ``/`` names the directory and
+    matches every path below it. Every place ASH matches an ignore path calls this,
+    so they agree: dropping findings, the converters, detect-secrets, the
+    exclusions the tree-walking scanners are given, and snyk-code's refusal.
+    """
+    return file_path_matches(file_path, ignore_path_pattern(ignore_path))
 
-    return fnmatch.fnmatch(finding_lower, suppression_lower)
+
+def warn_unmatched_directory_suppressions(
+    suppressions: Iterable[AshSuppression], used_ids: Iterable[str]
+) -> None:
+    """Warn once for each suppression whose path ends in ``/`` and matched nothing.
+
+    An ignore path ending in ``/`` names a directory; a suppression's path does
+    not, and matches only that literal path, which no file has. A suppression
+    written ``build/`` therefore suppresses nothing, and the findings it was
+    written for are reported. The warning names the glob that suppresses the
+    directory's findings, ``build/**/*``: as a suppression path that covers every
+    file below the directory and not a file named ``build``, which ``build/**``
+    would also cover. Called after the scan's last suppression pass, with the ids
+    of the suppressions that pass used.
+    """
+    used = set(used_ids)
+    for suppression in suppressions:
+        path = getattr(suppression, "path", None) or ""
+        if not path.endswith(("/", "\\")) or suppression.id in used:
+            continue
+        directory = path.rstrip("/\\")
+        if not directory:
+            continue
+        ASH_LOGGER.warning(
+            f"The suppression with path '{escape_markup(path)}' matched no finding: "
+            "a suppression path ending in '/' matches only that literal path, not "
+            "the files in the directory, as an ignore path's does. To suppress the "
+            "findings below it, write "
+            f"'{escape_markup(directory_spelling(directory, ignore_path=False))}'."
+        )
 
 
 def _line_range_matches(
@@ -170,6 +208,7 @@ def should_suppress_finding(
     finding: FlatVulnerability,
     suppressions: List[AshSuppression],
     symbol_resolver: Optional[SymbolResolver] = None,
+    where: str = "global_settings.suppressions",
 ) -> Tuple[bool, Optional[AshSuppression]]:
     """
     Determine if a finding should be suppressed based on the suppression rules.
@@ -179,27 +218,18 @@ def should_suppress_finding(
         suppressions: List of suppression rules to check against
         symbol_resolver: Resolves ``symbol`` on a suppression to source spans.
             Without it, a suppression that sets ``symbol`` matches nothing.
+        where: The list's location, which names an entry in a message
+            (_has_expired).
 
     Returns:
         A tuple of (should_suppress, matching_suppression)
     """
-    for suppression in suppressions:
-        # Skip expired suppressions
-        if suppression.expiration:
-            try:
-                expiration_date = datetime.strptime(
-                    suppression.expiration, "%Y-%m-%d"
-                ).date()
-                if expiration_date <= datetime.now().date():
-                    ASH_LOGGER.debug(
-                        f"Suppression for rule {suppression.rule_id} has expired on {suppression.expiration}"
-                    )
-                    continue
-            except ValueError:
-                ASH_LOGGER.warning(
-                    f"Invalid expiration date format for suppression: {suppression.expiration}"
-                )
-                continue
+    for index, suppression in enumerate(suppressions):
+        location = f"{where}[{index}]"
+        if _has_expired(suppression, location) or _has_unknown_keys(
+            suppression, location
+        ):
+            continue
 
         if matches_suppression(finding, suppression, symbol_resolver):
             return True, suppression
@@ -207,8 +237,285 @@ def should_suppress_finding(
     return False, None
 
 
+def _has_expired(entry: IgnorePathWithReason, where: str) -> bool:
+    """Whether ``entry`` no longer applies because its ``expiration`` has passed.
+
+    The one rule for suppressions and ignore paths alike. ``expiration`` is a
+    YYYY-MM-DD date compared with ``current_date()``, the host's local date, and
+    the entry stops applying at the start of that day: on the expiration date
+    itself it is already expired.
+
+    A date that does not parse counts as expired, with a warning. A config file
+    with one is refused when it loads, but a configuration kept from a results
+    file keeps the date as written (utils/unknown_keys.py), and ``ash merge``
+    applies that configuration to the shards' findings. For such an entry the
+    safe reading is that it does not apply: an unapplied ignore path means more
+    is scanned, not less.
+
+    The messages name the entry by ``where``, its location, and not by its
+    values: the date and the path are the file's data, and either can be a
+    value read from the environment where the scan ran.
+
+    Args:
+        entry: The suppression or ignore path.
+        where: Its location, such as ``global_settings.ignore_paths[0]``.
+    """
+    if not entry.expiration:
+        return False
+    try:
+        expired = expiration_has_passed(entry.expiration)
+    except ValueError:
+        ASH_LOGGER.warning(
+            f"Invalid expiration date format for {where}. Use YYYY-MM-DD; "
+            "the entry is not applied."
+        )
+        return True
+    if expired:
+        ASH_LOGGER.debug(f"{where} has expired")
+    return expired
+
+
+def _has_unknown_keys(entry: IgnorePathWithReason, where: str) -> bool:
+    """Whether ``entry`` came from a results file with a key it does not declare.
+
+    A config file with such a key is refused when it loads, so only an entry
+    kept from a stored config (utils/unknown_keys.py) gets here. It is never
+    applied; the warning was logged when the results were loaded. Named by
+    ``where``, its location, as in _has_expired.
+    """
+    if entry.has_unknown_keys:
+        ASH_LOGGER.debug(
+            f"Not applying {where}: it has keys this version of ASH does not know"
+        )
+        return True
+    return False
+
+
+#: The rule_id of a suppression that accepts an input a converter could not
+#: convert (a FailedInputInfo whose kind is "input").
+UNCONVERTED_INPUT_RULE = "ash-unconverted-input"
+
+
+def accepting_unconverted_input(
+    path: str,
+    suppressions: Optional[Sequence[AshSuppression]],
+    where: str = "global_settings.suppressions",
+) -> Optional[AshSuppression]:
+    """The suppression that accepts ``path`` as an unconverted input, or None.
+
+    An entry accepts when its ``rule_id`` is :data:`UNCONVERTED_INPUT_RULE`
+    exactly (case-insensitive; a glob written for finding suppressions grants
+    nothing here, because this acceptance waives scan coverage rather than one
+    finding) and its ``path`` pattern matches, read as
+    ``AshSuppression.matches_path`` reads it. Only ``path``, ``reason`` and
+    ``expiration`` take part: an expired entry, or one kept from a results file
+    with unknown keys, accepts nothing (_has_expired, _has_unknown_keys).
+
+    Consulted only for an input error, the record of a file that is not one the
+    converter could hand to its tool. A tool failure never reaches this, so a
+    broken tool cannot be suppressed into a complete scan.
+    """
+    for index, suppression in enumerate(suppressions or []):
+        rule_id = suppression.rule_id
+        if rule_id is None or rule_id.lower() != UNCONVERTED_INPUT_RULE:
+            continue
+        location = f"{where}[{index}]"
+        if _has_expired(suppression, location) or _has_unknown_keys(
+            suppression, location
+        ):
+            continue
+        if suppression.matches_path(path):
+            return suppression
+    return None
+
+
+def active_ignore_paths(
+    ignore_paths: Optional[Sequence[IgnorePathWithReason]],
+    where: str = "global_settings.ignore_paths",
+) -> List[IgnorePathWithReason]:
+    """The entries of ``ignore_paths`` that still apply today.
+
+    Every place that applies a list of ignore-path entries filters it through
+    this first: for ``global_settings.ignore_paths``, the list the orchestrator
+    hands the scanners, the archive and Jupyter converters, and the SARIF step
+    that drops findings after the scan; and the scanner options of the same type
+    (bandit ``excluded_paths``, checkov ``skip_path``, syft ``exclude``) where
+    they become tool arguments. The config itself keeps every entry, so the
+    aggregated results still report an expired one; only its effect stops.
+
+    ``where`` is the list's location, which names an entry in a message
+    (_has_expired): pass it for a list other than ``global_settings.ignore_paths``.
+    """
+    return [
+        entry
+        for index, entry in enumerate(ignore_paths or [])
+        if not _has_expired(entry, f"{where}[{index}]")
+        and not _has_unknown_keys(entry, f"{where}[{index}]")
+    ]
+
+
+_Entry = TypeVar("_Entry", bound=IgnorePathWithReason)
+
+
+def _expiring_within(
+    entries: Sequence[_Entry], days_threshold: int, where: str
+) -> List[_Entry]:
+    """Entries whose expiration is today or within ``days_threshold`` days.
+
+    One whose date does not parse is named by its location in ``where``, the
+    list's location, as in _has_expired.
+    """
+    expiring = []
+    today = current_date()
+
+    for index, entry in enumerate(entries):
+        if entry.expiration:
+            try:
+                expiration_date = datetime.strptime(entry.expiration, "%Y-%m-%d").date()
+                days_until_expiration = (expiration_date - today).days
+
+                if 0 <= days_until_expiration <= days_threshold:
+                    expiring.append(entry)
+            except ValueError:
+                ASH_LOGGER.warning(
+                    f"Invalid expiration date format for {where}[{index}]. "
+                    "Use YYYY-MM-DD."
+                )
+
+    return expiring
+
+
+#: The fields of a suppression that the reports and warnings quoting it show.
+SHOWN_SUPPRESSION_FIELDS = (
+    "path",
+    "rule_id",
+    "line_start",
+    "line_end",
+    "reason",
+    "expiration",
+    *PACKAGE_SUPPRESSION_FIELDS,
+    "symbol",
+)
+
+
+def recorded_suppressions(config: Any) -> Dict[int, Dict[str, Any]]:
+    """Each of ``config``'s suppressions, keyed by its ``id()``, as a dict of its
+    shown fields (``SHOWN_SUPPRESSION_FIELDS``) in which each field the config
+    file read from the environment is the reference as the file wrote it
+    (``${VAR}``, ``!ENV`` and any text after the reference included). The
+    rewrite is value-based: a literal field whose text happens to equal an
+    environment-read value is recorded as the reference too, not as the
+    literal the file wrote at that spot.
+
+    What quotes a suppression's fields (its SARIF justification, which the results
+    file and every report carry, the unused-suppressions report, the expiry
+    warning) quotes one read from the environment by its reference, as the results
+    file's ``ash_config`` records it, and never the value. The suppressions are the
+    config's ``global_settings.suppressions``, where its record places the
+    references.
+    """
+    settings = getattr(config, "global_settings", None)
+    suppressions = list(getattr(settings, "suppressions", None) or [])
+    if not suppressions:
+        return {}
+    shown: List[Dict[str, Any]] = [
+        {name: getattr(s, name, None) for name in SHOWN_SUPPRESSION_FIELDS}
+        for s in suppressions
+    ]
+    references = getattr(config, "_environment_references", ()) or ()
+    if references:
+        from automated_security_helper.config.environment_record import (
+            record_environment_references,
+        )
+
+        shown = record_environment_references(
+            shown, references, at=("global_settings", "suppressions")
+        )
+    return {id(s): entry for s, entry in zip(suppressions, shown)}
+
+
+def written_suppression_reasons(
+    config: Any, recorded: Optional[Dict[int, Dict[str, Any]]] = None
+) -> Dict[int, str]:
+    """The reason of each of ``config``'s suppressions that its config file read
+    from the environment, as the file wrote it, keyed by the suppression's
+    ``id()`` (``recorded_suppressions``). A caller that already holds
+    ``recorded_suppressions(config)`` passes it as ``recorded``, so the
+    environment record is not built a second time."""
+    settings = getattr(config, "global_settings", None)
+    suppressions = list(getattr(settings, "suppressions", None) or [])
+    if recorded is None:
+        recorded = recorded_suppressions(config)
+    return {
+        id(s): recorded[id(s)]["reason"]
+        for s in suppressions
+        if isinstance(recorded[id(s)].get("reason"), str)
+        and recorded[id(s)]["reason"] != getattr(s, "reason", None)
+    }
+
+
+def written_suppression_id(
+    suppression: AshSuppression, recorded: Dict[int, Dict[str, Any]]
+) -> str:
+    """``suppression``'s id over its written form: each field the config file
+    read from the environment is the reference as the file wrote it
+    (``recorded_suppressions``). ``used_suppressions`` records this id, so the
+    results file names a used entry the way its own config record does and
+    never by a resolved value. The written form's id is one of the ids the
+    unused-suppressions check matches a report entry by
+    (``ConfigLinter._suppression_ids``).
+
+    The two forms share one text namespace, so this reduces collisions rather
+    than ruling them out: an entry the file writes as quoted text that only
+    looks like a reference (``path: '${VAR}'``) has that text as its id, the
+    same id an env-read ``path: ${VAR}`` entry is recorded by, and a use of
+    either reads as a use of both."""
+    written = (recorded or {}).get(id(suppression))
+    if not written:
+        return suppression.id
+    changed = {
+        name: value
+        for name, value in written.items()
+        if value != getattr(suppression, name, None)
+    }
+    if not changed:
+        return suppression.id
+    return suppression.model_copy(update=changed).id
+
+
+#: The fields of an ignore path that the warnings naming it show.
+SHOWN_IGNORE_PATH_FIELDS = ("path", "reason", "expiration")
+
+
+def recorded_ignore_paths(
+    config: Any, entries: Sequence[Any], at: Sequence[str]
+) -> Dict[int, Dict[str, Any]]:
+    """Each of ``entries``, the ignore paths at ``at`` in ``config`` (its global
+    ``ignore_paths``, or a scanner option that takes the same entries), keyed by
+    its ``id()``, as a dict of its shown fields (``SHOWN_IGNORE_PATH_FIELDS``) in
+    which each field the config file read from the environment is the reference
+    as the file wrote it, as ``recorded_suppressions`` gives a suppression's."""
+    entries = list(entries or [])
+    if not entries:
+        return {}
+    shown: List[Dict[str, Any]] = [
+        {name: getattr(entry, name, None) for name in SHOWN_IGNORE_PATH_FIELDS}
+        for entry in entries
+    ]
+    references = getattr(config, "_environment_references", ()) or ()
+    if references:
+        from automated_security_helper.config.environment_record import (
+            record_environment_references,
+        )
+
+        shown = record_environment_references(shown, references, at=tuple(at))
+    return {id(entry): fields for entry, fields in zip(entries, shown)}
+
+
 def check_for_expiring_suppressions(
-    suppressions: List[AshSuppression], days_threshold: int = 30
+    suppressions: List[AshSuppression],
+    days_threshold: int = 30,
+    where: str = "global_settings.suppressions",
 ) -> List[AshSuppression]:
     """
     Check for suppressions that will expire within the specified number of days.
@@ -216,29 +523,26 @@ def check_for_expiring_suppressions(
     Args:
         suppressions: List of suppression rules to check
         days_threshold: Number of days threshold for warning
+        where: The list's location, which names an entry in a message.
 
     Returns:
         List of suppressions that will expire within the threshold
     """
-    expiring_suppressions = []
-    today = datetime.now().date()
+    return _expiring_within(suppressions, days_threshold, where)
 
-    for suppression in suppressions:
-        if suppression.expiration:
-            try:
-                expiration_date = datetime.strptime(
-                    suppression.expiration, "%Y-%m-%d"
-                ).date()
-                days_until_expiration = (expiration_date - today).days
 
-                if 0 <= days_until_expiration <= days_threshold:
-                    expiring_suppressions.append(suppression)
-            except ValueError:
-                ASH_LOGGER.warning(
-                    f"Invalid expiration date format for suppression: {suppression.expiration}"
-                )
+def check_for_expiring_ignore_paths(
+    ignore_paths: List[IgnorePathWithReason],
+    days_threshold: int = 30,
+    where: str = "global_settings.ignore_paths",
+) -> List[IgnorePathWithReason]:
+    """The ignore paths that will expire within ``days_threshold`` days.
 
-    return expiring_suppressions
+    The same window ``check_for_expiring_suppressions`` uses, so the scan-start
+    warning gives an ignore path the same notice a suppression gets. ``where``
+    is the list's location, which names an entry in a message.
+    """
+    return _expiring_within(ignore_paths, days_threshold, where)
 
 
 def find_inline_suppressions(

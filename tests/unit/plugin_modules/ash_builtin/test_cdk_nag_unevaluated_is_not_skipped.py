@@ -261,7 +261,7 @@ YAML_WITH_APPLICATION_TAGS = """markdown_extensions:
     ids=["json-with-comments", "yaml-with-application-tags"],
 )
 def test_a_file_that_does_not_parse_is_an_uncounted_but_recorded_skip(
-    scanner, cdk_available, filename, body
+    scanner, cdk_available, filename, body, monkeypatch, tmp_path_factory
 ):
     """A document no parser can load is not a target, and is not silent either.
 
@@ -277,16 +277,29 @@ def test_a_file_that_does_not_parse_is_an_uncounted_but_recorded_skip(
 
     Driven through the real ``scan()`` rather than the wrapper, because the behaviour under test
     IS the scanner's accounting: the counter it must not increment and the channel it must write
-    to. The wrapper is left raising, which is what ``get_model_from_template`` documents.
+    to. The wrapper is the parse double in tests/utils/cdk_nag_parse_double.py, which raises
+    what the real wrapper's parser raises: the real one imports cdk-nag first, which starts the
+    host's node through jsii, and without the cdk extra fails before it parses at all. No tool
+    may start here (recording stand-ins first on PATH).
 
     Both inputs are reductions of real files in this repository. cdk-nag's scan set is every
     ``*.json``, ``*.yaml`` and ``*.yml`` file in the tree, so a repository holding either shape
     -- and most repositories hold one -- reported incomplete coverage for cdk-nag while
     containing no CloudFormation that went unscanned.
     """
+    from tests.utils.cdk_nag_parse_double import use_the_parse_double
+    from tests.utils.tool_guard import install_tool_guard, reset_tool_lookup_caches
+
+    use_the_parse_double(monkeypatch)
+    guard = install_tool_guard(monkeypatch, tmp_path_factory.mktemp("guard-bin"))
     (scanner.context.work_dir / filename).write_text(body, encoding="utf-8")
 
-    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+    try:
+        report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+    finally:
+        reset_tool_lookup_caches()
+
+    assert guard.started == [], f"the scan started tools: {guard.started}"
 
     assert (scanner.targets_attempted, scanner.targets_failed) == (0, 0), (
         f"{filename} does not parse as YAML or JSON, so it was never a candidate "
@@ -507,20 +520,19 @@ def test_the_empty_pack_failure_names_the_way_to_turn_the_scanner_off(
 
 
 # ---------------------------------------------------------------------------
-# A partial failure is still a pass -- unchanged, and deliberately so
+# A partial failure is not a pass
 # ---------------------------------------------------------------------------
 
 
-def test_one_template_evaluated_among_failures_is_still_a_pass(
+def test_one_template_evaluated_among_failures_is_not_a_pass(
     scanner, cdk_available, wrapper_double
 ):
-    """Records the classification this change did NOT touch.
-
-    ``targets_failed < targets_attempted`` is a pass, so one template out of three evaluating
-    cleanly masks two that were never evaluated at all. That is arguable in both directions and
-    changing it is an operator-facing semantics decision nobody has made, so it is pinned here
-    as the current behavior rather than altered.
-    """
+    """A target the scanner could not evaluate fails the run, however many
+    others evaluated cleanly. An earlier revision of this cell pinned the
+    opposite (``targets_failed < targets_attempted`` was a pass) as a decision
+    nobody had made; the decision has since been made, fail-closed, so one
+    template out of three evaluating cleanly no longer masks two that were
+    never evaluated at all."""
     (scanner.context.work_dir / "good.yaml").write_text(CFN_TEMPLATE)
     (scanner.context.work_dir / "bad1.yaml").write_text(CFN_TEMPLATE)
     (scanner.context.work_dir / "bad2.yaml").write_text(CFN_TEMPLATE)
@@ -532,7 +544,92 @@ def test_one_template_evaluated_among_failures_is_still_a_pass(
 
     wrapper_double.side_effect = _by_name
 
-    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert (scanner.targets_attempted, scanner.targets_failed) == (3, 2)
-    assert _status_for(scanner) == ScannerStatus.PASSED
+    assert _status_for(scanner) == ScannerStatus.ERROR
+    assert report.runs[0].invocations[0].executionSuccessful is False
+
+
+def test_one_failed_template_beside_a_clean_one_fails_the_rendered_run(
+    scanner, cdk_available, wrapper_double
+):
+    """The two-template shape a consumer actually hits: one clean, one the
+    wrapper could not evaluate, and the rendered SARIF's
+    ``executionSuccessful`` says the run did not complete successfully."""
+    (scanner.context.work_dir / "good.yaml").write_text(CFN_TEMPLATE)
+    (scanner.context.work_dir / "bad.yaml").write_text(CFN_TEMPLATE)
+
+    def _by_name(template_path, **kwargs):
+        if template_path.name == "good.yaml":
+            return CdkNagWrapperResponse(results={"AwsSolutions": []}, failure=None)
+        return CdkNagWrapperResponse(results={}, failure="no validation report")
+
+    wrapper_double.side_effect = _by_name
+
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert (scanner.targets_attempted, scanner.targets_failed) == (2, 1)
+    assert report.runs[0].invocations[0].executionSuccessful is False
+
+
+#: A template no parser can read and that still reads as one: the format version and
+#: a resource type survive (test_scanner_with_nothing_to_scan.py's DAMAGED_TEMPLATES).
+DAMAGED_TEMPLATE = (
+    "AWSTemplateFormatVersion: '2010-09-09'\n"
+    "Resources:\n"
+    "  Bucket:\n"
+    "    Type: AWS::S3::Bucket\n"
+    "   Properties: [\n"
+)
+
+
+def test_the_skipped_reason_says_whether_a_template_failed_to_parse(
+    scanner, cdk_available, wrapper_double
+):
+    """Per target, as for cfn-nag: no template, or only one it could not parse.
+
+    One scanner scans a tree holding a damaged template and then a tree holding
+    none, so the value is reset for each target rather than carried over; built
+    fresh for each case, a scanner whose reset was dropped still passed. The
+    wrapper double raises the YAML error the real one raises for the damaged
+    template and answers None for the JSON file that is not CloudFormation.
+    """
+    from unittest.mock import patch
+
+    from yaml import YAMLError
+
+    from automated_security_helper.core.phases.scanner_executor import (
+        _skipped_reason_after_scan,
+    )
+    from automated_security_helper.utils.cfn_template_model import (
+        NO_CLOUDFORMATION_TEMPLATE,
+        NO_PARSEABLE_CLOUDFORMATION_TEMPLATE,
+    )
+
+    damaged = scanner.context.work_dir / "damaged"
+    damaged.mkdir()
+    (damaged / "stack.yaml").write_text(DAMAGED_TEMPLATE, encoding="utf-8")
+    clean = scanner.context.work_dir / "clean"
+    clean.mkdir()
+    (clean / "settings.json").write_text('{"debug": false}\n', encoding="utf-8")
+
+    def _like_the_wrapper(template_path, **kwargs):
+        if template_path.name == "stack.yaml":
+            raise YAMLError("found unexpected end of stream")
+        return None
+
+    wrapper_double.side_effect = _like_the_wrapper
+
+    reasons = []
+    for tree in (damaged, clean):
+        with patch.object(
+            cdk_nag_scanner,
+            "cloudformation_candidate_files",
+            return_value=sorted(p.as_posix() for p in tree.iterdir()),
+        ):
+            scanner.scan(target=tree, target_type="converted")
+        assert scanner.targets_attempted == 0
+        reasons.append(_skipped_reason_after_scan(scanner, "cdk-nag", "converted"))
+
+    assert reasons == [NO_PARSEABLE_CLOUDFORMATION_TEMPLATE, NO_CLOUDFORMATION_TEMPLATE]

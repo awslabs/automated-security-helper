@@ -125,14 +125,32 @@ export class AshCodeCommitGateStack extends Stack {
         'With no such rule the vote is recorded but blocks nothing.',
     });
 
+    /*
+     * OFF BY DEFAULT, because turning it on changes what the verdict covers.
+     *
+     * With `--changed-files-only --base-ref <destination>`, ASH keeps only findings
+     * whose file appears in `git diff --name-only`. Findings in files the pull request
+     * did not touch are not counted, and neither is any finding in a file whose name
+     * git prints C-quoted (a non-ASCII byte, a quote, a backslash or a control
+     * character), because the quoted spelling matches no scanned path: a bandit
+     * finding in `a.py` exits 2 with the option on, the same finding in `é.py` exits
+     * 0. With the option off every finding in the tree counts. The Terraform gate
+     * refuses the option; here it stays available to an operator who accepts the
+     * narrower verdict for the speed.
+     */
     const changedFilesOnly = new CfnParameter(this, 'ChangedFilesOnly', {
       type: 'String',
-      default: 'true',
+      default: 'false',
       allowedValues: ['true', 'false'],
       description:
-        "Scan only files the pull request changed, using ASH's --changed-files-only " +
-        '--base-ref against the destination commit. The repository is still cloned in ' +
-        'full, so scanners keep whole-repository context such as lockfiles.',
+        "Scan only files the pull request changed (ASH's --changed-files-only --base-ref " +
+        'against the destination commit). Every file is still cloned and scanned, so ' +
+        'scanners keep whole-repository context such as lockfiles and the scan takes as ' +
+        'long as a full one; findings in other files are dropped from the verdict and ' +
+        'the comment. Off by default: with it on, findings in files ' +
+        'the pull request did not change stop counting, and so do findings in any file ' +
+        'whose name git prints quoted (non-ASCII, quote, backslash or control ' +
+        'characters), so such a pull request can pass.',
     });
 
     const minSeverity = new CfnParameter(this, 'MinSeverity', {

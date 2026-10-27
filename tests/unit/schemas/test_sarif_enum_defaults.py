@@ -23,6 +23,7 @@ import pytest
 from pydantic import BaseModel
 
 from automated_security_helper.schemas import sarif_schema_model
+from automated_security_helper.utils.severity_ladder import MISSING_SARIF_LEVEL
 from automated_security_helper.schemas.sarif_schema_model import (
     Message,
     ReportingConfiguration,
@@ -61,7 +62,7 @@ def test_no_sarif_model_declares_an_enum_member_as_a_field_default():
 
 @pytest.mark.parametrize(
     ("field_name", "expected"),
-    [("level", "error"), ("kind", "fail")],
+    [("level", MISSING_SARIF_LEVEL), ("kind", "fail")],
 )
 def test_result_default_is_a_plain_string_when_the_key_is_absent(field_name, expected):
     """A scanner may legally omit level and kind; SARIF says so."""
@@ -75,7 +76,7 @@ def test_result_default_is_a_plain_string_when_the_key_is_absent(field_name, exp
 
 @pytest.mark.parametrize(
     ("field_name", "expected"),
-    [("level", "error"), ("kind", "fail")],
+    [("level", MISSING_SARIF_LEVEL), ("kind", "fail")],
 )
 def test_result_default_is_a_plain_string_under_direct_construction(
     field_name, expected

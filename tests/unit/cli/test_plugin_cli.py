@@ -77,13 +77,28 @@ def _stub(name, **attrs):
 
 
 def _run_list(args, scanners):
-    """Invoke the default (list) command with load_plugins returning stub scanners.
+    """Invoke the default (list) command with the stub scanners as the only plugins.
 
-    Patches ``get_plugin_config`` on the resolved config to return None so the
-    CLI falls back to instantiating each scanner (exercising the real per-class
-    row path), and lets the real ``describe_scanner`` run against the stubs.
+    The command lists what is registered (``ash_plugin_manager.plugin_modules``), in
+    the order load_plugins declares, so both are given the stubs, as
+    test_scanner_inventory_parity does. With load_plugins alone the table held the
+    real scanners and none of the stubs, and these tests passed or failed by which
+    tools the host had: under the unit tests' tool guard every real scanner showed
+    Yes, and no row said No or Unknown. The real ``describe_scanner`` still runs
+    against the stubs.
     """
-    with patch("automated_security_helper.cli.plugin.load_plugins") as mock_load:
+    from automated_security_helper.plugins import ash_plugin_manager
+
+    with (
+        patch("automated_security_helper.cli.plugin.load_plugins") as mock_load,
+        patch.object(
+            ash_plugin_manager,
+            "plugin_modules",
+            side_effect=lambda plugin_type, *a, **k: (
+                list(scanners) if plugin_type == "scanner" else []
+            ),
+        ),
+    ):
         mock_load.return_value = {
             "scanners": list(scanners),
             "converters": [],

@@ -9,10 +9,90 @@
     ]),
     'result': dict({
       'ash_command_available': True,
-      'ash_command_output': 'ASH version <ASH_VERSION>',
+      'ash_command_output': '/opt/ash/bin/ash',
       'installed': True,
+      'installs_on_first_scan': list([
+      ]),
+      'missing_dependencies': list([
+        'grype',
+      ]),
+      'ready': False,
+      'scanners': list([
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'bandit',
+          'version': '<BANDIT_VERSION>',
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'cdk_nag',
+          'version': '<CDK_NAG_VERSION>',
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'cfn_nag',
+          'version': None,
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'checkov',
+          'version': '<CHECKOV_VERSION>',
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'detect_secrets',
+          'version': '<DETECT_SECRETS_VERSION>',
+        }),
+        dict({
+          'dependencies_satisfied': False,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'grype',
+          'version': None,
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'npm_audit',
+          'version': None,
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'opengrep',
+          'version': None,
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'semgrep',
+          'version': '<SEMGREP_VERSION>',
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'syft',
+          'version': None,
+        }),
+      ]),
       'success': True,
       'timestamp': '2026-01-15T12:00:00',
+      'undetermined_dependencies': list([
+      ]),
       'version': '<ASH_VERSION>',
     }),
     'tool': 'check_installation',
@@ -69,7 +149,7 @@
           'detected_at': '2026-01-15T12:00:00+00:00',
           'file_path': 'src/settings.py',
           'fix_available': None,
-          'id': 'bandit-B105-35f80ca8',
+          'id': 'bandit-B105-d8e89f4bf133',
           'is_suppressed': False,
           'line_end': 7,
           'line_start': 7,
@@ -77,7 +157,7 @@
           'package_path': None,
           'package_version': None,
           'properties': '{"tags": ["bandit"], "scanner_name": "bandit", "issue_severity": "MEDIUM"}',
-          'raw_data': '{"ruleId":"B105","ruleIndex":-1,"kind":"fail","level":"warning","message":{"text":"Possible hardcoded password: \'hunter2\'","arguments":[]},"locations":[{"id":-1,"physicalLocation":{"artifactLocation":{"uri":"src/settings.py","index":-1},"region":{"startLine":7,"endLine":7,"charOffset":-1,"byteOffset":-1}},"logicalLocations":[],"annotations":[],"relationships":[]}],"stacks":[],"codeFlows":[],"graphs":[],"graphTraversals":[],"relatedLocations":[],"rank":-1.0,"attachments":[],"fixes":[],"taxa":[],"properties":{"tags":["bandit"],"scanner_name":"bandit","issue_severity":"MEDIUM"}}',
+          'raw_data': '{"ruleId":"B105","ruleIndex":-1,"kind":"fail","level":"warning","message":{"text":"Possible hardcoded password: \'h******\'","arguments":[]},"locations":[{"id":-1,"physicalLocation":{"artifactLocation":{"uri":"src/settings.py","index":-1},"region":{"startLine":7,"endLine":7,"charOffset":-1,"byteOffset":-1}},"logicalLocations":[],"annotations":[],"relationships":[]}],"stacks":[],"codeFlows":[],"graphs":[],"graphTraversals":[],"relatedLocations":[],"rank":-1.0,"attachments":[],"fixes":[],"taxa":[],"properties":{"tags":["bandit"],"scanner_name":"bandit","issue_severity":"MEDIUM"}}',
           'references': None,
           'rule_id': 'B105',
           'scanner': 'bandit',
@@ -99,7 +179,7 @@
           'detected_at': '2026-01-15T12:00:00+00:00',
           'file_path': 'tests/test_app.py',
           'fix_available': None,
-          'id': 'bandit-B101-c969d24b',
+          'id': 'bandit-B101-30eccaf87e25',
           'is_suppressed': True,
           'line_end': 4,
           'line_start': 4,
@@ -127,7 +207,7 @@
           'detected_at': '2026-01-15T12:00:00+00:00',
           'file_path': 'config/settings.ini',
           'fix_available': None,
-          'id': 'detect-secrets-SECRET-AWS-ACCESS-KEY-8af19541',
+          'id': 'detect-secrets-SECRET-AWS-ACCESS-KEY-49559df70b2e',
           'is_suppressed': False,
           'line_end': 3,
           'line_start': 3,
@@ -152,7 +232,7 @@
         dict({
           'after_severity': 'CRITICAL',
           'before_severity': 'HIGH',
-          'id': 'bandit-B602-e9f369ff',
+          'id': 'bandit-B602-b92d8ccf95a2',
         }),
       ]),
     }),
@@ -164,11 +244,7 @@
     'client_messages': list([
     ]),
     'result': dict({
-      'error': '''
-        Failed to parse result file: 1 validation error for AshAggregatedResults
-          Input should be an object [type=model_type, input_value=[], input_type=list]
-            For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/model_type
-      ''',
+      'error': "Failed to parse result file: 1 validation error for AshAggregatedResults: Invalid value at '(top level)': Input should be an object",
       'success': False,
     }),
     'tool': 'diff_scan_results',
@@ -481,391 +557,28 @@
     'tool': 'get_config',
   })
 # ---
-# name: test_get_config[explicit_path_missing_returns_defaults]
+# name: test_get_config[explicit_path_missing_is_refused]
   dict({
     'client_messages': list([
     ]),
     'result': dict({
-      'ash_plugin_modules': list([
+      'context': dict({
+        'config_path': '<TMP>/cwd/absent.yaml',
+        'error_category': 'file_not_found',
+      }),
+      'error': 'Configuration file <TMP>/cwd/absent.yaml cannot be loaded: the file does not exist',
+      'error_category': 'file_not_found',
+      'error_type': 'MCPResourceError',
+      'exit_code': 3,
+      'exit_code_meaning': 'invalid config or refused input',
+      'operation': 'get_config',
+      'success': False,
+      'suggestions': list([
+        'Check that the file or directory exists',
+        'Verify the path is correct',
+        'Ensure the file has not been moved or deleted',
       ]),
-      'build': None,
-      'content_db_staleness': 'fail',
-      'content_db_staleness_overrides': list([
-      ]),
-      'converters': dict({
-        'archive': dict({
-          'enabled': True,
-          'name': 'archive',
-          'options': dict({
-          }),
-        }),
-        'jupyter': dict({
-          'enabled': True,
-          'name': 'jupyter',
-          'options': dict({
-            'install_timeout': 300,
-            'tool_version': '>=7.16.0,<8.0.0',
-          }),
-        }),
-      }),
-      'external_reports_to_include': list([
-      ]),
-      'fail_on_findings': True,
-      'fail_on_incomplete_scanners': True,
-      'global_settings': dict({
-        'ignore_paths': list([
-        ]),
-        'mcp': dict({
-          'runtime_overrides': dict({
-            'allowed_paths': list([
-            ]),
-            'denied_paths': list([
-              '/fail_on_findings',
-              '/fail_on_incomplete_scanners',
-              '/content_db_staleness',
-              '/content_db_staleness_overrides',
-              '/sandbox',
-              '/sandbox/**',
-              '/ash_plugin_modules',
-              '/ash_plugin_modules/**',
-              '/global_settings/ignore_paths',
-              '/global_settings/suppressions',
-              '/reporters/bedrock-summary-reporter/options/aws_*',
-              '/reporters/cloudwatch-logs/**',
-            ]),
-            'denied_value_patterns': dict({
-            }),
-            'enabled': False,
-          }),
-        }),
-        'severity_threshold': 'MEDIUM',
-        'suppressions': list([
-        ]),
-      }),
-      'mcp_resource_management': dict({
-        'enable_health_checks': True,
-        'enable_resource_logging': True,
-        'health_check_interval_seconds': 60,
-        'log_resource_operations': False,
-        'max_concurrent_scans': 3,
-        'max_concurrent_tasks': 20,
-        'max_directory_size_mb': 1000,
-        'max_message_size_bytes': 10485760,
-        'max_path_length': 4096,
-        'memory_critical_threshold_mb': 2048,
-        'memory_warning_threshold_mb': 1024,
-        'operation_timeout_seconds': 180,
-        'scan_timeout_seconds': 1800,
-        'shutdown_timeout_seconds': 30,
-        'task_count_warning_threshold': 15,
-        'thread_pool_max_workers': 4,
-      }),
-      'project_name': 'ash-scan',
-      'reporters': dict({
-        'csv': dict({
-          'enabled': True,
-          'extension': 'csv',
-          'name': 'csv',
-          'options': dict({
-          }),
-        }),
-        'cyclonedx': dict({
-          'enabled': True,
-          'extension': 'cdx.json',
-          'name': 'cyclonedx',
-          'options': dict({
-          }),
-        }),
-        'flat_json': dict({
-          'enabled': True,
-          'extension': 'flat.json',
-          'name': 'flat-json',
-          'options': dict({
-            'include_metadata': True,
-            'include_scanner_metrics': True,
-            'include_summary_metrics': True,
-          }),
-        }),
-        'github_ghas': dict({
-          'enabled': True,
-          'extension': 'ghas.sarif',
-          'name': 'github-ghas',
-          'options': dict({
-            'exclude_suppressed': True,
-          }),
-        }),
-        'gitlab_cyclonedx': dict({
-          'enabled': True,
-          'extension': 'gl-dependency-scanning-report.cdx.json',
-          'name': 'gitlab-cyclonedx',
-          'options': dict({
-            'category': 'production',
-            'input_file_path_override': None,
-            'language_override': None,
-            'package_manager_override': None,
-          }),
-        }),
-        'gitlab_sast': dict({
-          'enabled': True,
-          'extension': 'gl-sast-report.json',
-          'name': 'gitlab-sast',
-          'options': dict({
-            'exclude_suppressed': False,
-          }),
-        }),
-        'html': dict({
-          'enabled': True,
-          'extension': 'html',
-          'name': 'html',
-          'options': dict({
-          }),
-        }),
-        'junitxml': dict({
-          'enabled': True,
-          'extension': 'junit.xml',
-          'name': 'junitxml',
-          'options': dict({
-            'respect_severity_threshold': True,
-          }),
-        }),
-        'markdown': dict({
-          'enabled': True,
-          'extension': 'summary.md',
-          'name': 'markdown',
-          'options': dict({
-            'compact': False,
-            'include_detailed_findings': True,
-            'include_findings_table': False,
-            'include_summary': True,
-            'max_detailed_findings': 20,
-            'top_hotspots_limit': 10,
-            'use_collapsible_details': True,
-          }),
-        }),
-        'ocsf': dict({
-          'enabled': True,
-          'extension': 'ocsf.json',
-          'name': 'ocsf',
-          'options': dict({
-          }),
-        }),
-        'sarif': dict({
-          'enabled': True,
-          'extension': 'sarif',
-          'name': 'sarif',
-          'options': dict({
-          }),
-        }),
-        'spdx': dict({
-          'enabled': False,
-          'extension': 'spdx.json',
-          'name': 'spdx',
-          'options': dict({
-          }),
-        }),
-        'text': dict({
-          'enabled': True,
-          'extension': 'summary.txt',
-          'name': 'text',
-          'options': dict({
-            'include_detailed_findings': False,
-            'include_findings_table': False,
-            'include_summary': True,
-            'max_detailed_findings': 20,
-            'top_hotspots_limit': 20,
-          }),
-        }),
-        'unused_suppressions': dict({
-          'enabled': True,
-          'extension': 'unused-suppressions.json',
-          'name': 'unused-suppressions',
-          'options': dict({
-            'output_format': 'both',
-          }),
-        }),
-        'yaml': dict({
-          'enabled': False,
-          'extension': 'yaml',
-          'name': 'yaml',
-          'options': dict({
-          }),
-        }),
-      }),
-      'sandbox': dict({
-        'extra_read_paths': list([
-        ]),
-        'mode': 'off',
-        'network_scanners': None,
-      }),
-      'scanners': dict({
-        'bandit': dict({
-          'enabled': True,
-          'name': 'bandit',
-          'options': dict({
-            'additional_formats': list([
-            ]),
-            'confidence_level': 'all',
-            'config_file': None,
-            'excluded_paths': list([
-            ]),
-            'ignore_nosec': False,
-            'install_timeout': 300,
-            'scan_timeout': 1800,
-            'severity_threshold': None,
-            'tool_version': '>=1.7.0,<2.0.0',
-          }),
-        }),
-        'cdk_nag': dict({
-          'enabled': True,
-          'name': 'cdk-nag',
-          'options': dict({
-            'include_compliant_checks': False,
-            'nag_packs': dict({
-              'AwsSolutionsChecks': True,
-              'HIPAASecurityChecks': False,
-              'NIST80053R4Checks': False,
-              'NIST80053R5Checks': False,
-              'PCIDSS321Checks': False,
-            }),
-            'scan_timeout': 1800,
-            'severity_threshold': None,
-          }),
-        }),
-        'cfn_nag': dict({
-          'enabled': True,
-          'name': 'cfn-nag',
-          'options': dict({
-            'scan_timeout': 1800,
-            'severity_threshold': None,
-          }),
-        }),
-        'checkov': dict({
-          'enabled': True,
-          'name': 'checkov',
-          'options': dict({
-            'additional_formats': list([
-              'cyclonedx_json',
-            ]),
-            'config_file': None,
-            'frameworks': list([
-              'all',
-            ]),
-            'install_timeout': 300,
-            'offline': False,
-            'scan_timeout': 1800,
-            'severity_threshold': None,
-            'skip_ash_output_dir': True,
-            'skip_frameworks': list([
-            ]),
-            'skip_path': list([
-            ]),
-            'tool_version': None,
-          }),
-        }),
-        'detect_secrets': dict({
-          'enabled': True,
-          'name': 'detect-secrets',
-          'options': dict({
-            'baseline_file': None,
-            'scan_settings': dict({
-              'filters_used': list([
-              ]),
-              'generated_at': None,
-              'plugins_used': list([
-              ]),
-              'results': dict({
-              }),
-              'version': None,
-            }),
-            'scan_timeout': 1800,
-            'severity_threshold': None,
-            'skip_generated_lockfiles': True,
-          }),
-        }),
-        'grype': dict({
-          'enabled': True,
-          'name': 'grype',
-          'options': dict({
-            'config_file': None,
-            'offline': False,
-            'scan_timeout': 1800,
-            'severity_threshold': None,
-          }),
-        }),
-        'npm_audit': dict({
-          'enabled': True,
-          'name': 'npm-audit',
-          'options': dict({
-            'offline': False,
-            'scan_timeout': 1800,
-            'severity_threshold': None,
-          }),
-        }),
-        'opengrep': dict({
-          'enabled': True,
-          'name': 'opengrep',
-          'options': dict({
-            'config': 'p/ci',
-            'exclude': list([
-              '*-converted.py',
-              '*_report_result.txt',
-            ]),
-            'exclude_rule': list([
-            ]),
-            'metrics': 'auto',
-            'offline': False,
-            'patterns': list([
-            ]),
-            'scan_timeout': 1800,
-            'severity': list([
-            ]),
-            'severity_threshold': None,
-            'sha256': dict({
-            }),
-            'version': 'v1.30.2',
-          }),
-        }),
-        'semgrep': dict({
-          'enabled': True,
-          'name': 'semgrep',
-          'options': dict({
-            'config': 'p/ci',
-            'exclude': list([
-              '*-converted.py',
-              '*_report_result.txt',
-            ]),
-            'exclude_rule': list([
-            ]),
-            'install_timeout': 300,
-            'metrics': 'auto',
-            'offline': False,
-            'scan_timeout': 1800,
-            'severity': list([
-            ]),
-            'severity_threshold': None,
-            'tool_version': None,
-          }),
-        }),
-        'syft': dict({
-          'enabled': True,
-          'name': 'syft',
-          'options': dict({
-            'additional_outputs': list([
-              'syft-table',
-            ]),
-            'config_file': None,
-            'exclude': list([
-            ]),
-            'offline': False,
-            'scan_timeout': 1800,
-            'severity_threshold': None,
-          }),
-        }),
-      }),
-      'workspace': dict({
-        'max_parallel_projects': None,
-        'project_timeout': None,
-      }),
+      'timestamp': None,
     }),
     'tool': 'get_config',
   })
@@ -879,6 +592,7 @@
       ]),
       'build': None,
       'content_db_staleness': 'fail',
+      'content_db_staleness_offline_image_default': True,
       'content_db_staleness_overrides': list([
       ]),
       'converters': dict({
@@ -886,6 +600,10 @@
           'enabled': True,
           'name': 'archive',
           'options': dict({
+            'max_compression_ratio': 100,
+            'max_member_bytes': 268435456,
+            'max_members': 100000,
+            'max_total_bytes': 1073741824,
           }),
         }),
         'jupyter': dict({
@@ -913,30 +631,123 @@
               '/fail_on_incomplete_scanners',
               '/content_db_staleness',
               '/content_db_staleness_overrides',
+              '/honor_ignore_files',
+              '/content_db_staleness_offline_image_default',
               '/sandbox',
               '/sandbox/**',
               '/ash_plugin_modules',
               '/ash_plugin_modules/**',
+              '/scanners/detect-secrets/options/scan_settings/filters_used',
+              '/scanners/detect-secrets/options/scan_settings/filters_used/**',
+              '/scanners/detect-secrets/options/scan_settings/plugins_used',
+              '/scanners/detect-secrets/options/scan_settings/plugins_used/**',
+              '/scanners/detect-secrets/options/baseline_file',
               '/global_settings/ignore_paths',
               '/global_settings/suppressions',
+              '/global_settings/mcp',
+              '/global_settings/mcp/**',
+              '/scanners/opengrep/options/exclude_rule',
+              '/scanners/semgrep/options/exclude_rule',
+              '/scanners/bandit/options/confidence_level',
+              '/scanners/checkov/options/frameworks',
+              '/scanners/checkov/options/skip_frameworks',
+              '/scanners/opengrep/options/config',
+              '/scanners/opengrep/options/patterns',
+              '/scanners/opengrep/options/severity',
+              '/scanners/semgrep/options/config',
+              '/scanners/semgrep/options/severity',
+              '/scanners/detect-secrets/options/scan_settings',
+              '/scanners/cdk-nag/options/nag_packs/AwsSolutionsChecks',
+              '/scanners/ferret-scan/options/checks',
+              '/scanners/ferret-scan/options/confidence_levels',
+              '/scanners/ferret-scan/options/disable_ip_types',
+              '/scanners/ferret-scan/options/enable_preprocessors',
+              '/scanners/ferret-scan/options/finding_limit',
+              '/scanners/ferret-scan/options/profile',
+              '/scanners/ferret-scan/options/recursive',
+              '/scanners/ferret-scan/options/respect_gitignore',
+              '/scanners/ferret-scan/options/use_default_config',
+              '/scanners/ferret-scan/options/validator_budget',
+              '/scanners/trivy-repo/options/license_full',
+              '/scanners/trivy-repo/options/scanners',
+              '/scanners/cfn-guard/options/rule_sets',
+              '/scanners/cfn-lint/options/ignore_checks',
+              '/scanners/cfn-lint/options/regions',
+              '/scanners/gitleaks/options/baseline_path',
+              '/scanners/trivy/options/scanners',
+              '/scanners/trivy/options/ignore_unfixed',
+              '/scanners/*/options/offline',
+              '/scanners/ferret-scan/options/max_live_bytes',
+              '/scanners/gitleaks/options/max_target_megabytes',
+              '/scanners/bandit/options/config_file',
+              '/scanners/checkov/options/config_file',
+              '/scanners/ferret-scan/options/config_file',
+              '/scanners/grype/options/config_file',
+              '/scanners/syft/options/config_file',
+              '/scanners/trivy-repo/options/secret_config_file',
+              '/scanners/trivy-repo/options/config_file',
+              '/scanners/trivy-repo/options/module_dir',
+              '/scanners/trivy/options/config_file',
+              '/scanners/trivy/options/secret_config_file',
+              '/scanners/actionlint/options/config_file',
+              '/scanners/actionlint/options/shellcheck',
+              '/scanners/actionlint/options/pyflakes',
+              '/scanners/cfn-guard/options/rules_paths',
+              '/scanners/cfn-lint/options/config_file',
+              '/scanners/gitleaks/options/config_file',
+              '/scanners/zizmor/options/config_file',
+              '/scanners/zizmor/options/online_audits',
+              '/scanners/snyk-code/options/honor_tree_exclusions',
+              '/scanners/cfn-lint/options/honor_inline_ignores',
+              '/scanners/gitleaks/options/honor_inline_ignores',
+              '/scanners/zizmor/options/honor_inline_ignores',
+              '/scanners/*/options/tool_version',
+              '/converters/jupyter/options/tool_version',
+              '/scanners/opengrep/options/version',
+              '/scanners/opengrep/options/sha256',
+              '/scanners/opengrep/options/metrics',
+              '/scanners/semgrep/options/metrics',
               '/reporters/bedrock-summary-reporter/options/aws_*',
               '/reporters/cloudwatch-logs/**',
+              '/reporters/aws-security-hub/**',
+              '/reporters/bedrock-summary-reporter/options/model_id',
+              '/reporters/bedrock-summary-reporter/options/output_file',
+              '/reporters/bedrock-summary-reporter/options/output_executive_file',
+              '/reporters/bedrock-summary-reporter/options/output_technical_file',
+              '/reporters/s3/**',
+              '/reporters/bedrock-summary-reporter/**',
+              '/reporters/gitlab-sast/options/exclude_suppressed',
+              '/scanners/detect-secrets/**',
+              '/scanners/npm-audit/**',
+              '/scanners/opengrep/**',
+              '/scanners/semgrep/**',
+              '/scanners/snyk-code/**',
+              '/scanners/trivy-repo/**',
+              '/scanners/trivy/**',
+              '/scanners/zizmor/**',
+              '/converters/archive/options/max_members',
+              '/converters/archive/options/max_member_bytes',
+              '/converters/archive/options/max_total_bytes',
+              '/converters/archive/options/max_compression_ratio',
             ]),
             'denied_value_patterns': dict({
             }),
             'enabled': False,
+            'replace_default_denied_paths': False,
           }),
         }),
         'severity_threshold': 'HIGH',
         'suppressions': list([
         ]),
       }),
+      'honor_ignore_files': True,
       'mcp_resource_management': dict({
         'enable_health_checks': True,
         'enable_resource_logging': True,
         'health_check_interval_seconds': 60,
         'log_resource_operations': False,
         'max_concurrent_scans': 3,
+        'max_concurrent_scans_per_session': 2,
         'max_concurrent_tasks': 20,
         'max_directory_size_mb': 1000,
         'max_message_size_bytes': 10485760,
@@ -949,6 +760,8 @@
         'task_count_warning_threshold': 15,
         'thread_pool_max_workers': 4,
       }),
+      'output_formats': list([
+      ]),
       'project_name': 'snapshot-project',
       'reporters': dict({
         'csv': dict({
@@ -1081,12 +894,27 @@
         }),
       }),
       'sandbox': dict({
+        'env_scanners': list([
+        ]),
         'extra_read_paths': list([
         ]),
         'mode': 'off',
         'network_scanners': None,
+        'read_path_scanners': list([
+        ]),
       }),
       'scanners': dict({
+        'actionlint': dict({
+          'enabled': True,
+          'name': 'actionlint',
+          'options': dict({
+            'config_file': None,
+            'pyflakes': None,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'shellcheck': None,
+          }),
+        }),
         'bandit': dict({
           'enabled': True,
           'name': 'bandit',
@@ -1099,6 +927,7 @@
             ]),
             'ignore_nosec': False,
             'install_timeout': 300,
+            'offline': False,
             'scan_timeout': 1800,
             'severity_threshold': None,
             'tool_version': '>=1.7.0,<2.0.0',
@@ -1116,14 +945,47 @@
               'NIST80053R5Checks': False,
               'PCIDSS321Checks': False,
             }),
+            'offline': False,
             'scan_timeout': 1800,
             'severity_threshold': None,
+          }),
+        }),
+        'cfn_guard': dict({
+          'enabled': True,
+          'name': 'cfn-guard',
+          'options': dict({
+            'rule_sets': list([
+              'wa-Security-Pillar',
+            ]),
+            'rules_paths': list([
+            ]),
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
+        'cfn_lint': dict({
+          'enabled': True,
+          'name': 'cfn-lint',
+          'options': dict({
+            'config_file': None,
+            'honor_inline_ignores': False,
+            'ignore_checks': list([
+            ]),
+            'include_checks': list([
+            ]),
+            'install_timeout': 300,
+            'regions': list([
+            ]),
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'tool_version': '>=1.43.3,<2.0.0',
           }),
         }),
         'cfn_nag': dict({
           'enabled': True,
           'name': 'cfn-nag',
           'options': dict({
+            'offline': False,
             'scan_timeout': 1800,
             'severity_threshold': None,
           }),
@@ -1156,6 +1018,8 @@
           'name': 'detect-secrets',
           'options': dict({
             'baseline_file': None,
+            'max_worker_output_mib': 256,
+            'offline': False,
             'scan_settings': dict({
               'filters_used': list([
               ]),
@@ -1169,6 +1033,18 @@
             'scan_timeout': 1800,
             'severity_threshold': None,
             'skip_generated_lockfiles': True,
+          }),
+        }),
+        'gitleaks': dict({
+          'enabled': True,
+          'name': 'gitleaks',
+          'options': dict({
+            'baseline_path': None,
+            'config_file': None,
+            'honor_inline_ignores': False,
+            'max_target_megabytes': None,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
           }),
         }),
         'grype': dict({
@@ -1250,6 +1126,38 @@
             'severity_threshold': None,
           }),
         }),
+        'trivy': dict({
+          'enabled': True,
+          'name': 'trivy',
+          'options': dict({
+            'config_file': None,
+            'disable_telemetry': True,
+            'ignore_file': None,
+            'ignore_unfixed': False,
+            'license_full': False,
+            'offline': False,
+            'scan_timeout': 1800,
+            'scanners': list([
+              'vuln',
+            ]),
+            'secret_config_file': None,
+            'severity_threshold': None,
+          }),
+        }),
+        'zizmor': dict({
+          'enabled': True,
+          'name': 'zizmor',
+          'options': dict({
+            'config_file': None,
+            'honor_inline_ignores': False,
+            'install_timeout': 300,
+            'online_audits': False,
+            'persona': 'regular',
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'tool_version': '>=1.29.0,<2.0.0',
+          }),
+        }),
       }),
       'workspace': dict({
         'max_parallel_projects': None,
@@ -1268,6 +1176,7 @@
       ]),
       'build': None,
       'content_db_staleness': 'fail',
+      'content_db_staleness_offline_image_default': True,
       'content_db_staleness_overrides': list([
       ]),
       'converters': dict({
@@ -1275,6 +1184,10 @@
           'enabled': True,
           'name': 'archive',
           'options': dict({
+            'max_compression_ratio': 100,
+            'max_member_bytes': 268435456,
+            'max_members': 100000,
+            'max_total_bytes': 1073741824,
           }),
         }),
         'jupyter': dict({
@@ -1302,30 +1215,123 @@
               '/fail_on_incomplete_scanners',
               '/content_db_staleness',
               '/content_db_staleness_overrides',
+              '/honor_ignore_files',
+              '/content_db_staleness_offline_image_default',
               '/sandbox',
               '/sandbox/**',
               '/ash_plugin_modules',
               '/ash_plugin_modules/**',
+              '/scanners/detect-secrets/options/scan_settings/filters_used',
+              '/scanners/detect-secrets/options/scan_settings/filters_used/**',
+              '/scanners/detect-secrets/options/scan_settings/plugins_used',
+              '/scanners/detect-secrets/options/scan_settings/plugins_used/**',
+              '/scanners/detect-secrets/options/baseline_file',
               '/global_settings/ignore_paths',
               '/global_settings/suppressions',
+              '/global_settings/mcp',
+              '/global_settings/mcp/**',
+              '/scanners/opengrep/options/exclude_rule',
+              '/scanners/semgrep/options/exclude_rule',
+              '/scanners/bandit/options/confidence_level',
+              '/scanners/checkov/options/frameworks',
+              '/scanners/checkov/options/skip_frameworks',
+              '/scanners/opengrep/options/config',
+              '/scanners/opengrep/options/patterns',
+              '/scanners/opengrep/options/severity',
+              '/scanners/semgrep/options/config',
+              '/scanners/semgrep/options/severity',
+              '/scanners/detect-secrets/options/scan_settings',
+              '/scanners/cdk-nag/options/nag_packs/AwsSolutionsChecks',
+              '/scanners/ferret-scan/options/checks',
+              '/scanners/ferret-scan/options/confidence_levels',
+              '/scanners/ferret-scan/options/disable_ip_types',
+              '/scanners/ferret-scan/options/enable_preprocessors',
+              '/scanners/ferret-scan/options/finding_limit',
+              '/scanners/ferret-scan/options/profile',
+              '/scanners/ferret-scan/options/recursive',
+              '/scanners/ferret-scan/options/respect_gitignore',
+              '/scanners/ferret-scan/options/use_default_config',
+              '/scanners/ferret-scan/options/validator_budget',
+              '/scanners/trivy-repo/options/license_full',
+              '/scanners/trivy-repo/options/scanners',
+              '/scanners/cfn-guard/options/rule_sets',
+              '/scanners/cfn-lint/options/ignore_checks',
+              '/scanners/cfn-lint/options/regions',
+              '/scanners/gitleaks/options/baseline_path',
+              '/scanners/trivy/options/scanners',
+              '/scanners/trivy/options/ignore_unfixed',
+              '/scanners/*/options/offline',
+              '/scanners/ferret-scan/options/max_live_bytes',
+              '/scanners/gitleaks/options/max_target_megabytes',
+              '/scanners/bandit/options/config_file',
+              '/scanners/checkov/options/config_file',
+              '/scanners/ferret-scan/options/config_file',
+              '/scanners/grype/options/config_file',
+              '/scanners/syft/options/config_file',
+              '/scanners/trivy-repo/options/secret_config_file',
+              '/scanners/trivy-repo/options/config_file',
+              '/scanners/trivy-repo/options/module_dir',
+              '/scanners/trivy/options/config_file',
+              '/scanners/trivy/options/secret_config_file',
+              '/scanners/actionlint/options/config_file',
+              '/scanners/actionlint/options/shellcheck',
+              '/scanners/actionlint/options/pyflakes',
+              '/scanners/cfn-guard/options/rules_paths',
+              '/scanners/cfn-lint/options/config_file',
+              '/scanners/gitleaks/options/config_file',
+              '/scanners/zizmor/options/config_file',
+              '/scanners/zizmor/options/online_audits',
+              '/scanners/snyk-code/options/honor_tree_exclusions',
+              '/scanners/cfn-lint/options/honor_inline_ignores',
+              '/scanners/gitleaks/options/honor_inline_ignores',
+              '/scanners/zizmor/options/honor_inline_ignores',
+              '/scanners/*/options/tool_version',
+              '/converters/jupyter/options/tool_version',
+              '/scanners/opengrep/options/version',
+              '/scanners/opengrep/options/sha256',
+              '/scanners/opengrep/options/metrics',
+              '/scanners/semgrep/options/metrics',
               '/reporters/bedrock-summary-reporter/options/aws_*',
               '/reporters/cloudwatch-logs/**',
+              '/reporters/aws-security-hub/**',
+              '/reporters/bedrock-summary-reporter/options/model_id',
+              '/reporters/bedrock-summary-reporter/options/output_file',
+              '/reporters/bedrock-summary-reporter/options/output_executive_file',
+              '/reporters/bedrock-summary-reporter/options/output_technical_file',
+              '/reporters/s3/**',
+              '/reporters/bedrock-summary-reporter/**',
+              '/reporters/gitlab-sast/options/exclude_suppressed',
+              '/scanners/detect-secrets/**',
+              '/scanners/npm-audit/**',
+              '/scanners/opengrep/**',
+              '/scanners/semgrep/**',
+              '/scanners/snyk-code/**',
+              '/scanners/trivy-repo/**',
+              '/scanners/trivy/**',
+              '/scanners/zizmor/**',
+              '/converters/archive/options/max_members',
+              '/converters/archive/options/max_member_bytes',
+              '/converters/archive/options/max_total_bytes',
+              '/converters/archive/options/max_compression_ratio',
             ]),
             'denied_value_patterns': dict({
             }),
             'enabled': False,
+            'replace_default_denied_paths': False,
           }),
         }),
         'severity_threshold': 'MEDIUM',
         'suppressions': list([
         ]),
       }),
+      'honor_ignore_files': True,
       'mcp_resource_management': dict({
         'enable_health_checks': True,
         'enable_resource_logging': True,
         'health_check_interval_seconds': 60,
         'log_resource_operations': False,
         'max_concurrent_scans': 3,
+        'max_concurrent_scans_per_session': 2,
         'max_concurrent_tasks': 20,
         'max_directory_size_mb': 1000,
         'max_message_size_bytes': 10485760,
@@ -1338,6 +1344,8 @@
         'task_count_warning_threshold': 15,
         'thread_pool_max_workers': 4,
       }),
+      'output_formats': list([
+      ]),
       'project_name': 'ash-scan',
       'reporters': dict({
         'csv': dict({
@@ -1470,12 +1478,27 @@
         }),
       }),
       'sandbox': dict({
+        'env_scanners': list([
+        ]),
         'extra_read_paths': list([
         ]),
         'mode': 'off',
         'network_scanners': None,
+        'read_path_scanners': list([
+        ]),
       }),
       'scanners': dict({
+        'actionlint': dict({
+          'enabled': True,
+          'name': 'actionlint',
+          'options': dict({
+            'config_file': None,
+            'pyflakes': None,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'shellcheck': None,
+          }),
+        }),
         'bandit': dict({
           'enabled': True,
           'name': 'bandit',
@@ -1488,6 +1511,7 @@
             ]),
             'ignore_nosec': False,
             'install_timeout': 300,
+            'offline': False,
             'scan_timeout': 1800,
             'severity_threshold': None,
             'tool_version': '>=1.7.0,<2.0.0',
@@ -1505,14 +1529,47 @@
               'NIST80053R5Checks': False,
               'PCIDSS321Checks': False,
             }),
+            'offline': False,
             'scan_timeout': 1800,
             'severity_threshold': None,
+          }),
+        }),
+        'cfn_guard': dict({
+          'enabled': True,
+          'name': 'cfn-guard',
+          'options': dict({
+            'rule_sets': list([
+              'wa-Security-Pillar',
+            ]),
+            'rules_paths': list([
+            ]),
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
+        'cfn_lint': dict({
+          'enabled': True,
+          'name': 'cfn-lint',
+          'options': dict({
+            'config_file': None,
+            'honor_inline_ignores': False,
+            'ignore_checks': list([
+            ]),
+            'include_checks': list([
+            ]),
+            'install_timeout': 300,
+            'regions': list([
+            ]),
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'tool_version': '>=1.43.3,<2.0.0',
           }),
         }),
         'cfn_nag': dict({
           'enabled': True,
           'name': 'cfn-nag',
           'options': dict({
+            'offline': False,
             'scan_timeout': 1800,
             'severity_threshold': None,
           }),
@@ -1545,6 +1602,8 @@
           'name': 'detect-secrets',
           'options': dict({
             'baseline_file': None,
+            'max_worker_output_mib': 256,
+            'offline': False,
             'scan_settings': dict({
               'filters_used': list([
               ]),
@@ -1558,6 +1617,18 @@
             'scan_timeout': 1800,
             'severity_threshold': None,
             'skip_generated_lockfiles': True,
+          }),
+        }),
+        'gitleaks': dict({
+          'enabled': True,
+          'name': 'gitleaks',
+          'options': dict({
+            'baseline_path': None,
+            'config_file': None,
+            'honor_inline_ignores': False,
+            'max_target_megabytes': None,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
           }),
         }),
         'grype': dict({
@@ -1639,6 +1710,38 @@
             'severity_threshold': None,
           }),
         }),
+        'trivy': dict({
+          'enabled': True,
+          'name': 'trivy',
+          'options': dict({
+            'config_file': None,
+            'disable_telemetry': True,
+            'ignore_file': None,
+            'ignore_unfixed': False,
+            'license_full': False,
+            'offline': False,
+            'scan_timeout': 1800,
+            'scanners': list([
+              'vuln',
+            ]),
+            'secret_config_file': None,
+            'severity_threshold': None,
+          }),
+        }),
+        'zizmor': dict({
+          'enabled': True,
+          'name': 'zizmor',
+          'options': dict({
+            'config_file': None,
+            'honor_inline_ignores': False,
+            'install_timeout': 300,
+            'online_audits': False,
+            'persona': 'regular',
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'tool_version': '>=1.29.0,<2.0.0',
+          }),
+        }),
       }),
       'workspace': dict({
         'max_parallel_projects': None,
@@ -1651,9 +1754,17 @@
 # name: test_list_scanners[result]
   dict({
     'result': dict({
+      'actionlint': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'actionlint',
+        'offline_strategy': 'bundled',
+        'version': None,
+      }),
       'bandit': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'bandit',
         'offline_strategy': 'bundled',
         'version': '<BANDIT_VERSION>',
@@ -1661,13 +1772,29 @@
       'cdk_nag': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'cdk_nag',
         'offline_strategy': 'bundled',
         'version': '<CDK_NAG_VERSION>',
       }),
+      'cfn_guard': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'cfn_guard',
+        'offline_strategy': 'bundled',
+        'version': None,
+      }),
+      'cfn_lint': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'cfn_lint',
+        'offline_strategy': 'bundled',
+        'version': '<CFN_LINT_VERSION>',
+      }),
       'cfn_nag': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'cfn_nag',
         'offline_strategy': 'bundled',
         'version': None,
@@ -1675,6 +1802,7 @@
       'checkov': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'checkov',
         'offline_strategy': 'cache_flags',
         'version': '<CHECKOV_VERSION>',
@@ -1682,6 +1810,7 @@
       'detect_secrets': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'detect_secrets',
         'offline_strategy': 'bundled',
         'version': '<DETECT_SECRETS_VERSION>',
@@ -1689,13 +1818,22 @@
       'ferret_scan': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'ferret_scan',
+        'offline_strategy': 'bundled',
+        'version': None,
+      }),
+      'gitleaks': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'gitleaks',
         'offline_strategy': 'bundled',
         'version': None,
       }),
       'grype': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'grype',
         'offline_strategy': 'cache_flags',
         'version': None,
@@ -1703,13 +1841,15 @@
       'npm_audit': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'npm_audit',
-        'offline_strategy': 'cache_flags',
+        'offline_strategy': 'skip_offline',
         'version': None,
       }),
       'opengrep': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'opengrep',
         'offline_strategy': 'cache_flags',
         'version': None,
@@ -1717,6 +1857,7 @@
       'semgrep': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'semgrep',
         'offline_strategy': 'cache_flags',
         'version': '<SEMGREP_VERSION>',
@@ -1724,6 +1865,7 @@
       'snyk_code': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'snyk_code',
         'offline_strategy': 'skip_offline',
         'version': None,
@@ -1731,16 +1873,32 @@
       'syft': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'syft',
+        'offline_strategy': 'cache_flags',
+        'version': None,
+      }),
+      'trivy': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'trivy',
         'offline_strategy': 'cache_flags',
         'version': None,
       }),
       'trivy_repo': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'trivy_repo',
         'offline_strategy': 'cache_flags',
         'version': None,
+      }),
+      'zizmor': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'zizmor',
+        'offline_strategy': 'bundled',
+        'version': '<ZIZMOR_VERSION>',
       }),
     }),
     'tool': 'list_scanners',
@@ -1762,11 +1920,7 @@
     'client_messages': list([
     ]),
     'result': dict({
-      'error': '''
-        Failed to parse results file: 1 validation error for AshAggregatedResults
-          Invalid JSON: key must be a string at line 1 column 2 [type=json_invalid, input_value='{not json', input_type=str]
-            For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/json_invalid
-      ''',
+      'error': "Failed to parse results file: 1 validation error for AshAggregatedResults: Invalid value at '(top level)': Invalid JSON: key must be a string at line 1 column 2",
       'success': False,
     }),
     'tool': 'suggest_suppression',
@@ -1789,6 +1943,7 @@
     ]),
     'result': dict({
       'json': dict({
+        'client_supplied': False,
         'expiration': '2031-01-31',
         'line_end': 12,
         'line_start': 12,
@@ -1798,6 +1953,7 @@
       }),
       'success': True,
       'yaml': '''
+        client_supplied: false
         expiration: '2031-01-31'
         line_end: 12
         line_start: 12
@@ -1813,6 +1969,23 @@
 # name: test_suggest_suppression_defaults[default_justification]
   'Suppressed via ASH MCP suggest_suppression tool — review before merging'
 # ---
+# name: test_validate_config[denied_field][result]
+  dict({
+    'client_messages': list([
+    ]),
+    'result': dict({
+      'errors': list([
+        dict({
+          'field': 'fail_on_findings',
+          'message': "fail_on_findings may not be set by a config an MCP client delivers: path '/fail_on_findings' matches denied_paths entry '/fail_on_findings'",
+          'type': 'denied_by_runtime_policy',
+        }),
+      ]),
+      'valid': False,
+    }),
+    'tool': 'validate_config',
+  })
+# ---
 # name: test_validate_config[file_not_found][result]
   dict({
     'client_messages': list([
@@ -1826,6 +1999,8 @@
         }),
       ]),
       'valid': False,
+      'warnings': list([
+      ]),
     }),
     'tool': 'validate_config',
   })
@@ -1838,6 +2013,8 @@
       'errors': list([
       ]),
       'valid': True,
+      'warnings': list([
+      ]),
     }),
     'tool': 'validate_config',
   })
@@ -1855,6 +2032,8 @@
         }),
       ]),
       'valid': False,
+      'warnings': list([
+      ]),
     }),
     'tool': 'validate_config',
   })
@@ -1865,13 +2044,15 @@
     ]),
     'result': dict({
       'errors': list([
+      ]),
+      'valid': True,
+      'warnings': list([
         dict({
           'field': 'not_a_setting',
-          'message': "Unknown top-level field 'not_a_setting' - may cause parsing issues",
+          'message': "Unknown top-level field 'not_a_setting' - a scan ignores it",
           'type': 'unknown_field',
         }),
       ]),
-      'valid': False,
     }),
     'tool': 'validate_config',
   })
@@ -1884,6 +2065,8 @@
       'errors': list([
       ]),
       'valid': True,
+      'warnings': list([
+      ]),
     }),
     'tool': 'validate_config',
   })
@@ -1894,8 +2077,15 @@
     ]),
     'result': dict({
       'errors': list([
+        dict({
+          'field': 'fail_on_findings',
+          'message': "Invalid value at 'fail_on_findings': Input should be a valid boolean",
+          'type': 'invalid_field',
+        }),
       ]),
-      'valid': True,
+      'valid': False,
+      'warnings': list([
+      ]),
     }),
     'tool': 'validate_config',
   })
@@ -1908,16 +2098,13 @@
       'errors': list([
         dict({
           'field': '',
-          'message': '''
-            YAML parsing error: while parsing a flow sequence
-              in "<TMP>/server-tmp/tmpvalidate_config/config.yaml", line 1, column 15
-            expected ',' or ']', but got '<stream end>'
-              in "<TMP>/server-tmp/tmpvalidate_config/config.yaml", line 2, column 1
-          ''',
+          'message': 'YAML parsing error: <TMP>/server-tmp/tmpvalidate_config/config.yaml could not be parsed (ParserError at line 2, column 1; started at line 1, column 15)',
           'type': 'yaml_parse_error',
         }),
       ]),
       'valid': False,
+      'warnings': list([
+      ]),
     }),
     'tool': 'validate_config',
   })

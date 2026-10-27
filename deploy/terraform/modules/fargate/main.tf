@@ -38,17 +38,24 @@ locals {
 
   allowed_hosts = distinct(concat(local.load_balancer_hosts, var.mcp_allowed_host))
 
+  # ASH_MCP_TRUST_UPSTREAM_HOST_CHECK is false, explicitly, because the launcher's
+  # default is AgentCore's (true): it would pass --trust-upstream-host-check
+  # whenever the allowlist were empty and ASH would serve any Host. Behind a load
+  # balancer the allowlist is the load balancer's name, and if it were ever empty
+  # ASH has to refuse to start on 0.0.0.0. ASH_MCP_TRUST_UPSTREAM_SESSION_ID is
+  # left at the launcher's false: a load balancer issues no Mcp-Session-Id.
   mcp_environment = {
-    ASH_MCP_TRANSPORT             = "streamable-http"
-    ASH_MCP_HOST                  = "0.0.0.0"
-    ASH_MCP_PORT                  = tostring(var.container_port)
-    ASH_MCP_MOUNT_PATH            = var.mcp_mount_path
-    ASH_MCP_STATELESS_HTTP        = var.mcp_stateless_http ? "true" : "false"
-    ASH_MCP_ALLOWED_HOSTS         = join(",", local.allowed_hosts)
-    ASH_MCP_AUTH_HEADER_NAME      = local.use_auth_header ? var.mcp_auth_header_name : ""
-    ASH_OFFLINE                   = var.ash_offline_mode ? "YES" : "NO"
-    ASH_BASE_CONFIG_SSM_PARAMETER = local.use_base_config ? var.base_config_ssm_parameter_name : ""
-    ASH_MCP_AUTH_SECRET_ARN       = local.manage_auth_secret ? aws_secretsmanager_secret.auth_header[0].arn : ""
+    ASH_MCP_TRANSPORT                 = "streamable-http"
+    ASH_MCP_HOST                      = "0.0.0.0"
+    ASH_MCP_PORT                      = tostring(var.container_port)
+    ASH_MCP_MOUNT_PATH                = var.mcp_mount_path
+    ASH_MCP_STATELESS_HTTP            = var.mcp_stateless_http ? "true" : "false"
+    ASH_MCP_ALLOWED_HOSTS             = join(",", local.allowed_hosts)
+    ASH_MCP_TRUST_UPSTREAM_HOST_CHECK = "false"
+    ASH_MCP_AUTH_HEADER_NAME          = local.use_auth_header ? var.mcp_auth_header_name : ""
+    ASH_OFFLINE                       = var.ash_offline_mode ? "YES" : "NO"
+    ASH_BASE_CONFIG_SSM_PARAMETER     = local.use_base_config ? var.base_config_ssm_parameter_name : ""
+    ASH_MCP_AUTH_SECRET_ARN           = local.manage_auth_secret ? aws_secretsmanager_secret.auth_header[0].arn : ""
   }
 
   # Caller values first so the module's own keys win on collision.

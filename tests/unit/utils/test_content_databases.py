@@ -36,6 +36,8 @@ import pytest
 import yaml
 
 from automated_security_helper.utils import content_databases as cdb
+from tests.utils import workflow_commands as wc
+from tests.utils.helpers import checkout_env
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 REGISTRY = REPO_ROOT / "automated_security_helper" / "utils" / "content_databases.py"
@@ -158,6 +160,7 @@ class TestTheCommandLine:
             capture_output=True,
             text=True,
             cwd=str(REPO_ROOT),
+            env=checkout_env(),
             timeout=60,
         )
 
@@ -353,8 +356,9 @@ def _step(workflow: Path, name: str) -> str:
 
 
 def _run_guard(
-    tmp_path: Path, script: str, built: datetime
+    tmp_path: Path, workflow: Path, script: str, built: datetime
 ) -> tuple[subprocess.CompletedProcess, Path, Path]:
+    """Run a guard step's script, after its job's one_line definer, as a runner would."""
     home = tmp_path / "home"
     db = home / ".cache" / "grype" / "db"
     db.mkdir(parents=True)
@@ -372,9 +376,12 @@ def _run_guard(
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
     output = tmp_path / "github_output"
     output.write_text("")
+    runner_temp = tmp_path / "runner-temp"
+    runner_temp.mkdir()
     env = {
         "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}",
         "HOME": str(home),
+        "RUNNER_TEMP": str(runner_temp),
         "ASH_TOOL_BIN": str(tools),
         "ASH_UVX_SOURCE": "unused-by-the-stub",
         "GITHUB_OUTPUT": str(output),
@@ -382,6 +389,16 @@ def _run_guard(
         "STUB_PYTHON": sys.executable,
         "PYTHONPATH": str(REPO_ROOT),
     }
+    # The guards print the database's build time through one_line, which an earlier
+    # step of their job writes to RUNNER_TEMP.
+    definer = subprocess.run(
+        ["bash", "-e", "-c", _step(workflow, wc.DEFINER_NAME)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert definer.returncode == 0, definer.stdout + definer.stderr
     proc = subprocess.run(  # nosec B603 B607 — fixed interpreter, the workflow's own script
         ["bash", "-e", "-c", script],
         env=env,
@@ -403,7 +420,7 @@ class TestTheCiGuards:
     def test_a_restored_database_past_the_bound_is_deleted_not_used(self, tmp_path):
         script = _step(SCAN_WORKFLOW, self.RESTORE_GUARD)
         built = datetime.now(UTC) - GRYPE.max_age - timedelta(hours=1)
-        proc, db, _ = _run_guard(tmp_path, script, built)
+        proc, db, _ = _run_guard(tmp_path, SCAN_WORKFLOW, script, built)
         assert proc.returncode == 0, proc.stdout + proc.stderr
         assert not db.exists(), (
             "a stale restored database must be removed before the scan"
@@ -413,7 +430,7 @@ class TestTheCiGuards:
     def test_a_restored_database_inside_the_bound_is_kept(self, tmp_path):
         script = _step(SCAN_WORKFLOW, self.RESTORE_GUARD)
         proc, db, _ = _run_guard(
-            tmp_path, script, datetime.now(UTC) - timedelta(hours=30)
+            tmp_path, SCAN_WORKFLOW, script, datetime.now(UTC) - timedelta(hours=30)
         )
         assert db.exists(), proc.stdout + proc.stderr
         assert "inside its bound" in proc.stdout
@@ -437,7 +454,7 @@ class TestTheCiGuards:
             - (GRYPE.max_age - cdb.bucket_width(GRYPE))
             - timedelta(hours=1)
         )
-        proc, _, output = _run_guard(tmp_path, script, built)
+        proc, _, output = _run_guard(tmp_path, workflow, script, built)
         assert "ok=true" not in output.read_text(), proc.stdout + proc.stderr
         assert "not saving the grype database" in proc.stdout
 
@@ -454,7 +471,7 @@ class TestTheCiGuards:
     def test_a_fresh_database_is_saved(self, tmp_path, workflow, name):
         script = _step(workflow, name)
         proc, _, output = _run_guard(
-            tmp_path, script, datetime.now(UTC) - timedelta(hours=3)
+            tmp_path, workflow, script, datetime.now(UTC) - timedelta(hours=3)
         )
         assert "ok=true" in output.read_text(), proc.stdout + proc.stderr
 
@@ -497,6 +514,18 @@ class TestTheCommandLineInProcess:
         out = capsys.readouterr().out
         assert ("allowed" if code == 0 else "REFUSED") in out
 
+    def test_check_age_help_names_every_exit_code(self, capsys):
+        """A workflow branches on the code, so the help names each one: 2 is a
+        usage error (an unknown name, or a --built that does not parse), not a
+        refusal."""
+        with pytest.raises(SystemExit):
+            cdb.main(["--help"])
+        listing = " ".join(capsys.readouterr().out.split())
+
+        assert "exit 0 if" in listing, listing
+        assert "1 if not" in listing, listing
+        assert "2 for a usage error" in listing, listing
+
     def test_check_age_on_an_unbounded_database_refuses(self, capsys):
         built = datetime.now(UTC).isoformat()
         assert (
@@ -508,7 +537,140 @@ class TestTheCommandLineInProcess:
         with pytest.raises(ValueError, match="no timezone"):
             cdb.parse_timestamp("2026-09-30T00:00:00")
 
+    @pytest.mark.parametrize("purpose", ["use", "save"])
+    @pytest.mark.parametrize(
+        "built,command",
+        [
+            pytest.param(
+                "x\r::warning::from the value",
+                "::warning::from the value",
+                id="carriage return",
+            ),
+            pytest.param(
+                "x\n::warning::from the value",
+                "::warning::from the value",
+                id="line feed",
+            ),
+            pytest.param(
+                "::warning::from the value", "::warning::from the value", id="command"
+            ),
+            pytest.param(
+                "x ##[warning]from the value",
+                "##[warning]from the value",
+                id="legacy marker",
+            ),
+            pytest.param("2026-09-30T00:00:00", None, id="no timezone"),
+            pytest.param("not a timestamp", None, id="not a timestamp"),
+        ],
+    )
+    def test_check_age_refuses_a_build_time_it_cannot_read_without_printing_it(
+        self, capsys, built, command, purpose
+    ):
+        """The workflows pass --built from the database's metadata and print the output.
+
+        The runner reads a line of a step's output that starts with `::`, or holds
+        `##[`, as a workflow command. So a value that does not parse is refused with
+        exit 2, and neither the value nor a traceback quoting it is printed.
+        """
+        assert (
+            cdb.main(["check-age", "grype-db", "--built", built, "--for", purpose]) == 2
+        )
+        captured = capsys.readouterr()
+        printed = captured.out + captured.err
+        assert built not in printed, printed
+        assert "Traceback" not in printed, printed
+        assert "RFC 3339" in captured.err, printed
+        if command is not None:
+            assert command not in printed, printed
+
     def test_go_duration_spellings(self):
         assert cdb.go_duration(timedelta(hours=96)) == "96h"
         assert cdb.go_duration(timedelta(hours=1, minutes=2, seconds=3)) == "1h2m3s"
         assert cdb.go_duration(timedelta(seconds=-60)) == "-0h1m0s"
+
+
+class TestTheGrypeStatusErrorIsRedactedBeforeItsCut:
+    def test_a_value_straddling_the_cut_is_hidden_whole(self, monkeypatch):
+        """`grype db status` without a build time raises with the status
+        document quoted, cut at 300 characters: the redaction runs BEFORE
+        the cut, so an env-read value straddling character 300 is hidden
+        whole. The pad is sized so the value CROSSES the cut (checked
+        below): with a longer pad the value sat wholly past 300 and the
+        cut alone hid it, so the cell measured nothing about the order.
+        This pins the site's own order -- reverting only this
+        shown_tool_stderr leaves every other cell green."""
+        from automated_security_helper.utils import content_db_staleness as cds
+
+        value = "Zq7Kx9Lm2Pw4Nv"
+        status = {"schemaVersion": 5, "pad": "p" * 210, "path": value}
+        unredacted = f"`grype db status` reported no build time: {status!r}"
+        start = unredacted.index(value)
+        assert start < 300 < start + len(value), (
+            "premise: the value no longer straddles the 300 cut",
+            start,
+        )
+        monkeypatch.setattr(cds, "_run_json", lambda command, env, *, ctx: status)
+        ctx = cds.ProbeContext(env={}, executable="grype", values=(value,))
+
+        with pytest.raises(ValueError) as excinfo:
+            cds._built_from_grype(ctx)
+
+        message = str(excinfo.value)
+        assert "reported no build time" in message, message
+        assert "Zq7K" not in message, message
+
+
+class TestTheProbeContextCarriesThePluginsValues:
+    def test_the_hooks_values_reach_the_context(self):
+        """The probe's excerpts are redacted with ProbeContext.values, and
+        the builder wires the plugin's _values_to_redact into it: a context
+        built with values=() leaves every probe excerpt unredacted while
+        every committed cell stays green (the MO2 wiring mutant)."""
+        from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+
+        class _Scanner:
+            command = ""
+
+            def _values_to_redact(self):
+                return ("Zq7Kx9Lm2Pw4Nv",)
+
+        context = ScannerPluginBase.content_database_probe_context(_Scanner())
+
+        assert context.values == ("Zq7Kx9Lm2Pw4Nv",), context.values
+
+
+class TestARaisingProbeContextHook:
+    def test_the_scan_keeps_its_verdict_and_the_database_is_unmeasurable(self):
+        """content_database_probe_context calls the plugin's overridable
+        _values_to_redact hook and deliberately lets a raise escape: the one
+        caller, assess_scanner, catches it, runs NO probe (so no probe text
+        can print unredacted), and records an unmeasurable verdict for each
+        declared database instead of failing the finished scan. This pins
+        the catch assess_scanner's docstring promises, which is why the
+        builder itself carries no guard."""
+        from automated_security_helper.utils.content_db_staleness import (
+            STALENESS_FAIL,
+            assess_scanner,
+        )
+
+        class _Config:
+            name = "grype"
+
+        class _Scanner:
+            config = _Config()
+
+            def content_databases_in_use(self):
+                return [e for e in cdb.CONTENT_DATABASES if e.scanner == "grype"]
+
+            def content_database_probe_context(self):
+                raise TypeError("hook drift")
+
+        records = assess_scanner(_Scanner(), None, STALENESS_FAIL)
+
+        assert records, "grype declares a database, so a record must exist"
+        for record in records:
+            assert record.built is None
+            assert "could not describe its database" in (record.error or ""), (
+                record.error
+            )
+            assert "TypeError" in record.error, record.error

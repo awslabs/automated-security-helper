@@ -15,11 +15,18 @@
  Use --fix to auto-fix common issues (removes internal fields, sets missing
  line_end, removes expired suppressions, collapses multi-line reasons).
 
- Use --fix-unused to remove suppressions that are no longer matching any
- findings (based on the unused suppressions report from the last scan).
+ Use --fix-unused to comment out suppressions that no longer match any
+ finding (based on the unused suppressions report from the last scan).
 
  Use --non-interactive (or --yes/-y) to skip confirmation prompts. This is
  useful for pre-commit hooks or CI/CD pipelines.
+
+ Exit codes: 0 a scan accepts the config (whatever else is reported is a
+ warning); 1 no config file was found, or --fix or --fix-unused refused to
+ rewrite it; 3 a scan would refuse the config, as 'ash config validate'
+ reports it, the file does not parse, or the named file does not exist or
+ cannot be read. The output marks each issue that makes a scan refuse the
+ config with "blocks the scan".
 
  Examples:
      # Lint the default config
@@ -38,22 +45,40 @@
      ash config lint --config path/to/config.yaml
 
 ┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
-│ --config                 -c                <str>  The path to the configuration file to lint.   │
-│                                                   By default, ASH lints the config a scan of    │
-│                                                   the current directory would use (see the      │
-│                                                   configuration guide for the discovery order), │
-│                                                   falling back to .ash/.ash.yaml.               │
+│ --config                 -c                <str>  The path to the configuration file. By        │
+│                                                   default, the config a scan of the current     │
+│                                                   directory would use: ['.ash.yml',             │
+│                                                   '.ash.yaml', '.ash.json', 'ash.yml',          │
+│                                                   'ash.yaml', 'ash.json'] (each at the root,    │
+│                                                   then in .ash/), then ['.ashrc.toml',          │
+│                                                   '.ashrc.yaml', '.ashrc.yml', '.ashrc.json',   │
+│                                                   'ashrc.toml', 'ashrc.yaml', 'ashrc.yml',      │
+│                                                   'ashrc.json'] at the root, then the tool.ash  │
+│                                                   table of pyproject.toml at the root; the      │
+│                                                   first found is used.                          │
 │                                                   [env var: ASH_CONFIG]                         │
 │ --output-dir             -o                <str>  Path to the ASH output directory (for unused  │
 │                                                   suppressions report). Defaults to             │
 │                                                   .ash/ash_output                               │
 │ --fix                                             Auto-fix fixable issues (internal fields,     │
 │                                                   missing line_end, expired suppressions,       │
-│                                                   multi-line suppression reasons)               │
+│                                                   multi-line suppression reasons). A TOML file, │
+│                                                   and a file that reads the environment (${VAR} │
+│                                                   or !ENV), are not rewritten: fix those by     │
+│                                                   hand                                          │
 │ --fix-unused                                      Comment out unused suppressions based on the  │
-│                                                   last scan's unused suppressions report        │
+│                                                   last scan's unused suppressions report. A     │
+│                                                   TOML file, and a JSON file (which holds no    │
+│                                                   comments), are not rewritten: remove those by │
+│                                                   hand                                          │
 │ --non-interactive,--yes  -y                       Accept all changes without prompting. Useful  │
 │                                                   for pre-commit hooks and CI/CD                │
+│ --source-dir                               <str>  The directory a scan would scan, as `ash scan │
+│                                                   --source-dir`: the config is discovered there │
+│                                                   unless --config names one, and a config       │
+│                                                   inside it may only extend files inside it.    │
+│                                                   Defaults to the current directory.            │
+│                                                   [env var: ASH_SOURCE_DIR]                     │
 │ --verbose                -v                       Enable verbose logging                        │
 │ --debug                  -d                       Enable debug logging                          │
 │ --color                      --no-color           Enable/disable colorized output               │

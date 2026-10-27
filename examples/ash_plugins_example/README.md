@@ -1,108 +1,127 @@
-# ASH Example Plugin Package
+# ASH example plugin package
 
-This package demonstrates how to create external plugins for the Automated Security Helper (ASH) using the plugin discovery pattern.
+This package shows how to write external plugins for the Automated Security Helper
+(ASH). It contains one plugin of each kind and two event handlers:
 
-## Overview
+1. `ExampleConverter` (`my-example-converter`) copies each Python template in the
+   scan set, `*.py.tmpl`, to a `.py` file in its work directory, so that scanners
+   which select files by extension read it too.
+2. `ExampleScanner` (`my-example-scanner`) reports every line containing
+   `TODO(security)` as a SARIF `note` result. ASH maps `note` to LOW, which is below
+   the default severity threshold, so the findings appear in every report and do not
+   fail the scan.
+3. `ExampleReporter` (`my-example-reporter`) writes the findings as a Markdown list
+   to `reports/ash.example.md`.
+4. `handle_scan_start` and `handle_scan_complete` print a line as each scanner
+   starts and finishes.
 
-This example package includes:
-
-1. **ExampleConverter**: A simple converter plugin that logs the target and returns it unchanged
-2. **ExampleScanner**: A scanner plugin that returns a mock finding
-3. **ExampleReporter**: A reporter plugin that generates a simple text report
-4. **Event Subscribers**: Examples of subscribing to ASH events using the `ASH_EVENT_HANDLERS` pattern
+`tests/unit/plugins/test_example_plugin_package.py` in the ASH repository runs a real
+scan with this package, so the code here is kept working.
 
 ## Installation
 
-To install this example plugin package:
+Install the package into the Python environment ASH runs in. ASH imports it by name,
+so it has to be importable there. From a checkout of the ASH repository:
 
 ```bash
-# From the package directory
-poetry install
+# ASH installed with uv tool install: reinstall it with the package added
+uv tool install --with ./examples/ash_plugins_example git+https://github.com/awslabs/automated-security-helper.git
+
+# ASH installed in a virtual environment: install the package into that environment
+uv pip install --python /path/to/venv/bin/python -e ./examples/ash_plugins_example
 ```
+
+The package declares no dependency on `automated-security-helper`: ASH installs from
+its git repository, and the PyPI project with that name is not published by ASH.
 
 ## Usage
 
-Once installed, ASH will automatically discover and use these plugins when running scans.
+ASH loads only its built-in plugins unless a plugin module is named. Name this one in
+any of three ways:
 
 ```bash
-# Run ASH with the example plugins
-ash --source-dir /path/to/code
+# On the command line
+ash --source-dir /path/to/code --ash-plugin-modules my_ash_plugins
+
+# With this directory's config, which also sets the plugins' options
+ash --source-dir /path/to/code --config examples/ash_plugins_example/.ash/.ash.yaml
 ```
 
-## Plugin Development
+or copy `.ash/.ash.yaml` into the repository you scan, where ASH finds it.
 
-This package demonstrates the key components of ASH plugins:
+A config file inside the scanned tree, such as a copied `.ash/.ash.yaml`, can name only
+modules installed outside that tree. The scanned tree is the scanned directory, or the
+outermost git checkout that contains it. An `ash_plugin_modules` entry from such a file
+that resolves inside the tree is not imported, and ASH logs "Ignoring
+ash_plugin_modules entries 'my_ash_plugins' (it resolves inside the scanned tree)". So
+a copied config loads `my_ash_plugins` only when the package is installed from a
+directory outside that repository's checkout. The rule covers config files inside the
+scanned tree; modules named by whoever runs ASH, with `--ash-plugin-modules`,
+`--config-overrides` or a config file outside the tree, are loaded as named.
 
-### 1. Plugin Registration
+To see each plugin work, scan a directory holding a file such as `settings.py.tmpl`
+with a line containing `TODO(security)`. The scan exits 0; `reports/ash.example.md`
+lists the finding in the template and again in the `settings.py` the converter wrote
+under `converted/my-example-converter/`.
 
-Plugins are registered using discovery constants in the `__init__.py` file:
+## How the plugins are written
 
-```python
-# Make plugins discoverable
-ASH_CONVERTERS = [ExampleConverter]
-ASH_SCANNERS = [ExampleScanner]
-ASH_REPORTERS = [ExampleReporter]
-```
+### Registration
 
-### 2. Interface Implementation
+Each class carries `@ash_converter_plugin`, `@ash_scanner_plugin` or
+`@ash_reporter_plugin`, which registers it when ASH imports the package. The
+`ASH_CONVERTERS`, `ASH_SCANNERS` and `ASH_REPORTERS` lists in `__init__.py` register
+nothing; the loader reads them to report what the package provided.
 
-Each plugin implements the required methods from `IConverter`, `IScanner`, or `IReporter` interfaces.
+### Converters
 
-### 3. Event Subscription
+ASH calls `convert()` once per scan, with no arguments. The converter finds its inputs
+in the scan set under `self.context.source_dir`, reads each one through
+`self.open_source_file()` (which refuses symlinks, files with a second hard link and
+paths outside the scanned tree),
+writes its output under `self.results_dir`, and returns the paths it wrote. ASH then
+scans those files as a second, `converted`, target.
 
-Event subscribers are registered using the `ASH_EVENT_HANDLERS` dictionary:
+A converter written as `convert(self, target)`, the form of earlier versions, is
+refused with an error that says to declare `convert(self)`.
 
-```python
-def handle_scan_complete(**kwargs):
-    """Example event handler for scan complete event."""
-    scanner = kwargs.get("scanner", "Unknown")
-    remaining_count = kwargs.get("remaining_count", 0)
-    print(f"Scanner '{scanner}' completed!")
-    return True
+### Scanners
 
+A scanner that runs an external tool implements `_execute_scan()` and lets the base
+class run the tool and read its SARIF. A pure-Python scanner like this one overrides
+`scan()` and returns a `SarifReport`. Only a `SarifReport` carries findings into the
+reports; a scanner that cannot run returns `False`, which ASH reports as MISSING. It
+reads each file through `open_in_scanned_tree()` from
+`automated_security_helper.utils.scanned_tree`, which refuses the same files
+`open_source_file()` does.
 
-# Event callback registry
-ASH_EVENT_HANDLERS = {
-    AshEventType.SCAN_COMPLETE: [handle_scan_complete],
-    AshEventType.SCAN_START: [handle_scan_start],
-}
-```
+### Reporters
 
-### Available Event Types
+`report()` returns the report as a string, and ASH writes it to
+`reports/ash.<extension>`, here `reports/ash.example.md`.
 
-ASH provides several event types you can subscribe to:
+### Event handlers
 
-- `AshEventType.SCAN_START`: Fired when the scan phase begins
-- `AshEventType.SCAN_COMPLETE`: Fired when each individual scanner completes
-- `AshEventType.CONVERT_START`: Fired when the convert phase begins
-- `AshEventType.CONVERT_COMPLETE`: Fired when the convert phase completes
-- `AshEventType.REPORT_START`: Fired when the report phase begins
-- `AshEventType.REPORT_COMPLETE`: Fired when the report phase completes
-- `AshEventType.ERROR`: Fired when errors occur
-- `AshEventType.WARNING`: Fired for warning conditions
-- `AshEventType.INFO`: Fired for informational events
+`ASH_EVENT_HANDLERS` maps an `AshEventType` to a list of callables, which ASH
+registers when it loads the package. Every handler receives keyword arguments,
+including `phase` and `plugin_context`.
 
-### Event Data
+- The convert, scan, report and inspect phases each emit `<PHASE>_PHASE_START` and
+  `<PHASE>_PHASE_COMPLETE` once, for example `SCAN_PHASE_START`.
+  `AshEventType` also declares `<PHASE>_PHASE_PROGRESS`, but no phase emits it.
+- The convert, scan and report phases also emit `<PHASE>_START` and
+  `<PHASE>_COMPLETE` once per plugin, for example `SCAN_START` as each scanner
+  starts.
+- `EXECUTION_START` and `EXECUTION_COMPLETE` cover the whole run, and `ERROR`,
+  `WARNING` and `INFO` report conditions.
 
-Event subscribers receive keyword arguments with relevant data:
+`SCAN_START` passes `scanner`, `scanner_class`, `scan_targets` and `message`.
+`SCAN_COMPLETE` passes `scanner`, `completed_count`, `total_count`,
+`remaining_count`, `remaining_scanners` and `message`.
 
-**SCAN_COMPLETE Event Data:**
-- `scanner`: Name of the completed scanner
-- `completed_count`: Number of scanners completed so far
-- `total_count`: Total number of scanners
-- `remaining_count`: Number of scanners still running
-- `remaining_scanners`: List of remaining scanner names
-- `message`: Human-readable summary message
-- `phase`: The phase name ("scan")
-- `plugin_context`: The current plugin context
+## More information
 
-## Plugin Discovery
-
-ASH automatically discovers plugins by:
-
-1. Loading modules specified in the `internal_modules` list (for built-in plugins)
-2. Loading additional modules specified in configuration via `ash_plugin_modules`
-3. Scanning for `ASH_CONVERTERS`, `ASH_SCANNERS`, `ASH_REPORTERS`, and `ASH_EVENT_HANDLERS` constants
-4. Registering discovered plugins and event subscribers with the plugin manager
-
-For more information, see the [ASH Plugin System documentation](https://github.com/awslabs/automated-security-helper/blob/main/AmazonQ.md).
+The plugin pages of the ASH documentation are under
+[docs/content/docs/plugins](../../docs/content/docs/plugins/index.md), and the
+configuration schema is
+[automated_security_helper/schemas/AshConfig.json](../../automated_security_helper/schemas/AshConfig.json).

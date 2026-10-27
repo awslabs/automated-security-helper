@@ -53,6 +53,11 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner 
     SyftScannerConfig,
     SyftScannerConfigOptions,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+    TrivyScanner,
+    TrivyScannerConfig,
+    TrivyScannerConfigOptions,
+)
 from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
     TrivyRepoScanner,
     TrivyRepoScannerConfig,
@@ -121,6 +126,16 @@ CASES = {
         "syft",
         lambda s: s.extra_env.get("SYFT_CHECK_FOR_APP_UPDATE") == "false",
     ),
+    # trivy shares trivy-repo's argument building (TrivyScannerBase).
+    "trivy": Case(
+        TrivyScanner,
+        TrivyScannerConfig,
+        TrivyScannerConfigOptions,
+        "",  # community plugin: not a declared ScannerConfigSegment field
+        lambda s: (
+            "--offline-scan" in _arg_keys(s) and "--skip-db-update" in _arg_keys(s)
+        ),
+    ),
     "trivy-repo": Case(
         TrivyRepoScanner,
         TrivyRepoScannerConfig,
@@ -133,7 +148,8 @@ CASES = {
 }
 
 params = pytest.mark.parametrize("case", list(CASES.values()), ids=list(CASES))
-# trivy-repo is a community plugin, so ScannerConfigSegment has no field for it.
+# trivy and trivy-repo are community plugins, so ScannerConfigSegment has no field
+# for them.
 SEGMENT_CASES = {k: c for k, c in CASES.items() if c.segment_field}
 segment_params = pytest.mark.parametrize(
     "case", list(SEGMENT_CASES.values()), ids=list(SEGMENT_CASES)
@@ -305,8 +321,15 @@ def test_grype_online_db_bound_is_set_online(online, test_plugin_context):
 
 
 def _scanner_options_with_offline() -> set:
-    """Every scanner options class shipped in plugin_modules that has an ``offline`` field."""
+    """Every scanner options class shipped in plugin_modules that declares ``offline``.
+
+    Declares it itself: ``ScannerOptionsBase`` also declares it, because
+    ``_scanner_offline`` reads it for every scanner, so every class has the field.
+    A scanner that declares its own is one whose tool can go online, and that is
+    what needs a case below.
+    """
     import importlib
+    import inspect
     import pkgutil
 
     import automated_security_helper.plugin_modules as plugin_modules
@@ -322,7 +345,7 @@ def _scanner_options_with_offline() -> set:
         cls = stack.pop()
         stack.extend(cls.__subclasses__())
         if cls.__module__.startswith(plugin_modules.__name__) and (
-            "offline" in cls.model_fields
+            "offline" in inspect.get_annotations(cls)
         ):
             found.add(cls)
     return found
@@ -349,7 +372,9 @@ def test_offline_option_default_is_a_plain_false():
     longer changes behavior; it would make config dumps and the generated schema
     depend on the environment they were produced in.
     """
-    for options_cls in _scanner_options_with_offline():
+    from automated_security_helper.base.options import ScannerOptionsBase
+
+    for options_cls in _scanner_options_with_offline() | {ScannerOptionsBase}:
         field = options_cls.model_fields["offline"]
         assert field.default_factory is None, options_cls.__qualname__
         assert field.default is False, options_cls.__qualname__

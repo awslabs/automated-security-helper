@@ -7,13 +7,14 @@
 │ --help          Show this message and exit.                                                     │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌─ Commands ──────────────────────────────────────────────────────────────────────────────────────┐
-│ init                                                                                            │
-│ get                                                                                             │
+│ init                          Create a configuration file with every setting at its default.    │
+│ get                           Print the resolved configuration: the file's settings over the    │
+│                               defaults.                                                         │
 │ update                        Update an existing configuration file with the specified          │
 │                               modifications.                                                    │
-│ validate-plugin-dependencies                                                                    │
+│ validate-plugin-dependencies  Check that the configuration resolves and names a project.        │
 │ lint                          Lint an ASH configuration file for issues and optionally auto-fix │
 │                               them.                                                             │
 │ wizard                        Interactive configuration wizard.                                 │
-│ validate                      Validate an ASH configuration file for common issues.             │
+│ validate                      Validate an ASH configuration file the way a scan loads it.       │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘

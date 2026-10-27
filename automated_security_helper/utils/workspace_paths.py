@@ -66,19 +66,29 @@ Down-conversion: workspace-relative to project-relative
 Used to push a workspace-level policy into one project. The contract is
 behavioural, not textual -- for every project-relative path ``p``::
 
-    matches(to_project_pattern(P, R), p)  ==  matches(P, R + "/" + p)
+    matches(to_project_pattern(P, R, kind=k), p)  ==  matches(P, R + "/" + p)
 
 A down-converted pattern must reach exactly the files the workspace-level
 pattern reached inside that project. ``None`` means the pattern cannot match
-anything in the project, so the caller applies nothing.
+anything in the project, so the caller applies nothing. ``matches`` is the
+matcher of the entry's kind: ``ignore_path_matches`` for an ignore path, where a
+trailing ``/`` names a directory (``vendor/`` covers what is inside ``vendor``),
+and ``file_path_matches`` for a suppression, where it is literal and matches no
+file. So an ignore path keeps its directory form (``api/vendor/`` over ``api``
+becomes ``vendor/``) and a suppression keeps its slash.
+
+A ``.`` or empty component (``./api/x.py``, ``api/./x.py``, ``api//x.py``) is
+refused. The top-level matchers read it literally, so it matches no file there,
+while ``PurePosixPath`` folds it away.
 
 Getting this wrong is not symmetric, and the asymmetry runs the opposite way to
-intuition. These patterns are suppressions. A pattern that matches TOO MUCH
-suppresses findings that should have been reported, and a suppressed finding
-leaves no trace in the output -- nobody sees what is missing. A pattern that
-matches too little, or is dropped entirely, produces extra findings, which are
-visible and merely noisy. So the safe failure is to under-suppress: return
-``None``, or refuse, rather than widen a pattern.
+intuition. A suppression that matches TOO MUCH suppresses findings that should
+have been reported, and a suppressed finding leaves no trace in the output --
+nobody sees what is missing. An ignore path that matches too much drops files
+from the scan, with the same result. A pattern that matches too little, or is
+dropped entirely, produces extra findings, which are visible and merely noisy.
+So the safe failure is to match less: return ``None``, or refuse, rather than
+widen a pattern.
 
 The matcher has two glob semantics, and they are not interconvertible
 --------------------------------------------------------------------
@@ -100,11 +110,22 @@ another in general, which is why down-conversion is sound only for a proven
 subset of shapes rather than for a tidy rule. This is the same inconsistency
 recorded in the corrected comment at suppression_matcher.py:92.
 
-Every rewrite below was therefore derived by sweeping candidate rewrites against
-the real ``file_path_matches`` over an adversarial corpus -- component names
-chosen to collide with pattern literals -- and keeping only those that satisfied
-the contract for every path. Nothing is passed through on the hope that it might
-apply, and nothing is justified by reasoning about glob semantics alone:
+A pattern that already holds ``**`` is read component by component on both
+sides of the contract, so it converts exactly (``_down_convert_components``):
+the project prefix is walked through the pattern's components as
+``_recursive_glob_match`` walks a path, and what is left of the pattern is the
+project-side pattern. ``**`` over the whole project is the answer when what is
+left covers every path, ``None`` when nothing is left, and the pattern is
+refused when the walk leaves two positions neither of which covers the other
+(``**/api/src/x.py`` over ``services/api``). An ignore path's directory form
+(``vendor/``, read as ``vendor/*/**``) is always of this kind.
+
+Every rewrite below, for a pattern WITHOUT ``**``, was therefore derived by
+sweeping candidate rewrites against the real ``file_path_matches`` over an
+adversarial corpus -- component names chosen to collide with pattern literals --
+and keeping only those that satisfied the contract for every path. Nothing is
+passed through on the hope that it might apply, and nothing is justified by
+reasoning about glob semantics alone:
 
 * Anchored to this project (``api/src/x.py`` over ``api``) -- strip the prefix.
 * Anchored elsewhere (``api/src/x.py`` over ``api-v2``) -- ``None``.
@@ -129,8 +150,10 @@ apply, and nothing is justified by reasoning about glob semantics alone:
   (``?roject-a/src/x.py`` over ``project-a``) -- becomes ``src/x.py``, NOT
   ``**/src/x.py``. ``?`` and ``[...]`` match a fixed number of characters, so
   the component consumed exactly the prefix; ``**`` would over-suppress
-  ``sub/src/x.py``.
-* Trailing ``**`` inside the prefix span (``api/**`` over ``api/sub``) -- ``**``.
+  ``sub/src/x.py``. With ``**`` in the pattern this rule does not apply: there a
+  ``?`` stays inside one component, so ``???/**`` covers nothing in ``a/b``.
+* Trailing ``**`` inside the prefix span (``api/**`` over ``api/sub``) -- ``**``,
+  from the component walk.
 
 Fail-closed classes
 -------------------
@@ -171,19 +194,20 @@ Failure modes and known limitations
   representable pattern costs the operator an error message; accepting an
   unrepresentable one silently changes which findings are suppressed. Given the
   asymmetry above, that trade is the right way round.
-* The safe region is small, and deliberately so. Of 2,880 pattern/prefix pairs
-  in the verification sweep, 371 convert, 656 return ``None`` and 1,853 fail
-  closed. Anyone widening it must extend that sweep first and show it still
-  reports zero contract violations.
-* Prefix comparison is case-insensitive, matching how ``file_path_matches`` and
-  ``_path_pattern_matches`` compare paths elsewhere in ASH. Two projects
-  differing only in case would therefore both match; ASH has no such case
-  elsewhere, and diverging from the rest of the codebase's comparison rule
-  would be worse.
-* The contract is stated against ``file_path_matches``. If that matcher's glob
-  semantics change -- particularly whether ``*`` crosses ``/`` -- these rewrites
-  must be re-derived. The property test in
-  ``tests/unit/utils/test_workspace_paths.py`` calls the real matcher on both
+* The safe region for patterns without ``**`` is small, and deliberately so.
+  Anyone widening it must extend the contract sweeps first (both kinds, in
+  ``tests/unit/utils/test_workspace_paths.py``) and show they still report zero
+  contract violations.
+* Prefix comparison is case-sensitive, as ``file_path_matches`` and
+  ``_path_pattern_matches`` compare paths: on a case-sensitive filesystem
+  ``Project-A`` is another directory, so a workspace pattern naming it does not
+  apply to the project ``project-a``. Diverging from the matcher would break the
+  contract below.
+* The contract is stated against ``file_path_matches`` and
+  ``ignore_path_matches``. If their glob semantics change -- particularly
+  whether ``*`` crosses ``/``, or how ``ignore_path_pattern`` reads a trailing
+  ``/`` -- these rewrites must be re-derived. The property tests in
+  ``tests/unit/utils/test_workspace_paths.py`` call the real matchers on both
   sides for exactly that reason, so such a change fails the suite here.
 * Up-conversion is purely textual. It does not check that the project prefix
   exists; that is :mod:`automated_security_helper.utils.path_containment`'s job.
@@ -193,11 +217,26 @@ from __future__ import annotations
 
 import fnmatch
 from pathlib import PurePosixPath, PureWindowsPath
-from typing import Optional, Union
+from typing import Final, FrozenSet, Literal, Optional, Tuple, Union
 
 from automated_security_helper.core.exceptions import WorkspacePatternError
+from automated_security_helper.utils.path_matching import (
+    _pattern_components,
+    ignore_path_pattern,
+)
 
 PathLike = Union[str, PurePosixPath]
+
+#: The two kinds of workspace policy entry a pattern can be. Each is read at the
+#: top level by its own matcher, and a down-converted pattern has to keep that
+#: matcher's answer: an ignore path by ``suppression_matcher.ignore_path_matches``,
+#: where a trailing ``/`` names a directory and covers what is inside it, and a
+#: suppression by ``suppression_matcher.file_path_matches``, where a trailing
+#: ``/`` is literal and so matches no file.
+IGNORE_PATH: Final = "ignore_path"
+SUPPRESSION: Final = "suppression"
+PatternKind = Literal["ignore_path", "suppression"]
+_KINDS: FrozenSet[str] = frozenset({IGNORE_PATH, SUPPRESSION})
 
 _PARENT = ".."
 
@@ -206,6 +245,9 @@ _GLOB_METACHARACTERS = frozenset("*?[]")
 
 # What a down-converted pattern becomes when it names exactly the project root.
 _WHOLE_PROJECT = "**"
+
+# What ``ignore_path_pattern`` appends to a directory: one component, then any.
+_INSIDE_DIRECTORY = "/*/**"
 
 
 def _leading_separator_count(normalised_raw: str) -> int:
@@ -310,7 +352,7 @@ def _absorbs(prefix_parts: tuple, component: str) -> bool:
     component for exactly that reason: ``api*`` absorbs ``api/sub``.
     """
     joined = PurePosixPath(*prefix_parts).as_posix()
-    return fnmatch.fnmatch(joined.lower(), component.lower())
+    return fnmatch.fnmatchcase(joined, component)
 
 
 def _collides_with_prefix(prefix_parts: tuple, component: str) -> bool:
@@ -321,9 +363,7 @@ def _collides_with_prefix(prefix_parts: tuple, component: str) -> bool:
     may begin INSIDE the prefix, and no project-relative pattern reproduces
     that -- see the module docstring.
     """
-    return any(
-        fnmatch.fnmatch(part.lower(), component.lower()) for part in prefix_parts
-    )
+    return any(fnmatch.fnmatchcase(part, component) for part in prefix_parts)
 
 
 def _is_all_stars(component: str) -> bool:
@@ -380,13 +420,24 @@ def _survives_double_star(rest: tuple) -> bool:
 
     * every component literal -- a literal suffix means the same thing matched
       character-wise or component-wise.
-    * exactly one component -- re-anchoring has nothing to re-anchor.
+    * exactly one component that is ``*``, or ``*`` then a literal (``*.py``) --
+      "the path ends with the literal" is decided inside the last component.
 
     Anything else changes meaning. ``sub/*.py`` is the counter-example: under
     ``fnmatch`` the trailing ``*.py`` crosses ``/`` and matches ``src/x.py``,
     but under ``**/sub/*.py`` it is pinned to the final component and does not.
+    One component is not enough on its own: ``*/a*`` over project ``x`` covers
+    ``api/sub``, because ``a*`` takes ``api/sub`` under fnmatch, while ``**/a*``
+    needs the last component to start with ``a``.
     """
-    return len(rest) == 1 or not any(_is_glob_component(part) for part in rest)
+    if len(rest) == 1:
+        only = rest[0]
+        return (
+            not _is_glob_component(only)
+            or _is_all_stars(only)
+            or _is_star_then_literal(only)
+        )
+    return not any(_is_glob_component(part) for part in rest)
 
 
 def _unconvertible(
@@ -513,52 +564,148 @@ def to_workspace_pattern(pattern: PathLike, project_prefix: PathLike) -> str:
     if not pattern_parts:
         raise WorkspacePatternError("pattern must name at least one component")
 
-    return PurePosixPath(*prefix_parts, *pattern_parts).as_posix()
+    rebased = PurePosixPath(*prefix_parts, *pattern_parts).as_posix()
+    # PurePosixPath drops a trailing slash, which the matcher reads as "the
+    # directory's files" (utils/path_matching.py): put it back.
+    return rebased + "/" if _names_a_directory(pattern) else rebased
 
 
-def to_project_pattern(pattern: PathLike, project_prefix: PathLike) -> Optional[str]:
-    """Rebase a workspace-relative *pattern* onto one project's root.
+def _names_a_directory(pattern: PathLike) -> bool:
+    """Whether ``pattern`` ends in a separator, ``vendor/`` rather than ``vendor``."""
+    raw = str(pattern).replace("\\", "/")
+    return raw.endswith("/") and bool(raw.strip("/"))
 
-    The inverse of :func:`to_workspace_pattern`, for pushing a workspace-level
-    policy down into a single project.
 
-    Args:
-        pattern: A workspace-relative pattern.
-        project_prefix: The project's workspace-relative path.
+def _refuse_dot_components(raw: str, text: str) -> None:
+    """Refuse a pattern with a ``.`` or an empty component.
 
-    Satisfies, for every project-relative path ``p``::
+    The top-level readers compare a pattern as it is written
+    (``path_matching._path_pattern_matches``), so ``./api/x.py``, ``api/./x.py``
+    and ``api//x.py`` match no file there, and neither does ``./*``.
+    ``PurePosixPath`` folds those components away, so read through it they would
+    be ``api/x.py`` and ``*``, and a pushed-down ignore path would drop files from
+    the scan that the same pattern at the top level keeps. Refusing names the
+    pattern instead of guessing what it meant.
 
-        matches(to_project_pattern(P, R), p) == matches(P, R + "/" + p)
-
-    where ``matches`` is ``suppression_matcher.file_path_matches``. See the
-    module docstring for the per-shape rewrites and why over-suppression is the
-    dangerous direction.
-
-    Returns:
-        The project-relative pattern, or ``None`` when the pattern cannot match
-        anything inside this project -- including when it names only the project
-        directory, which covers no file within it.
-
-    Raises:
-        WorkspacePatternError: On the same malformed inputs as
-            :func:`to_workspace_pattern`, and on the three shapes that have no
-            correct single-pattern rewrite (see "Fail-closed classes" in the
-            module docstring). The message names the pattern and the remedy.
+    ``text`` is ``raw`` with backslashes as separators and without its one leading
+    separator. Trailing separators are not components: they are an ignore path's
+    directory form or a suppression's literal slash.
     """
-    prefix_parts = _relative_parts(_normalise(project_prefix, label="project prefix"))
-    if not prefix_parts:
-        raise WorkspacePatternError("project prefix must name at least one component")
+    for component in text.rstrip("/").split("/"):
+        if component in ("", "."):
+            raise WorkspacePatternError(
+                f"pattern '{raw}' has a '.' or empty component, "
+                "which ASH's matcher reads literally, so it matches no file; "
+                "remove the extra '.' or '/'"
+            )
 
-    pattern_parts = _relative_parts(_normalise(pattern, label="pattern"))
-    if not pattern_parts:
-        raise WorkspacePatternError("pattern must name at least one component")
 
+def _down_convert_components(
+    text: str, components: Tuple[str, ...], prefix_parts: tuple
+) -> Optional[str]:
+    """Down-convert a pattern the matcher reads component by component.
+
+    A pattern holding ``**`` anywhere goes to ``_recursive_glob_match`` on both
+    sides of the contract, where every other component matches exactly one path
+    component. So the conversion is exact: walk the project prefix through the
+    pattern's components as that matcher does, ``**`` taking any number of them,
+    and keep what is left of the pattern. ``components`` are the pattern's as the
+    matcher splits them (``path_matching._pattern_components``).
+
+    The fnmatch-derived rules of :func:`_down_convert_unanchored` do not hold
+    here: there a ``?`` or a ``*`` crosses ``/``, here it does not, so ``???/**``
+    covers nothing in project ``a/b`` though ``???`` matches the text ``a/b``.
+
+    Returns ``None`` when no position of the pattern survives the prefix, ``**``
+    when one that does matches every path, and raises when two positions survive
+    and neither covers the other, because no single pattern is their union.
+    """
+    end = len(components)
+
+    def closure(states: set) -> set:
+        # A "**" also matches no component, so the position after it is reached too.
+        pending = list(states)
+        while pending:
+            index = pending.pop()
+            if index < end and components[index] == _WHOLE_PROJECT:
+                if index + 1 not in states:
+                    states.add(index + 1)
+                    pending.append(index + 1)
+        return states
+
+    # The positions reached after the last prefix component are kept without the
+    # closure: what is left from a "**" already covers what is left after it.
+    states: set = {0}
+    for prefix_part in prefix_parts:
+        advanced = set()
+        for index in closure(set(states)):
+            if index == end:
+                continue
+            if components[index] == _WHOLE_PROJECT:
+                advanced.add(index)
+            elif fnmatch.fnmatchcase(prefix_part, components[index]):
+                advanced.add(index + 1)
+        states = advanced
+
+    # A position at the end matches only the empty path, which names no file.
+    states.discard(end)
+    if not states:
+        return None
+    remainders = [components[index:] for index in sorted(states)]
+    if any(_matches_every_path(remainder) for remainder in remainders):
+        return _WHOLE_PROJECT
+    if len(remainders) > 1:
+        raise _unconvertible(
+            tuple(text.split("/")),
+            prefix_parts,
+            "the match can continue from more than one point of the project path, "
+            "so no single pattern covers what the workspace pattern covers there",
+        )
+    rewritten = "/".join(remainders[0])
+    if _WHOLE_PROJECT not in rewritten and any(
+        _is_glob_component(part) for part in remainders[0]
+    ):
+        # Without a "**" the project side would be read by fnmatch, whose "*"
+        # crosses "/". The workspace side's "**" was inside a component ("x**.py").
+        raise _unconvertible(
+            tuple(text.split("/")),
+            prefix_parts,
+            "what is left after the project path has no '**' component, so the "
+            "project side would read its wildcards across '/'",
+        )
+    return rewritten
+
+
+def _matches_every_path(remainder: Tuple[str, ...]) -> bool:
+    """Whether a component-matched pattern covers every path of one or more components.
+
+    ``**`` takes any number of components and ``*`` exactly one, so the remainder
+    covers every path when it holds a ``**`` and at most one ``*``, and nothing
+    else.
+    """
+    stars = [part for part in remainder if part != _WHOLE_PROJECT]
+    return (
+        _WHOLE_PROJECT in remainder
+        and all(part == "*" for part in stars)
+        and len(stars) <= 1
+    )
+
+
+def _down_convert(text: str, prefix_parts: tuple) -> Optional[str]:
+    """Down-convert ``text``: no leading or trailing separator, no ``.`` component."""
+    if _WHOLE_PROJECT in text:
+        # The matcher reads any pattern holding "**" component by component.
+        return _down_convert_components(
+            text, tuple(_pattern_components(text)), prefix_parts
+        )
+
+    pattern_parts = PurePosixPath(text).parts
     if _is_glob_component(pattern_parts[0]):
         return _down_convert_unanchored(pattern_parts, prefix_parts)
 
     # Walk the span the project prefix occupies, component by component and
-    # case-insensitively, to match how the rest of ASH compares paths. A string
-    # prefix test would wrongly accept "project-abc" as inside "project-a".
+    # case-sensitively, as file_path_matches compares paths. A string prefix
+    # test would wrongly accept "project-abc" as inside "project-a".
     for index, prefix_part in enumerate(prefix_parts):
         if index >= len(pattern_parts):
             # The pattern runs out inside the prefix span, so it names an
@@ -567,17 +714,13 @@ def to_project_pattern(pattern: PathLike, project_prefix: PathLike) -> Optional[
 
         pattern_part = pattern_parts[index]
         if not _is_glob_component(pattern_part):
-            if pattern_part.lower() != prefix_part.lower():
+            if pattern_part != prefix_part:
                 return None
             continue
 
-        # A glob inside the prefix span. The one shape that is both common and
-        # soundly rewritable is a trailing `**`, which covers everything below
-        # this point and therefore the whole project: "api/**" over project
-        # "api/sub". Anything else would need glob algebra to align a stretchy
-        # component against the remaining prefix, so fail closed.
-        if pattern_parts[index:] == (_WHOLE_PROJECT,):
-            return _WHOLE_PROJECT
+        # A glob inside the prefix span. Under fnmatch it could align with the
+        # rest of the prefix in more than one way, so fail closed. ("api/**" over
+        # "api/sub" holds "**" and is converted by _down_convert_components.)
         raise WorkspacePatternError(
             f"pattern '{PurePosixPath(*pattern_parts).as_posix()}' cannot be "
             f"rewritten for project "
@@ -596,3 +739,109 @@ def to_project_pattern(pattern: PathLike, project_prefix: PathLike) -> Optional[
         # contract sweep caught exactly that.
         return None
     return PurePosixPath(*remainder).as_posix()
+
+
+def _as_directory_form(converted: Optional[str]) -> Optional[str]:
+    """An ignore path's down-converted ``<dir>/*/**`` written back as ``<dir>/``.
+
+    ``ignore_path_pattern`` reads ``<dir>/`` as ``<dir>/*/**``, so the two are one
+    ignore path, and the directory form is the one the operator wrote. ``**`` (the
+    whole project) and ``None`` are returned as they are.
+    """
+    if converted is not None and converted.endswith(_INSIDE_DIRECTORY):
+        directory = converted[: -len(_INSIDE_DIRECTORY)]
+        if directory:
+            return f"{directory}/"
+    return converted
+
+
+def _down_convert_literal_slash(text: str, prefix_parts: tuple) -> Optional[str]:
+    """Down-convert a suppression ending in ``/``, whose slash is literal.
+
+    A file's path never ends in ``/``, so such a suppression matches no file at
+    the top level, and the one pushed down must match none either. It keeps its
+    slash (``api/vendor/`` becomes ``vendor/``), so the project's warning about a
+    suppression that names a directory still names it. When no rewrite keeps the
+    slash meaningful, which includes the project root itself (``api/`` over
+    ``api``) and a rewrite whose slash ``**`` would absorb (``*/`` would become
+    ``**/``, which is ``**``), it is dropped for the project, never widened.
+
+    ``api/**/`` is not literal: the matcher absorbs a slash after a trailing
+    ``**``, so it is ``api/**`` and converts as that.
+    """
+    directory = text.rstrip("/")
+    if _pattern_components(text)[-1] != "":
+        return _down_convert(directory, prefix_parts)
+    try:
+        converted = _down_convert(directory, prefix_parts)
+    except WorkspacePatternError:
+        # Matching no file either way, there is nothing to refuse.
+        return None
+    if converted is None or converted == _WHOLE_PROJECT:
+        return None
+    candidate = f"{converted}/"
+    return candidate if _pattern_components(candidate)[-1] == "" else None
+
+
+def to_project_pattern(
+    pattern: PathLike, project_prefix: PathLike, *, kind: PatternKind
+) -> Optional[str]:
+    """Rebase a workspace-relative *pattern* onto one project's root.
+
+    The inverse of :func:`to_workspace_pattern`, for pushing a workspace-level
+    policy down into a single project.
+
+    Args:
+        pattern: A workspace-relative pattern.
+        project_prefix: The project's workspace-relative path.
+        kind: :data:`IGNORE_PATH` or :data:`SUPPRESSION`, the kind of policy entry
+            the pattern belongs to, which decides the matcher it is read by.
+
+    Satisfies, for every project-relative path ``p``::
+
+        matches(to_project_pattern(P, R, kind=k), p) == matches(P, R + "/" + p)
+
+    where ``matches`` is ``suppression_matcher.ignore_path_matches`` for an ignore
+    path and ``suppression_matcher.file_path_matches`` for a suppression. See the
+    module docstring for the per-shape rewrites and why widening a pattern is the
+    dangerous direction.
+
+    An ignore path keeps its directory form: ``api/vendor/`` over ``api`` becomes
+    ``vendor/``, and one naming the project directory or an ancestor of it
+    (``api/`` over ``api`` or ``api/sub``) covers the whole project, ``**``. A
+    suppression keeps its literal ``/`` (:func:`_down_convert_literal_slash`).
+
+    Returns:
+        The project-relative pattern, or ``None`` when the pattern cannot match
+        anything inside this project -- including when it names only the project
+        directory, which covers no file within it.
+
+    Raises:
+        WorkspacePatternError: On the same malformed inputs as
+            :func:`to_workspace_pattern`, on a ``.`` or empty component
+            (:func:`_refuse_dot_components`), and on the shapes that have no
+            correct single-pattern rewrite (see "Fail-closed classes" in the
+            module docstring). The message names the pattern and the remedy.
+        ValueError: ``kind`` is neither kind.
+    """
+    if kind not in _KINDS:
+        raise ValueError(f"unknown workspace pattern kind {kind!r}")
+    prefix_parts = _relative_parts(_normalise(project_prefix, label="project prefix"))
+    if not prefix_parts:
+        raise WorkspacePatternError("project prefix must name at least one component")
+
+    if not _relative_parts(_normalise(pattern, label="pattern")):
+        raise WorkspacePatternError("pattern must name at least one component")
+
+    raw = str(pattern)
+    # One leading separator at most (_normalise refuses more): workspace-rooted.
+    text = raw.replace("\\", "/").removeprefix("/")
+    _refuse_dot_components(raw, text)
+
+    if text.endswith("/"):
+        if kind == IGNORE_PATH:
+            return _as_directory_form(
+                _down_convert(ignore_path_pattern(text), prefix_parts)
+            )
+        return _down_convert_literal_slash(text, prefix_parts)
+    return _down_convert(text, prefix_parts)

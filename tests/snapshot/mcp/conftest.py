@@ -37,7 +37,7 @@ def isolated_mcp_state(
     saved_sources = dict(source_delivery._SESSION_SOURCE_DIRS)
     source_delivery._SESSION_SOURCE_DIRS.clear()
     profile_registry.clear_profile_registry()
-    profile_registry.clear_session_state()
+    profile_registry.clear_all_session_state()
     reset_default_registry_for_tests()
 
     for name in (
@@ -58,7 +58,7 @@ def isolated_mcp_state(
     source_delivery._SESSION_SOURCE_DIRS.clear()
     source_delivery._SESSION_SOURCE_DIRS.update(saved_sources)
     profile_registry.clear_profile_registry()
-    profile_registry.clear_session_state()
+    profile_registry.clear_all_session_state()
     reset_default_registry_for_tests()
 
 

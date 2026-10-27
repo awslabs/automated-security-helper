@@ -19,10 +19,12 @@ the new complete one.
 from __future__ import annotations
 
 import os
+import secrets
 import sys
 import time
-import uuid
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator, TextIO, cast
 
 # Windows refuses to replace a file another process or thread has open, and a progress
 # poll holds the aggregated file open for the length of one JSON parse. Retrying for a
@@ -32,20 +34,86 @@ _REPLACE_ATTEMPTS = 40
 _REPLACE_BACKOFF_SECONDS = 0.05
 
 
+def _staging_path(path: Path) -> Path:
+    """A file beside *path*, named for this process and a random token.
+
+    The token comes from :mod:`secrets`, not ``uuid.uuid4``: the snapshot tests pin
+    ``uuid.uuid4`` to a counter that report ids are built from, and a staging name
+    that drew from it shifted the id of every report made after the write.
+    """
+    return path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(16)}.tmp")
+
+
 def write_text_atomically(path: Path, content: str, encoding: str = "utf-8") -> None:
     """Write ``content`` to ``path`` so that readers see the old file or the new one.
 
-    The staging file is created in the target's own directory, because ``os.replace``
-    is only atomic within one filesystem. It is created with ``open(..., "x")`` rather
-    than ``tempfile.mkstemp`` so it gets the same umask-derived mode a plain write
-    would: ``mkstemp`` creates 0600, which would stop a host user reading results a
-    container wrote.
+    fs_guard.open_for_atomic_write does the writing: a staging file created
+    exclusively in the target's own directory, because ``os.replace`` is only atomic
+    within one filesystem, then renamed over ``path``. Created exclusively rather
+    than with ``tempfile.mkstemp`` so it gets the same umask-derived mode a plain
+    write would: ``mkstemp`` creates 0600, which would stop a host user reading
+    results a container wrote.
+
+    Below a registered output directory (``fs_guard``), the directory is opened
+    without following a link at any component, and the staging file is created and
+    renamed relative to that descriptor: a link on the way to ``path``, or at
+    ``path`` itself, raises ``OutputLinkRefused``, and a file at ``path`` that
+    another name refers to raises ``OutputHardLinkRefused``.
     """
+    # Not at the top: fs_guard imports the sandbox package. Do not hoist.
+    from automated_security_helper.utils.sandbox.fs_guard import open_for_atomic_write
+
+    with open_for_atomic_write(path, encoding=encoding) as handle:
+        handle.write(content)
+
+
+@contextmanager
+def open_atomically(path: Path, encoding: str = "utf-8") -> Iterator[TextIO]:
+    """A text handle whose contents replace ``path`` when the block ends.
+
+    :func:`write_text_atomically` for a writer that streams its content rather than
+    holding it whole, such as the workspace's unified results file, assembled one
+    project's SARIF at a time. Written to a staging file beside ``path`` and renamed
+    over it when the block completes; if the block raises, the staging file is
+    removed and ``path`` is left as it was.
+
+    The staging file is created through ``fs_guard.open_for_write``, exclusively,
+    so below a registered output directory no link is followed on the way to it.
+    Elsewhere that is the plain exclusive ``open`` it always was.
+    """
+    # Not at the top: fs_guard imports the sandbox package. Do not hoist.
+    from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
     path = Path(path)
-    staging = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    staging = _staging_path(path)
     try:
-        with open(staging, mode="x", encoding=encoding) as handle:
-            handle.write(content)
+        with open_for_write(staging, encoding=encoding, exclusive=True) as handle:
+            yield cast(TextIO, handle)
+        _replace(staging, path)
+    except BaseException:
+        staging.unlink(missing_ok=True)
+        raise
+
+
+def write_bytes_atomically(path: Path, data: bytes) -> None:
+    """Write ``data`` to ``path`` as :func:`write_text_atomically` writes text.
+
+    The bytes reach the file as given: nothing is encoded and no newline is
+    translated, so a caller that records a digest of the file can take it of
+    ``data`` rather than read the file back, which another writer may have replaced
+    by then.
+
+    The staging file is created as :func:`open_atomically` creates it: through
+    ``fs_guard.open_for_write``, exclusively and in binary.
+    """
+    # Not at the top: fs_guard imports the sandbox package. Do not hoist.
+    from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
+    path = Path(path)
+    staging = _staging_path(path)
+    try:
+        with open_for_write(staging, binary=True, exclusive=True) as handle:
+            handle.write(data)
         _replace(staging, path)
     except BaseException:
         staging.unlink(missing_ok=True)
@@ -79,6 +147,11 @@ def read_text_of_replaced_file(path: Path, encoding: str = "utf-8") -> str:
 
 
 def _replace(staging: Path, target: Path) -> None:
+    """Rename ``staging`` over ``target`` by name; fs_guard's rename without a dir_fd.
+
+    On Windows a ``PermissionError`` from a reader holding ``target`` open is
+    retried for the bounded time above.
+    """
     for attempt in range(_REPLACE_ATTEMPTS):
         try:
             os.replace(staging, target)

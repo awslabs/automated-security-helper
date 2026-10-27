@@ -84,13 +84,17 @@ Failure modes and known limitations
 
 from __future__ import annotations
 
+import ast
+import sys
 import json
+import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Barrier, BrokenBarrierError, Lock
 from typing import Any, Dict, List, Literal, Optional, Tuple
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, create_autospec
 
 import pytest
 
@@ -101,9 +105,14 @@ from automated_security_helper.base.scanner_plugin import (
 )
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.core.phases import scan_phase as scan_phase_module
 from automated_security_helper.core.phases.scan_phase import ScanPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.models.scanner_validation import (
+    ScannerValidationManager,
+    ValidationCheckpoint,
+)
 from automated_security_helper.models.workspace import ProjectRunStatus
 from automated_security_helper.workspace.execution import (
     ProjectScanSettings,
@@ -325,32 +334,40 @@ def _write_workspace(root: Path) -> Path:
 
 
 def _run_scan_phase(context: PluginContext) -> AshAggregatedResults:
-    """Run one project's real scan phase with the recording scanner registered."""
+    """Run one project's real scan phase with the recording scanner registered.
+
+    Runs on a project's worker thread, so it replaces the phase's own validation
+    manager rather than patching ``scan_phase.ScannerValidationManager``: a patch
+    of a module attribute is process-wide, and two projects' patches overlapping
+    left one project's mock in place for every later test on the worker.
+    """
     progress = MagicMock()
     progress.add_task.return_value = 1
-    with patch(
-        "automated_security_helper.core.phases.scan_phase.ScannerValidationManager"
-    ) as MockValMgr:
-        manager = MagicMock()
-        checkpoint = MagicMock()
-        checkpoint.has_issues.return_value = False
-        checkpoint.get_missing_scanners.return_value = []
-        checkpoint.get_unexpected_scanners.return_value = []
-        checkpoint.errors = []
-        checkpoint.discrepancies = []
-        manager.validate_task_queue.return_value = checkpoint
-        manager.validate_execution_completion.return_value = checkpoint
-        manager.validate_result_completeness.return_value = checkpoint
-        manager.report_execution_discrepancies.return_value = {}
-        MockValMgr.return_value = manager
+    phase = ScanPhase(
+        plugin_context=context,
+        plugins=[RecordingScanner],
+        progress_display=progress,
+    )
+    phase.validation_manager = _validation_manager_double()
+    return phase.execute(aggregated_results=AshAggregatedResults())
 
-        phase = ScanPhase(
-            plugin_context=context,
-            plugins=[RecordingScanner],
-            progress_display=progress,
-        )
-        phase.validation_manager = manager
-        return phase.execute(aggregated_results=AshAggregatedResults())
+
+def _validation_manager_double():
+    """The scan phase's validation manager, answering with a real, empty checkpoint.
+
+    Autospecced with spec_set: a method the manager does not have fails where it
+    is configured instead of being configured and never called, an assignment to
+    a misspelled attribute fails, and so does a call the real signature refuses.
+    The checkpoint is real because the phase formats its values.
+    """
+    manager = create_autospec(ScannerValidationManager, instance=True, spec_set=True)
+    checkpoint = ValidationCheckpoint(checkpoint_name="project-isolation")
+    manager.validate_task_queue.return_value = checkpoint
+    manager.validate_execution_completion.return_value = checkpoint
+    manager.ensure_complete_results.return_value = checkpoint
+    manager.report_execution_discrepancies.return_value = {}
+    manager.report_result_completeness.return_value = {}
+    return manager
 
 
 class ScanningOrchestrator:
@@ -504,6 +521,24 @@ def _reset_recorders():
     OBSERVATIONS.clear()
     LeakyOrchestrator.reset()
     _RENDEZVOUS = None
+    leaked = _put_back_a_leaked_manager()
+    assert leaked is None, leaked
+
+
+def _put_back_a_leaked_manager() -> Optional[str]:
+    """What replaced ``scan_phase.ScannerValidationManager``, or None if nothing did.
+
+    Projects run on worker threads, and a patch of a module attribute is not
+    thread-safe: when two threads' patches overlap, the later one restores the
+    earlier one's mock, and every later test on the worker builds its ScanPhase
+    with it. Checked after each test here, where the leak would start, and the
+    class is put back, so the test that leaked fails and the ones after it do not.
+    """
+    current = scan_phase_module.ScannerValidationManager
+    if current is ScannerValidationManager:
+        return None
+    scan_phase_module.ScannerValidationManager = ScannerValidationManager
+    return f"a test left scan_phase.ScannerValidationManager replaced: {current!r}"
 
 
 def _execute(tmp_path: Path, factory, *, bound: int = len(PROJECT_MARKERS)):
@@ -797,6 +832,65 @@ class TestAScannerWithNoConfigIsExcluded:
         assert OBSERVATIONS[0].marker == "marker-from-configured"
 
 
+class TestTheScanPhaseDoublesAreTheRealShapes:
+    """The phase runs against its validation manager double without an error.
+
+    The double was a bare MagicMock that configured a method the manager does not
+    have, and its checkpoint a MagicMock whose ``metadata.get`` returned another,
+    so the phase's ``{completion_rate:.1%}`` raised inside its own try and logged
+    "Error during execution completion validation" on every scan here.
+    """
+
+    def test_one_project_scan_logs_no_error(self, tmp_path, caplog):
+        _write_project(tmp_path, "checked", "marker-from-checked")
+        source_dir = tmp_path / "checked"
+        output_dir = tmp_path / "checked-out"
+        output_dir.mkdir()
+
+        with caplog.at_level(logging.ERROR):
+            _run_scan_phase(
+                PluginContext(
+                    source_dir=source_dir,
+                    output_dir=output_dir,
+                    config=resolve_config(
+                        config_path=source_dir / ".ash" / "ash.yaml",
+                        source_dir=source_dir,
+                    ),
+                )
+            )
+
+        errors = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
+        assert errors == [], errors
+        assert len(OBSERVATIONS) == 1
+
+    def test_the_manager_double_refuses_an_attribute_the_manager_lacks(self):
+        """A misspelled assignment would configure nothing, and the test would pass."""
+        manager = _validation_manager_double()
+
+        with pytest.raises(AttributeError):
+            manager.validate_task_queu = MagicMock()
+
+    def test_the_manager_double_refuses_a_call_the_manager_would(self):
+        """validate_task_queue takes the queue's contents; a call without them fails."""
+        manager = _validation_manager_double()
+
+        with pytest.raises(TypeError):
+            manager.validate_task_queue()
+
+
+class TestALeakedManagerIsPutBack:
+    """A leak fails the test that made it, and stops there."""
+
+    def test_a_leaked_manager_is_named_and_the_class_put_back(self):
+        leaked = MagicMock(name="leaked-manager")
+        scan_phase_module.ScannerValidationManager = leaked
+
+        message = _put_back_a_leaked_manager()
+
+        assert scan_phase_module.ScannerValidationManager is ScannerValidationManager
+        assert message is not None and "leaked-manager" in message, message
+
+
 class TestSingleProjectPathsAreUnchanged:
     """Requirement 9. Nothing branches on workspace mode, so nothing can drift.
 
@@ -894,6 +988,21 @@ class TestPluginManagerSingletonState:
         "getattr(ash_plugin_manager, 'context'",
     )
 
+    #: The files the registry sweep allows in, with the reasons the sweep
+    #: test's docstring gives. plugin_manager.py is the registry's production
+    #: owner; the rest are test files, and every registry-reaching helper they
+    #: define must be a _REGISTRY_HELPERS key (the completeness test below).
+    _REGISTRY_SWEEP_ALLOWED = (
+        "automated_security_helper/plugins/plugin_manager.py",
+        "test_plugin_system.py",
+        "tests/snapshot/conftest.py",
+        "tests/snapshot/test_snapshot_plugin_registry.py",
+        "tests/conftest.py",
+        "tests/unit/test_conftest_tool_state_isolation.py",
+        "tests/unit/cli/test_report_refuses_invalid_plugin_options.py",
+        "tests/unit/cli/test_operator_text_is_not_markup.py",
+    )
+
     _REGISTRY_PATTERNS = (
         "ash_plugin_manager.plugin_library",
         "ash_plugin_manager._resolved_plugins",
@@ -901,6 +1010,15 @@ class TestPluginManagerSingletonState:
         "getattr(ash_plugin_manager, 'plugin_library'",
         'getattr(ash_plugin_manager, "_resolved_plugins"',
         "getattr(ash_plugin_manager, '_resolved_plugins'",
+        # A write by name: monkeypatch.setattr, setattr and patch.object.
+        'setattr(ash_plugin_manager, "plugin_library"',
+        "setattr(ash_plugin_manager, 'plugin_library'",
+        'setattr(ash_plugin_manager, "_resolved_plugins"',
+        "setattr(ash_plugin_manager, '_resolved_plugins'",
+        'patch.object(ash_plugin_manager, "plugin_library"',
+        "patch.object(ash_plugin_manager, 'plugin_library'",
+        'patch.object(ash_plugin_manager, "_resolved_plugins"',
+        "patch.object(ash_plugin_manager, '_resolved_plugins'",
     )
 
     @classmethod
@@ -962,7 +1080,24 @@ class TestPluginManagerSingletonState:
             yield path
 
     @classmethod
-    def _hits(cls, patterns, *, skip_files=()) -> Dict[str, str]:
+    def _shown_name(cls, path: Path) -> str:
+        """The one spelling a file is reported by: its repo-relative POSIX path
+        inside the repository, its resolved POSIX path outside. as_posix both
+        ways, so the spelling carries no backslashes for a repr to double on
+        Windows. _hits' relative_names keys, the helper enforcement, the
+        completeness check and both planted controls all read this one rule,
+        so a --basetemp inside the checkout changes every reader together."""
+        resolved = path.resolve()
+        repo_root = Path(__file__).resolve().parents[3]
+        if resolved.is_relative_to(repo_root):
+            return resolved.relative_to(repo_root).as_posix()
+        return resolved.as_posix()
+
+    @classmethod
+    def _hits(cls, patterns, *, skip_files=(), relative_names=False) -> Dict[str, str]:
+        """With ``relative_names``, hits are keyed by ``_shown_name`` (the
+        repo-relative path, a file outside the repo by its resolved POSIX
+        path), so two files sharing a basename stay two entries."""
         found: Dict[str, str] = {}
         skipped = set(skip_files)
         repo_root = Path(__file__).resolve().parents[3]
@@ -977,6 +1112,9 @@ class TestPluginManagerSingletonState:
             )
             if path.name in skipped or relative in skipped:
                 continue
+            shown = path.name
+            if relative_names:
+                shown = cls._shown_name(path)
             for number, line in enumerate(
                 path.read_text(encoding="utf-8").splitlines(), start=1
             ):
@@ -984,7 +1122,7 @@ class TestPluginManagerSingletonState:
                 if stripped.startswith("#"):
                     continue
                 if any(pattern in stripped for pattern in patterns):
-                    found[f"{path.name}:{number}"] = stripped
+                    found[f"{shown}:{number}"] = stripped
         return found
 
     def test_the_sweep_looks_at_more_than_the_package(self):
@@ -1060,14 +1198,17 @@ class TestPluginManagerSingletonState:
         shape that reintroduces the registry defect, so it has to be a deliberate
         decision rather than a drive-by.
 
-        Four files are allowed in; the widened walk surfaced the first two:
+        Six files are allowed in; the widened walk surfaced the first two:
 
         * ``plugin_manager.py`` owns the attributes.
         * ``tests/unit/plugins/test_plugin_system.py`` is the test *of* the plugin
           system, and clears ``plugin_library.event_handlers`` between cases.
           There is no manager API for "forget every handler", and a test resetting
           process-global state is the opposite of the hazard here -- it prevents
-          leakage between cases rather than causing it between projects.
+          leakage between cases rather than causing it between projects. It also
+          holds ``registry_changes_left_behind``, the check
+          ``test_plugin_system_leaves_the_registry.py`` runs after this file in a
+          pytest process of its own.
         * ``tests/snapshot/conftest.py`` (by path, not by name) narrows the
           registry to ASH's built-in plugins for each snapshot test and puts it
           back afterwards, so a snapshot shows what a fresh ``ash`` process
@@ -1075,20 +1216,46 @@ class TestPluginManagerSingletonState:
           Same category as the one above: it stops leakage between tests.
         * ``tests/snapshot/test_snapshot_plugin_registry.py`` is the test of that
           conftest code: it reads the registry to prove a plugin first imported
-          inside a snapshot test is merged back afterwards, and removes the probe
-          plugin it registered.
+          inside a snapshot test is merged back afterwards, and that a module an
+          earlier test imported has its real registrations put back when a
+          snapshot test's run loads it, and removes the probe plugins it
+          registered. It also holds ``registry_state`` and
+          ``registry_changes_since``, the record and the check
+          ``test_snapshot_plugin_registry_leaves_the_registry.py`` takes around
+          this file in a pytest process of its own - and that companion also
+          calls both directly from its own in-process tests, which read and
+          change the live registry and restore it only through ``finally`` and
+          ``monkeypatch``.
+        * ``tests/conftest.py`` (by path) restores the resolved-plugin memo, the
+          event handlers and the registrations after every test, so a plugin one
+          test registers by hand does not reach the next. Same category: it stops
+          leakage between tests.
+        * ``tests/unit/test_conftest_tool_state_isolation.py`` is the test of that
+          conftest code, and removes the probe plugin it registers.
+        * ``tests/unit/cli/test_report_refuses_invalid_plugin_options.py`` gives
+          each of its tests an empty ``_resolved_plugins`` and puts the previous
+          one back afterwards. An earlier ``ash report`` in the worker had
+          memoised the reporters before ``ash_aws_plugins`` registered, so the
+          module failed in some orders. Same category: it stops leakage between
+          tests, and it leaves ``plugin_library`` alone.
+        * ``tests/unit/cli/test_operator_text_is_not_markup.py`` runs ash report,
+          scan and merge in-process and gives each test its own copy of the
+          registry and an empty lookup cache. ``plugin_modules()`` memoizes what it
+          found per process, and without the copy a later test in the same worker
+          (test_report_refuses_invalid_plugin_options.py, which loads the AWS
+          reporters from its config) got the memoized list and not its reporter.
+          It stops leakage between tests, like the snapshot conftest.
+
+        The sweep matches writes by name (``setattr``, ``patch.object``) as well
+        as reads; matching reads alone leaves the snapshot conftest's ``setattr``
+        unmatched.
 
         Anything else, in production or in a new test, fails this and has to
         justify itself.
         """
         offenders = self._hits(
             self._REGISTRY_PATTERNS,
-            skip_files=(
-                "plugin_manager.py",
-                "test_plugin_system.py",
-                "tests/snapshot/conftest.py",
-                "tests/snapshot/test_snapshot_plugin_registry.py",
-            ),
+            skip_files=self._REGISTRY_SWEEP_ALLOWED,
         )
         assert offenders == {}, (
             "the plugin manager's registry state is now reached from outside the "
@@ -1213,18 +1380,920 @@ class TestPluginManagerSingletonState:
         """The companion assertion: prove the allowlist is narrow, not the matcher.
 
         ``test_nothing_outside_the_manager_touches_the_registry`` passes partly
-        because two files are excluded. If the matcher were broken it would pass
+        because six files are excluded. If the matcher were broken it would pass
         for the wrong reason and look identical. So assert that the same patterns
         do find the accesses in the excluded files -- an empty result there would
         mean the sweep is blind rather than the tree clean.
         """
         without_allowlist = self._hits(self._REGISTRY_PATTERNS)
         assert without_allowlist, (
-            "the registry patterns match nothing anywhere, including in the two "
-            "files known to contain such accesses, so the sweep is blind and the "
-            "clean result next door is meaningless"
+            "the registry patterns match nothing anywhere, including in the files "
+            "allowed in, which are known to contain such accesses, so the sweep is "
+            "blind and the clean result next door is meaningless"
         )
         assert any(
             location.startswith("test_plugin_system.py")
             for location in without_allowlist
         ), sorted(without_allowlist)
+
+    #: Registry helpers an allowed file keeps, each with the files that may
+    #: name it. This comment is the one home of the reasoning; the tests and
+    #: controls below point here instead of restating it.
+    #:
+    #: Why a table: an allowed file may keep a module-level helper that
+    #: reaches the registry, and a caller anywhere else then reaches it
+    #: through the helper with no registry spelling on the caller's own line,
+    #: where the pattern sweep cannot see it. Two tests enforce the two
+    #: directions:
+    #:
+    #: * the name sweep (test_a_registry_helper_is_named_only_in_its_files):
+    #:   the set of files naming each key equals exactly its listed files, so
+    #:   a borrower anywhere in the repository is caught by the helper's name
+    #:   alone, whatever basename its file carries;
+    #: * the derivation (test_every_registry_reaching_helper_is_in_the_table):
+    #:   the keys are derived from the allowed files, not hand-trusted. Every
+    #:   module-level definition there - function, class, or assignment, also
+    #:   under module-level control flow - whose own text (decorators
+    #:   included; docstrings and comment lines excluded; string values that
+    #:   are not docstrings included) spells a registry pattern or the name of
+    #:   another definition already so flagged, iterated to a fixed point that
+    #:   STARTS EMPTY (never from these keys, which would let hand-typed keys
+    #:   justify each other), must be a key. The fixed point is what catches a
+    #:   helper that reaches the registry only through another helper. Exempt:
+    #:   test_* functions and Test* classes, which pytest collects and nothing
+    #:   imports, and pytest fixtures, which pytest offers only inside their
+    #:   own file - except fixtures in a conftest.py, offered to the whole
+    #:   tree, which are exempt only when autouse (nothing requests an autouse
+    #:   fixture by name). usefixtures marks a user, not a definition, and
+    #:   exempts nothing.
+    #:
+    #: Two documented limits, each with a pin that turns red if it moves. The
+    #: fixture exemption is import-blind: a fixture function imported by name
+    #: into another module resolves there too, which the sweep does not see
+    #: (pinned by test_a_file_bound_fixture_and_docstring_prose_are_not_
+    #: derived). And both sweeps match names as written: a name aliased,
+    #: joined from adjacent literals, assembled with ``+`` or an f-string,
+    #: computed and looked up through ``globals()``, or spelled across lines
+    #: is not matched - a hygiene check against accidental access, not a
+    #: boundary (the name sweep's own docstring says the same; pinned by
+    #: test_an_aliased_assembled_or_line_split_reach_is_not_derived).
+    #:
+    #: The entries, every one of which the derivation reaches (the test
+    #: asserts both directions, so a hand-typed key that enforces nothing
+    #: cannot sit here). _handler_modules and _loaded_inside are private to
+    #: their file; registry_changes_since reaches the registry only THROUGH
+    #: registry_state, the shape the fixed point exists for.
+    #: _registration_state (the same file) is deliberately NOT here: it
+    #: formats a registration its caller already holds, so a borrower gets a
+    #: formatter and no registry, and its only registry mentions are docstring
+    #: prose. The readers (registry_state,
+    #: registry_changes_since, registry_changes_left_behind) serve the one
+    #: test that runs their file in a pytest process of its own, AND the
+    #: companion file's own in-process tests, which call them directly while
+    #: changing the live registry. ``a_scanner_registration`` is a
+    #: live-registration handle those in-process tests borrow and restore.
+    #: ``builtin_plugin_registry`` (tests/snapshot/conftest.py, a context
+    #: manager, not a fixture) swaps the whole registry for a copy.
+    #: ``_LOADS_TRIVY`` is source text for a child test file: run, that text
+    #: imports builtin_plugin_registry, so a module borrowing the constant
+    #: hands its caller the registry the same way a helper would.
+    _REGISTRY_HELPERS = {
+        "_LOADS_TRIVY": ("tests/snapshot/test_snapshot_plugin_registry.py",),
+        "_handler_modules": ("tests/snapshot/test_snapshot_plugin_registry.py",),
+        "_loaded_inside": ("tests/snapshot/test_snapshot_plugin_registry.py",),
+        "a_scanner_registration": (
+            "tests/snapshot/test_snapshot_plugin_registry.py",
+            "tests/snapshot/test_snapshot_plugin_registry_leaves_the_registry.py",
+        ),
+        "builtin_plugin_registry": (
+            "tests/snapshot/conftest.py",
+            "tests/snapshot/test_snapshot_plugin_registry.py",
+        ),
+        "registry_changes_left_behind": (
+            "tests/unit/plugins/test_plugin_system.py",
+            "tests/unit/plugins/test_plugin_system_leaves_the_registry.py",
+        ),
+        "registry_state": (
+            "tests/snapshot/test_snapshot_plugin_registry.py",
+            "tests/snapshot/test_snapshot_plugin_registry_leaves_the_registry.py",
+        ),
+        "registry_changes_since": (
+            "tests/snapshot/test_snapshot_plugin_registry.py",
+            "tests/snapshot/test_snapshot_plugin_registry_leaves_the_registry.py",
+        ),
+    }
+
+    def test_a_registry_helper_is_named_only_in_its_files(self):
+        """Each _REGISTRY_HELPERS key may be named only in its listed files;
+        the reasoning is at the table's comment. A caller anywhere else
+        reaches the registry through a helper with no registry spelling on
+        its own line, so the helper's name is what this sweep matches. It
+        matches names as written: a hygiene check against accidental live
+        registry access from tests, not a boundary against a name assembled
+        at run time."""
+        self._assert_each_helper_named_only_in_its_files()
+
+    def _assert_each_helper_named_only_in_its_files(self) -> Dict[str, Dict[str, int]]:
+        """The one enforcement the check and the planted controls share: the
+        set of files naming each _REGISTRY_HELPERS key equals exactly its
+        listed files (why: the table's comment), compared by _shown_name.
+        Returns ``{helper: {shown name: first line naming it}}``, so a control
+        asserts what was and was not found rather than only that nothing
+        raised. Names match as whole words, so an identifier that merely
+        starts or ends with a helper's name is not read as the helper, and
+        one pass over the tree records every helper's hits. Extra files and
+        missing files are reported apart - a symmetric difference cannot say
+        which side a path is wrong on - extras with the first line that names
+        the helper. The failure message is a plain string, which pytest
+        passes through whole: a repr'd message is truncated and doubles a
+        Windows path's backslashes. The controls call this same method, so
+        gutting the assertion fails them rather than leaving a mirror of the
+        data to agree with itself."""
+        matchers = {
+            name: re.compile(rf"(?<!\w){re.escape(name)}(?!\w)")
+            for name in self._REGISTRY_HELPERS
+        }
+        naming: Dict[str, Dict[str, int]] = {name: {} for name in matchers}
+        for path in self._source_files():
+            shown = self._shown_name(path)
+            for number, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), start=1
+            ):
+                stripped = line.strip()
+                if stripped.startswith("#"):
+                    continue
+                for name, matcher in matchers.items():
+                    if matcher.search(stripped):
+                        naming[name].setdefault(shown, number)
+        problems = []
+        for name, allowed in self._REGISTRY_HELPERS.items():
+            extra = set(naming[name]) - set(allowed)
+            missing = set(allowed) - set(naming[name])
+            if extra:
+                problems.append(
+                    f"{name} is named beyond its files: "
+                    + ", ".join(
+                        f"{shown}:{naming[name][shown]}" for shown in sorted(extra)
+                    )
+                )
+            if missing:
+                problems.append(
+                    f"{name} is not named in: " + ", ".join(sorted(missing))
+                )
+        assert not problems, "\n".join(problems)
+        return naming
+
+    def test_a_live_registration_borrowed_elsewhere_is_caught(
+        self, tmp_path, monkeypatch
+    ):
+        """The must-fire for the name sweep (reasoning: the table's comment):
+        a borrower with no registry spelling on any line is flagged by the
+        helper's name. Planted through the walk of this process only, so no
+        other worker's sweep sees it. The planted file carries the same
+        basename as a file the table allows, so an enforcement comparing
+        basenames instead of paths would read it as the allowed file and go
+        quiet; the path comparison is what flags it."""
+        planted = tmp_path / "test_snapshot_plugin_registry.py"
+        planted.write_text(
+            "from tests.snapshot.test_snapshot_plugin_registry import (\n"
+            "    a_scanner_registration,\n"
+            ")\n"
+            "\n"
+            "name, registration = a_scanner_registration()\n"
+            "registration.enabled = False\n",
+            encoding="utf-8",
+        )
+        walked = list(type(self)._source_files())
+        monkeypatch.setattr(
+            type(self), "_source_files", classmethod(lambda cls: [*walked, planted])
+        )
+
+        # The enforcement the check runs must itself flag the planted file, so
+        # the control goes red when the enforcement's assertion is gone. The
+        # expected spelling comes from _shown_name, the same rule the
+        # enforcement keys by (POSIX both ways, so no backslash a repr could
+        # double on Windows; the plain-string message is never truncated), and
+        # a --basetemp inside the checkout moves both sides together.
+        with pytest.raises(AssertionError) as flagged:
+            self._assert_each_helper_named_only_in_its_files()
+        assert self._shown_name(planted) in str(flagged.value), flagged.value
+
+        # The control: the registry spellings themselves do not find it. Keyed
+        # by _shown_name, since the planted file shares the allowed basename.
+        assert self._shown_name(planted) not in {
+            location.rsplit(":", 1)[0]
+            for location in self._hits(self._REGISTRY_PATTERNS, relative_names=True)
+        }
+
+    def test_a_name_sharing_a_suffix_is_not_a_borrower(self, tmp_path, monkeypatch):
+        """Substring matching would read ``lambda_scanner_registration`` as
+        ``a_scanner_registration`` and fail an innocent file with a message
+        that names no false positive; the sweep matches each helper as a whole
+        word. Asserted on the returned naming map, not only on the absence of
+        a failure, so a sweep that found nothing at all could not pass."""
+        planted = tmp_path / "test_lambda_registrations.py"
+        planted.write_text("lambda_scanner_registration = object()\n", encoding="utf-8")
+        walked = list(type(self)._source_files())
+        monkeypatch.setattr(
+            type(self), "_source_files", classmethod(lambda cls: [*walked, planted])
+        )
+
+        naming = self._assert_each_helper_named_only_in_its_files()
+
+        shown = self._shown_name(planted)
+        assert all(shown not in named for named in naming.values()), naming
+        assert naming["a_scanner_registration"], (
+            "the sweep found no real naming at all, so it proved nothing"
+        )
+
+    def test_a_name_sharing_a_prefix_is_not_a_borrower(self, tmp_path, monkeypatch):
+        """The other side of the whole-word rule: an identifier that merely
+        starts with a helper's name (``registry_state_snapshot``) is not the
+        helper either."""
+        planted = tmp_path / "test_prefixed_names.py"
+        planted.write_text("registry_state_snapshot = object()\n", encoding="utf-8")
+        walked = list(type(self)._source_files())
+        monkeypatch.setattr(
+            type(self), "_source_files", classmethod(lambda cls: [*walked, planted])
+        )
+
+        naming = self._assert_each_helper_named_only_in_its_files()
+
+        shown = self._shown_name(planted)
+        assert all(shown not in named for named in naming.values()), naming
+        assert naming["registry_state"], (
+            "the sweep found no real naming at all, so it proved nothing"
+        )
+
+    @staticmethod
+    def _pytest_fixture_decorator(node):
+        """node's pytest.fixture decorator, or None. Read from the decorator's
+        own shape, never a substring: ``usefixtures`` marks a user of a
+        fixture, not a definition, and must exempt nothing."""
+        for decorator in node.decorator_list:
+            target = decorator.func if isinstance(decorator, ast.Call) else decorator
+            if isinstance(target, ast.Attribute):
+                name = target.attr
+            elif isinstance(target, ast.Name):
+                name = target.id
+            else:
+                continue
+            if name == "fixture":
+                return decorator
+        return None
+
+    @staticmethod
+    def _is_autouse(decorator) -> bool:
+        return isinstance(decorator, ast.Call) and any(
+            keyword.arg == "autouse" and getattr(keyword.value, "value", None) is True
+            for keyword in decorator.keywords
+        )
+
+    @staticmethod
+    def _searchable_text(source_lines, node) -> str:
+        """The definition's own lines with every docstring and comment line
+        removed: prose about a helper is not a reach for it (the principle
+        test_prose_about_the_hazard_is_not_counted_as_the_hazard pins), while
+        a string value that is not a docstring - source text for a child test
+        file - still is."""
+        skipped = set()
+        for inner in ast.walk(node):
+            if isinstance(inner, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                first = inner.body[0] if inner.body else None
+                if (
+                    isinstance(first, ast.Expr)
+                    and isinstance(first.value, ast.Constant)
+                    and isinstance(first.value.value, str)
+                ):
+                    skipped.update(range(first.lineno, first.end_lineno + 1))
+        # From the first decorator, not the def line: a reach that lives only
+        # in a decorator (a patch of a registry attribute) is a reach.
+        start = node.lineno
+        for decorator in getattr(node, "decorator_list", []):
+            start = min(start, decorator.lineno)
+        kept = []
+        for number in range(start, node.end_lineno + 1):
+            if number in skipped:
+                continue
+            line = source_lines[number - 1].strip()
+            if line.startswith("#"):
+                continue
+            kept.append(line)
+        return "\n".join(kept)
+
+    @staticmethod
+    def _module_level_nodes(tree):
+        """The module-level statements of *tree*, looked for inside module-level
+        control flow too (if/try/for/while/with/match): a definition there
+        binds a module name just the same, so one holding a registry reach
+        cannot hide behind a version check, an import guard or a case arm.
+        Function and class bodies are not entered; their inner names are not
+        module-level."""
+        flow = (ast.If, ast.Try, ast.For, ast.While, ast.With)
+        try_star = getattr(ast, "TryStar", None)
+        if try_star is not None:
+            flow = (*flow, try_star)
+        pending = list(tree.body)
+        while pending:
+            node = pending.pop(0)
+            if isinstance(node, ast.Match):
+                for case in node.cases:
+                    pending.extend(case.body)
+                continue
+            if isinstance(node, flow):
+                for field in ("body", "orelse", "finalbody"):
+                    pending.extend(getattr(node, field, None) or [])
+                for handler in getattr(node, "handlers", None) or []:
+                    pending.extend(handler.body)
+                continue
+            yield node
+
+    @classmethod
+    def _registry_reaching_definitions(cls, files) -> Dict[str, List[str]]:
+        """``{name: files (by _shown_name) defining it}`` for every module-level
+        definition in *files* that reaches the registry. The rules and the
+        exemptions are at the _REGISTRY_HELPERS comment: functions, classes
+        and assignments; a definition reaches by spelling a registry pattern,
+        or the name of another definition already flagged, to a fixed point
+        rooted at the patterns alone - never seeded from the table, so a
+        hand-typed key cannot justify itself."""
+        definitions = []
+        for path in files:
+            shown = cls._shown_name(path)
+            source = path.read_text(encoding="utf-8")
+            source_lines = source.splitlines()
+            in_conftest = path.name == "conftest.py"
+            for node in cls._module_level_nodes(ast.parse(source)):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    if node.name.startswith("test_"):
+                        continue
+                    fixture = cls._pytest_fixture_decorator(node)
+                    if fixture is not None and (
+                        not in_conftest or cls._is_autouse(fixture)
+                    ):
+                        continue
+                    names = [node.name]
+                elif isinstance(node, ast.ClassDef):
+                    if node.name.startswith("Test"):
+                        continue
+                    names = [node.name]
+                elif isinstance(node, ast.Assign):
+                    names = [
+                        target.id
+                        for target in node.targets
+                        if isinstance(target, ast.Name)
+                    ]
+                elif isinstance(node, ast.AnnAssign):
+                    names = (
+                        [node.target.id] if isinstance(node.target, ast.Name) else []
+                    )
+                else:
+                    continue
+                if not names:
+                    continue
+                text = cls._searchable_text(source_lines, node)
+                for name in names:
+                    definitions.append((name, shown, text))
+        reached: Dict[str, List[str]] = {}
+        # The fixed point starts EMPTY, never from the table's own keys: seeded
+        # with them, two hand-typed keys that reach nothing but name each other
+        # would read as derived, and the both-directions check below would
+        # enforce nothing for them. Every chain roots at a registry pattern.
+        reach_names: set = set()
+        while True:
+            grew = False
+            matchers = {
+                name: re.compile(rf"(?<!\w){re.escape(name)}(?!\w)")
+                for name in reach_names
+            }
+            for name, shown, text in definitions:
+                if shown in reached.get(name, ()):
+                    continue
+                direct = any(pattern in text for pattern in cls._REGISTRY_PATTERNS)
+                through = any(
+                    other != name and matcher.search(text)
+                    for other, matcher in matchers.items()
+                )
+                if direct or through:
+                    reached.setdefault(name, []).append(shown)
+                    if name not in reach_names:
+                        reach_names.add(name)
+                        grew = True
+            if not grew:
+                return reached
+
+    @classmethod
+    def _allowed_sweep_files(cls):
+        """The file behind each _REGISTRY_SWEEP_ALLOWED test entry, matched
+        exactly once per entry and in both directions: a count comparison
+        reads one entry matched twice and another not at all as complete, and
+        the no-match it hides is a file the table reasons about going unswept.
+        plugin_manager.py is the registry's production owner, not a borrowable
+        test helper, and is not scanned here."""
+        allowed = tuple(
+            entry
+            for entry in cls._REGISTRY_SWEEP_ALLOWED
+            if entry != "automated_security_helper/plugins/plugin_manager.py"
+        )
+        matches = {entry: [] for entry in allowed}
+        for path in cls._source_files():
+            for entry in allowed:
+                if ("/" in entry and cls._shown_name(path) == entry) or (
+                    "/" not in entry and path.name == entry
+                ):
+                    matches[entry].append(path)
+        wrong = {
+            entry: sorted(cls._shown_name(path) for path in found)
+            for entry, found in matches.items()
+            if len(found) != 1
+        }
+        assert wrong == {}, (
+            "each allowed entry must match exactly one swept file: " + repr(wrong)
+        )
+        return [found[0] for found in matches.values()]
+
+    def _assert_every_reaching_definition_is_in_the_table(self, files):
+        """The one enforcement the completeness test and its controls share:
+        the derivation over *files* equals the table in both directions. The
+        controls call this same method, so gutting either assertion fails
+        them rather than leaving the test to agree with itself."""
+        reached = self._registry_reaching_definitions(files)
+        unlisted = {
+            name: files_naming
+            for name, files_naming in reached.items()
+            if name not in self._REGISTRY_HELPERS
+        }
+        assert unlisted == {}, (
+            "definitions reaching the registry but not in _REGISTRY_HELPERS: "
+            + repr(unlisted)
+        )
+        # Both directions: a table key the derivation does not reach is a
+        # hand-typed entry that enforces nothing, and deleting a derived key
+        # turns the assertion above red instead of nothing.
+        underived = sorted(set(self._REGISTRY_HELPERS) - set(reached))
+        assert underived == [], (
+            "table keys the derivation does not reach: " + ", ".join(underived)
+        )
+        return reached
+
+    def test_every_registry_reaching_helper_is_in_the_table(self):
+        """The table is derived, not hand-trusted; the rules are at the
+        _REGISTRY_HELPERS comment. Every reaching definition in an allowed
+        file either joins the table (and the name sweep above) or loses the
+        access, so the next a_scanner_registration - and the next wrapper
+        around one - is caught at the commit that writes it."""
+        self._assert_every_reaching_definition_is_in_the_table(
+            self._allowed_sweep_files()
+        )
+
+    def test_an_unlisted_reaching_definition_fails_the_table_check(self, tmp_path):
+        """The must-fire for the check's unlisted side: a reaching definition
+        the table does not key fails the shared enforcement by name."""
+        planted = tmp_path / "handout.py"
+        planted.write_text(
+            "from automated_security_helper.plugins import ash_plugin_manager\n"
+            "\n"
+            "\n"
+            "def hands_out():\n"
+            "    return ash_plugin_manager.plugin_library\n",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(AssertionError) as flagged:
+            self._assert_every_reaching_definition_is_in_the_table(
+                [*self._allowed_sweep_files(), planted]
+            )
+
+        assert "hands_out" in str(flagged.value), flagged.value
+
+    def test_an_underived_table_key_fails_the_table_check(self, monkeypatch):
+        """The must-fire for the check's underived side: a key the derivation
+        does not reach fails the shared enforcement by name."""
+        with_fake = dict(self._REGISTRY_HELPERS)
+        with_fake["a_key_nothing_derives"] = ("tests/snapshot/conftest.py",)
+        monkeypatch.setattr(type(self), "_REGISTRY_HELPERS", with_fake)
+
+        with pytest.raises(AssertionError) as flagged:
+            self._assert_every_reaching_definition_is_in_the_table(
+                self._allowed_sweep_files()
+            )
+
+        assert "a_key_nothing_derives" in str(flagged.value), flagged.value
+
+    def test_hand_typed_keys_cannot_justify_each_other(self, tmp_path, monkeypatch):
+        """The fixed point starts empty, never from the table's own keys:
+        seeded with them, two hand-typed keys that reach nothing but name each
+        other would read as derived, and the both-directions check would
+        enforce nothing for them."""
+        planted = tmp_path / "mutual.py"
+        planted.write_text(
+            "def first_of_a_pair():\n"
+            "    return second_of_a_pair()\n"
+            "\n"
+            "\n"
+            "def second_of_a_pair():\n"
+            "    return first_of_a_pair()\n",
+            encoding="utf-8",
+        )
+        shown = self._shown_name(planted)
+        with_pair = dict(self._REGISTRY_HELPERS)
+        with_pair["first_of_a_pair"] = (shown,)
+        with_pair["second_of_a_pair"] = (shown,)
+        monkeypatch.setattr(type(self), "_REGISTRY_HELPERS", with_pair)
+
+        with pytest.raises(AssertionError) as flagged:
+            self._assert_every_reaching_definition_is_in_the_table(
+                [*self._allowed_sweep_files(), planted]
+            )
+
+        message = str(flagged.value)
+        assert "first_of_a_pair" in message, message
+        assert "second_of_a_pair" in message, message
+
+    def test_a_wrapper_reaching_the_registry_through_a_helper_is_derived(
+        self, tmp_path
+    ):
+        """The fixed point's must-fire: a helper whose body spells no registry
+        pattern and only calls a reaching helper is a reach, and so is a
+        wrapper around that wrapper. The chain roots at a pattern in the same
+        scan, as every real chain roots at one in the allowed files."""
+        planted = tmp_path / "helpers.py"
+        planted.write_text(
+            "from automated_security_helper.plugins import ash_plugin_manager\n"
+            "\n"
+            "\n"
+            "def reaches_directly():\n"
+            "    return ash_plugin_manager.plugin_library\n"
+            "\n"
+            "\n"
+            "def borrows():\n"
+            "    return reaches_directly()\n"
+            "\n"
+            "\n"
+            "def wraps_the_borrower():\n"
+            "    return borrows()\n",
+            encoding="utf-8",
+        )
+
+        reached = self._registry_reaching_definitions([planted])
+
+        assert set(reached) >= {
+            "reaches_directly",
+            "borrows",
+            "wraps_the_borrower",
+        }, reached
+
+    def test_a_name_sharing_a_prefix_is_not_derived_through(self, tmp_path):
+        """The derivation matches a flagged name as a whole word, like the
+        name sweep: an identifier that merely starts with one is not a reach,
+        and neither is a definition that only names that identifier."""
+        planted = tmp_path / "prefixes.py"
+        planted.write_text(
+            "from automated_security_helper.plugins import ash_plugin_manager\n"
+            "\n"
+            "anchor_point = object()\n"
+            "\n"
+            "\n"
+            "def anchor():\n"
+            "    return ash_plugin_manager.plugin_library\n"
+            "\n"
+            "\n"
+            "def innocent():\n"
+            "    return anchor_point\n",
+            encoding="utf-8",
+        )
+
+        reached = self._registry_reaching_definitions([planted])
+
+        assert "anchor" in reached, reached
+        assert "innocent" not in reached, reached
+        assert "anchor_point" not in reached, reached
+
+    def test_a_reach_only_in_a_decorator_is_derived(self, tmp_path):
+        """A patch of a registry attribute written as a decorator reaches the
+        registry for whoever calls the decorated helper; the definition's text
+        starts at its first decorator, not at the def line."""
+        planted = tmp_path / "decorated.py"
+        planted.write_text(
+            "from unittest.mock import patch\n"
+            "\n"
+            "from automated_security_helper.plugins import ash_plugin_manager\n"
+            "\n"
+            "\n"
+            '@patch.object(ash_plugin_manager, "_resolved_plugins", new=None)\n'
+            "def swaps_the_cache():\n"
+            "    return None\n",
+            encoding="utf-8",
+        )
+
+        reached = self._registry_reaching_definitions([planted])
+
+        assert "swaps_the_cache" in reached, reached
+
+    def test_a_definition_inside_module_level_control_flow_is_derived(self, tmp_path):
+        """A definition under a module-level if or try binds a module name just
+        the same, so a reach there cannot hide behind a version check or an
+        import guard."""
+        planted = tmp_path / "guarded.py"
+        planted.write_text(
+            "from automated_security_helper.plugins import ash_plugin_manager\n"
+            "\n"
+            "if True:\n"
+            "\n"
+            "    def behind_an_if():\n"
+            "        return ash_plugin_manager.plugin_library\n"
+            "\n"
+            "\n"
+            "try:\n"
+            "    behind_a_try = ash_plugin_manager.plugin_library\n"
+            "except Exception:\n"
+            "    behind_a_try = None\n",
+            encoding="utf-8",
+        )
+
+        reached = self._registry_reaching_definitions([planted])
+
+        assert "behind_an_if" in reached, reached
+        assert "behind_a_try" in reached, reached
+
+    def test_a_definition_inside_a_module_level_match_arm_is_derived(self, tmp_path):
+        """A def under a module-level match/case binds a module name like one
+        under an if, and ast.Match is not one of the body-carrying flow nodes
+        the generic walk reads, so it needs its own arm in the walker."""
+        planted = tmp_path / "matched.py"
+        planted.write_text(
+            "import sys\n"
+            "from automated_security_helper.plugins import ash_plugin_manager\n"
+            "\n"
+            "match sys.platform:\n"
+            "    case 'linux':\n"
+            "\n"
+            "        def behind_a_case():\n"
+            "            return ash_plugin_manager.plugin_library\n"
+            "\n"
+            "    case _:\n"
+            "\n"
+            "        def behind_the_default_case():\n"
+            "            return ash_plugin_manager.plugin_library\n",
+            encoding="utf-8",
+        )
+
+        reached = self._registry_reaching_definitions([planted])
+
+        assert "behind_a_case" in reached, reached
+        assert "behind_the_default_case" in reached, reached
+
+    @pytest.mark.skipif(
+        sys.version_info < (3, 11), reason="the star form of except needs Python 3.11"
+    )
+    def test_a_definition_inside_an_except_star_handler_is_derived(self, tmp_path):
+        """ast.TryStar carries its handlers like Try does, but it is its own
+        node type: dropped from the walker's flow tuple, a def under
+        ``except*`` would go unseen while every try/except cell stays green."""
+        planted = tmp_path / "grouped.py"
+        planted.write_text(
+            "from automated_security_helper.plugins import ash_plugin_manager\n"
+            "\n"
+            "try:\n"
+            "    pass\n"
+            "except* ValueError:\n"
+            "    def behind_an_except_star():\n"
+            "        return ash_plugin_manager.plugin_library\n",
+            encoding="utf-8",
+        )
+
+        reached = self._registry_reaching_definitions([planted])
+
+        assert "behind_an_except_star" in reached, reached
+
+    def test_every_flow_body_and_arm_is_walked(self, tmp_path):
+        """One definition per flow construct and arm beyond if-body and
+        try-body: for, while and with bodies, a for's else, a try's else, an
+        except handler and a finally. A walker reading only If and Try bodies
+        passes the existing cells; each name here pins one of the others."""
+        planted = tmp_path / "flows.py"
+        planted.write_text(
+            "from automated_security_helper.plugins import ash_plugin_manager\n"
+            "\n"
+            "for _item in []:\n"
+            "    def in_a_for():\n"
+            "        return ash_plugin_manager.plugin_library\n"
+            "else:\n"
+            "    def in_a_for_else():\n"
+            "        return ash_plugin_manager.plugin_library\n"
+            "while False:\n"
+            "    def in_a_while():\n"
+            "        return ash_plugin_manager.plugin_library\n"
+            "with open('/dev/null') as _handle:\n"
+            "    def in_a_with():\n"
+            "        return ash_plugin_manager.plugin_library\n"
+            "try:\n"
+            "    pass\n"
+            "except Exception:\n"
+            "    def in_an_except():\n"
+            "        return ash_plugin_manager.plugin_library\n"
+            "else:\n"
+            "    def in_a_try_else():\n"
+            "        return ash_plugin_manager.plugin_library\n"
+            "finally:\n"
+            "    def in_a_finally():\n"
+            "        return ash_plugin_manager.plugin_library\n",
+            encoding="utf-8",
+        )
+
+        reached = self._registry_reaching_definitions([planted])
+
+        for name in (
+            "in_a_for",
+            "in_a_for_else",
+            "in_a_while",
+            "in_a_with",
+            "in_an_except",
+            "in_a_try_else",
+            "in_a_finally",
+        ):
+            assert name in reached, (name, sorted(reached))
+
+    def test_an_aliased_assembled_or_line_split_reach_is_not_derived(self, tmp_path):
+        """The pin for the documented limit at _REGISTRY_HELPERS: both sweeps
+        match names as written, so a reach through an import alias, a split
+        or assembled registry spelling, or a name computed at run time is not
+        matched. If any of them starts being derived, the limit comment above
+        the table is stale and moves with this cell. The three attribute
+        forms sit in a pattern shape on the real registry name, so a sweep
+        that started joining adjacent literals would derive exactly the
+        joined form, one joining ``+`` concatenations exactly the plus form,
+        and the f-string form stays unseen either way. The ``globals()``
+        lookup is the computed-name limit: no pattern has that shape, so it
+        stays underived whatever the text sweep reads. The direct reach in
+        the same file is the must-fire: a derivation gone blind reds here
+        instead of passing vacuously."""
+        planted = tmp_path / "unseen.py"
+        planted.write_text(
+            "from automated_security_helper.plugins import (\n"
+            "    ash_plugin_manager as apm,\n"
+            ")\n"
+            "from automated_security_helper.plugins import ash_plugin_manager\n"
+            "\n"
+            "\n"
+            "def reaches_directly():\n"
+            "    return ash_plugin_manager.plugin_library\n"
+            "\n"
+            "\n"
+            "def via_an_alias():\n"
+            "    return apm.plugin_library\n"
+            "\n"
+            "\n"
+            "def via_joined_attribute():\n"
+            '    return getattr(ash_plugin_manager, "plugin" "_library")\n'
+            "\n"
+            "\n"
+            "def via_plus_attribute():\n"
+            '    return getattr(ash_plugin_manager, "plugin" + "_library")\n'
+            "\n"
+            "\n"
+            "def via_fstring_attribute():\n"
+            '    part = "library"\n'
+            '    return getattr(ash_plugin_manager, f"plugin_{part}")\n'
+            "\n"
+            "\n"
+            "def via_computed_name_lookup():\n"
+            '    name = "ash_plugin" + "_manager"\n'
+            '    return getattr(globals()[name], "plugin" + "_library")\n'
+            "\n"
+            "\n"
+            "def via_a_line_split():\n"
+            "    return (\n"
+            "        ash_plugin_manager\n"
+            "        .plugin_library\n"
+            "    )\n",
+            encoding="utf-8",
+        )
+
+        reached = self._registry_reaching_definitions([planted])
+
+        assert "reaches_directly" in reached, reached
+        assert "via_an_alias" not in reached, reached
+        assert "via_joined_attribute" not in reached, reached
+        assert "via_plus_attribute" not in reached, reached
+        assert "via_fstring_attribute" not in reached, reached
+        assert "via_computed_name_lookup" not in reached, reached
+        assert "via_a_line_split" not in reached, reached
+
+    def test_the_production_owner_is_named_by_its_full_path(self):
+        """plugin_manager.py's allowlist entry spells the repo-relative path,
+        so a same-named file elsewhere cannot take the production owner's
+        exemption, and the entry names the file that exists there."""
+        entry = "automated_security_helper/plugins/plugin_manager.py"
+        assert entry in self._REGISTRY_SWEEP_ALLOWED
+        assert "plugin_manager.py" not in self._REGISTRY_SWEEP_ALLOWED
+        root = Path(__file__).resolve().parents[3]
+        assert (root / entry).is_file()
+
+    def test_a_module_level_binding_and_class_are_derived(self, tmp_path):
+        """An assignment aliasing the registry and a class whose method reads
+        it hand the registry out with no function definition to scan."""
+        planted = tmp_path / "handout.py"
+        planted.write_text(
+            "from automated_security_helper.plugins import ash_plugin_manager\n"
+            "\n"
+            "shared_registry = ash_plugin_manager.plugin_library\n"
+            "\n"
+            "\n"
+            "class Handout:\n"
+            "    def registry(self):\n"
+            "        return ash_plugin_manager.plugin_library\n",
+            encoding="utf-8",
+        )
+
+        reached = self._registry_reaching_definitions([planted])
+
+        assert set(reached) >= {"shared_registry", "Handout"}, reached
+
+    def test_a_conftest_fixture_is_derived_unless_autouse(self, tmp_path):
+        """A conftest fixture is requestable tree-wide, so one that reaches
+        the registry is a borrowable helper unless it is autouse; and a
+        usefixtures decorator marks a user, not a fixture definition, so it
+        exempts nothing."""
+        planted = tmp_path / "conftest.py"
+        planted.write_text(
+            "import pytest\n"
+            "from automated_security_helper.plugins import ash_plugin_manager\n"
+            "\n"
+            "\n"
+            "@pytest.fixture\n"
+            "def requestable_registry():\n"
+            "    return ash_plugin_manager.plugin_library\n"
+            "\n"
+            "\n"
+            "@pytest.fixture(autouse=True)\n"
+            "def _resets_quietly():\n"
+            "    ash_plugin_manager.plugin_library\n"
+            "\n"
+            "\n"
+            '@pytest.mark.usefixtures("requestable_registry")\n'
+            "def decorated_helper():\n"
+            "    return ash_plugin_manager.plugin_library\n",
+            encoding="utf-8",
+        )
+
+        reached = self._registry_reaching_definitions([planted])
+
+        assert "requestable_registry" in reached, reached
+        assert "_resets_quietly" not in reached, reached
+        assert "decorated_helper" in reached, reached
+
+    def test_a_file_bound_fixture_and_docstring_prose_are_not_derived(self, tmp_path):
+        """The exemptions' control, and the pin of a DOCUMENTED LIMIT: a
+        fixture in a non-conftest file is exempt although pytest fixtures can
+        be imported by name into another module and resolve there, so the
+        exemption is import-blind (the table comment names this). This pin
+        turns red if the exemption ever narrows, so the comment moves with the
+        behavior. The docstring-prose half is the plain control: a definition
+        whose only mention of the registry is its docstring documents the
+        hazard rather than reaching it."""
+        planted = tmp_path / "test_module.py"
+        planted.write_text(
+            "import pytest\n"
+            "from automated_security_helper.plugins import ash_plugin_manager\n"
+            "\n"
+            "\n"
+            "@pytest.fixture\n"
+            "def own_registry():\n"
+            "    return ash_plugin_manager.plugin_library\n"
+            "\n"
+            "\n"
+            "def documents_only():\n"
+            '    """Explains builtin_plugin_registry and\n'
+            '    ash_plugin_manager.plugin_library at length."""\n'
+            "    return None\n",
+            encoding="utf-8",
+        )
+
+        reached = self._registry_reaching_definitions([planted])
+
+        assert reached == {}, reached
+
+    def test_a_double_match_cannot_hide_a_missing_allowed_file(
+        self, tmp_path, monkeypatch
+    ):
+        """A count comparison (len(files) == len(allowed)) reads one entry
+        matched twice and another matched not at all as complete. One match
+        per entry, and both failures named."""
+        extra = tmp_path / "test_plugin_system.py"
+        extra.write_text("x = 1\n", encoding="utf-8")
+        walked = [
+            path
+            for path in type(self)._source_files()
+            if self._shown_name(path) != "tests/snapshot/conftest.py"
+        ]
+        monkeypatch.setattr(
+            type(self), "_source_files", classmethod(lambda cls: [*walked, extra])
+        )
+
+        with pytest.raises(AssertionError) as flagged:
+            self._allowed_sweep_files()
+
+        message = str(flagged.value)
+        assert "test_plugin_system.py" in message, message
+        assert "tests/snapshot/conftest.py" in message, message

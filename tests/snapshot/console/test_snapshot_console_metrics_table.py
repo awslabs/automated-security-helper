@@ -126,7 +126,7 @@ def test_display_metrics_table(system, width, text_snapshot, tmp_path, monkeypat
         consoles.append(console)
         return console
 
-    monkeypatch.setattr(metrics_table, "Console", pinned_console)
+    monkeypatch.setattr(metrics_table, "ash_console", pinned_console)
 
     display_metrics_table(
         scan_results_model(with_stale_databases=True),

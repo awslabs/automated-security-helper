@@ -49,7 +49,7 @@ sequenceDiagram
         CV-->>ASH: Return Validation Status
 
         alt Converter Valid
-            ASH->>CV: convert(target)
+            ASH->>CV: convert()
             CV->>FS: Read Source Files
             FS-->>CV: Return File Contents
 
@@ -59,7 +59,7 @@ sequenceDiagram
             CV->>FS: Write Converted Files
             FS-->>CV: Files Written
 
-            CV-->>ASH: Return Converted Path
+            CV-->>ASH: Return Converted Paths
         else Converter Invalid
             ASH->>ES: Emit ConverterError Event
         end
@@ -78,28 +78,27 @@ flowchart TD
 
     B --> C{Archive Type?}
 
-    C -->|ZIP| D[Extract ZIP]
-    C -->|TAR| E[Extract TAR]
-    C -->|TAR.GZ| F[Extract TAR.GZ]
+    C -->|ZIP| D[Read the member list]
+    C -->|TAR, TAR.GZ| E[Read headers one at a time]
 
-    D --> G[Extracted Files]
-    E --> G
-    F --> G
+    D --> F{Over an extraction limit?}
+    E --> F
 
-    G --> H{Contains Nested Archives?}
+    F -->|Yes| G[Refuse the whole archive: nothing written, recorded with the limit]
+    F -->|No| H{Member is an archive?}
 
-    H -->|Yes| I{Max Depth Reached?}
-    H -->|No| J[Proceed to Scanning]
+    G --> N[Scan exits 1 when fail_on_incomplete_scanners is on]
 
-    I -->|Yes| K[Skip Nested Archives]
-    I -->|No| L[Process Nested Archives]
-
-    L --> B
-
-    K --> J
+    H -->|Yes| I[Recorded as not scanned, not extracted]
+    H -->|No| J[Extract scannable regular files, at most their declared size]
 
     J --> M[Scanner Plugins]
 ```
+
+Extraction is one level deep: an archive inside an archive is never extracted, and is
+reported as not scanned. The limits are `max_members`, `max_member_bytes`,
+`max_total_bytes` and `max_compression_ratio`; see
+[Archive Converter](converters.md#archive-converter).
 
 ## Jupyter Converter Workflow
 
@@ -137,7 +136,7 @@ The following diagram shows how configuration flows through the built-in convert
 
 ```mermaid
 flowchart TD
-    A[.ash/.ash.yaml] --> B[Configuration Parser]
+    A[ASH config file] --> B[Configuration Parser]
     C[CLI Arguments] --> B
     B --> D[ASH Configuration]
     D --> E[Converter Configuration]

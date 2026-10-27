@@ -320,20 +320,24 @@ class TestTheResolveFlagsAreHonoured:
 
     @pytest.mark.asyncio
     async def test_workspace_config_reaches_the_plan(
-        self, tmp_path, isolated_registry, orchestrators_built, executions
+        self, tmp_path, monkeypatch, isolated_registry, orchestrators_built, executions
     ):
         """A named policy file shows up as the policy the plan reports.
 
         The plan prints a ``policy:`` line only when there is one, so its
         presence is the observable. Dropping the parameter would leave the plan
         describing a scan with no ceiling while the scan the caller runs next
-        applies one -- the exact drift ``--dry-run`` exists to rule out.
+        applies one -- the exact drift ``--dry-run`` exists to rule out. The
+        policy sits in a directory the operator set aside with
+        ``ASH_MCP_ALLOWED_CONFIG_ROOTS``; elsewhere it is the client's, and
+        refused.
         """
         root = tmp_path / "work"
         _project(root, "api")
         workspace = _workspace(root, ["api"])
         policy = tmp_path / "central" / "ash-workspace.yaml"
         policy.parent.mkdir(parents=True)
+        monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(policy.parent))
         policy.write_text(
             "workspace:\n  max_severity_threshold: CRITICAL\n", encoding="utf-8"
         )

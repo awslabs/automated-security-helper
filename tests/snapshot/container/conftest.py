@@ -27,6 +27,7 @@ in length between machines and moves rich's wrap points.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess  # nosec B404 - the fake runner below starts a Python child on purpose
 import sys
@@ -45,7 +46,7 @@ FIXTURE_REPO = REPO_ROOT / "tests" / "test_data" / "snapshot_fixture" / "repo"
 
 #: What the fake runner reports as its path. A fixed string, so the "Resolved
 #: OCI_RUNNER to:" line is the same on every machine.
-FAKE_DOCKER = "/usr/bin/docker"
+FAKE_DOCKER = "/nonexistent/ash-test/docker"
 
 
 @pytest.fixture
@@ -56,17 +57,21 @@ def in_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture
-def local_checkout(in_tmp: Path) -> None:
-    """Make the working directory look like an ASH checkout to build from.
+def project_build_files_in_cwd(in_tmp: Path) -> None:
+    """Make the working directory a project with a Dockerfile and pyproject.toml of its own.
 
-    Container mode resolves its Dockerfile before it decides whether to build: for
-    a LOCAL revision, the nearest directory holding both a Dockerfile and a
-    pyproject.toml, starting at the working directory. These two empty files are
-    what it finds, so the build context it prints is <TMP> and nothing depends on
-    where the suite was started.
+    That is the usual shape of a Python project that ships a container image, and
+    it is what ``ash`` is most often started in. Container mode builds ASH's own
+    Dockerfile regardless: this suite imports ASH from a checkout, so the revision
+    is LOCAL and a build command printed here names that checkout (``<REPO>``) as
+    both the Dockerfile's directory and the build context, never ``<TMP>``.
     """
-    (in_tmp / "Dockerfile").write_text("", encoding="utf-8")
-    (in_tmp / "pyproject.toml").write_text("", encoding="utf-8")
+    (in_tmp / "Dockerfile").write_text(
+        "FROM scratch AS non-root\nFROM scratch AS ci\n", encoding="utf-8"
+    )
+    (in_tmp / "pyproject.toml").write_text(
+        "[project]\nname = 'scanned'\n", encoding="utf-8"
+    )
 
 
 @pytest.fixture
@@ -120,6 +125,42 @@ class FakeStep:
     stderr: str = ""
     #: For ``run``: the results JSON to leave in the mounted output directory.
     results_json: str | None = None
+    #: Whether the run marks its results completed, as an inner ASH run does when it
+    #: finishes. False leaves the file as an ASH older than the host's would.
+    marks_completion: bool = True
+
+
+def completed_by(results_json: str, run_id: str | None) -> str:
+    """``results_json`` with the completion marker an inner run writes for ``run_id``.
+
+    See utils/inner_run_outcome.py. Text that does not parse is returned unchanged,
+    as the inner run could not have marked it either.
+    """
+    try:
+        document = json.loads(results_json)
+    except ValueError:
+        return results_json
+    if run_id is None or not isinstance(document, dict):
+        return results_json
+    document.setdefault("validation_checkpoints", []).append(
+        {"type": "run_completed", "metadata": {"run_id": run_id}}
+    )
+    return json.dumps(document)
+
+
+def _outer_run_id(args: list[str], env: dict | None) -> str | None:
+    """The run ID the host passed, as the runner would read it.
+
+    ``-e ASH_OUTER_RUN_ID`` takes the value from the runner's environment, and
+    ``-e ASH_OUTER_RUN_ID=<id>`` gives it on the command line.
+    """
+    for index, arg in enumerate(args[:-1]):
+        if arg != "-e":
+            continue
+        name, _, value = args[index + 1].partition("=")
+        if name == "ASH_OUTER_RUN_ID":
+            return value or (env or {}).get(name)
+    return None
 
 
 @dataclass
@@ -138,14 +179,21 @@ class FakeOciRunner:
     run: FakeStep = field(default_factory=FakeStep)
     calls: list[str] = field(default_factory=list)
 
-    def popen(self, args: list[str], **_kwargs: Any) -> subprocess.Popen:
+    def popen(self, args: list[str], **kwargs: Any) -> subprocess.Popen:
         subcommand = next(a for a in args[1:] if not a.startswith("-"))
         self.calls.append(subcommand)
         step = {"build": self.build, "run": self.run}[subcommand]
         if subcommand == "run" and step.results_json is not None:
+            # surrogateescape: a lone surrogate such as "\udcff" is written as the
+            # byte it stands for, so a step can leave a file that is not UTF-8.
+            results_json = (
+                completed_by(step.results_json, _outer_run_id(args, kwargs.get("env")))
+                if step.marks_completion
+                else step.results_json
+            )
             _mounted_output_dir(args).joinpath(
                 "ash_aggregated_results.json"
-            ).write_text(step.results_json, encoding="utf-8")
+            ).write_text(results_json, encoding="utf-8", errors="surrogateescape")
         script = (
             "import sys\n"
             f"sys.stdout.write({step.stdout!r})\n"
@@ -178,8 +226,8 @@ def fake_docker(
     """Resolve ``docker`` to :data:`FAKE_DOCKER` and run :class:`FakeOciRunner` for it.
 
     The clock is pinned in run_ash_container as well, because the build command it
-    assembles carries ``BUILD_DATE_EPOCH=<now>`` and a failed build prints that
-    command. The buildx probe is answered "no", so the build is a plain
+    assembles for an offline build carries ``BUILD_DATE_EPOCH=<now>`` and a failed
+    build prints that command. The buildx probe is answered "no", so the build is a plain
     ``docker build`` whatever the machine's docker supports.
     """
     from automated_security_helper.interactions import run_ash_container

@@ -10,7 +10,11 @@ import { App, Stack } from 'aws-cdk-lib';
 import { Capture, Match, Template } from 'aws-cdk-lib/assertions';
 
 import { AshAgentCoreStack } from '../lib/ash-agentcore-stack';
-import { ASH_PARAMETER_NAMES, DEFAULT_REBUILD_SCHEDULE } from '../lib/ash-config';
+import {
+  ASH_PARAMETER_NAMES,
+  DEFAULT_ASH_VERSION,
+  DEFAULT_REBUILD_SCHEDULE,
+} from '../lib/ash-config';
 
 function synth(): Template {
   const app = new App({ analyticsReporting: false });
@@ -148,11 +152,14 @@ describe('AgentCore runtime contract', () => {
   });
 
   test('the parameter defaults this stack ships are the ones that needed resolving', () => {
-    // Pinned so the fallback above cannot become decorative without anyone
-    // noticing: if either default moves, this fails and whoever moved it has to
-    // decide whether the fallback is still needed.
+    // AshVersion is the packaged release, which `cz bump` moves at every release,
+    // so it is read from DEFAULT_ASH_VERSION rather than written out: a literal
+    // here turned every release bump red. The fallback above goes at the first
+    // release with --stateless-http, and
+    // tests/unit/deploy/test_agentcore_stateless_fallback_tripwire.py fails at
+    // that bump until it is gone.
     const parameters = template.toJSON().Parameters;
-    expect(parameters[ASH_PARAMETER_NAMES.ashVersion].Default).toBe('v3.7.0');
+    expect(parameters[ASH_PARAMETER_NAMES.ashVersion].Default).toBe(DEFAULT_ASH_VERSION);
     expect(parameters[ASH_PARAMETER_NAMES.mcpStatelessHttp].Default).toBe('true');
   });
 

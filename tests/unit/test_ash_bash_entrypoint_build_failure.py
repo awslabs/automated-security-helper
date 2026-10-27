@@ -26,6 +26,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.host_ids import with_fixed_ids
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ASH_SCRIPT = REPO_ROOT / "ash"
 
@@ -86,7 +88,11 @@ def run_ash(failing_runner, tmp_path):
         capture_output=True,
         text=True,
         cwd=str(REPO_ROOT),
-        env={**os.environ, "OCI_RUNNER": str(failing_runner)},
+        # An unprivileged `id`, so the default non-root build reaches the runner when
+        # the suite itself runs as root.
+        env=with_fixed_ids(
+            {**os.environ, "OCI_RUNNER": str(failing_runner)}, tmp_path / "fixed-id-bin"
+        ),
         timeout=180,
         check=False,
     )

@@ -87,7 +87,7 @@ ASH provides several ways to manage your configuration:
 
 ### Configuration File
 
-ASH uses YAML configuration files by default. The standard location is `.ash/.ash.yaml` in your project directory. You can also use JSON format with `.ash/.ash.json`.
+ASH uses YAML configuration files by default. `ash config init` creates `.ashrc.yaml` in your project directory; an existing `.ash/.ash.yaml` keeps working. You can also use JSON (`.ashrc.json`) or TOML (`.ashrc.toml`, or a `[tool.ash]` table in `pyproject.toml`). The [Configuration Guide](configuration-guide.md#configuration-file-location) lists every name ASH looks for, in order.
 
 A basic configuration file looks like this:
 
@@ -131,7 +131,7 @@ Create a new configuration file:
 ash config init
 ```
 
-This creates a default configuration file at `.ash/.ash.yaml`.
+This creates a default configuration file, `.ashrc.yaml`, in the current directory.
 
 #### View Current Configuration
 
@@ -182,10 +182,12 @@ ash config validate --config-overrides 'scanners.bandit.options.confidence_level
 ### Custom Plugins
 
 You can add custom plugins to ASH by specifying them in the `ash_plugin_modules` list.
-The top-level package must be inside ASH's plugin namespace: either under
-`automated_security_helper.`, or a top-level package whose name ends in `ash_plugins`
-(`my_ash_plugins`, `acme_ash_plugins`). A module outside that namespace is skipped with
-a warning rather than imported, so a name like `my_plugins` silently registers nothing.
+Each entry must be a dotted path of Python identifiers inside ASH's plugin namespace:
+under `automated_security_helper.` or `ash_plugins`, or a top-level package named
+`ash_plugins` or ending in `_ash_plugins` (`my_ash_plugins`, `acme_ash_plugins`). A
+name outside that namespace, such as `my_plugins`, ASH's plugin root
+`automated_security_helper.plugin_modules`, or a namespace package (a directory with no
+`__init__.py`) refuses the scan with exit code 3 before any module is imported.
 
 ```yaml
 ash_plugin_modules:
@@ -203,24 +205,71 @@ ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
 - Configuration overrides are applied after loading the configuration file
 - Overrides work with both default and explicit configurations
 - An override that cannot be parsed, or that produces a configuration failing
-  validation, stops the run with exit code 3 (`invalid config`). Nothing is
-  scanned, because continuing would mean scanning with settings you did not
-  choose. Note that a top-level key ASH does not recognise is still ignored
+  validation, stops the run with exit code 3
+  (`invalid config or refused input`). Nothing is scanned, because continuing
+  would mean scanning with settings you did not choose. Note that a top-level key ASH does not recognise is still ignored
   rather than rejected, for compatibility with configuration files written
   against other ASH versions.
 - For complex values, use valid JSON syntax
 - Environment variables can be referenced in YAML configuration files using
-  `!ENV ${VAR_NAME:default_value}` syntax. `VAR_NAME` must begin with `ASH_`, or
-  be one of `AWS_REGION`, `AWS_DEFAULT_REGION` or `AWS_PROFILE`. A reference to
-  any other name is left in the configuration exactly as written and a warning
-  names it; ASH does not read the variable. The names are matched exactly, so
-  write them in upper case.
+  `!ENV ${VAR_NAME}` or `!ENV ${VAR_NAME:default_value}` syntax. `VAR_NAME` must
+  begin with `ASH_`, or be one of `AWS_REGION`, `AWS_DEFAULT_REGION` or
+  `AWS_PROFILE`. A reference to any other name is left in the configuration
+  exactly as written and a warning names it; ASH does not read the variable. The
+  names are matched exactly, so write them in upper case. An `ASH_` name that
+  ends in `_KEY`, `_TOKEN`, `_SECRET`, `_PASSWORD`, `_CREDENTIAL`, `_CREDENTIALS`
+  or `_HEADER_VALUE`, in any case, and `ASH_MCP_AUTH_HEADER_VALUE`, is left as
+  written the same way: a configuration file does not read a variable named for
+  a credential. The warning names the variable, never its value.
+
+  In YAML, an unquoted value that starts with `${` is resolved with or without the
+  `!ENV` tag; a quoted one (`'${VAR_NAME}'`) only with it. In a TOML file every
+  string value that starts with `${` is resolved. A JSON configuration file is
+  never interpolated.
 
   ASH reads the configuration file it finds in the directory it is scanning, so
   which variables that file may name is ASH's decision rather than the file's.
   To reference a variable of your own, give it an `ASH_` prefix — `ASH_MY_BUCKET`
   rather than `MY_BUCKET` — and set it under that name wherever you run ASH.
 
-  A reference with no default, `${VAR_NAME}`, has never resolved and still does
-  not; write `${VAR_NAME:default_value}`. A reference must also be the whole
-  value, not part of a longer string.
+  A reference with no default, `${VAR_NAME}`, reads the variable too. When the
+  variable is not set, the configuration is refused with exit code 3 and the
+  error names the variable, since there is no value to use; write
+  `${VAR_NAME:None}`, or another default, for a variable that may be unset. A
+  variable that is set to an empty string resolves to nothing either way. This
+  holds in YAML, TOML and `pyproject.toml` alike.
+
+  Write one reference per value, at its start. A reference runs to the last `}`
+  in the value, so text after it is kept only if it contains no `}`:
+  `${ASH_REPORT_PREFIX:scans}/ash` resolves to the variable, or `scans`, followed
+  by `/ash`. When the text after it does contain a `}`, it is read as part of the
+  reference. With a default, as in `${ASH_PREFIX:scans}/{run}`, the default becomes
+  `scans}/{run`, and the whole value is replaced by the variable when it is set;
+  without one, as in `${ASH_PREFIX}/{run}`, the value is left as written. A
+  reference after other text is not resolved, and neither is a second reference.
+
+  The scan, and the reports it renders, use the value. What ASH writes of the
+  configuration holds the reference as the file wrote it instead: the
+  `ash_config` a scan records in `ash_aggregated_results.json`, the merged
+  results, what an off-host reporter sends, `ash config get`, and the MCP
+  `get_config` tool, which shows `<from ${VAR_NAME}>`. Debug output names a
+  section's keys, never its values. A reference whose variable is unset records
+  the default the file wrote. `ash merge` and `ash report` do not read the
+  environment for a recorded reference. A field that takes a fixed choice, such
+  as `global_settings.severity_threshold`, cannot hold one, so they exit 3 and
+  name the field until you supply it, as in
+  `--config-overrides 'global_settings.severity_threshold=MEDIUM'` or in the
+  file that `--config` (or `ASH_CONFIG`) names, for both commands. A field that
+  holds a list, such as `output_formats`, needs the whole list: an override
+  that appends with `+=` adds to the list the configuration holds and does not
+  supply the field. A config file in the working directory supplies nothing.
+  `ash merge` over several shards refuses once, naming each such field with its reference and every shard and
+  results file that recorded it, and both commands word a refusal over several
+  fields the same way. A boolean or a number field cannot hold one either, and
+  the results file that records one there is refused.
+
+  Under the MCP server, a configuration file an MCP client delivered may not use
+  `!ENV` at all, whatever the name, and for a remote client neither may any other
+  file outside `ASH_MCP_ALLOWED_CONFIG_ROOTS` and the session's own `config/`
+  directory, a scan target's own config included; see
+  [Config files in delivered source](mcp/streamable-http.md#config-files-in-delivered-source).

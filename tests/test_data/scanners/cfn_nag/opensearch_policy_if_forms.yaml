@@ -1,0 +1,269 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Fixture for StarResourceAccessPolicyRule and ResourcePolicyStarAccessVerbPolicyRule
+  (automated_security_helper/assets/appsec_cfn_rules). A policy can choose between two
+  values with Fn::If, and the stack takes whichever branch its condition selects when it
+  is created. cfn-model 0.6.6 resolves every Fn::If to its first branch when it parses the
+  policy, so a rule that reads the parsed statement never sees the second branch.
+
+  Both rules now read the policy as the template wrote it, from cfn-model's raw model, and
+  check every branch of every Fn::If in a statement's Effect, Action, NotAction, Principal
+  and NotPrincipal, in a list of statements and in the whole AccessPolicies property.
+  The conditions are not evaluated: a statement is reported when any combination of
+  branches would make it public. A branch that is Ref AWS::NoValue is an absent value.
+  A statement with more than 32 combinations of branches is read the way cfn-model reads
+  it, the first branch of each Fn::If, and each rule writes one warning line to stderr
+  that names the resource.
+
+  Reported by StarResourceAccessPolicyRule: IfPrincipalSecondStar, IfPrincipalValueStar,
+  IfStatementSecondOpen, IfEffectSecondAllow and IfWholePolicy.
+  Reported by ResourcePolicyStarAccessVerbPolicyRule: IfActionSecondStar,
+  IfActionFirstStar (the star is the first branch, which cfn-model already read),
+  IfActionListElement, IfStatementSecondOpen, IfEffectSecondAllow and IfWholePolicy.
+  Reported by neither: IfActionScoped, IfActionNoValue, IfPrincipalScoped and
+  IfTooManyBranches (its first branches are scoped, and each rule says on stderr that it
+  read only those).
+
+Parameters:
+  Stage:
+    Type: String
+    Default: "dev"
+
+Conditions:
+  IsProd:
+    Fn::Equals:
+      - Ref: Stage
+      - "prod"
+
+Resources:
+  IfActionSecondStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-if-action-second-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - Fn::If:
+                  - IsProd
+                  - "es:ESHttpGet"
+                  - "*"
+            Resource: "*"
+
+  IfActionFirstStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-if-action-first-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - Fn::If:
+                  - IsProd
+                  - "*"
+                  - "es:ESHttpGet"
+            Resource: "*"
+
+  IfActionScoped:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-if-action-scoped
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - Fn::If:
+                  - IsProd
+                  - "es:ESHttpGet"
+                  - "es:ESHttpHead"
+            Resource: "*"
+
+  IfActionListElement:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-if-action-list-element
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - "es:ESHttpGet"
+              - Fn::If:
+                  - IsProd
+                  - "es:ESHttpHead"
+                  - "es:*"
+            Resource: "*"
+
+  IfActionNoValue:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-if-action-no-value
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - "es:ESHttpGet"
+              - Fn::If:
+                  - IsProd
+                  - "es:ESHttpHead"
+                  - Ref: AWS::NoValue
+            Resource: "*"
+
+  IfPrincipalSecondStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-if-principal-second-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Fn::If:
+                - IsProd
+                - AWS: "arn:aws:iam::123456789012:root"
+                - "*"
+            Action: "es:ESHttpGet"
+            Resource: "*"
+
+  IfPrincipalValueStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-if-principal-value-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                Fn::If:
+                  - IsProd
+                  - "arn:aws:iam::123456789012:root"
+                  - "*"
+            Action: "es:ESHttpGet"
+            Resource: "*"
+
+  IfPrincipalScoped:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-if-principal-scoped
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Fn::If:
+                - IsProd
+                - AWS: "arn:aws:iam::123456789012:root"
+                - AWS: "arn:aws:iam::210987654321:root"
+            Action: "es:ESHttpGet"
+            Resource: "*"
+
+  IfStatementSecondOpen:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-if-statement-second-open
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Fn::If:
+              - IsProd
+              - Effect: Allow
+                Principal:
+                  AWS: "arn:aws:iam::123456789012:root"
+                Action: "es:ESHttpGet"
+                Resource: "*"
+              - Effect: Allow
+                Principal: "*"
+                Action: "*"
+                Resource: "*"
+
+  IfEffectSecondAllow:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-if-effect-second-allow
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect:
+              Fn::If:
+                - IsProd
+                - Deny
+                - Allow
+            Principal: "*"
+            Action: "*"
+            Resource: "*"
+
+  IfWholePolicy:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-if-whole-policy
+      AccessPolicies:
+        Fn::If:
+          - IsProd
+          - Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Principal:
+                  AWS: "arn:aws:iam::123456789012:root"
+                Action: "es:ESHttpGet"
+                Resource: "*"
+          - Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Principal: "*"
+                Action: "*"
+                Resource: "*"
+
+  IfTooManyBranches:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-if-too-many-branches
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect:
+              Fn::If:
+                - IsProd
+                - Allow
+                - Allow
+            Principal:
+              AWS:
+                Fn::If:
+                  - IsProd
+                  - "arn:aws:iam::123456789012:root"
+                  - "arn:aws:iam::210987654321:root"
+              Service:
+                Fn::If:
+                  - IsProd
+                  - "es.amazonaws.com"
+                  - "lambda.amazonaws.com"
+              Federated:
+                Fn::If:
+                  - IsProd
+                  - "cognito-identity.amazonaws.com"
+                  - "accounts.google.com"
+              CanonicalUser:
+                Fn::If:
+                  - IsProd
+                  - "79a59df900b949e55d96a1e698fbaced"
+                  - "79a59df900b949e55d96a1e698fbacee"
+            Action:
+              Fn::If:
+                - IsProd
+                - "es:ESHttpGet"
+                - "es:ESHttpHead"
+            Resource: "*"

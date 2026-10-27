@@ -95,9 +95,9 @@ change for adopters and desynchronizes the two implementations.
 
 | Parameter | Default | Notes |
 | --- | --- | --- |
-| `AshVersion` | `v3.7.0` | Git ref cloned and built. Not a PyPI version. |
+| `AshVersion` | `v3.7.0` | Git ref fetched and built: a tag, a branch, or a full commit SHA. Not a PyPI version. The release these files belong to; see [Which `AshVersion` to use](../README.md#which-ashversion-to-use). |
 | `AshImageTag` | empty | ECR tag the **workload** pulls. Empty tracks the moving tag. Not offered by `AshImagePipeline`, which runs no workload. See below. |
-| `AshOfflineMode` | `NO` | `YES`/`NO`, forwarded to the ASH Dockerfile's `OFFLINE` build argument. The spelling is the Dockerfile's; a boolean would build an image that stayed online. |
+| `AshOfflineMode` | `NO` | `YES`/`NO`, forwarded to the ASH Dockerfile's `OFFLINE` build argument. The spelling is the Dockerfile's; a boolean would build an image that stayed online. It bakes scanner data into the image and does not restrict network egress: Fargate tasks keep TCP 443 through the NAT gateway, AgentCore runs in `PUBLIC` mode, and the gate has open egress unless `VpcId` is set. |
 | `AshBaseConfigYaml` | empty | An ASH configuration document. See the size note below. |
 | `McpStatelessHttp` | `true` | Keep `true` on AgentCore, and behind any load balancer with more than one replica. See below for what is measured and what is inferred. |
 | `McpMountPath` | `/mcp` | AgentCore routes only `/mcp`, so change this only for Fargate. |
@@ -109,7 +109,7 @@ change for adopters and desynchronizes the two implementations.
 | `CodeCommitRepositoryArn` | required | An **existing** repository. The gate stack never creates or deletes one. |
 | `VpcId` | empty | Gate only. The VPC for the scan function, set together with `VpcSubnetIds`; setting only one is refused at launch. The stack creates a security group there whose only egress is TCP 443 to `ScanEgressCidr`, exported as `ScanSecurityGroupId` so you can widen it. Empty keeps the function outside any VPC, with open egress. See below. |
 | `VpcSubnetIds` | empty | Gate only. Comma-separated subnets for the scan function, in `VpcId`. Your routes there must reach what `ScanEgressCidr` names (NAT or interface endpoints). |
-| `ScanEgressCidr` | empty | Gate only, and required with `VpcId`; setting one without the other is refused at launch. The IPv4 CIDR the scan function may reach on TCP 443. The function itself calls CodeCommit (the API and `git-codecommit`), and Systems Manager for its config parameter; the Lambda service, not the function's network interfaces, pulls the image and delivers its logs. With `AshOfflineMode=NO` the scanners also download rules and vulnerability databases from public hosts outside AWS. So: your VPC CIDR if the image is offline and you have interface endpoints for those services, or `0.0.0.0/0` behind a NAT gateway with an online image. There is no default because the right value depends on your network. |
+| `ScanEgressCidr` | empty | Gate only, and required with `VpcId`; setting one without the other is refused at launch. The IPv4 CIDR the scan function may reach on TCP 443. The function itself calls CodeCommit (the API and `git-codecommit`), and, when `AshBaseConfigYaml` is set, Systems Manager for its config parameter on every invocation; the Lambda service, not the function's network interfaces, pulls the image and delivers its logs. With `AshOfflineMode=NO` the scanners also download rules and scanner databases from public hosts outside AWS. So: your VPC CIDR if the image is offline and you have interface endpoints for those services, or `0.0.0.0/0` behind a NAT gateway with an online image. There is no default because the right value depends on your network. |
 
 **VPC attachment for the gate has not been deploy-tested.** The network-interface grant it adds keeps `Resource: "*"`, as Lambda documents, and pins the calls to the stack's Region with `aws:RequestedRegion`. AWS does not document whether Lambda's service-side network-interface calls carry that key. It is a global key present on signed requests, so this is expected to work. If attaching the function fails with a permissions error on `ec2:CreateNetworkInterface`, please report it: the condition is the first suspect. The Terraform module carries the same condition.
 
@@ -121,8 +121,25 @@ into the container at start, applied through `ASH_CONFIG` so it covers every sca
 the process runs. CloudFormation caps a parameter value at 4096 bytes, so that is
 the real ceiling on what you can paste. Advanced tier holds 8 KB, so a larger
 config can be pasted into Parameter Store after deployment; the next container
-start picks it up. A `.ash.yaml` inside a scanned repository still wins, which is
-the precedence you want.
+start, or on the gate the next pull request, picks it up. Deploy with a short
+document such as `{}` rather than empty if you mean to do that: a stack deployed with
+`AshBaseConfigYaml` empty does not tell its workload the parameter's name, so an
+edit to the parameter is read by nothing.
+
+ASH selects one config source rather than merging them, so what `ASH_CONFIG` means
+depends on how the target runs ASH. An MCP scan of a directory that carries its own
+`.ash.yaml` uses that file; `ASH_CONFIG` is the default for directories without one.
+The pipeline's shard and merge projects run `ash scan` and `ash merge`, and
+`ASH_CONFIG` always names a file there: the base config, or `{}` (ASH's defaults)
+when `AshBaseConfigYaml` is empty, so the repository's own ASH config is not read.
+The CodeCommit gate always passes `--config`:
+the base config, read from the parameter on every invocation, or `{}` (ASH's
+defaults) when none was supplied, so a pull request's own ASH config is never read.
+That covers ASH's configuration only: ASH still passes some scanners a
+configuration file committed in the scanned tree (bandit's `.bandit` or
+`bandit.yaml`, grype's `.grype.yaml`), so a pull request can still configure those
+scanners. A base config the gate cannot read refuses the scan, comments on the pull
+request and revokes its approval.
 
 The CloudFormation quotas page suggests working around the 4096-byte cap by
 declaring several parameters and rejoining them with `Fn::Join`. That is lossless,
@@ -366,6 +383,27 @@ admitted.
   accepted posture is that the runtime is reachable only through
   `bedrock-agentcore:InvokeAgentRuntime`, which is IAM-authorized.
 
+The entrypoint makes that an explicit decision rather than a side effect of the
+bind address. It starts only with one of two things: a Host allowlist
+(`McpAllowedHost`, which on Fargate defaults to the ALB's name), or
+`ASH_MCP_TRUST_UPSTREAM_HOST_CHECK=true`, the statement that something in front of
+ASH checks Host. AgentCore sets the statement; Fargate does not. With neither, the
+container exits 65 rather than serve every `Host`. When an allowlist was requested
+and the image's `ash mcp` has no `--allowed-host`, it also exits 65 instead of
+starting without the allowlist, so a Fargate stack on such an `AshVersion` does not
+come up: deploy an `AshVersion` whose `ash mcp` accepts `--allowed-host`.
+
+On an ASH whose `ash mcp` lists them, the statements become flags:
+`--trust-upstream-host-check` when there is no allowlist (ASH refuses it together
+with `--allowed-host`), and, from `ASH_MCP_TRUST_UPSTREAM_SESSION_ID=true`,
+`--trust-upstream-session-id` in stateless mode. The second says the platform in
+front issues and authenticates `Mcp-Session-Id`; without it a stateless ASH treats
+the header as no identity, and its session tools (source delivery, the scan
+registry) refuse. AgentCore sets it, because the platform issues that header.
+Fargate does not: a load balancer issues none, so a stateless Fargate service has
+no session identity and those tools refuse there. Both stacks set
+`ASH_MCP_TRANSPORT=streamable-http`, so ASH treats every caller as remote.
+
 The same restricted-header list is why `McpAuthHeaderName` has to be a header
 AgentCore will forward. The stack adds it to the runtime's `RequestHeaderAllowlist`
 when both auth parameters are set, but a restricted name (anything `x-amz-`,
@@ -384,17 +422,17 @@ findings fails the pipeline before the other shards' findings have been collecte
 So shards pass `--no-fail-on-findings` and only the merge action fails.
 
 A shard's success is not decided by an exit code at all, and that is deliberate.
-Click reports a usage error as exit 2 and ASH reports actionable findings as exit
-2, so the two are indistinguishable — and one of them means nothing was scanned. A
-shard therefore succeeds if and only if ASH wrote `ash_aggregated_results.json`,
+ASH 3.7.0 and 3.7.1 report a usage error as exit 2, the code they use for actionable
+findings, so the two are indistinguishable there — and one of them means nothing was scanned.
+ASH releases after 3.7.1 exit 5 for a usage error, but `AshVersion` can name an older
+release. A shard therefore succeeds if and only if ASH wrote `ash_aggregated_results.json`,
 which is the artifact the merge actually consumes. The exit code is recorded for
-diagnosis and never trusted. That holds whether the flag is unrecognized (usage
-error, no results, shard fails), a scanner crashed (no results, shard fails),
+diagnosis and never trusted. That holds whether ASH refused the command line (a
+usage error, no results, shard fails), a scanner crashed (no results, shard fails),
 findings were found (results present, merge gates) or the shard was clean.
 
-`--no-fail-on-findings` was **not** verified from this repository, because ASH is
-not installed in the checkout this was written in. Correctness does not depend on
-it; the results-file check does the work.
+`--no-fail-on-findings` exists in ASH 3.7.0 and later. Correctness does not depend
+on it; the results-file check does the work.
 
 The merge independently requires that file from every shard, and refuses two cases
 separately: a partial result set, and zero collected shards. Reporting a clean scan
@@ -405,6 +443,19 @@ Shard results travel through an S3 bucket keyed by pipeline execution id, not
 through pipeline artifacts. A CodeBuild pipeline action accepts
 [1 to 5 input artifacts](https://docs.aws.amazon.com/codepipeline/latest/userguide/reference-action-artifacts.html),
 so an artifact per shard cannot express a six-way split at all.
+
+Each shard build may put objects only under
+`executions/<execution id>/shard-<its index>/<its own build ARN>/` in that bucket,
+and delete nothing. The grant ends in `${codebuild:BuildArn}`, which IAM replaces
+with the ARN of the build making the request, and the execution id is matched by
+one `?` per character of CodePipeline's execution id format. The merge asks
+CodePipeline (`codepipeline:ListActionExecutions` on this pipeline) which build ran
+each shard action of the execution it merges, downloads only that build's results,
+skips the keys of a shard action's earlier failed runs, and fails on any other key
+under the execution's prefix. IAM has no variable for the execution id, so a shard
+build could still put objects under another execution's id, but only under its own
+build ARN, which that execution's merge does not read. The merge also refuses a key
+with an empty, `.` or `..` segment, which IAM's string match does not.
 
 Those transfers use `boto3`, not `aws s3 cp`, and that is not a style preference.
 The shard and merge actions run with the ASH image as their CodeBuild environment
@@ -454,6 +505,37 @@ aws codecommit create-approval-rule-template --approval-rule-template-name ash-g
 aws codecommit associate-approval-rule-template-with-repository \
   --approval-rule-template-name ash-gate --repository-name <GatedRepositoryName>
 ```
+
+The gate scans the whole tree. `ChangedFilesOnly` (default `false`) narrows it to
+the files the pull request changed, with ASH's `--changed-files-only --base-ref`
+against the destination commit. Turning it on changes what the verdict covers:
+findings in files the pull request did not change stop counting, and so does every
+finding in a file whose name git prints quoted (a non-ASCII byte, a quote, a
+backslash or a control character), because the quoted name matches no scanned path.
+Such a pull request passes, and with `ApprovalGate` it is approved.
+
+The scan always passes `--fail-on-incomplete-scanners`, so a scan in which a selected
+scanner was MISSING or ERROR is an error, not a pass, whatever the base config says.
+ASH releases up to v3.7.1, the default `AshVersion` v3.7.0 among them, have no such
+option and their `ash scan` silently drops options it does not know, so on them a
+scan where nothing ran would pass. The handler therefore checks once, with
+`ash scan --help`, that the option exists, and refuses to scan (an error comment and,
+with `ApprovalGate`, a REVOKE) when it does not. Until a release has the option, the
+gate needs an `AshVersion` that is a commit which does.
+
+The scan runs without the function role's credentials. That role can comment on and
+approve pull requests, and the scanners run over code the pull request controls, so
+the handler removes every credential and profile variable from the scan's environment
+and keeps the role only for the clone. A base config that enables a reporter which
+calls AWS has no credentials in the gate, and that reporter fails. The role holds no
+Secrets Manager grant: the gate reads no secret.
+
+The handler refuses an event whose `sourceCommit` or `destinationCommit` is not a
+full hex object id, before it runs git or calls CodeCommit, and the invocation fails.
+CodeCommit sends 40-digit ids, so this never refuses a real event. Both ids reach git
+as arguments, and `git checkout` takes whatever follows `--` as paths, so `--` cannot
+keep a commit from being read as an option there. The clone passes `--` before the
+repository.
 
 ## Requires CLI surface from sibling changes
 
@@ -522,6 +604,17 @@ here rather than to a variant.
   two-hour project timeout, may never run `post_build`, and the stack then sits in
   `CREATE_IN_PROGRESS` on `BootstrapBuild` until CloudFormation's own timeout.
   Cancel the stack operation if you see that.
+- **The build learns CloudFormation's response URL from a parameter.** That URL is
+  what answers CloudFormation for the bootstrap, so the starter writes it to a
+  SecureString parameter, `/ash-bootstrap/<image build project name>`, encrypted with
+  the stack's own KMS key, and hands the build only the parameter's name. It is not a
+  build environment value, so `codebuild:BatchGetBuilds` and the console do not show
+  it, and reading the parameter takes `kms:Decrypt` on that key. Each create or update
+  overwrites it and deleting the stack removes it; between those it holds the URL of
+  the last bootstrap, whose stack operation has already completed. The starter may
+  use the key only to encrypt a parameter under `/ash-bootstrap/` (an encryption
+  context condition), and a delete that fails is written to its log rather than
+  dropped, since the teardown still has to succeed.
 - **The Lambda gate is bounded by Lambda.** 900 seconds is the
   [hard maximum](https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html),
   and the clone plus ASH's output share 4 GB of `/tmp`. A large repository or a slow

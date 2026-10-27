@@ -17,11 +17,11 @@ Key differences:
 | Visibility  | Files not scanned at all     | Findings still visible but marked as suppressed |
 | Granularity | File-level only              | Rule ID, file path, line number, package, symbol |
 | Tracking    | No tracking of ignored files | Suppressed findings are tracked and reported    |
-| Expiration  | No expiration mechanism      | Can set expiration dates                        |
+| Expiration  | Optional `expiration` date   | Optional `expiration` date                      |
 
 ## Configuring Suppressions
 
-Suppressions are defined in the `.ash.yaml` configuration file under the `global_settings` section:
+Suppressions are defined in the ASH configuration file (`.ashrc.yaml`, or the config file your project already has) under the `global_settings` section:
 
 ```yaml
 global_settings:
@@ -54,10 +54,39 @@ Each suppression rule can include the following properties:
 | `package_path`    | No  | Only suppress findings about the package copy installed at this path |
 | `symbol`          | No  | Only suppress findings inside the function or class with this qualified name |
 
+A key that is not in this table refuses the configuration (exit code 3; exit code 4
+in a workspace policy file), and the error suggests the key that was probably meant:
+`ruleId: B101` fails with `Unknown key 'ruleId' (did you mean 'rule_id'?)`. The same
+goes for an ignore path, whose keys are `path`, `reason` and `expiration`.
+
 ### Matching Rules
 
 - **Rule ID**: Must match exactly the rule ID reported by the scanner
-- **File Path**: Supports glob patterns (e.g., `src/*.js`, `**/*.py`)
+- **File Path**: Supports glob patterns (e.g., `src/*.js`, `**/*.py`), relative to
+  the scanned directory and matched case-sensitively on every platform, so
+  `tests/**` does not match `Tests/x.py`. To suppress the findings in a
+  directory, write `vendor/**/*`, which covers every file below `vendor` and not a
+  file named `vendor` (`vendor/**` covers that file too, because a trailing `**` can
+  match nothing at all). A suppression path ending in `/` keeps its literal meaning,
+  so `vendor/` matches no file, and ASH warns after the scan about each such
+  suppression that matched nothing, naming the `vendor/**/*` form; an ignore path
+  ending in `/` does name the
+  directory's files (see [Global Settings](configuration-guide.md#global-settings)).
+  A path is compared as it is given: a leading `./` is not dropped, so `./src/a.py`
+  matches no finding, and `./`, `.\`, `.` and an empty path match no file. A
+  finding's location is read as the file it names, so one a scanner reports as
+  `./src/a.py`, `src/./a.py` or `src//a.py` is matched as `src/a.py`; a `..` in it
+  is kept. A `file://` location is read as its path, and one with another
+  scheme, such as `https://host/x`, is compared as written, so no pattern for a
+  file in the tree matches it. A bare
+  `vendor`, with no slash and no glob, names only the path
+  `vendor` itself and matches nothing inside the directory; `ash config lint`
+  points this out. A path that starts with `/`, or with a drive such as `C:\`,
+  matches nothing, since paths are matched relative to the scanned directory:
+  write `vendor/**/*`, not `/vendor/**/*` or the directory's absolute path. `ash
+  config lint` and `ash config validate` warn about one, name the relative spelling
+  when there is one, and in an `extends` chain name the file that holds it. The
+  same rules apply to the `path` of an ignore path, apart from the trailing `/`.
 - **Line Range**: If specified, only findings within this line range will be suppressed
 - **Package fields**: If specified, only findings about that package copy will be suppressed. See [Suppressing one package copy](#suppressing-one-package-copy).
 - **Symbol**: If specified, only findings inside that function, method or class will be suppressed, wherever it sits in the file. See [Suppressing by symbol](#suppressing-by-symbol).
@@ -82,8 +111,19 @@ The package fields narrow a suppression to one copy:
   `deploy/cdk/node_modules/aws-cdk-lib/node_modules/brace-expansion`. Glob, with
   `**` support like `path`. ASH reports it with forward slashes and no drive
   letter on every platform, so one entry works on Windows, Linux and macOS.
-  `path` and `package_path` treat `\` as a separator, so a pattern written with
-  backslashes compares the same way everywhere.
+  `path` and `package_path` treat `\` as a separator in the pattern, so a
+  pattern written with backslashes compares the same way everywhere. A `\` in a
+  file's own path is part of its name, as it is on Linux and macOS, so
+  `tests/**` does not match a file named `tests\other.py`. The patterns `./`,
+  `.\`, `.` and an empty path match no file.
+  A file whose name is not valid UTF-8 is reported with each such byte written
+  as `\udcNN` (a latin-1 `secr\xe9t.py` as `secr\udce9t.py`). A `path` matches
+  it written that way, since the `\` of a `\udcNN` escape is part of the name and
+  not a separator, or with `?` for that `\` (`secr?udce9t.py`), or as a glob
+  such as `secr*t.py`. An ignore path matches such a file the same way when ASH
+  lists the files to scan. A UTF-8 file name that spells the same `\udcNN` text
+  reads as the same name, so in a tree that holds both files, both are reported
+  under that name and a path that matches one matches both.
 
 Every package field you set has to match. A finding that doesn't report a field
 you set is not suppressed, so when a scanner can't tell which copy a finding
@@ -113,16 +153,17 @@ there because npm-audit and grype report different paths for the same finding
 | Scanner    | `package_name` | `package_version`       | `package_path`                                     |
 |------------|----------------|-------------------------|----------------------------------------------------|
 | npm-audit  | Yes            | Yes, from the lockfile  | Yes, for every node npm audit lists                |
+| trivy      | Yes            | Yes                     | npm lockfiles only                                 |
 | trivy-repo | Yes            | Yes                     | npm lockfiles only                                 |
 | grype      | Yes            | Yes                     | npm lockfiles only, and only when the name and version occur once in the lockfile |
 
 The rule IDs also differ: grype appends the package name to the advisory
 (`GHSA-6j4f-fj2g-mc7p-brace-expansion`), npm-audit uses the bare GHSA ID, and
-trivy-repo uses the CVE alias when the advisory has one. A glob such as
-`GHSA-6j4f-fj2g-mc7p*` covers the first two. trivy-repo needs its own entry keyed
-on the CVE.
+trivy and trivy-repo use the CVE alias when the advisory has one. A glob such as
+`GHSA-6j4f-fj2g-mc7p*` covers the first two. trivy and trivy-repo need their own
+entry keyed on the CVE; one entry covers both of them.
 
-Paths differ too. grype and trivy-repo report the lockfile, for example
+Paths differ too. grype, trivy and trivy-repo report the lockfile, for example
 `deploy/cdk/package-lock.json`. npm-audit reports
 `node_modules/<path>/package.json` with each `node_modules/` segment removed
 from the middle, and without the lockfile's directory. That shape predates the
@@ -170,15 +211,49 @@ method of `Deployer`, or at module level, is still reported.
 
 Symbol suppressions parse source files with
 [tree-sitter](https://tree-sitter.github.io/), which ASH installs as an optional
-extra:
+extra. When the extra is missing, the scan warning and `ash config lint` print a
+command that installs the extra's packages, read from the metadata of the ASH you
+run, so it fits that ASH whatever its version or source. It runs the `uv` that ASH
+depends on through the Python interpreter that runs ASH, and installs into that
+interpreter's environment, so it reaches a virtualenv, a `uv tool install` or
+`pipx install` environment and a checkout's `uv sync` environment alike. The hint
+prints the interpreter's full path where this shows `<python>`:
 
 ```bash
-pip install "automated-security-helper[symbols]"
-# or
-uv tool install "automated-security-helper[symbols]"
+<python> -m uv pip install --python <python> 'tree-sitter>=0.26,<0.27' 'tree-sitter-java>=0.23.5,<0.24' 'tree-sitter-javascript>=0.25,<0.26' 'tree-sitter-python>=0.25,<0.26' 'tree-sitter-typescript>=0.23.2,<0.24'
 ```
 
-The ASH container image includes it. Without it, an entry that sets `symbol`
+A plain `pip install` of those packages does not do the same: environments made by
+uv have no pip, so `pip` runs whichever pip comes next on `PATH`, usually another
+Python's.
+
+You can also reinstall ASH with `[symbols]` added to the source you installed it
+from. For uvx that is the only way that lasts: uvx rebuilds its cached environment
+from its own arguments, so an extra installed into it is dropped.
+
+The `symbols` extra is available from the next release, the first after v3.7.1.
+v3.7.1 and earlier define only `cdk`, and asking one of them for `[symbols]`
+installs it without the extra, with only a warning. Until that release, install
+from the `main` branch:
+
+```bash
+# ASH installed with uv tool install
+uv tool install --force "automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@main"
+# ASH installed with pipx install
+pipx install --force "automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@main"
+# the uvx alias from the installation guide
+alias ash="uvx --from 'automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@main' ash"
+```
+
+`main` moves, so these commands also replace the ASH you run with the newest code.
+To stay on one version, or to use a checkout, put that source after the first `@`
+instead (`automated-security-helper[symbols] @ git+...@<commit from main>`, or
+`@ file:///path/to/checkout`).
+Keep the `@` and the source. ASH is not published on PyPI, and the PyPI project
+with ASH's name is unrelated and has no `symbols` extra, so asking for the extra by
+the bare name installs that project instead.
+
+The ASH container image includes the extra. Without it, an entry that sets `symbol`
 matches nothing: the findings it names stay visible, the scan logs a warning
 naming the missing extra, the entry shows up in the unused-suppressions report,
 and `ash config lint` warns about it.
@@ -309,6 +384,50 @@ suppressions:
     expiration: '2025-06-30'
 ```
 
+## Suppressions an MCP client's config supplied
+
+Under the MCP server, a config file a client delivered may set its own
+`suppressions` and `ignore_paths`, as a repository's config may on the CLI (see
+[Configs an MCP client delivered](configuration-guide.md#configs-an-mcp-client-delivered)).
+ASH applies them, and marks what came from the client so the results show what
+the client's config hid:
+
+- In the results' config, each suppression and ignore path the operator did not
+  supply has `client_supplied: true`. ASH sets the mark; a `client_supplied`
+  value written in a config file, of any kind, or set with `--config-overrides`
+  is ignored.
+- A workspace policy file a client delivered (under the MCP workspace root) is
+  handled the same way, including when `ash --workspace` reads one: its
+  suppressions and ignore paths are marked, and they and the scanners it adds
+  are checked against the operator's runtime-override policy as a delivered
+  config's are, both as written and as each project gets them.
+- A file under a client-supplied ignore path is still converted and scanned, and a
+  finding there is kept as a suppressed result rather than dropped. An exclusion
+  the client's config added to a scanner's own options is handled the same way.
+- In SARIF, the suppression on such a finding has a `justification` that starts
+  with `(ASH, client-supplied config)` and names the entry, and
+  `properties.clientSupplied: true`. Its `kind` is `inSource` for a suppression
+  entry and `external` for an ignore path or a scanner exclusion:
+
+  ```json
+  "suppressions": [
+    {
+      "kind": "external",
+      "justification": "(ASH, client-supplied config) Ignoring finding under ignore path 'vendor/**' with reason: third-party code",
+      "properties": {"clientSupplied": true}
+    }
+  ]
+  ```
+
+- The flat-json and CSV reports show the finding with `is_suppressed: true` and
+  that justification in `suppression_justification`, and the GitLab SAST report
+  includes it in the finding's solution.
+- Like any suppressed finding, it does not count toward `fail_on_findings`.
+  `--ignore-suppressions` turns it back into an ordinary, unmarked finding, whether
+  a suppression entry, an ignore path or a scanner exclusion hid it: the files under
+  a client-supplied ignore path or exclusion were scanned, and the flag skips the
+  step that suppresses and marks their findings.
+
 ## Temporarily Disabling Suppressions
 
 To temporarily ignore all suppressions and see all findings, use the `--ignore-suppressions` flag:
@@ -323,15 +442,39 @@ This is useful when you want to:
 - Get a complete view of all security findings in your codebase
 - Perform a comprehensive security review
 
-When this flag is used, ASH will process all findings as if no suppressions were defined, but will still respect the `ignore_paths` settings.
+When this flag is used, ASH processes all findings as if no suppressions were defined, and that includes `ignore_paths`. Every scanner reads the files under an ignore path, the converters convert the archives and notebooks there, and their findings are reported as ordinary findings. The same holds for an ignore path or scanner exclusion an MCP client's config supplied (see [Suppressions an MCP client's config supplied](#suppressions-an-mcp-clients-config-supplied)). Expect a slower scan when an ignore path leaves out a large part of the tree. In container mode the flag is passed to the scan inside the container.
+
+ASH's own output directory is not an ignore path. Findings located there, outside its `converted` work directory, are left out of the results with or without the flag.
 
 ## Expiring Suppressions
 
-When a suppression has an expiration date:
+Suppressions and ignore paths both take an optional `expiration`, and it works the
+same way on each, and on the scanner options that take the same entries (bandit
+`excluded_paths`, checkov `skip_path`, syft `exclude`):
 
-1. The suppression will only be applied until that date
-2. When the date is reached, the suppression will no longer be applied
-3. ASH will warn you when suppressions are about to expire within 30 days
+1. The date is `YYYY-MM-DD`, written as a quoted string (`'2027-06-30'`). Any other
+   format refuses the configuration, and the scan exits with code 3.
+2. The entry applies until that date, read on the local clock of the host running
+   the scan; in container mode that clock is UTC, because the ASH image sets
+   `TZ=UTC`. On the expiration date itself the entry no longer applies: an expired
+   suppression's findings count again, and the files an expired ignore path excluded
+   are scanned again. (A `content_db_staleness_overrides` entry is different: it
+   stops applying at 00:00 UTC on its date, whatever the host's time zone.)
+3. For the 30 days before the date, every scan logs a warning that names the entry.
+   From the date on, one warning at the start of each scan lists every ignore path
+   and suppression that has expired, so a scan whose result changed says why.
+   `ash config lint` reports expired entries, and malformed dates, by the same rule.
+
+```yaml
+global_settings:
+  ignore_paths:
+    - path: 'vendor/legacy-sdk/**'
+      reason: 'Vendored copy, removed by the SDK upgrade'
+      expiration: '2027-06-30'
+```
+
+An expired entry stays in the configuration file, and in the `ash_config` section of
+`ash_aggregated_results.json`; only its effect stops. Remove it or move its date.
 
 This helps ensure that temporary exceptions don't become permanent security gaps.
 
@@ -422,7 +565,7 @@ ash --mode local
 cat .ash/ash_output/reports/ash.unused-suppressions.md
 
 # 3. Edit configuration to remove unused suppressions
-vim .ash/.ash.yaml
+vim .ashrc.yaml  # your ASH config file; `ash config validate` prints which one a scan uses
 
 # 4. Re-run scan to verify
 ash --mode local
@@ -430,7 +573,7 @@ ash --mode local
 
 ### Configuration Options
 
-The unused suppressions reporter is enabled by default. To customize its behavior, add to your `.ash/.ash.yaml`:
+The unused suppressions reporter is enabled by default. To customize its behavior, add to your ASH config file (`.ashrc.yaml` in a new project):
 
 ```yaml
 reporters:

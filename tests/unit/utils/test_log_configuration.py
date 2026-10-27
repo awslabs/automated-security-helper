@@ -37,6 +37,7 @@ from automated_security_helper.utils.log import (
     configure_windows_safe_logging,
     get_logger,
 )
+from tests.utils.windows_console import windows_logging_kept_in_the_test
 
 CI_INDICATORS = [
     "CI",
@@ -479,8 +480,14 @@ def test_configure_treats_a_stream_without_encoding_as_needing_repair(on_windows
     setlocale.assert_called_once()
 
 
-def test_configure_falls_back_to_a_codec_writer_when_reconfigure_fails(on_windows):
-    """reconfigure raising OSError must fall through to wrapping the raw buffer."""
+def test_configure_falls_back_to_a_utf8_writer_when_reconfigure_fails(on_windows):
+    """reconfigure raising OSError must fall through to wrapping the raw buffer
+    in a UTF-8 text layer, one with a ``buffer``, which the checked stderr wrap
+    hands out (log._utf8_writer_in_place_of). It writes through, so a byte write
+    below it cannot overtake held text, and replaces what it cannot encode,
+    rather than raise on the console it was put in place to fix."""
+    import io
+
     on_windows.setattr(
         sys, "stdout", FakeStream(encoding="cp1252", reconfigure_error=OSError("nope"))
     )
@@ -491,10 +498,11 @@ def test_configure_falls_back_to_a_codec_writer_when_reconfigure_fails(on_window
     with patch("locale.setlocale"):
         configure_windows_safe_logging()
 
-    import codecs
-
-    assert isinstance(sys.stdout, codecs.StreamWriter)
-    assert isinstance(sys.stderr, codecs.StreamWriter)
+    for stream in (sys.stdout, sys.stderr):
+        assert isinstance(stream, io.TextIOWrapper)
+        assert stream.encoding == "utf-8"
+        assert stream.write_through is True
+        assert stream.errors == "replace"
 
 
 def test_configure_gives_up_quietly_when_the_buffer_cannot_be_detached(on_windows):
@@ -644,8 +652,11 @@ def test_get_logger_selects_the_windows_color_system_on_windows(
     closed_logger, monkeypatch
 ):
     console_cls = create_autospec(Console)
-    monkeypatch.setattr(log_module, "Console", console_cls)
+    monkeypatch.setattr(log_module, "ash_console", console_cls)
     monkeypatch.setattr(log_module.platform, "system", lambda: "Windows")
+    # A CI runner sets a CI variable, which takes configure_windows_safe_logging's
+    # Windows branch here: the module docstring's second hazard.
+    windows_logging_kept_in_the_test(monkeypatch)
 
     get_logger(name=closed_logger("win_color"), show_progress=False, use_color=True)
 
@@ -656,7 +667,7 @@ def test_get_logger_selects_the_windows_color_system_on_windows(
 
 def test_get_logger_selects_the_auto_color_system_elsewhere(closed_logger, monkeypatch):
     console_cls = create_autospec(Console)
-    monkeypatch.setattr(log_module, "Console", console_cls)
+    monkeypatch.setattr(log_module, "ash_console", console_cls)
     monkeypatch.setattr(log_module.platform, "system", lambda: "Linux")
 
     get_logger(name=closed_logger("nix_color"), show_progress=False, use_color=True)
@@ -668,7 +679,7 @@ def test_get_logger_disables_the_color_system_when_color_is_off(
     closed_logger, monkeypatch
 ):
     console_cls = create_autospec(Console)
-    monkeypatch.setattr(log_module, "Console", console_cls)
+    monkeypatch.setattr(log_module, "ash_console", console_cls)
 
     get_logger(name=closed_logger("no_color"), show_progress=False, use_color=False)
 
@@ -679,7 +690,7 @@ def test_get_logger_constrains_the_console_width_inside_a_container(
     closed_logger, monkeypatch
 ):
     console_cls = create_autospec(Console)
-    monkeypatch.setattr(log_module, "Console", console_cls)
+    monkeypatch.setattr(log_module, "ash_console", console_cls)
     monkeypatch.setenv("ASH_IN_CONTAINER", "YES")
 
     get_logger(name=closed_logger("container"), show_progress=False)
@@ -691,7 +702,7 @@ def test_get_logger_leaves_the_console_width_unset_outside_a_container(
     closed_logger, monkeypatch
 ):
     console_cls = create_autospec(Console)
-    monkeypatch.setattr(log_module, "Console", console_cls)
+    monkeypatch.setattr(log_module, "ash_console", console_cls)
     monkeypatch.delenv("ASH_IN_CONTAINER", raising=False)
 
     get_logger(name=closed_logger("no_container"), show_progress=False)
@@ -706,7 +717,7 @@ def test_get_logger_routes_the_console_to_stderr_on_request(
     closed_logger, monkeypatch, env_value, expected
 ):
     console_cls = create_autospec(Console)
-    monkeypatch.setattr(log_module, "Console", console_cls)
+    monkeypatch.setattr(log_module, "ash_console", console_cls)
     monkeypatch.setenv("ASH_LOG_TO_STDERR", env_value)
 
     get_logger(name=closed_logger(f"stderr_{env_value}"), show_progress=False)

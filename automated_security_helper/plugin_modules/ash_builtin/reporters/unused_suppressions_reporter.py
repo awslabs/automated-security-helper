@@ -4,7 +4,7 @@
 """Reporter for identifying unused suppressions."""
 
 import json
-from typing import Literal, TYPE_CHECKING, Dict, Any, List
+from typing import Literal, TYPE_CHECKING, Any, ClassVar, Dict, List, Tuple
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -19,6 +19,10 @@ from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.models.core import (
     PACKAGE_SUPPRESSION_FIELDS,
     AshSuppression,
+)
+from automated_security_helper.utils.suppression_matcher import (
+    recorded_suppressions,
+    written_suppression_id,
 )
 
 
@@ -89,10 +93,24 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
 
     workspace_behaviour = ReporterWorkspaceBehaviour.WORKSPACE_SCOPED
 
+    #: The markdown copy written beside the JSON report when ``output_format`` is
+    #: ``both``.
+    MARKDOWN_FILE_NAME: ClassVar[str] = "ash.unused-suppressions.md"
+
     def model_post_init(self, context):
         if self.config is None:
             self.config = UnusedSuppressionsReporterConfig()
         return super().model_post_init(context)
+
+    def companion_file_names(self) -> Tuple[str, ...]:
+        """The markdown copy, when ``output_format`` is ``both`` (the default)."""
+        config = self.config
+        if isinstance(config, dict):
+            config = UnusedSuppressionsReporterConfig.model_validate(config)
+        output_format = getattr(
+            getattr(config, "options", None), "output_format", "both"
+        )
+        return (self.MARKDOWN_FILE_NAME,) if output_format == "both" else ()
 
     def report(self, model: "AshAggregatedResults") -> str:
         """Generate a report of unused suppressions."""
@@ -106,21 +124,48 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
         # Get used suppressions from the model
         used_suppressions = getattr(model, "used_suppressions", set())
 
+        # A use is recorded by the written form's id (written_suppression_id):
+        # a field read from the environment is its reference. An entry counts
+        # as used by that id, and also by its resolved id, the form a results
+        # file written before used ids took the written form recorded, but
+        # only when no configured entry has the resolved id as its written id.
+        # Without the resolved id, such a file re-rendered reads its env-read
+        # entries unused, and `ash config lint --fix-unused` then comments out
+        # an entry the scan applies. Without the exclusion, an entry whose
+        # environment value is itself reference text (interpolation is one
+        # pass) resolves to another entry's written id and reads "used"
+        # although nothing applied it.
+        recorded = recorded_suppressions(self.context.config)
+        written = {
+            id(suppression): written_suppression_id(suppression, recorded)
+            for suppression in all_suppressions
+        }
+        written_ids = set(written.values())
+
         # Identify unused suppressions
+        used_ids = set(used_suppressions)
         unused_suppressions = []
         for suppression in all_suppressions:
-            if suppression.id not in used_suppressions:
-                unused_suppressions.append(suppression)
+            if written[id(suppression)] in used_ids:
+                continue
+            if suppression.id in used_ids and suppression.id not in written_ids:
+                continue
+            unused_suppressions.append(suppression)
 
-        # Build the report data
+        # Build the report data. "used" counts the configured entries matched,
+        # not the recorded ids, so the three numbers always add up: an id that
+        # matches no configured entry (one from a config edited since, say) is
+        # counted nowhere, where counting the ids read "total 3, used 1,
+        # unused 3".
         report_data: Dict[str, Any] = {
             "summary": {
                 "total_suppressions": len(all_suppressions),
-                "used_suppressions": len(used_suppressions),
+                "used_suppressions": len(all_suppressions) - len(unused_suppressions),
                 "unused_suppressions": len(unused_suppressions),
             },
             "unused_suppressions": [
-                self._suppression_to_dict(s) for s in unused_suppressions
+                self._suppression_to_dict(s, recorded.get(id(s)))
+                for s in unused_suppressions
             ],
         }
 
@@ -157,54 +202,80 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
             # Generate both formats and write markdown separately
             json_output = json.dumps(report_data, indent=2, default=str)
             markdown_output = self._generate_markdown_report(
-                report_data, unused_suppressions
+                report_data, unused_suppressions, recorded
             )
 
             # Write the markdown file separately
             if hasattr(self.context, "output_dir"):
                 from pathlib import Path
 
+                from automated_security_helper.base.reporter_plugin import (
+                    write_report_file,
+                )
+
                 report_dir = Path(self.context.output_dir) / "reports"
                 report_dir.mkdir(parents=True, exist_ok=True)
-                markdown_file = report_dir / "ash.unused-suppressions.md"
-                with open(markdown_file, "w", encoding="utf-8") as f:
-                    f.write(markdown_output)
+                write_report_file(report_dir, self.MARKDOWN_FILE_NAME, markdown_output)
 
             # Return JSON as the primary output
             return json_output
         elif output_format == "markdown":
-            return self._generate_markdown_report(report_data, unused_suppressions)
+            return self._generate_markdown_report(
+                report_data, unused_suppressions, recorded
+            )
         else:
             return json.dumps(report_data, indent=2, default=str)
 
     @staticmethod
-    def _suppression_to_dict(suppression: AshSuppression) -> Dict[str, Any]:
+    def _suppression_to_dict(
+        suppression: AshSuppression, recorded: Dict[str, Any] | None = None
+    ) -> Dict[str, Any]:
         """Convert a suppression to a dictionary for JSON serialization.
 
         Package fields and ``symbol`` are included only when set, so the
         report for a suppression without them is unchanged, and so the config
-        linter can rebuild the same id from the report that
-        ``AshSuppression.id`` gives.
+        linter can rebuild an id from the report that matches the entry.
+        ``recorded``, when given, is the suppression as its config file wrote
+        the fields it read from the environment (``recorded_suppressions``),
+        and each value comes from it. For such an entry the rebuilt id hashes
+        the references, not ``AshSuppression.id``'s resolved values, so the
+        linter's fixer matches each file entry by its as-written id as well as
+        its resolved one (``ConfigLinter.fix_unused_suppressions``).
         """
+
+        def shown(field: str) -> Any:
+            if recorded is not None and field in recorded:
+                return recorded[field]
+            return getattr(suppression, field)
+
         data: Dict[str, Any] = {
-            "path": suppression.path,
-            "rule_id": suppression.rule_id,
-            "line_start": suppression.line_start,
-            "line_end": suppression.line_end,
-            "reason": suppression.reason,
-            "expiration": suppression.expiration,
+            field: shown(field)
+            for field in (
+                "path",
+                "rule_id",
+                "line_start",
+                "line_end",
+                "reason",
+                "expiration",
+            )
         }
         for field in (*PACKAGE_SUPPRESSION_FIELDS, "symbol"):
-            value = getattr(suppression, field)
-            if value is not None:
-                data[field] = value
+            if getattr(suppression, field) is not None:
+                data[field] = shown(field)
         return data
 
     @staticmethod
     def _generate_markdown_report(
-        report_data: Dict[str, Any], unused_suppressions: List[AshSuppression]
+        report_data: Dict[str, Any],
+        unused_suppressions: List[AshSuppression],
+        recorded: Dict[int, Dict[str, Any]] | None = None,
     ) -> str:
-        """Generate a human-readable markdown report."""
+        """Generate a human-readable markdown report.
+
+        ``recorded`` (``recorded_suppressions``) gives the fields shown for a
+        suppression, each one the config read from the environment as its
+        reference.
+        """
         lines = []
 
         # Title
@@ -243,9 +314,14 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
             lines.append("")
 
             for i, suppression in enumerate(unused_suppressions, 1):
-                lines.append(f"### {i}. {suppression.path}")
+                # Each field as recorded: one read from the environment is shown
+                # as its reference.
+                shown = UnusedSuppressionsReporter._suppression_to_dict(
+                    suppression, (recorded or {}).get(id(suppression))
+                )
+                lines.append(f"### {i}. {shown['path']}")
                 lines.append("")
-                lines.append(f"- **Rule ID**: `{suppression.rule_id or 'Any'}`")
+                lines.append(f"- **Rule ID**: `{shown['rule_id'] or 'Any'}`")
 
                 if suppression.line_start is not None:
                     if (
@@ -253,10 +329,10 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                         and suppression.line_end != suppression.line_start
                     ):
                         lines.append(
-                            f"- **Lines**: {suppression.line_start}-{suppression.line_end}"
+                            f"- **Lines**: {shown['line_start']}-{shown['line_end']}"
                         )
                     else:
-                        lines.append(f"- **Line**: {suppression.line_start}")
+                        lines.append(f"- **Line**: {shown['line_start']}")
                 else:
                     lines.append("- **Lines**: Any")
 
@@ -266,14 +342,13 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                     ("package_path", "Package path"),
                     ("symbol", "Symbol"),
                 ):
-                    value = getattr(suppression, field)
-                    if value is not None:
-                        lines.append(f"- **{label}**: `{value}`")
+                    if field in shown:
+                        lines.append(f"- **{label}**: `{shown[field]}`")
 
-                lines.append(f"- **Reason**: {_one_line(suppression.reason)}")
+                lines.append(f"- **Reason**: {_one_line(shown['reason'])}")
 
                 if suppression.expiration:
-                    lines.append(f"- **Expiration**: {suppression.expiration}")
+                    lines.append(f"- **Expiration**: {shown['expiration']}")
 
                 lines.append("")
 

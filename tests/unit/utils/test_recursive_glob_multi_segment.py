@@ -102,16 +102,22 @@ def test_the_reported_example_verbatim():
     assert file_path_matches("a/x/b/c", "a/**/b/**") is True
 
 
-def test_backslash_separators_are_normalized_on_both_sides():
-    assert _recursive_glob_match("a\\x\\b\\c", "a/**/b/**") is True
+def test_backslash_separators_are_normalized_in_the_pattern_only():
     assert _recursive_glob_match("a/x/b/c", "a\\**\\b\\**") is True
+    # A backslash in the path is part of a name: "a\x\b\c" is one component.
+    assert _recursive_glob_match("a\\x\\b\\c", "a/**/b/**") is False
 
 
-def test_case_is_folded_by_the_callers():
-    assert file_path_matches(
+def test_case_is_compared_as_written():
+    assert not file_path_matches(
         "Tests/Unit/__snapshots__/X.ambr", "tests/**/__snapshots__/**"
     )
-    assert match_glob("Tests/Unit/__snapshots__/X.ambr", "TESTS/**/__SNAPSHOTS__/**")
+    assert not match_glob(
+        "Tests/Unit/__snapshots__/X.ambr", "TESTS/**/__SNAPSHOTS__/**"
+    )
+    assert file_path_matches(
+        "Tests/Unit/__snapshots__/X.ambr", "Tests/**/__snapshots__/**"
+    )
 
 
 def test_a_long_path_does_not_blow_up():

@@ -6,6 +6,7 @@
 import json
 from datetime import date, timedelta
 
+import pytest
 import yaml
 
 from automated_security_helper.cli.mcp_tools import mcp_suggest_suppression
@@ -224,6 +225,59 @@ class TestFindingNotFound:
 
         assert result["success"] is False
         assert "error" in result
+
+
+class TestPasteReadyTextKeepsReferenceLookalikesLiteral:
+    """A value that starts like ``${VAR}`` loads back as the literal text.
+
+    The paste-ready YAML is written for ASH's own config loader, which reads a
+    plain ``${VAR...}`` start as an environment reference. Written plain, a
+    pasted justification of that shape read the variable on load; quoted, it
+    loads back as exactly the text the block displayed.
+    """
+
+    def _suggest(self, tmp_path, justification: str) -> dict:
+        vuln = _make_vuln()
+        results_file = tmp_path / "ash_aggregated_results.json"
+        results_file.write_text(json.dumps(_make_aggregated_json([vuln])))
+        result = mcp_suggest_suppression(
+            finding_id=vuln.id,
+            results_path=str(results_file),
+            justification=justification,
+        )
+        assert result["success"] is True, result
+        return result
+
+    @pytest.mark.parametrize(
+        "justification",
+        ["${ASH_X} note", "${ASH_X}", "${ASH_X:fallback} trailing"],
+        ids=["prefixed", "whole", "with-default"],
+    )
+    def test_a_lookalike_justification_loads_back_literally(
+        self, tmp_path, monkeypatch, justification
+    ):
+        from automated_security_helper.config.config_sources import read_config_file
+
+        monkeypatch.setenv("ASH_X", "resolved-from-the-environment")
+        result = self._suggest(tmp_path, justification)
+
+        pasted = tmp_path / "pasted.yaml"
+        pasted.write_text(result["yaml"], encoding="utf-8")
+        loaded = read_config_file(pasted)
+
+        assert loaded["reason"] == justification, (
+            "the pasted block read the environment instead of the shown text",
+            loaded["reason"],
+        )
+        # The same text through plain YAML, so the block parses the same both
+        # ways and the dict mirror matches what was asked for.
+        assert yaml.safe_load(result["yaml"])["reason"] == justification
+        assert result["json"]["reason"] == justification
+
+    def test_a_plain_justification_stays_unquoted(self, tmp_path):
+        result = self._suggest(tmp_path, "Reviewed and accepted risk")
+
+        assert "reason: Reviewed and accepted risk" in result["yaml"], result["yaml"]
 
 
 class TestSchemaResource:

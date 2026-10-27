@@ -1,7 +1,7 @@
 """Unit tests for CloudWatchLogsReporter to increase coverage."""
 
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import ANY, patch, MagicMock
 
 
 from automated_security_helper.base.plugin_context import PluginContext
@@ -159,7 +159,9 @@ def test_cloudwatch_logs_reporter_report_success(mock_boto3):
     result = reporter.report(mock_model)
 
     # Verify logs client was called
-    mock_boto3.client.assert_called_once_with("logs", region_name="us-west-2")
+    mock_boto3.client.assert_called_once_with(
+        "logs", region_name="us-west-2", config=ANY
+    )
     mock_logs_client.create_log_stream.assert_called_once_with(
         logGroupName="test-log-group", logStreamName="test-stream"
     )

@@ -197,7 +197,7 @@ Windows for a file nobody edited.
 | `buildImage` | `IBuildImage` | `LinuxBuildImage.STANDARD_7_0` | |
 | `computeType` | `ComputeType` | `SMALL` | |
 | `environmentVariables` | `map<string, string>` | none | |
-| `extraScanArguments` | `string[]` | none | verdict and shard flags rejected |
+| `extraScanArguments` | `string[]` | none | verdict and shard flags rejected; an option ASH does not accept fails the scan with exit 5 (ASH releases after 3.7.1) |
 | `rolePolicyStatements` | `PolicyStatement[]` | none | added to each project role |
 
 `CRITICAL` and `HIGH` are equivalent: SARIF does not distinguish the two levels,
@@ -232,6 +232,15 @@ happens to work.
 its repository. It defaults to a pinned release tag, so two runs of the same
 pipeline definition scan with the same ASH; pointing it at a branch gives that up.
 
+The ref has to be a plain git ref: a tag, a branch name or a commit id made of
+letters, digits and `. _ / -`, not starting with `-` or `.`, with no `..`, no empty
+path component and no component starting with `.` or ending in `.lock`. pip hands
+the ref to `git show-ref` and `git checkout` as an argument of its own, and git reads
+an argument that starts with `-` as an option. A literal `version` that breaks the
+rule fails synthesis. A `version` of `$NAME` is read from that build environment
+variable, so the install phase checks its value first and stops the build on one
+that breaks the rule, before pip or uvx runs.
+
 ## How ASH gets installed
 
 Every install mode fetches ASH from its git repository. None installs by
@@ -264,6 +273,9 @@ ASH release by overriding one variable rather than editing a generated file:
 aws codebuild start-build --project-name my-scan \
   --environment-variables-override name=ASH_VERSION,value=v3.6.0,type=PLAINTEXT
 ```
+
+The install phase's first command checks that `ASH_VERSION` is a plain git ref, as
+described above, and fails the build when it is not.
 
 ## Development
 

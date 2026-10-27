@@ -79,8 +79,9 @@ The status of a scanner is determined based on its findings and configuration:
 
 - **PASSED**: The scanner did not find any actionable findings
 - **FAILED**: The scanner found actionable findings (at or above the threshold)
-- **SKIPPED**: The scanner was explicitly excluded from the scan
-- **MISSING**: The scanner has missing dependencies
+- **ERROR**: The scanner ran and produced no result that can be graded
+- **SKIPPED**: The run left the scanner out (`--exclude-scanners`, `--scanners`, `enabled: false`, `--python-only`, or an unsupported platform), or it had nothing to scan in the project, whether or not its tool is installed (cdk-nag and cfn-nag with no CloudFormation template, npm-audit with no lockfile beside a `package.json`). The scanner's row in `ash_aggregated_results.json` and in `ash.flat.json` says which in `skipped_reason`
+- **MISSING**: The scanner was selected and could not run: its tool was not found, its dependency check failed, it could not be sandboxed, or it found its dependencies unavailable when it ran. `missing_reason` says which. ASH scans the source files and, when the convert phase wrote any, the converted files; a scanner that could not run on one of them is MISSING even though it scanned the other, and its `missing_reason` starts with the files it missed (`on the converted files: ...`)
 
 ## Statistics Calculation
 

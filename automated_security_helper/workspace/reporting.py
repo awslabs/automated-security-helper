@@ -72,10 +72,25 @@ Failure modes and known limitations
   and ``execute_workspace``'s exit code is a verdict about code under scan.
 * An ``UNSUPPORTED`` reporter *does* fail the run, at
   ``WorkspaceExitCode.INTERNAL_ERROR``, and only when the run would otherwise
-  have succeeded. It does not override exit 2 or 3, for the reason recorded in
-  ``models.workspace``: a finding is a certainty and must not be suppressed by
-  anything weaker. No reporter shipped here declares ``UNSUPPORTED``; the path is
+  have succeeded. It does not override exit 2 or 3: those are verdicts about the
+  code under scan, and a reporter that cannot render them is not one. No
+  reporter shipped here declares ``UNSUPPORTED``; the path is
   built and tested so the enum member is a mechanism rather than a comment.
+* A per-project reporter that ASH's default config leaves off (the AWS reporters)
+  is listed with the per-project artefacts that exist on disk, because the
+  projects' own configs decided whether it ran. Only the projects that wrote one
+  are listed, and none is reported missing: the step cannot tell a project whose
+  config left the reporter off from one whose report phase failed. With no
+  artefact on disk it is recorded as ``skipped: disabled``.
+* A symlink or directory junction at ``reports/``, at a file a workspace-level
+  reporter writes there, or at the manifest refuses the run with
+  ``ReportPathLinkRefused`` (exit 1), before any project is scanned
+  (:func:`refuse_linked_workspace_report_paths`). One that appears while the
+  projects are scanned is refused when the report step starts, before anything is
+  written; the results file has been written by then, with the exit code the
+  projects gave. A selected reporter's file name that is not a file name, for a
+  per-project reporter too, refuses the run before any project is scanned
+  (``ReportPathRefused``). See utils/report_path_links.py.
 * The per-project artefact paths in the manifest are derived from each reporter's
   configured ``extension``, which is how ``ReportPhase`` derives the filename it
   writes. A reporter that writes extra files under its own steam -- as
@@ -101,9 +116,22 @@ from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterWorkspaceBehaviour,
+    off_host_reporter_refused,
+    reporter_classes_for_run,
+    reporter_companion_file_names,
+    reporter_file_name,
+    reporter_file_names,
     reporter_matches_requested_formats,
+    write_report_file,
 )
+from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.report_path_links import (
+    ensure_reports_dir,
+    refuse_colliding_report_names,
+    refuse_linked_report_paths,
+    refuse_report_names_outside,
+)
 from automated_security_helper.workspace.plan import WorkspacePlan
 
 #: Where workspace-level reports land, mirroring the ``reports/`` directory a
@@ -144,7 +172,8 @@ _EMITTING_BEHAVIOURS = frozenset(
 class WorkspaceReportOutcome:
     """What the workspace-level report step produced, and what it refused to."""
 
-    manifest_path: Path
+    #: None when the manifest could not be written; the reason is logged.
+    manifest_path: Optional[Path]
     workspace_artifacts: Dict[str, Path] = field(default_factory=dict)
     per_project_reporters: Tuple[str, ...] = ()
     unsupported_reporters: Tuple[str, ...] = ()
@@ -177,13 +206,12 @@ def _reporter_name(instance: ReporterPluginBase) -> str:
 def _report_filename(instance: ReporterPluginBase) -> str:
     """The filename ``ReportPhase`` would give this reporter's output.
 
-    Mirrors ``ReportPhase._execute_phase`` exactly, including its ``ash.txt``
-    fallback for a reporter that declares no extension, so a workspace-level
-    report and a per-project one are never named differently for the same
-    reporter.
+    The same function ``ReportPhase._execute_phase`` names its file with, including
+    the ``ash.txt`` fallback for a reporter that declares no extension, so a
+    workspace-level report and a per-project one are never named differently for
+    the same reporter.
     """
-    extension = getattr(getattr(instance, "config", None), "extension", None)
-    return f"ash.{extension}" if extension else "ash.txt"
+    return reporter_file_name(instance)
 
 
 def _disabled_by_config(instance: ReporterPluginBase) -> bool:
@@ -271,17 +299,28 @@ def _per_project_artifacts(
     return entries, missing
 
 
-def _default_reporter_classes() -> List[type]:
-    """Every reporter class the plugin registry resolved.
+def _present_per_project_artifacts(
+    plan: WorkspacePlan, output_dir: Path, filename: str
+) -> List[Dict[str, str]]:
+    """The per-project artefacts of ``filename`` that exist on disk, in plan order."""
+    entries, missing = _per_project_artifacts(plan, output_dir, filename)
+    return [entry for entry in entries if entry["project"] not in missing]
+
+
+def _default_reporter_classes(plugin_modules: Sequence[str] = ()) -> List[type]:
+    """The reporter classes of this workspace run's own plugin modules.
 
     ``execution.prewarm_plugin_registry`` has already resolved the ``reporter``
     type before any project ran, so this reads a warm, complete registry rather
     than triggering discovery here -- which under the old lazy behaviour would
     have made the resolved set depend on when it was first asked for.
-    """
-    from automated_security_helper.plugins import ash_plugin_manager
 
-    return list(ash_plugin_manager.plugin_modules("reporter"))
+    Only ASH's built-ins and ``plugin_modules`` (the modules the workspace's
+    projects and command line name, ``execution.workspace_plugin_modules``): the
+    registry is process-wide, and a reporter another run's module registered in
+    it was built, checked and run here (``reporter_classes_for_run``).
+    """
+    return reporter_classes_for_run(plugin_modules)
 
 
 def _build_instance(
@@ -309,6 +348,7 @@ def _selected_reporters(
     python_based_plugins_only: bool,
     reporter_classes: Optional[Sequence[type]],
     check_dependencies: bool = True,
+    plugin_modules: Sequence[str] = (),
 ):
     """Every constructible reporter, with its declared behaviour and skip reason.
 
@@ -330,7 +370,7 @@ def _selected_reporters(
     classes = (
         list(reporter_classes)
         if reporter_classes is not None
-        else _default_reporter_classes()
+        else _default_reporter_classes(plugin_modules)
     )
     for reporter_class in classes:
         instance = _build_instance(reporter_class, context, config_lookup)
@@ -347,16 +387,29 @@ def _selected_reporters(
         # because they route the operator to different knobs: disabled means edit
         # the config, not-requested means widen --output-format, and unavailable
         # means the reporter's own dependencies are unsatisfied.
+        #
+        # The dependency check is last, and only for a reporter that produces an
+        # artefact at workspace level: it can contact a remote service (the AWS
+        # reporters call STS or DescribeHub), and a reporter this step does not
+        # run -- not requested, or per-project, whose check its own project's
+        # scan made -- is not checked here.
         skipped: Optional[str] = None
-        if _disabled_by_config(instance):
+        if _disabled_by_config(instance) or off_host_reporter_refused(
+            reporter_class, config_lookup(plugin_config_key(reporter_class))
+        ):
             skipped = SKIP_DISABLED
-        elif check_dependencies and _dependencies_unsatisfied(instance):
-            skipped = SKIP_UNSATISFIED_DEPENDENCIES
         if skipped is None and python_based_plugins_only:
             if not instance.is_python_only():
                 skipped = SKIP_NOT_PYTHON_ONLY
         if skipped is None and not _matches_requested_formats(instance, output_formats):
             skipped = SKIP_NOT_REQUESTED
+        if (
+            skipped is None
+            and check_dependencies
+            and behaviour in _EMITTING_BEHAVIOURS
+            and _dependencies_unsatisfied(instance)
+        ):
+            skipped = SKIP_UNSATISFIED_DEPENDENCIES
 
         if skipped is not None:
             ASH_LOGGER.debug(
@@ -396,6 +449,128 @@ def _workspace_context(
     return context, config_lookup
 
 
+def _workspace_report_file_names(selection) -> List[str]:
+    """Every file the workspace report step writes in ``reports/``.
+
+    The files of each reporter that will produce a workspace-level artefact, as the
+    reporter names them, and the manifest. ``selection`` is what
+    :func:`_selected_reporters` yields.
+    """
+    names: List[str] = []
+    for instance, behaviour, skipped in selection:
+        if skipped is None and behaviour in _EMITTING_BEHAVIOURS:
+            names.extend(reporter_file_names(instance))
+    names.append(MANIFEST_FILENAME)
+    return names
+
+
+def _workspace_report_main_names(selection, every_behaviour: bool = False) -> List[str]:
+    """The report file (``ash.<extension>``) of each reporter that will emit one.
+
+    With ``every_behaviour``, of every selected reporter, including those that
+    write only in each project's own ``reports/``.
+    """
+    return [
+        reporter_file_name(instance)
+        for instance, behaviour, skipped in selection
+        if skipped is None and (every_behaviour or behaviour in _EMITTING_BEHAVIOURS)
+    ]
+
+
+def _workspace_report_companion_names(
+    selection, every_behaviour: bool = False
+) -> List[Tuple[str, str]]:
+    """``(reporter, name)`` for each file such a reporter writes beside its report."""
+    return [
+        (_reporter_name(instance), name)
+        for instance, behaviour, skipped in selection
+        if skipped is None and (every_behaviour or behaviour in _EMITTING_BEHAVIOURS)
+        for name in reporter_companion_file_names(instance)
+    ]
+
+
+def _workspace_report_writers(
+    selection, every_behaviour: bool = False
+) -> List[Tuple[str, Tuple[str, ...]]]:
+    """``(who, names)`` for each reporter that will write, as ``refuse_colliding_report_names`` takes them.
+
+    Of the reporters that emit a workspace-level file, with the manifest the step
+    writes beside them; with ``every_behaviour``, of every selected reporter, as
+    each project's report phase runs them, and without the manifest.
+    """
+    writers: List[Tuple[str, Tuple[str, ...]]] = [
+        (f"the {_reporter_name(instance)} reporter", reporter_file_names(instance))
+        for instance, behaviour, skipped in selection
+        if skipped is None and (every_behaviour or behaviour in _EMITTING_BEHAVIOURS)
+    ]
+    if not every_behaviour:
+        writers.append(("the workspace report step", (MANIFEST_FILENAME,)))
+    return writers
+
+
+def refuse_linked_workspace_report_paths(
+    plan: WorkspacePlan,
+    output_dir: Path,
+    *,
+    output_formats: Sequence[str] = (),
+    python_based_plugins_only: bool = False,
+    reporter_classes: Optional[Sequence[type]] = None,
+) -> None:
+    """Refuse the run when a workspace report would be written through a link.
+
+    Run before any project is scanned, for the reason
+    :func:`unsupported_reporter_names` is: nothing gets scanned or written, so the
+    results file and the exit status cannot disagree. Nothing clears the
+    workspace's ``reports/`` before the report step, so a link there now is a link
+    there then. :func:`emit_workspace_reports` checks again before it writes. No
+    dependency validation, for the same reason as there, so the links checked are
+    at the files of every enabled reporter that writes a workspace-level file.
+
+    The file names of every selected reporter are checked as well, those that
+    write only in each project's ``reports/`` included: a name that is not a file
+    in a reports directory would otherwise be refused by each project's report
+    phase after that project was scanned. Like the rest of this step, the names
+    come from ASH's default config and ``--output-format``, not from a project's
+    config (see "Reporter enablement" above), so narrowing ``--output-format`` is
+    how to leave such a reporter out.
+
+    Raises:
+        ReportPathRefused: A selected reporter's file name is not a file name.
+        ReportNameCollision: Two selected reporters would write the same file, or
+            a workspace-level reporter would write the manifest's.
+        ReportPathLinkRefused: ``reports/``, one of those reporters' files or the
+            manifest is a symlink or a directory junction.
+    """
+    context, config_lookup = _workspace_context(plan.workspace_root, Path(output_dir))
+    selection = list(
+        _selected_reporters(
+            context=context,
+            config_lookup=config_lookup,
+            output_formats=output_formats,
+            python_based_plugins_only=python_based_plugins_only,
+            reporter_classes=reporter_classes,
+            check_dependencies=False,
+        )
+    )
+    refuse_report_names_outside(
+        Path(output_dir) / REPORTS_DIR_NAME,
+        _workspace_report_main_names(selection, every_behaviour=True),
+        _workspace_report_companion_names(selection, every_behaviour=True),
+    )
+    # Two reporters writing one file: in each project's reports/, where every
+    # selected reporter writes, and in the workspace's, beside the manifest.
+    refuse_colliding_report_names(
+        Path(output_dir) / REPORTS_DIR_NAME,
+        _workspace_report_writers(selection, every_behaviour=True),
+    )
+    refuse_colliding_report_names(
+        Path(output_dir) / REPORTS_DIR_NAME, _workspace_report_writers(selection)
+    )
+    refuse_linked_report_paths(
+        Path(output_dir) / REPORTS_DIR_NAME, _workspace_report_file_names(selection)
+    )
+
+
 def unsupported_reporter_names(
     plan: WorkspacePlan,
     output_dir: Path,
@@ -403,24 +578,22 @@ def unsupported_reporter_names(
     output_formats: Sequence[str] = (),
     python_based_plugins_only: bool = False,
     reporter_classes: Optional[Sequence[type]] = None,
+    plugin_modules: Sequence[str] = (),
 ) -> Tuple[str, ...]:
     """Enabled reporters that declare they cannot work in workspace mode.
 
     Answered from declarations and config alone -- no model, no results file, no
     scan, and deliberately no dependency validation.
 
-    That last exclusion is not an optimisation. ``SecurityHubReporter`` and
-    ``BedrockSummaryReporter`` call AWS inside
-    ``validate_plugin_dependencies``, so validating here would put live API calls
-    on the path *before every workspace scan* -- latency and log noise on a run
-    they cannot affect, since a reporter whose dependencies are unsatisfied is
-    already skipped by :func:`emit_workspace_reports`. It also means the two
-    answers differ in one narrow case, on purpose: a reporter that is enabled,
-    declares ``UNSUPPORTED``, and has unsatisfied dependencies refuses the run
-    here rather than being quietly skipped later. That is the right direction --
-    the operator's configuration asks for something the format cannot do, and
-    telling them so does not depend on whether an unrelated credential happens to
-    be present.
+    That last exclusion is not an optimisation. The AWS reporters call AWS inside
+    ``validate_plugin_dependencies`` (Security Hub ``DescribeHub``, the others
+    STS), so validating here would put live API calls on the path *before every
+    workspace scan* -- latency and log noise on a run they cannot affect.
+    :func:`emit_workspace_reports` checks dependencies only for a reporter that
+    emits a workspace-level artefact, so an enabled ``UNSUPPORTED`` reporter is
+    refused here and recorded as unsupported there, whether or not its
+    dependencies are satisfied: whether the format can express a workspace does
+    not depend on a credential being present.
 
     Why a pre-flight at all:
 
@@ -448,6 +621,7 @@ def unsupported_reporter_names(
             python_based_plugins_only=python_based_plugins_only,
             reporter_classes=reporter_classes,
             check_dependencies=False,
+            plugin_modules=plugin_modules,
         )
         # ``skipped is None`` is what makes disabling the documented way out
         # actually work: a reporter the operator turned off must not refuse a run
@@ -465,6 +639,7 @@ def emit_workspace_reports(
     python_based_plugins_only: bool = False,
     ignore_suppressions: bool = False,
     reporter_classes: Optional[Sequence[type]] = None,
+    plugin_modules: Sequence[str] = (),
 ) -> WorkspaceReportOutcome:
     """Run the workspace-level report step and write the manifest.
 
@@ -485,14 +660,28 @@ def emit_workspace_reports(
             reads it sees the same value the projects' scans did.
         reporter_classes: Injected only by tests. Production callers take the
             registry, which ``prewarm_plugin_registry`` has already resolved.
+        plugin_modules: The plugin modules this workspace run names
+            (``execution.workspace_plugin_modules``). With ``reporter_classes``
+            unset, only ASH's built-in reporters and those of these modules are
+            considered.
 
     Returns:
         What was written, what was withheld, and what refused. The caller folds
         ``refused`` into the exit code; nothing here calls ``sys.exit``.
+
+    Raises:
+        ReportPathRefused: A file name a reporter here would write is not a file
+            name. Nothing is written.
+        ReportNameCollision: Two reporters here, or a reporter and the manifest,
+            would write the same file. Nothing is written.
+        ReportPathLinkRefused: ``reports/``, a file a reporter here would write or
+            the manifest is a link. Nothing is written.
     """
+    # The reports and the manifest are written as ASH's other output: never through
+    # a link below the output directory (write_report_file replaces each file
+    # through fs_guard's atomic write).
     output_dir = Path(output_dir)
-    reports_dir = output_dir / REPORTS_DIR_NAME
-    reports_dir.mkdir(parents=True, exist_ok=True)
+    reports_dir = ensure_reports_dir(output_dir / REPORTS_DIR_NAME)
 
     context, config_lookup = _workspace_context(
         plan.workspace_root, output_dir, ignore_suppressions
@@ -508,13 +697,28 @@ def emit_workspace_reports(
     # pays the cost of materialising the whole model.
     model = None
 
-    for instance, behaviour, skipped in _selected_reporters(
-        context=context,
-        config_lookup=config_lookup,
-        output_formats=output_formats,
-        python_based_plugins_only=python_based_plugins_only,
-        reporter_classes=reporter_classes,
-    ):
+    selection = list(
+        _selected_reporters(
+            context=context,
+            config_lookup=config_lookup,
+            output_formats=output_formats,
+            python_based_plugins_only=python_based_plugins_only,
+            reporter_classes=reporter_classes,
+            plugin_modules=plugin_modules,
+        )
+    )
+    # Before any reporter runs and before the manifest: a link that appeared
+    # after refuse_linked_workspace_report_paths ran is refused here, with
+    # nothing written.
+    refuse_report_names_outside(
+        reports_dir,
+        _workspace_report_main_names(selection),
+        _workspace_report_companion_names(selection),
+    )
+    refuse_colliding_report_names(reports_dir, _workspace_report_writers(selection))
+    refuse_linked_report_paths(reports_dir, _workspace_report_file_names(selection))
+
+    for instance, behaviour, skipped in selection:
         name = _reporter_name(instance)
         filename = _report_filename(instance)
         entry: Dict[str, Any] = {
@@ -527,11 +731,31 @@ def emit_workspace_reports(
         }
         manifest_reporters[name] = entry
 
+        if (
+            skipped == SKIP_DISABLED
+            and behaviour is ReporterWorkspaceBehaviour.PER_PROJECT
+        ):
+            # Disabled by ASH's default config, which is what this step reads, but
+            # each project's scan read its own config. A per-project reporter the
+            # default leaves off -- the AWS reporters -- may have run in the
+            # projects whose config enabled it, so list what they wrote rather
+            # than call it disabled. A project with no artefact is not missing
+            # one: its config may simply leave the reporter off.
+            present = _present_per_project_artifacts(plan, output_dir, filename)
+            if present:
+                per_project.append(name)
+                entry["considered"] = True
+                entry["per_project_artifacts"] = present
+                ASH_LOGGER.verbose(
+                    f"Reporter {name} is off in the default config but per-project; "
+                    f"{len(present)} project(s) wrote its artefact."
+                )
+                continue
+
         if skipped is not None:
             # Recorded rather than omitted. Six of the nineteen shipped reporters
-            # land here on a default run -- yaml and spdx ship disabled, and the
-            # four AWS ones report unsatisfied dependencies without credentials --
-            # and an operator asking where their yaml report went deserves an
+            # land here on a default run -- yaml, spdx and the four AWS ones ship
+            # disabled -- and an operator asking where their yaml report went deserves an
             # answer rather than silence. Silence is the defect this manifest
             # exists to prevent; only the reason differs from a withheld artefact.
             entry["skipped"] = skipped
@@ -565,7 +789,8 @@ def emit_workspace_reports(
                 ASH_LOGGER.warning(
                     f"Reporter {name} has no artefact for project(s) "
                     f"{', '.join(missing)}. Those projects were skipped, failed, "
-                    f"or had the reporter disabled."
+                    f"had the reporter disabled, or left it out of their own "
+                    f"output_formats."
                 )
             continue
 
@@ -598,14 +823,21 @@ def emit_workspace_reports(
             ASH_LOGGER.verbose(f"Reporter {name} returned no content")
             continue
 
-        target = reports_dir / filename
-        target.write_text(content, encoding="utf-8")
+        target = write_report_file(reports_dir, filename, content)
+        if target is None:
+            failures[name] = (
+                f"report file {filename!r} could not be written in {reports_dir}"
+            )
+            entry["error"] = failures[name]
+            ASH_LOGGER.error(f"Reporter {name}: {failures[name]}")
+            continue
         artifacts[name] = target
         entry["workspace_artifact"] = target.relative_to(output_dir).as_posix()
         ASH_LOGGER.info(f"Writing workspace {name} report to {target}")
 
-    manifest_path = reports_dir / MANIFEST_FILENAME
-    manifest_path.write_text(
+    manifest_path = write_report_file(
+        reports_dir,
+        MANIFEST_FILENAME,
         json.dumps(
             {
                 "workspace_file": plan.workspace_file,
@@ -615,7 +847,6 @@ def emit_workspace_reports(
             },
             indent=2,
         ),
-        encoding="utf-8",
     )
 
     return WorkspaceReportOutcome(
