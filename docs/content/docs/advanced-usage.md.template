@@ -87,6 +87,49 @@ ash --mode nix
 - Linux and macOS; on Windows, run it in WSL2
 - See [Nix mode](../how-to/install.md#nix-mode)
 
+## When a scanner shows MISSING
+
+MISSING means the scanner did not run: ASH did not find its tool, found the tool only
+inside the scanned directory (see
+[Tools inside the scanned directory](#tools-inside-the-scanned-directory)), the
+scanner's own dependency check failed, or the sandbox mode was `auto` and no sandbox
+backend works on this machine. (Under a backend you name that does not work, or a
+sandbox refusal of another kind, the scanner is ERROR instead.) The reason is in the
+scanner's `missing_reason` in `ash_aggregated_results.json`. A MISSING scanner makes
+the scan incomplete, and by default (`fail_on_incomplete_scanners`) an incomplete
+scan exits 1.
+
+For most scanners, `ash dependencies install` installs the tool. To install one
+scanner's tool, name the scanner, as in `ash dependencies install --tool grype`. Four
+scanners need more:
+
+- detect-secrets ships with ASH as one of its Python dependencies. Reinstall ASH.
+- cdk-nag runs in ASH's own Python and needs Node.js, which ASH does not install.
+  `ash dependencies install --tool cdk-nag` installs its Python packages.
+- npm-audit needs Node.js and npm, and yarn or pnpm to audit a `yarn.lock` or a
+  `pnpm-lock.yaml`. ASH installs none of them.
+- cfn-nag is a Ruby gem. It needs RubyGems and a C compiler (on Windows, a Ruby
+  DevKit) before `ash dependencies install --tool cfn-nag` can install it.
+
+If you do not need a scanner, leave it out, as in `ash --exclude-scanners npm-audit`.
+It is then recorded SKIPPED, which does not make the scan incomplete.
+
+## Platform limits
+
+- Windows: semgrep and opengrep are off by default. semgrep is SKIPPED even when you
+  turn it on, because it publishes no Windows build. cfn-nag needs a Ruby DevKit. On
+  Windows on arm64, grype, opengrep and trivy publish no build. ASH does not look for
+  tools in `/usr/local/bin`.
+- macOS: each release binary ASH downloads (actionlint, cfn-guard, gitleaks, grype,
+  opengrep, syft and trivy) has a pinned build for Intel and Apple silicon. cfn-nag
+  needs a C compiler, such as the one in the Xcode Command Line Tools.
+- Linux: each of those release binaries has a pinned build for x86-64 and arm64. ASH
+  downloads opengrep's glibc build on every Linux system, so on a musl-based
+  distribution such as Alpine it may not run.
+
+A SKIPPED scanner does not make the scan incomplete, so on Windows a scan does not
+fail for lacking semgrep and opengrep, as long as another selected scanner runs.
+
 ## Custom Plugins
 
 ASH v3 supports custom plugins for extending functionality:

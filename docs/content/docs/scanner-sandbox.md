@@ -357,6 +357,8 @@ and the sandbox wraps them like any other scanner. To let detect-secrets verify
 secrets under the sandbox, pass `--config-overrides 'sandbox.network_scanners=[detect-secrets]'`
 (plus any other scanners that need a network). Under `--offline` it gets none.
 
+### Give a scanner more access {#grants}
+
 To give an extra scanner network access, or take it away:
 
 ```yaml
@@ -365,6 +367,8 @@ sandbox:
   network_scanners: [grype, trivy-repo]   # replaces the per-scanner defaults
   extra_read_paths: [/opt/company-ca]
 ```
+
+#### Who may grant
 
 Four settings grant access: `network_scanners`, `extra_read_paths`, and the two
 below that let a scanner have what its own options ask for. A config file the
@@ -446,6 +450,8 @@ a checkout, because a mode other than `off` grants nothing. Only `--sandbox off`
 sandbox on, the repository's `mode` applies, because a sandbox the repository asks
 for only takes access away. In workspace mode, the operator's `--config` decides for
 a project that has its own config file, the same as for one that doesn't.
+
+### Install tools before a sandboxed scan
 
 A sandboxed scan does not install tools, for scanners and converters alike:
 installing runs a package's build code and writes uv's tool directory, which a
@@ -559,6 +565,46 @@ Out of scope:
   network namespace forces all traffic through it; that is future work.
 - Results integrity. A scanner can still write false results to its own results file.
 - Kernel defects. All backends share the host kernel.
+
+## Scan a repository you do not trust {#untrusted}
+
+For a repository you do not trust, on Linux or macOS:
+
+1. Install the scanners first, from a trusted environment, with
+   `ash dependencies install`. Run it from a directory outside the repository, because
+   it reads the ASH config of the directory it runs in. A sandboxed scan does not
+   install tools (see
+   [Install tools before a sandboxed scan](#install-tools-before-a-sandboxed-scan)),
+   and a scanner whose tool is missing is recorded `MISSING`.
+2. Keep your own config file outside every git checkout and outside the scanned
+   directory, and pass it with `--config`. Only such a file and `--config-overrides`
+   can grant sandbox access (see [Who may grant](#who-may-grant)).
+3. Scan in local mode with the sandbox on. On Linux, name the backend with
+   `--sandbox bwrap`, or set `sandbox.mode` to `bwrap` in that file: `--sandbox auto`
+   falls back to firejail when bwrap is not usable, and firejail leaves readable every
+   path outside `$HOME` that your user can read. On macOS the backend is sandbox-exec,
+   which reads everywhere except the home directory and the shared temporary
+   directories.
+4. Scan with `--offline` if you can, so that no scanner gets a network. Otherwise set
+   `sandbox.network_scanners` to the shortest list that works. Offline, npm-audit is
+   `MISSING` for a project that has a lockfile, because npm, pnpm and yarn audit only
+   against the package registry; leave it out with `--exclude-scanners npm-audit`.
+5. Put the output directory outside the repository with `--output-dir`. The default
+   output directory, `.ash/ash_output`, is inside the scanned directory.
+6. Do not pass `--allow-in-tree-tools` or set `ASH_ALLOW_IN_TREE_TOOLS`, so that ASH
+   starts no tool it finds only inside the repository (see
+   [Tools inside the scanned directory](advanced-usage.md#tools-inside-the-scanned-directory)).
+7. Name only plugin modules you trust. A plugin module runs in ASH's own process,
+   outside the sandbox.
+
+With the default `fail_on_incomplete_scanners`, a scanner whose tool is found only
+inside the repository, or that cannot be sandboxed under `--sandbox auto` because no
+backend works, is `MISSING`. A scanner whose sandbox backend you named and that is
+unavailable, or whose sandbox is refused for another reason, is `ERROR`. Either way the
+scan exits 1, rather than passing on fewer scanners than you asked for.
+
+On Windows there is no sandbox backend. Run ASH under WSL2 with `--sandbox bwrap`, or
+use container mode, where the container is the boundary.
 
 ## Design
 

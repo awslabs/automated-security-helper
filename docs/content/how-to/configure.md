@@ -166,6 +166,19 @@ Without the variable, the same file is refused:
 ash config validate --config env-example.yaml
 ```
 
+## Relative paths in the operator's settings {#relative-paths}
+
+A relative path in one of the operator's settings is taken from where it was set, not from the source directory being scanned:
+
+- In a config file outside the tree (`--config`, `ASH_CONFIG`, a workspace's `--config`, an MCP profile), from that file's directory. In an `extends` base, from the base's directory. In a `patch` operation, from the directory of the file that holds it.
+- In `--config-overrides`, in a CLI flag, and in `TRIVY_IGNOREFILE`, `TRIVY_SECRET_CONFIG` or `TRIVY_CONFIG`, from the working directory ASH runs in.
+
+This covers `config_file` of actionlint, bandit, cfn-lint, checkov, ferret-scan, gitleaks, grype, syft, trivy, trivy-repo and zizmor, gitleaks' `baseline_path`, each entry of cfn-guard's `rules_paths`, detect-secrets' `baseline_file` and the `file://` entries of its `scan_settings`, trivy's and trivy-repo's `ignore_file` and `secret_config_file`, trivy-repo's `module_dir`, opengrep's and semgrep's `config` when a file or directory is there (otherwise it is a registry entry such as `p/ci`), and `sandbox.extra_read_paths`. It does not cover actionlint's `shellcheck` and `pyflakes`, which name a program: a bare name there is looked up on `PATH`, and a relative path is taken from the source directory. It does not cover hadolint's `config_file` either: a relative path there is also taken from the source directory, so give an absolute path.
+
+A path that starts with `~`, or is absolute, is used as written. In `TRIVY_IGNOREFILE`, `TRIVY_SECRET_CONFIG` and `TRIVY_CONFIG`, any other value is taken from the working directory exactly as written, a `$` or `://` in it included, and a `..` after a symbolic link goes up from where the link points.
+
+A config file inside the scanned tree does not set these options ([How a file's tier is decided](../concepts/trust-model.md#how-the-tier-is-decided)). To name a file in the scanned repository, give its absolute path, or a path relative to where you run ASH with `--config-overrides`.
+
 ## Get completion in your editor {#schema}
 
 The first line `ash config init` writes points editors that use the YAML language server (VS Code with the Red Hat YAML extension, for example) at ASH's JSON schema:

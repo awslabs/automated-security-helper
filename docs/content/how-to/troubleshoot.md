@@ -40,7 +40,7 @@ missing.
 
 Fix: install the tool, usually with `ash dependencies install --tool grype` (using the
 scanner's name). [When a scanner shows MISSING](../docs/advanced-usage.md#when-a-scanner-shows-missing)
-lists the exceptions: cdk-nag, npm-audit, and cfn-nag. If you do not need the scanner,
+lists the exceptions: detect-secrets, cdk-nag, npm-audit, and cfn-nag. If you do not need the scanner,
 leave it out with `ash --exclude-scanners grype`, which records it as SKIPPED.
 
 ### A tool inside the scanned directory is not run {#a-scanner-is-missing-because-it-was-found-only-inside-the-scanned-tree}
@@ -72,6 +72,70 @@ Fix: install the tool outside the repository, for example with
 scan, pass `--allow-in-tree-tools` or set `ASH_ALLOW_IN_TREE_TOOLS=1`. `ash mcp`
 ignores both. See
 [Tools inside the scanned directory](../docs/advanced-usage.md#tools-inside-the-scanned-directory).
+
+### A scanner is ERROR with an exit code it does not accept {#a-scanner-is-error-with-an-exit-code-it-does-not-accept}
+
+Symptom: a scanner's row is `ERROR`, and its error names the tool's exit code:
+
+```text
+Failed to execute semgrep scanner on source: SemgrepScanner scan failed: its tool exited with code 7, which this scanner does not accept as a completed run, so its results file is not graded (exit code 7: not an accepted exit code; success_exit_codes=[0, 1]). No stderr captured; checked .ash/ash_output/scanners/semgrep/source/SemgrepScanner.stderr.log, which the tool did not write. .ash/ash_output/scanners/semgrep/source/results_sarif.sarif reports: Invalid YAML file ...
+```
+
+Cause: the tool reported that it failed. Each scanner accepts the exit codes its tool uses
+for a run that completed, with or without findings, and nothing else. A failed tool
+can still leave a results file (semgrep exits 7 and writes SARIF holding only error
+notifications when it cannot read a rule configuration; grype exits 1 and writes a
+zero-byte report when it cannot load its database), so ASH does not read the file of
+a run with any other code: an empty or error-only file would otherwise be graded
+`PASSED` with no findings. A tool ended by a signal shows as `128 + N` (129 for
+SIGHUP, 130 for SIGINT, 137 for SIGKILL). 127 is a tool the OS could not start, or
+a run ASH itself failed to carry out (the scanner's errors name ASH's error).
+
+| Scanner | Accepted exit codes | What the tool uses other codes for |
+|---|---|---|
+| bandit | 0, 1 (issues found) | 2: any error (`bandit/cli/main.py`) |
+| checkov | 0, 1 (failed checks) | 2: the run crashed (`checkov/main.py`) |
+| grype | 0, 2 (a match at or above `grype --fail-on`) | 1: any error, such as a database it cannot load (`cmd/grype/cli/cli.go`) |
+| semgrep | 0, 1 (findings) | 2: fatal; 3 and up: specific failures, 7 for a rule configuration it cannot read (`semgrep/error.py`) |
+| opengrep | 0, 1 | the same values as semgrep (`src/osemgrep/core/Exit_code.ml`) |
+| trivy, trivy-repo | 0 | 1: any error (`cmd/trivy/main.go`) |
+| syft | 0 | 1: any error (`cmd/syft/main.go`) |
+| ferret-scan | 0, 3 (coverage cut short under `fail_on_incomplete`: the findings are reported and the row is `ERROR`, as its target counts as failed) | 1: any error |
+| snyk-code | 0, 1 (issues found) | 2: an error; 3: no supported project (`src/cli/exit-codes.ts`) |
+| gitleaks | 0, 2 (leaks found: ASH runs `gitleaks --exit-code=2`) | 1: any error, such as an unreadable config; gitleaks exits 1 for leaks too unless told otherwise, which is why ASH moves the leaks code |
+| zizmor | 0, 3 (nothing it could audit; findings never set the status because ASH runs `zizmor --no-exit-codes`) | any other status |
+| hadolint | 0 (ASH runs `hadolint --no-fail`) | any other status |
+| actionlint | 0, 1 (problems found) | 2: a bad command line; 3: a fatal error, such as an unreadable file |
+| cfn-lint | 0 and the even values up to 14: 2 error, 4 warning and 8 informational, added together for a run with more than one level (`cfnlint/runner/cli.py`) | 1: a fatal error, so any odd status; anything above 15 |
+| cfn-guard | 0, 19 (at least one rule failed) | any other status, such as 255 for a parse error or a missing rules path |
+| guarddog | 0, with output on stdout | any other status |
+
+trivy exits 0 for a run with findings unless its `exit-code` setting names another
+code. ASH runs trivy and trivy-repo with `trivy --exit-code=0`, which outranks an
+`exit-code` in the operator's trivy config and `TRIVY_EXIT_CODE` (measured with trivy
+0.75.0), and neither scanner reads a `trivy.yaml` from the scanned directory, so a
+run with findings exits 0 and a nonzero exit only ever means trivy failed. ASH
+decides the scan's exit code from the findings itself.
+
+cfn-nag, npm audit, detect-secrets and cdk-nag are not in this table. cfn-nag exits
+with its count of failing violations and is judged per template; npm audit exits 1
+both for advisories and for errors and is judged by whether it wrote a report;
+detect-secrets and cdk-nag run in ASH's own worker processes.
+
+Fix: read what the message quotes, and fix what the tool reported: its stderr, or, when
+it wrote none (semgrep and opengrep report a rule file they cannot read only in
+their SARIF), the error-level notifications from its results file, which the
+message names. The full text is in the `<Scanner>.stderr.log`, the
+`<Scanner>.stdout.log` and the results file under `scanners/<name>/<target>/` in the
+output directory; the message names the ones the tool wrote.
+For semgrep and opengrep under `--offline`, see
+[Seeding the semgrep and opengrep rule cache](../docs/advanced-usage.md#seeding-the-semgrep-and-opengrep-rule-cache).
+For grype, see [What each scanner does offline](run-offline.md#scanners).
+
+The scan exits 1 for an `ERROR` scanner while `fail_on_incomplete_scanners` is on,
+which is the default. With it off, the exit code comes from the findings alone, so a
+scan whose only problem is the failed scanner exits 0; see
+[Incomplete scans](set-the-gate.md#incomplete).
 
 ### semgrep and opengrep show SKIPPED on Windows
 
