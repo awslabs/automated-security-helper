@@ -59,10 +59,20 @@ REFUSED = {
 
 #: The keychain directories the profile denies outright: the system keychain and
 #: the login keychain, which keychain items live in whatever the daemon allows.
-KEYCHAIN_DIRECTORIES = {
-    "system": Path("/Library/Keychains"),
-    "login": Path.home() / "Library" / "Keychains",
-}
+#: The login one is resolved when a test asks for it (_keychain_directory), from the
+#: home the run started with: tests/conftest.py moves HOME into a session home before
+#: this module is imported, so a Path.home() read here would name an empty directory
+#: and the keychain tests would find nothing to deny.
+KEYCHAIN_DIRECTORIES = ("login", "system")
+
+
+def _keychain_directory(which: str, developer_home: Path) -> Path:
+    """The directory ``which`` names: the system keychain, or the login keychain in
+    ``developer_home``, the runner's own home (the ``developer_home`` fixture)."""
+    if which == "system":
+        return Path("/Library/Keychains")
+    return developer_home / "Library" / "Keychains"
+
 
 #: Services no scanner has a use for, looked up directly; all of them are denied
 #: after every allow. LaunchServices (launchservicesd, coreservicesd and the lsd
@@ -304,7 +314,12 @@ def test_a_sandboxed_scanner_cannot_read_the_pasteboard(tmp_path_factory, pasteb
     assert outcome.startswith(REFUSED["pasteboard_read"]), outcome
 
 
+@pytest.mark.real_home
 def test_a_sandboxed_scanner_cannot_read_the_keychain(tmp_path_factory, keychain_item):
+    """real_home: the throwaway item goes into the login keychain of the home the run
+    started with, where ``security`` finds a default keychain. Under the per-test home
+    tests/conftest.py gives every other test, ``security add-generic-password`` has
+    no keychain to write and hangs until the fixture's timeout."""
     _require_sandbox_exec()
     service, canary = keychain_item
     control = _attempt(
@@ -342,12 +357,19 @@ def _readable_files(directory: Path) -> "list[str]":
     return readable
 
 
-@pytest.mark.parametrize("which", sorted(KEYCHAIN_DIRECTORIES))
-def test_a_sandboxed_scanner_cannot_read_the_keychain_files(tmp_path_factory, which):
+@pytest.mark.real_home
+@pytest.mark.parametrize("which", KEYCHAIN_DIRECTORIES)
+def test_a_sandboxed_scanner_cannot_read_the_keychain_files(
+    tmp_path_factory, which, developer_home
+):
+    """real_home: the login keychain is in the home the run started with, and the
+    sandbox-exec profile denies ``$HOME/Library/Keychains`` of the scan's HOME, so the
+    scan runs with that home too."""
     _require_sandbox_exec()
-    files = _readable_files(KEYCHAIN_DIRECTORIES[which])
+    directory = _keychain_directory(which, developer_home)
+    files = _readable_files(directory)
     if not files:
-        _unavailable(f"nothing under {KEYCHAIN_DIRECTORIES[which]} is readable here")
+        _unavailable(f"nothing under {directory} is readable here")
     control = _attempt(
         tmp_path_factory.mktemp("control"), "off", "read_files", "", files=files
     )
@@ -362,7 +384,7 @@ def test_a_sandboxed_scanner_cannot_read_the_keychain_files(tmp_path_factory, wh
         files=files,
     )
     assert outcome != "succeeded", (
-        f"sandbox-exec let the scanner read a file under {KEYCHAIN_DIRECTORIES[which]}"
+        f"sandbox-exec let the scanner read a file under {directory}"
     )
     assert outcome == REFUSED["read_files"], outcome
 
