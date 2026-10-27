@@ -1684,12 +1684,114 @@ def test_mcp_notes_match_the_server() -> None:
     assert "does not stop" not in cancel
     progress = _section(text, "## get_scan_progress")
     assert "until `is_complete` is `true`" in progress
-    assert "`results_available`" in progress
+    # The page names a progress key exactly when the server returns it.
+    returned = _progress_keys()
+    assert "results_available" not in returned or "`results_available`" in progress
+    assert "results_available" in returned or "`results_available`" not in progress
     assert "ash mcp --profile NAME=path/to/ash.yaml" in _section(
         text, "## list_profiles"
     )
     install = _section(text, "## check_installation")
     assert "`installs_on_first_scan`" in install and "until a scan" not in install
+
+
+def _mcp_reference_module():
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import generate_mcp_tool_reference
+    finally:
+        sys.path.remove(str(SCRIPTS))
+    return generate_mcp_tool_reference
+
+
+def _progress_keys() -> set[str]:
+    """The keys of the get_scan_progress response that carries the most of them."""
+    import importlib.util
+
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import _mcp_contract
+    finally:
+        sys.path.remove(str(SCRIPTS))
+    spec = importlib.util.find_spec("automated_security_helper")
+    assert spec is not None and spec.origin
+    contracts = _mcp_contract.tool_contracts(Path(spec.origin).resolve().parent)
+    response = contracts["get_scan_progress"].response
+    return max(({key for key, _ in each.keys} for each in response.dicts()), key=len)
+
+
+def test_the_progress_example_names_only_keys_the_server_returns() -> None:
+    """Every key of the get_scan_progress example, and no caveat that needs a key the
+    server lacks, comes from the response the tool's return statements build."""
+    text = _page("mcp-tools.md")
+    progress = _section(text, "## get_scan_progress")
+    # The docs page prints the example as json or, when it is a sketch, as text.
+    fence = re.search(r"```(?:json|text)\n(.*?)```", progress, re.DOTALL)
+    assert fence, progress
+    example = fence.group(1)
+    shown = set(re.findall(r'^  "([a-z_]+)":', example, re.MULTILINE))
+    returned = _progress_keys()
+    assert shown and shown <= returned, sorted(shown - returned)
+    for key in ("finished_scanners", "scanner_status_counts"):
+        assert (key in returned) == (f"`{key}`" in progress), key
+
+
+def test_a_dict_caveat_is_printed_only_while_the_server_returns_what_it_needs() -> None:
+    generator = _mcp_reference_module()
+    caveat = {
+        "needs": ["flag"],
+        "text": "with the flag",
+        "otherwise": "without the flag",
+    }
+    assert (
+        generator._conditional_caveat(caveat, {"flag", "x"}, set()) == "with the flag"
+    )
+    assert generator._conditional_caveat(caveat, {"x"}, set()) == "without the flag"
+    bare = {"needs": ["flag"], "text": "with the flag"}
+    assert generator._conditional_caveat(bare, {"x"}, set()) is None
+    typed = {"needs_types": ["busy"], "text": "refused as busy"}
+    assert generator._conditional_caveat(typed, set(), {"busy"}) == "refused as busy"
+    assert generator._conditional_caveat(typed, set(), {"other"}) is None
+
+
+def test_the_error_type_paragraph_names_the_types_the_tool_returns() -> None:
+    generator = _mcp_reference_module()
+    caveat = {
+        "lead": "A refusal returns an `error_type`:",
+        "error_types": [("a", "first"), ("b", ""), ("c", "third")],
+        "untyped_unless": ["c"],
+        "untyped": "Anything else has none.",
+    }
+    only_a_and_b = generator._conditional_caveat(caveat, set(), {"a", "b"})
+    assert only_a_and_b == (
+        "A refusal returns an `error_type`: `a` (first), or `b`. "
+        "Anything else has none."
+    )
+    with_c = generator._conditional_caveat(caveat, set(), {"a", "c"})
+    assert with_c == ("A refusal returns an `error_type`: `a` (first), or `c` (third).")
+    assert generator._conditional_caveat(caveat, set(), {"z"}) is None
+
+
+def test_the_clone_paragraph_names_no_type_the_server_lacks() -> None:
+    """set_source_git's page names the clone types the reader finds in the server's
+    source, none from an older or newer one."""
+    git = _section(_page("mcp-tools.md"), "## set_source_git")
+    paragraph = next(p for p in git.split("\n\n") if p.startswith("A refusal"))
+    named = set(re.findall(r"`([a-z_]+)`", paragraph)) - {"error_type"}
+    clone_types = {
+        n for n in named if n.startswith(("clone_", "git_", "invalid_clone"))
+    }
+    import importlib.util
+
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import _mcp_contract
+    finally:
+        sys.path.remove(str(SCRIPTS))
+    spec = importlib.util.find_spec("automated_security_helper")
+    assert spec is not None and spec.origin
+    contracts = _mcp_contract.tool_contracts(Path(spec.origin).resolve().parent)
+    assert clone_types <= set(contracts["set_source_git"].error_types), clone_types
 
 
 def test_check_installation_notes_list_no_scanners() -> None:

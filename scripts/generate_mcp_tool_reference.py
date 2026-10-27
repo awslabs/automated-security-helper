@@ -44,7 +44,11 @@ to that behavior needs the note changed by hand. So the split is:
   ``error_type`` values each tool can return, and the ``type`` of each entry of
   ``validate_config``'s ``errors``. The pages that tell a client which error a
   refusal carries are checked against the same values, and so are the example
-  responses, so a renamed literal or key fails the docs checks.
+  responses, so a renamed literal or key fails the docs checks. Editorial text that
+  names a response key or an error type is printed only while the server returns it
+  (``returns_fields``, and a caveat given as a dict with ``needs``, ``needs_types``
+  or ``error_types``), so the page describes the tools at the commit it is generated
+  from and not a server that has more or fewer of them.
 * Editorial, held in ``TOOL_NOTES`` below: the intro override, the ``Returns:``
   example blocks, and the caveats. Per-parameter ``Notes`` text likewise.
 
@@ -225,73 +229,127 @@ TOOL_NOTES: dict[str, dict] = {
             "continues server-side independently of polling."
         ),
         "params": {"scan_id": {"notes": "From `run_ash_scan`"}},
-        "returns": """{
-  "scan_id": "...",
-  "directory_path": "/path/to/scanned/project",
-  "output_directory": "/path/to/.ash/ash_output",
-  "start_time": "<iso8601>",
-  "end_time": "<iso8601 | null>",
-  "status": "pending | running | completed | incomplete | failed | cancelled",
-  "severity_threshold": "<the threshold the scan was judged by once it is completed or incomplete; null before that, and for a failed or cancelled scan>",
-  "requested_severity_threshold": "<run_ash_scan's severity_threshold, upper-cased, or null>",
-  "config_path": "<path | null>",
-  "warnings": [...],
-  "error_message": "<str | null>",
-  "is_complete": bool,
-  "results_available": bool,
-  "output_holds_previous_results": bool,
-  "coverage_complete": "bool | null",
-  "incomplete_scanners": [
-    { "scanner": "grype", "status": "MISSING", "reason": "missing_dependencies", "detail": "MISSING" }
-  ],
-  "no_scanner_ran": bool,
-  "incomplete_converters": [{ "converter": "...", "reason": "..." }],
-  "unevaluated_rules": ["..."],
-  "stale_content_databases": [{ "name": "grype-db", "scanner": "grype", "built": "<iso8601 | null>", "age": "...", "max_age": "...", "refresh": "..." }],
-  "completed_scanners": int,
-  "finished_scanners": int,
-  "total_scanners": int,
-  "scanner_status_counts": { "passed": int, "failed": int, "skipped": int, "running": int, "pending": int },
-  "total_findings": int,
-  "severity_counts": { "critical": int, "high": int, "medium": int, "low": int, "info": int, "suppressed": int },
-  "scanners": {
-    "<scanner_name>": {
-      "<target_type>": { ... per-scanner-target progress ... }
-    }
-  }
-}""",
-        "caveats": [
+        # The example's keys are derived: a key is printed only when the response the
+        # tool's return statements build (scripts/_mcp_contract.py) has it, so the page
+        # never names a key the server at this commit does not return. The text after
+        # each key is editorial.
+        "returns_fields": [
+            ("scan_id", '  "scan_id": "..."'),
+            ("directory_path", '  "directory_path": "/path/to/scanned/project"'),
+            ("output_directory", '  "output_directory": "/path/to/.ash/ash_output"'),
+            ("start_time", '  "start_time": "<iso8601>"'),
+            ("end_time", '  "end_time": "<iso8601 | null>"'),
             (
-                "There is no overall percentage field. To compute progress, use "
-                "`finished_scanners / total_scanners`: `finished_scanners` counts every "
-                "scanner that has ended, whatever its status, and `completed_scanners` "
-                "only the ones that PASSED. `scanner_status_counts` splits them into "
-                "`passed`, `failed` (FAILED or ERROR), `skipped` (MISSING or SKIPPED), "
-                "`running`, and `pending`. **Guard against `total_scanners == 0`** during "
-                "the pre-flight phase (before any scanner has registered). Show "
-                '"initializing" or 0% when `total_scanners` is zero.'
+                "status",
+                '  "status": "pending | running | completed | incomplete | failed | cancelled"',
             ),
             (
-                "There is no top-level `duration` field — derive elapsed time from "
+                "severity_threshold",
+                '  "severity_threshold": "<the threshold the scan was judged by once it is completed or incomplete; null before that, and for a failed or cancelled scan>"',
+            ),
+            (
+                "requested_severity_threshold",
+                '  "requested_severity_threshold": "<run_ash_scan\'s severity_threshold, upper-cased, or null>"',
+            ),
+            ("config_path", '  "config_path": "<path | null>"'),
+            ("warnings", '  "warnings": [...]'),
+            ("error_message", '  "error_message": "<str | null>"'),
+            ("is_complete", '  "is_complete": bool'),
+            ("results_available", '  "results_available": bool'),
+            (
+                "output_holds_previous_results",
+                '  "output_holds_previous_results": bool',
+            ),
+            ("coverage_complete", '  "coverage_complete": "bool | null"'),
+            (
+                "incomplete_scanners",
+                '  "incomplete_scanners": [\n    { "scanner": "grype", "status": "MISSING", "reason": "missing_dependencies", "detail": "MISSING" }\n  ]',
+            ),
+            ("no_scanner_ran", '  "no_scanner_ran": bool'),
+            (
+                "incomplete_converters",
+                '  "incomplete_converters": [{ "converter": "...", "reason": "..." }]',
+            ),
+            ("unevaluated_rules", '  "unevaluated_rules": ["..."]'),
+            (
+                "stale_content_databases",
+                '  "stale_content_databases": [{ "name": "grype-db", "scanner": "grype", "built": "<iso8601 | null>", "age": "...", "max_age": "...", "refresh": "..." }]',
+            ),
+            ("completed_scanners", '  "completed_scanners": int'),
+            ("finished_scanners", '  "finished_scanners": int'),
+            ("total_scanners", '  "total_scanners": int'),
+            (
+                "scanner_status_counts",
+                '  "scanner_status_counts": { "passed": int, "failed": int, "skipped": int, "running": int, "pending": int }',
+            ),
+            ("total_findings", '  "total_findings": int'),
+            (
+                "severity_counts",
+                '  "severity_counts": { "critical": int, "high": int, "medium": int, "low": int, "info": int, "suppressed": int }',
+            ),
+            (
+                "scanners",
+                '  "scanners": {\n    "<scanner_name>": {\n      "<target_type>": { ... per-scanner-target progress ... }\n    }\n  }',
+            ),
+        ],
+        # A caveat is a string, or a dict that is printed only when the server
+        # returns what it describes: "needs" are response keys, "needs_types"
+        # error types. "otherwise" is what is printed instead, when there is one.
+        "caveats": [
+            {
+                "needs": ["finished_scanners", "scanner_status_counts"],
+                "text": (
+                    "There is no overall percentage field. To compute progress, use "
+                    "`finished_scanners / total_scanners`: `finished_scanners` counts every "
+                    "scanner that has ended, whatever its status, and `completed_scanners` "
+                    "only the ones that PASSED. `scanner_status_counts` splits them into "
+                    "`passed`, `failed` (FAILED or ERROR), `skipped` (MISSING or SKIPPED), "
+                    "`running`, and `pending`. **Guard against `total_scanners == 0`** during "
+                    "the pre-flight phase (before any scanner has registered). Show "
+                    '"initializing" or 0% when `total_scanners` is zero.'
+                ),
+                "otherwise": (
+                    "There is no overall percentage field. To compute progress, use "
+                    "`completed_scanners / total_scanners`: `completed_scanners` counts "
+                    "only the scanners whose progress status is completed, so it can "
+                    "stay below `total_scanners` when the scan ends with a scanner that "
+                    "failed or was skipped. **Guard against `total_scanners == 0`** "
+                    "during the pre-flight phase (before any scanner has registered). "
+                    'Show "initializing" or 0% when `total_scanners` is zero.'
+                ),
+            },
+            (
+                "There is no top-level `duration` field; derive elapsed time from "
                 "`start_time` and `end_time` (or from current time while running)."
             ),
-            (
-                "**`is_complete` is `true` once the scan has ended**, whatever the ending: "
-                "`completed`, `incomplete`, `failed`, or `cancelled`. It is decided by the "
-                "scan's state alone, never by a results file on disk, which can be an "
-                "earlier scan's. `results_available` is `true` for `completed` and "
-                "`incomplete`, the scans whose results `get_scan_results` can read."
-            ),
-            (
-                "**A failed or canceled scan has no results to read**, and "
-                "`results_available` is `false`. ASH puts the previous scan's results "
-                "back in `output_directory` once the scan has stopped, a moment after its "
-                "status changes. `output_holds_previous_results` is then `true` and the "
-                "scanner fields are empty, because those files are not this scan's, and "
-                "`get_scan_results` and the other tools that read results from that "
-                "directory refuse it with `error_category` `scan_incomplete`. A first "
-                "scan has nothing to put back, and what it wrote before it stopped stays."
-            ),
+            {
+                "needs": ["results_available"],
+                "text": (
+                    "**`is_complete` is `true` once the scan has ended**, whatever the ending: "
+                    "`completed`, `incomplete`, `failed`, or `cancelled`. It is decided by the "
+                    "scan's state alone, never by a results file on disk, which can be an "
+                    "earlier scan's. `results_available` is `true` for `completed` and "
+                    "`incomplete`, the scans whose results `get_scan_results` can read."
+                ),
+                "otherwise": (
+                    "**`is_complete` is `true` for `completed` and `incomplete`**, the "
+                    "scans whose results `get_scan_results` can read. Poll until it is "
+                    "`true`, then read `status`."
+                ),
+            },
+            {
+                "needs": ["results_available", "output_holds_previous_results"],
+                "text": (
+                    "**A failed or canceled scan has no results to read**, and "
+                    "`results_available` is `false`. ASH puts the previous scan's results "
+                    "back in `output_directory` once the scan has stopped, a moment after its "
+                    "status changes. `output_holds_previous_results` is then `true` and the "
+                    "scanner fields are empty, because those files are not this scan's, and "
+                    "`get_scan_results` and the other tools that read results from that "
+                    "directory refuse it with `error_category` `scan_incomplete`. A first "
+                    "scan has nothing to put back, and what it wrote before it stopped stays."
+                ),
+            },
             (
                 "**`incomplete` is terminal, with partial coverage.** The run finished and its "
                 "results are readable, but a selected scanner was `MISSING` or `ERROR` (or lost "
@@ -467,22 +525,28 @@ TOOL_NOTES: dict[str, dict] = {
                 "against `expected_sha256` before extracting it. A chunked upload that is never "
                 "finalized is not a scan target."
             ),
-            (
-                "Refused with `success: false` and `error_type: session_workspace_busy` "
-                "while the server removes this session's workspace for being unused "
-                "longer than its time to live. The upload is gone with the workspace, so "
-                "send the whole upload again, from chunk 0."
-            ),
+            {
+                "needs_types": ["session_workspace_busy"],
+                "text": (
+                    "Refused with `success: false` and `error_type: session_workspace_busy` "
+                    "while the server removes this session's workspace for being unused "
+                    "longer than its time to live. The upload is gone with the workspace, so "
+                    "send the whole upload again, from chunk 0."
+                ),
+            },
         ],
     },
     "select_profile": {
         "caveats": [
-            (
-                "Refused with `success: false` and `error_type: session_workspace_busy` "
-                "while the server removes this session's workspace for being unused "
-                "longer than its time to live. Select the profile again; any upload in "
-                "progress is gone with the workspace and is sent again from chunk 0."
-            ),
+            {
+                "needs_types": ["session_workspace_busy"],
+                "text": (
+                    "Refused with `success: false` and `error_type: session_workspace_busy` "
+                    "while the server removes this session's workspace for being unused "
+                    "longer than its time to live. Select the profile again; any upload in "
+                    "progress is gone with the workspace and is sent again from chunk 0."
+                ),
+            },
         ],
     },
     "set_source_git": {
@@ -507,19 +571,78 @@ TOOL_NOTES: dict[str, dict] = {
             },
         },
         "caveats": [
-            (
-                "A refusal or a git failure returns `success: false` with an "
-                "`error_type`: `clone_url_not_permitted` (a URL that begins with `-`, "
-                "uses the `ext::` transport, or has a scheme other than `https` or "
-                "`ssh`), `clone_ref_not_permitted` (a ref that begins with `-`), "
-                "`local_clone_source_refused` (a local path or `file://` URL), "
-                "`clone_host_not_permitted` (a host the server's "
-                "`ASH_MCP_GIT_ALLOWED_HOSTS` does not list), `ssh_key_not_registered`, "
-                "`invalid_clone_depth`, `invalid_session_id`, `source_delivery_busy` "
-                "(a scan of the session runs), `clone_timed_out` (a git command ran "
-                "past 10 minutes and was stopped), or `git_clone_failed` or "
-                "`git_checkout_failed`, with git's own message in `error`."
-            ),
+            # The error types are listed only when the tool returns them (the types
+            # the reader finds in the server's source), in this order, with this text
+            # after each. A type the tool returns that has no entry here is still
+            # named by the "On failure" line under it.
+            {
+                "error_types": [
+                    (
+                        "clone_url_not_permitted",
+                        (
+                            "a URL with a scheme other than `https` or `ssh`, or whose "
+                            "host or port the server cannot read"
+                        ),
+                    ),
+                    ("clone_ref_not_permitted", "a ref that begins with `-`"),
+                    (
+                        "local_clone_source_refused",
+                        "a local path or `file://` URL",
+                    ),
+                    (
+                        "clone_host_not_permitted",
+                        "a host the server's `ASH_MCP_GIT_ALLOWED_HOSTS` does not list",
+                    ),
+                    ("ssh_key_not_registered", ""),
+                    ("invalid_clone_depth", ""),
+                    ("invalid_session_id", ""),
+                    ("source_delivery_busy", "a scan of the session runs"),
+                    (
+                        "clone_timed_out",
+                        "a git command ran past 10 minutes and was stopped",
+                    ),
+                    (
+                        "clone_too_large",
+                        (
+                            "the clone passed the archive size or entry limits; shrink "
+                            "the request"
+                        ),
+                    ),
+                    (
+                        "clone_tree_unreadable",
+                        (
+                            "the tree git wrote could not be read, which is a "
+                            "server-side fault and not a size to reduce"
+                        ),
+                    ),
+                    (
+                        "git_clone_failed",
+                        "git ran and failed; its own message is in `error`",
+                    ),
+                    (
+                        "git_checkout_failed",
+                        (
+                            "git could not check out the ref; its own message is in "
+                            "`error`"
+                        ),
+                    ),
+                ],
+                "lead": "A refusal returns `success: false` with an `error_type`:",
+                # What the server returns with no error_type, said only while it has
+                # no type of its own for these.
+                "untyped_unless": [
+                    "clone_ref_not_permitted",
+                    "invalid_clone_depth",
+                    "git_clone_failed",
+                    "git_checkout_failed",
+                ],
+                "untyped": (
+                    "A URL that begins with `-` or uses the `ext::` transport, a ref "
+                    "that begins with `-`, a `depth` that is not a positive whole "
+                    "number, and a git failure return `success: false` and an `error` "
+                    "message, with no `error_type`."
+                ),
+            },
         ],
     },
     "list_scanners": {
@@ -664,6 +787,63 @@ def _docstring_arg_notes(func) -> dict[str, str]:
     return {k: v.replace("|", r"\|") for k, v in found.items()}
 
 
+def _response_keys(contract, wanted: set[str]) -> set[str]:
+    """The keys of the one response dict the tool's return statements build that
+    carries the most of ``wanted``.
+
+    Read by ``scripts/_mcp_contract.py``. One dict rather than the union of all of
+    them, because the docs checks hold an example to a single response: an example
+    with keys from a refusal and from a success would pass no check. Without a
+    contract (a tool the reader did not find) every wanted key counts as present.
+    """
+    if contract is None:
+        return set(wanted)
+    best: set[str] = set()
+    score = -1
+    for variant in contract.response.dicts():
+        keys = {key for key, _ in variant.keys}
+        hits = len(keys & wanted)
+        if hits > score or (hits == score and len(keys) > len(best)):
+            best, score = keys, hits
+    return best
+
+
+def _conditional_caveat(
+    caveat: dict, have: set[str], types: set[str] | None
+) -> str | None:
+    """The text of a caveat given as a dict, or None when it is not printed.
+
+    * ``needs``: response keys; all must be in ``have``, else ``otherwise`` is
+      printed when there is one.
+    * ``needs_types``: error types; all must be among the tool's, else nothing.
+    * ``error_types``: (type, note) pairs, a paragraph naming those the tool
+      returns, each followed by its note in parentheses; ``untyped`` is added after
+      it while none of ``untyped_unless`` is returned.
+    """
+    if not all(key in have for key in caveat.get("needs", [])):
+        return caveat.get("otherwise")
+    if types is not None and not set(caveat.get("needs_types", [])) <= types:
+        return None
+    if "error_types" in caveat:
+        named = [
+            f"`{kind}`" + (f" ({note})" if note else "")
+            for kind, note in caveat["error_types"]
+            if types is None or kind in types
+        ]
+        if not named:
+            return None
+        if len(named) > 1:
+            listed = f"{', '.join(named[:-1])}, or {named[-1]}"
+        else:
+            listed = named[0]
+        text = f"{caveat['lead']} {listed}."
+        absent = types is None or not set(caveat.get("untyped_unless", [])) & types
+        if caveat.get("untyped") and absent:
+            text = f"{text} {caveat['untyped']}"
+        return text
+    return caveat["text"]
+
+
 def _render_tool(
     name: str, description: str, schema: dict, func, contract=None
 ) -> list[str]:
@@ -716,10 +896,27 @@ def _render_tool(
     if notes.get("pre_returns"):
         lines += [notes["pre_returns"], ""]
 
-    if notes.get("returns"):
-        lines += ["Returns:", "```json", notes["returns"], "```", ""]
+    caveats = notes.get("caveats", [])
+    fields = notes.get("returns_fields")
+    wanted = {key for key, _ in fields or []}
+    for caveat in caveats:
+        if isinstance(caveat, dict):
+            wanted.update(caveat.get("needs", []))
+    have = _response_keys(contract, wanted)
+    types = None if contract is None else set(contract.error_types)
 
-    for caveat in notes.get("caveats", []):
+    returns = notes.get("returns")
+    if fields:
+        kept = [text for key, text in fields if key in have]
+        returns = "{\n" + ",\n".join(kept) + "\n}" if kept else None
+    if returns:
+        lines += ["Returns:", "```json", returns, "```", ""]
+
+    for caveat in caveats:
+        if isinstance(caveat, dict):
+            caveat = _conditional_caveat(caveat, have, types)
+            if caveat is None:
+                continue
         lines += [caveat, ""]
 
     if contract is not None:
