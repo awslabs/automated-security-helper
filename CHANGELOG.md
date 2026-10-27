@@ -2900,7 +2900,7 @@
     runs with `UV_NO_CONFIG=1`, so the scanned repository's `uv.toml` and
     `[tool.uv]` cannot choose what it installs.
   - ASH runs the uv installed with it, the one its install pins
-    (`uv>=0.12.22,<0.13`): beside the interpreter that runs ASH, in that
+    (`uv>=0.13.4,<0.14`): beside the interpreter that runs ASH, in that
     interpreter's scripts directory, or where the `uv` package keeps its
     executable. Only when none came with ASH does it use a uv on `PATH`, then one
     in the ASH bin directory or, except on Windows, `/usr/local/bin`. That holds
@@ -4179,7 +4179,7 @@
   `install-opengrep: false`.
 
   **The container image pins uv and no longer runs `get-pip.py`.** uv is
-  installed from its pinned release asset (0.12.23), verified against its SHA256,
+  installed from its pinned release asset (0.13.4), verified against its SHA256,
   in both build stages, replacing `curl -LsSf https://astral.sh/uv/install.sh |
   sh`. The unpinned `get-pip.py` download is gone: it installed a pip the base
   image already ships, and the image still upgrades pip with `pip install
@@ -5357,6 +5357,14 @@
   path.
 
 ### Fixes
+
+- **ASH now requires uv 0.13.4 or later, and the container image pins uv
+  0.13.4.** uv before 0.13.4 is affected by GHSA-hq85-5cpj-mr62 (critical). The
+  requirement is `uv>=0.13.4,<0.14`, and the image installs the 0.13.4 release
+  asset, verified against its SHA256. uv 0.13 changes some behavior: Python 3.15
+  is the default stable version when uv has to download an interpreter, tar
+  archives are read more strictly, and the constraints and requirements options
+  parse differently. See https://github.com/astral-sh/uv/releases/tag/0.13.0.
 
 - **A masked plugin module name is hidden wherever a message prints it, and the
   lines that print a registered module's path hide it too.** A module a config read
