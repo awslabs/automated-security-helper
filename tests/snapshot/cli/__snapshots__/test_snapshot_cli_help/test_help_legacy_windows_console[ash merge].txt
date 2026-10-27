@@ -62,8 +62,8 @@
 │                                                                           applied over the      │
 │                                                                           shards' recorded      │
 │                                                                           config.               │
-│    --min-severity                                    <str>                Minimum severity that │
-│                                                                           counts as actionable  │
+│    --min-severity                                    <critical|high|medi  Minimum severity that │
+│                                                      um|low|none>         counts as actionable  │
 │                                                                           for the exit code.    │
 │                                                                           [default: low]        │
 │    --ignore-suppressio…                                                   Ignore all            │

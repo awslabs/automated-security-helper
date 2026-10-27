@@ -1,631 +1,492 @@
 
  Usage: ash [OPTIONS] COMMAND [ARGS]...
 
- AWS Labs - Automated Security Helper
+ Automated Security Helper · one workflow for your security scanners.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --source-dir                                         <str>                 The source directory  │
-│                                                                            to scan               │
-│                                                                            [env var:             │
-│                                                                            ASH_SOURCE_DIR]       │
-│ --output-dir                                         <str>                 The directory to      │
-│                                                                            output results to     │
-│                                                                            [env var:             │
-│                                                                            ASH_OUTPUT_DIR]       │
-│ --scanners                                           <str>                 Specific scanner      │
-│                                                                            names to run.         │
-│                                                                            Defaults to all       │
-│                                                                            scanners.             │
-│                                                                            [env var:             │
-│                                                                            ASH_SCANNERS]         │
-│ --exclude-scanners                                   <str>                 Specific scanner      │
-│                                                                            names to exclude from │
-│                                                                            running. Takes        │
-│                                                                            precedence over       │
-│                                                                            scanners parameter.   │
-│                                                                            [env var:             │
-│                                                                            ASH_EXCLUDED_SCANNER… │
-│ --ash-plugin-modules                                 <str>                 List of Python        │
-│                                                                            modules to import     │
-│                                                                            containing ASH        │
-│                                                                            plugins and/or event  │
-│                                                                            subscribers. These    │
-│                                                                            are loaded in         │
-│                                                                            addition to the       │
-│                                                                            default modules.      │
-│                                                                            [env var:             │
-│                                                                            ASH_PLUGIN_MODULES]   │
-│ --config-overrides                                   <str>                 Configuration         │
-│                                                                            overrides specified   │
-│                                                                            as key-value pairs    │
-│                                                                            (e.g.,                │
-│                                                                            'reporters.cloudwatc… │
-│                                                                            Supports lists with , │
-│                                                                            append mode with      │
-│                                                                            key+=, and JSON       │
-│                                                                            syntax. See           │
-│                                                                            docs/config-override… │
-│ --offline                  --no-offline                                    Run scan in           │
-│                                                                            offline/airgapped     │
-│                                                                            mode (skips           │
-│                                                                            NPM/PNPM/Yarn Audit   │
-│                                                                            checks). IMPORTANT:   │
-│                                                                            Online access is      │
-│                                                                            needed when building  │
-│                                                                            ASH to prepare it for │
-│                                                                            usage during a scan!  │
-│                                                                            If selecting Offline  │
-│                                                                            while performing a    │
-│                                                                            build, the ASH        │
-│                                                                            container image will  │
-│                                                                            be built in offline   │
-│                                                                            mode and any          │
-│                                                                            typically online-only │
-│                                                                            dependencies like     │
-│                                                                            downloadable tool     │
-│                                                                            vulnerability         │
-│                                                                            databases will be     │
-│                                                                            cached in the image   │
-│                                                                            itself before         │
-│                                                                            publishing for scan   │
-│                                                                            usage.                │
-│                                                                            [default: no-offline] │
-│ --sandbox                                            <off|auto|bwrap|fire  Run every scanner     │
-│                                                      jail|landlock|sandbo  subprocess in an      │
-│                                                      x-exec>               OS-level sandbox:     │
-│                                                                            read-only source,     │
-│                                                                            writable results      │
-│                                                                            directory only,       │
-│                                                                            private home and      │
-│                                                                            temporary directory,  │
-│                                                                            no network unless the │
-│                                                                            scanner needs one     │
-│                                                                            (never under          │
-│                                                                            --offline). 'auto'    │
-│                                                                            picks the best        │
-│                                                                            available (Linux:     │
-│                                                                            bwrap, firejail,      │
-│                                                                            landlock; macOS:      │
-│                                                                            sandbox-exec). A      │
-│                                                                            scanner that cannot   │
-│                                                                            be sandboxed as       │
-│                                                                            requested is reported │
-│                                                                            MISSING. Overrides    │
-│                                                                            the config file's     │
-│                                                                            sandbox.mode; default │
-│                                                                            off. Ignored in       │
-│                                                                            container mode. See   │
-│                                                                            docs/content/docs/sc… │
-│ --offline-semgrep-ru…                                <str>                 Specify Semgrep       │
-│                                                                            rulesets for use in   │
-│                                                                            ASH offline mode      │
-│                                                                            [default: p/ci]       │
-│ --strategy                                           <sequential|parallel  Whether to run        │
-│                                                      >                     scanners in parallel  │
-│                                                                            or sequential         │
-│                                                                            [default: parallel]   │
-│ --progress             -p  --no-progress         -P                        Show progress of each │
-│                                                                            job live in the       │
-│                                                                            console. Defaults to  │
-│                                                                            True.                 │
-│                                                                            [default: progress]   │
-│ --output-formats,--o…  -f                            <str>                 The output formats to │
-│                                                                            use                   │
-│                                                                            (comma-separated).    │
-│                                                                            Available formats:    │
-│                                                                            aggregated, text,     │
-│                                                                            flat-json, yaml, csv, │
-│                                                                            html, dict, junitxml, │
-│                                                                            markdown, sarif,      │
-│                                                                            asff, ocsf,           │
-│                                                                            cyclonedx, spdx,      │
-│                                                                            custom                │
-│ --cleanup                  --no-cleanup                                    Clean up 'converted'  │
-│                                                                            directory and other   │
-│                                                                            temporary files after │
-│                                                                            scan completes.       │
-│                                                                            Defaults to False.    │
-│                                                                            Note: Scans will      │
-│                                                                            always clean up       │
-│                                                                            existing files in the │
-│                                                                            output directory      │
-│                                                                            before a new scan     │
-│                                                                            starts. This          │
-│                                                                            parameter only        │
-│                                                                            affects the cleanup   │
-│                                                                            of the temporary work │
-│                                                                            directory after a     │
-│                                                                            scan has completed,   │
-│                                                                            typically for         │
-│                                                                            inspection of         │
-│                                                                            temporary artifacts.  │
-│                                                                            [default: no-cleanup] │
-│ --phases                                             <convert|scan|report  The phases to run.    │
-│                                                      |inspect>             Defaults to all       │
-│                                                                            phases except         │
-│                                                                            inspect.              │
-│ --inspect                  --no-inspect                                    Enable inspection of  │
-│                                                                            SARIF fields after    │
-│                                                                            running. This adds    │
-│                                                                            the inspect phase to  │
-│                                                                            the execution.        │
-│                                                                            [default: no-inspect] │
-│ --use-existing             --no-use-existing                               Use an existing       │
-│                                                                            ash_aggregated_resul… │
-│                                                                            file in the           │
-│                                                                            output-dir. If True,  │
-│                                                                            the scan phase will   │
-│                                                                            be skipped and        │
-│                                                                            reports will be       │
-│                                                                            generated from this   │
-│                                                                            file.                 │
-│                                                                            [default:             │
-│                                                                            no-use-existing]      │
-│ --version                                                                  Prints version number │
-│ --mode                                               <precommit|container  Execution mode        │
-│                                                      |local|nix>           preset. 'precommit'   │
-│                                                                            enables python-based  │
-│                                                                            plugins only and      │
-│                                                                            simplified output.    │
-│                                                                            'container' runs      │
-│                                                                            non-Python plugins in │
-│                                                                            a container. 'local'  │
-│                                                                            (default) runs        │
-│                                                                            everything in the     │
-│                                                                            local Python process. │
-│                                                                            [env var: ASH_MODE]   │
-│                                                                            [default: local]      │
-│ --python-only,--pyth…      --full,--all-enable…                            Exclude execution of  │
-│                                                                            any plugins or tools  │
-│                                                                            that have depencies   │
-│                                                                            external to Python.   │
-│                                                                            [default: full]       │
-│ --show-summary             --no-show-summary                               Show metrics table    │
-│                                                                            and results summary   │
-│                                                                            [default:             │
-│                                                                            show-summary]         │
-│ --quiet                    --no-quiet                                      Hide all log output   │
-│                                                                            [default: no-quiet]   │
-│ --log-level                                          <QUIET|SIMPLE|ERROR|  Set the log level.    │
-│                                                      INFO|VERBOSE|DEBUG|T  [default: INFO]       │
-│                                                      RACE>                                       │
-│ --config               -c                            <str>                 The path to the       │
-│                                                                            configuration file.   │
-│                                                                            By default, ASH looks │
-│                                                                            for the following     │
-│                                                                            config file names in  │
-│                                                                            the source directory  │
-│                                                                            of a scan:            │
-│                                                                            ['.ash.yml',          │
-│                                                                            '.ash.yaml',          │
-│                                                                            '.ash.json',          │
-│                                                                            'ash.yml',            │
-│                                                                            'ash.yaml',           │
-│                                                                            'ash.json'] (each at  │
-│                                                                            the root, then in     │
-│                                                                            .ash/), then          │
-│                                                                            ['.ashrc.toml',       │
-│                                                                            '.ashrc.yaml',        │
-│                                                                            '.ashrc.yml',         │
-│                                                                            '.ashrc.json',        │
-│                                                                            'ashrc.toml',         │
-│                                                                            'ashrc.yaml',         │
-│                                                                            'ashrc.yml',          │
-│                                                                            'ashrc.json'] at the  │
-│                                                                            root, then the        │
-│                                                                            tool.ash table of     │
-│                                                                            pyproject.toml at the │
-│                                                                            root; the first found │
-│                                                                            is used.              │
-│                                                                            Alternatively, the    │
-│                                                                            full path to a config │
-│                                                                            file can be provided  │
-│                                                                            by setting the        │
-│                                                                            ASH_CONFIG            │
-│                                                                            environment variable  │
-│                                                                            before running ASH.   │
-│                                                                            [env var: ASH_CONFIG] │
-│ --verbose              -v                                                  Enable verbose        │
-│                                                                            logging. Any log flag │
-│                                                                            on the command line   │
-│                                                                            overrides             │
-│                                                                            ASH_VERBOSE.          │
-│                                                                            [env var:             │
-│                                                                            ASH_VERBOSE]          │
-│ --debug                -d                                                  Enable debug logging. │
-│                                                                            Any log flag on the   │
-│                                                                            command line          │
-│                                                                            overrides ASH_DEBUG.  │
-│                                                                            [env var: ASH_DEBUG]  │
-│ --color                    --no-color                                      Enable/disable        │
-│                                                                            colorized output      │
-│                                                                            [default: color]      │
-│ --fail-on-findings         --no-fail-on-findin…                            Enable/disable        │
-│                                                                            throwing              │
-│                                                                            non-successful exit   │
-│                                                                            codes if any          │
-│                                                                            actionable findings   │
-│                                                                            are found. Defaults   │
-│                                                                            to unset, which       │
-│                                                                            prefers the           │
-│                                                                            configuration value.  │
-│                                                                            If this is set        │
-│                                                                            directly, it takes    │
-│                                                                            precedence over the   │
-│                                                                            configuration value.  │
-│ --fail-on-incomplete…      --no-fail-on-incomp…                            Exit 1 when a         │
-│                                                                            selected scanner did  │
-│                                                                            not complete -- ERROR │
-│                                                                            (ran and failed) or   │
-│                                                                            MISSING (dependencies │
-│                                                                            unavailable, so it    │
-│                                                                            never ran). Without   │
-│                                                                            this, a run where     │
-│                                                                            nothing ran exits 0,  │
-│                                                                            the same code as a    │
-│                                                                            clean scan, because   │
-│                                                                            no scanner produced   │
-│                                                                            any finding. A        │
-│                                                                            SKIPPED scanner, one  │
-│                                                                            you did not select or │
-│                                                                            one with nothing of   │
-│                                                                            its kind to scan,     │
-│                                                                            does not trip it by   │
-│                                                                            itself, so --scanners │
-│                                                                            and                   │
-│                                                                            --exclude-scanners    │
-│                                                                            both narrow what is   │
-│                                                                            gated; but a run in   │
-│                                                                            which every scanner   │
-│                                                                            is SKIPPED, such as   │
-│                                                                            one where no selected │
-│                                                                            scanner had a file to │
-│                                                                            scan, exits 1.        │
-│                                                                            Independent of        │
-│                                                                            --fail-on-findings,   │
-│                                                                            and takes precedence  │
-│                                                                            over it when both     │
-│                                                                            would fail: a partial │
-│                                                                            scan's findings are   │
-│                                                                            real but its clean    │
-│                                                                            bill of health is     │
-│                                                                            not. Defaults to      │
-│                                                                            unset, which prefers  │
-│                                                                            the configuration     │
-│                                                                            value and then on.    │
-│                                                                            Pass                  │
-│                                                                            --no-fail-on-incompl… │
-│                                                                            to accept a partial   │
-│                                                                            scan's exit code, or  │
-│                                                                            --exclude-scanners    │
-│                                                                            for a tool you do not │
-│                                                                            have, which records   │
-│                                                                            it SKIPPED and says   │
-│                                                                            so in the report.     │
-│ --allow-stale-conten…      --no-allow-stale-co…                            Let the scan pass     │
-│                                                                            when a scanner's      │
-│                                                                            content database      │
-│                                                                            (grype's or trivy's   │
-│                                                                            vulnerability         │
-│                                                                            database, the offline │
-│                                                                            semgrep/opengrep      │
-│                                                                            rulesets) is older    │
-│                                                                            than its declared     │
-│                                                                            bound -- for grype,   │
-│                                                                            120h after the        │
-│                                                                            database was built.   │
-│                                                                            Without it such a     │
-│                                                                            scan exits 1, except  │
-│                                                                            for trivy's database  │
-│                                                                            in an image built     │
-│                                                                            with OFFLINE=YES,     │
-│                                                                            which warns by        │
-│                                                                            default. With it the  │
-│                                                                            scan proceeds and the │
-│                                                                            warning is recorded   │
-│                                                                            in the log and in the │
-│                                                                            reports.              │
-│                                                                            --no-allow-stale-con… │
-│                                                                            forces the failure,   │
-│                                                                            for that database     │
-│                                                                            too. Defaults to      │
-│                                                                            unset, which prefers  │
-│                                                                            the                   │
-│                                                                            `content_db_stalenes… │
-│                                                                            config value and then │
-│                                                                            'fail'; either form   │
-│                                                                            of the flag takes     │
-│                                                                            precedence over the   │
-│                                                                            config.               │
-│ --simple                   --no-simple                                     Simplified output     │
-│                                                                            mode with minimal     │
-│                                                                            logging               │
-│                                                                            [default: no-simple]  │
-│ --ignore-suppressions      --no-ignore-suppres…                            Ignore all            │
-│                                                                            suppression rules and │
-│                                                                            report all findings   │
-│                                                                            regardless of         │
-│                                                                            suppression status.   │
-│                                                                            [default:             │
-│                                                                            no-ignore-suppressio… │
-│ --honor-ignore-files       --no-honor-ignore-f…                            Whether the           │
-│                                                                            .gitignore and        │
-│                                                                            .ignore files in the  │
-│                                                                            scanned tree decide   │
-│                                                                            which files are left  │
-│                                                                            out of ASH's scan set │
-│                                                                            (the files            │
-│                                                                            detect-secrets,       │
-│                                                                            cfn-nag, cdk-nag,     │
-│                                                                            cfn-lint, cfn-guard,  │
-│                                                                            actionlint, zizmor,   │
-│                                                                            npm-audit and the     │
-│                                                                            converters read).     │
-│                                                                            --no-honor-ignore-fi… │
-│                                                                            scans the files they  │
-│                                                                            match too; ASH's own  │
-│                                                                            exclusions such as    │
-│                                                                            .git still apply.     │
-│                                                                            Defaults to unset,    │
-│                                                                            which prefers the     │
-│                                                                            operator's            │
-│                                                                            `honor_ignore_files`  │
-│                                                                            config value and then │
-│                                                                            honoring them. Either │
-│                                                                            form takes precedence │
-│                                                                            over the config. A    │
-│                                                                            config file inside    │
-│                                                                            the scanned tree      │
-│                                                                            cannot set it. The    │
-│                                                                            results and summaries │
-│                                                                            record whether the    │
-│                                                                            ignore files were     │
-│                                                                            honored and how many  │
-│                                                                            files they excluded.  │
-│ --min-severity                                       <str>                 Minimum severity to   │
-│                                                                            trigger non-zero exit │
-│                                                                            code (critical, high, │
-│                                                                            medium, low, none).   │
-│                                                                            'critical' and 'high' │
-│                                                                            are equivalent        │
-│                                                                            because SARIF does    │
-│                                                                            not distinguish them. │
-│                                                                            Findings below this   │
-│                                                                            threshold are still   │
-│                                                                            reported but don't    │
-│                                                                            affect the exit code. │
-│                                                                            [default: low]        │
-│ --compact-report                                                           Produce a shorter     │
-│                                                                            markdown report       │
-│                                                                            suitable for PR       │
-│                                                                            comments. Omits the   │
-│                                                                            severity legend, scan │
-│                                                                            metadata, footer, and │
-│                                                                            rows for scanners     │
-│                                                                            that were skipped or  │
-│                                                                            had zero findings.    │
-│ --changed-files-only                                                       Limit the scan to     │
-│                                                                            files changed between │
-│                                                                            the base branch and   │
-│                                                                            HEAD. Useful in CI to │
-│                                                                            scan only PR changes. │
-│                                                                            Falls back to a full  │
-│                                                                            scan when git is      │
-│                                                                            unavailable.          │
-│                                                                            [env var:             │
-│                                                                            ASH_CHANGED_FILES_ON… │
-│ --base-ref                                           <str>                 Git ref to diff       │
-│                                                                            against when          │
-│                                                                            --changed-files-only  │
-│                                                                            is set.               │
-│                                                                            [env var:             │
-│                                                                            ASH_BASE_REF]         │
-│                                                                            [default:             │
-│                                                                            origin/main]          │
-│ --allow-in-tree-tools                                                      Let ASH start         │
-│                                                                            scanners and other    │
-│                                                                            tools found inside    │
-│                                                                            the scanned           │
-│                                                                            directory, such as an │
-│                                                                            activated in-repo     │
-│                                                                            .venv/bin or          │
-│                                                                            node_modules/.bin.    │
-│                                                                            Off by default: a     │
-│                                                                            tool inside the       │
-│                                                                            scanned directory is  │
-│                                                                            treated as missing.   │
-│                                                                            Only this flag (also  │
-│                                                                            the                   │
-│                                                                            allow_in_tree_tools   │
-│                                                                            key of                │
-│                                                                            --cli-json-input) and │
-│                                                                            the                   │
-│                                                                            ASH_ALLOW_IN_TREE_TO… │
-│                                                                            environment variable  │
-│                                                                            (1, true, yes or on)  │
-│                                                                            turn it on, never a   │
-│                                                                            config file, and `ash │
-│                                                                            mcp` never does.      │
-│ --shard-index                                        <int>                 Zero-based index of   │
-│                                                                            this shard when one   │
-│                                                                            scan is split across  │
-│                                                                            several executors.    │
-│                                                                            Requires              │
-│                                                                            --shard-count. A      │
-│                                                                            3-way split uses      │
-│                                                                            indices 0, 1 and 2.   │
-│                                                                            Each shard runs a     │
-│                                                                            disjoint subset of    │
-│                                                                            the scanners and      │
-│                                                                            records which ones in │
-│                                                                            its results;          │
-│                                                                            recombine them with   │
-│                                                                            'ash merge'.          │
-│                                                                            [env var:             │
-│                                                                            ASH_SHARD_INDEX]      │
-│ --shard-count                                        <int>                 Total number of       │
-│                                                                            shards this scan is   │
-│                                                                            split across.         │
-│                                                                            Requires              │
-│                                                                            --shard-index.        │
-│                                                                            Balance is by scanner │
-│                                                                            count rather than     │
-│                                                                            scanner cost, so      │
-│                                                                            counts above about    │
-│                                                                            four buy little: wall │
-│                                                                            clock is bounded by   │
-│                                                                            the slowest single    │
-│                                                                            scanner.              │
-│                                                                            [env var:             │
-│                                                                            ASH_SHARD_COUNT]      │
-│ --workspace                                          <str>                 Path to a             │
-│                                                                            '.code-workspace'     │
-│                                                                            file whose folders    │
-│                                                                            are scanned as        │
-│                                                                            separate,             │
-│                                                                            independently-scoped  │
-│                                                                            projects. Pass 'auto' │
-│                                                                            to use the single     │
-│                                                                            '*.code-workspace'    │
-│                                                                            file in the current   │
-│                                                                            directory. Mutually   │
-│                                                                            exclusive with        │
-│                                                                            --source-dir.         │
-│                                                                            [env var:             │
-│                                                                            ASH_WORKSPACE]        │
-│ --workspace-config                                   <str>                 Path to the workspace │
-│                                                                            policy file (severity │
-│                                                                            ceiling,              │
-│                                                                            workspace-wide        │
-│                                                                            suppressions and      │
-│                                                                            ignore paths,         │
-│                                                                            additional scanners). │
-│                                                                            Without this, ASH     │
-│                                                                            looks for             │
-│                                                                            'ash-workspace.{yaml… │
-│                                                                            in the workspace root │
-│                                                                            or its '.ash'         │
-│                                                                            directory; finding    │
-│                                                                            none is not an error. │
-│                                                                            Must not be any       │
-│                                                                            project's own ASH     │
-│                                                                            config: workspace     │
-│                                                                            policy governs every  │
-│                                                                            project, so reading   │
-│                                                                            one project's config  │
-│                                                                            as policy would apply │
-│                                                                            its settings to its   │
-│                                                                            siblings.             │
-│                                                                            [env var:             │
-│                                                                            ASH_WORKSPACE_CONFIG] │
-│ --allow-missing-proj…                                                      In workspace mode,    │
-│                                                                            skip project folders  │
-│                                                                            that are absent or    │
-│                                                                            unreadable instead of │
-│                                                                            failing. Skipped      │
-│                                                                            projects are recorded │
-│                                                                            in the plan. Without  │
-│                                                                            this, a missing       │
-│                                                                            project fails the     │
-│                                                                            whole workspace, so a │
-│                                                                            typo or an un-cloned  │
-│                                                                            repository cannot     │
-│                                                                            pass as a clean scan. │
-│ --dry-run                                                                  In workspace mode,    │
-│                                                                            print the resolved    │
-│                                                                            execution plan and    │
-│                                                                            exit without scanning │
-│                                                                            anything.             │
-│ --build                -b  --no-build            -B                        Whether to build the  │
-│                                                                            ASH container image   │
-│                                                                            [default: build]      │
-│ --run                  -r  --no-run              -R                        Whether to run the    │
-│                                                                            ASH container image   │
-│                                                                            [default: run]        │
-│ --force                                                                    Force rebuild of the  │
-│                                                                            ASH container image   │
-│ --oci-runner,--oci,-…  -o                            <str>                 Use the specified OCI │
-│                                                                            runner instead of     │
-│                                                                            docker to run the     │
-│                                                                            containerized tools   │
-│                                                                            [env var: OCI_RUNNER] │
-│ --build-target                                       <non-root|ci>         The ASH image stage   │
-│                                                                            to build and run:     │
-│                                                                            'non-root' (an        │
-│                                                                            unprivileged user,    │
-│                                                                            the default) or 'ci'  │
-│                                                                            (root, the default on │
-│                                                                            Windows). CI          │
-│                                                                            environment variables │
-│                                                                            do not change it;     │
-│                                                                            --custom-containerfi… │
-│                                                                            builds on 'ci'.       │
-│ --container-uid        -u                            <str>                 UID to use for the    │
-│                                                                            container user        │
-│ --container-gid        -g                            <str>                 GID to use for the    │
-│                                                                            container user        │
-│ --ash-revision-to-in…                                <str>                 ASH branch or tag to  │
-│                                                                            install in the        │
-│                                                                            container image for   │
-│                                                                            usage during          │
-│                                                                            containerized scans   │
-│ --custom-containerfi…                                <str>                 Path to a custom      │
-│                                                                            container definition  │
-│                                                                            (e.g. Dockerfile)     │
-│                                                                            that you would like   │
-│                                                                            to build *after* the  │
-│                                                                            ASH container image   │
-│                                                                            builds. This is       │
-│                                                                            typically used when   │
-│                                                                            building a custom     │
-│                                                                            container image for   │
-│                                                                            ASH and including     │
-│                                                                            custom tooling that   │
-│                                                                            ASH does not come     │
-│                                                                            with by default. The  │
-│                                                                            fully qualified image │
-│                                                                            name for the ASH      │
-│                                                                            image is passed in as │
-│                                                                            the `ASH_BASE_IMAGE`  │
-│                                                                            build-arg so you can  │
-│                                                                            use it as a base.     │
-│                                                                            IMPORTANT: When a     │
-│                                                                            custom_containerfile  │
-│                                                                            path is provided, the │
-│                                                                            build-target is set   │
-│                                                                            to `ci` so the        │
-│                                                                            container run-as      │
-│                                                                            configuration is not  │
-│                                                                            shifted to the        │
-│                                                                            non-root user. If you │
-│                                                                            are using this        │
-│                                                                            parameter, you are    │
-│                                                                            responsible for       │
-│                                                                            securing your final   │
-│                                                                            container as          │
-│                                                                            appropriate.          │
-│ --custom-build-arg                                   <str>                 Custom build          │
-│                                                                            arguments to pass to  │
-│                                                                            the container build   │
-│ --install-completion                                                       Install completion    │
-│                                                                            for the current       │
-│                                                                            shell.                │
-│ --show-completion                                                          Show completion for   │
-│                                                                            the current shell, to │
-│                                                                            copy it or customize  │
-│                                                                            the installation.     │
-│ --help                                                                     Show this message and │
-│                                                                            exit.                 │
+│ --version                                             Prints version number                      │
+│ --honor-ignore-files     --no-honor-ignore-files      Whether the .gitignore and .ignore files   │
+│                                                       in the scanned tree decide which files are │
+│                                                       left out of ASH's scan set (the files      │
+│                                                       detect-secrets, cfn-nag, cdk-nag,          │
+│                                                       cfn-lint, cfn-guard, actionlint, zizmor,   │
+│                                                       npm-audit and the converters read).        │
+│                                                       --no-honor-ignore-files scans the files    │
+│                                                       they match too; ASH's own exclusions such  │
+│                                                       as .git still apply. Defaults to unset,    │
+│                                                       which prefers the operator's               │
+│                                                       `honor_ignore_files` config value and then │
+│                                                       honoring them. Either form takes           │
+│                                                       precedence over the config. A config file  │
+│                                                       inside the scanned tree cannot set it. The │
+│                                                       results and summaries record whether the   │
+│                                                       ignore files were honored and how many     │
+│                                                       files they excluded.                       │
+│ --allow-in-tree-tools                                 Let ASH start scanners and other tools     │
+│                                                       found inside the scanned directory, such   │
+│                                                       as an activated in-repo .venv/bin or       │
+│                                                       node_modules/.bin. Off by default: a tool  │
+│                                                       inside the scanned directory is treated as │
+│                                                       missing. Only this flag (also the          │
+│                                                       allow_in_tree_tools key of                 │
+│                                                       --cli-json-input) and the                  │
+│                                                       ASH_ALLOW_IN_TREE_TOOLS environment        │
+│                                                       variable (1, true, yes or on) turn it on,  │
+│                                                       never a config file, and `ash mcp` never   │
+│                                                       does.                                      │
+│ --install-completion                                  Install completion for the current shell.  │
+│ --show-completion                                     Show completion for the current shell, to  │
+│                                                       copy it or customize the installation.     │
+│ --help                                                Show this message and exit.                │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Scan ───────────────────────────────────────────────────────────────────────────────────────────╮
+│ --source-dir                <str>                            The source directory to scan        │
+│                                                              [env var: ASH_SOURCE_DIR]           │
+│ --scanners                  <str>                            Specific scanner names to run.      │
+│                                                              Defaults to all scanners.           │
+│                                                              [env var: ASH_SCANNERS]             │
+│ --exclude-scanners          <str>                            Specific scanner names to exclude   │
+│                                                              from running. Takes precedence over │
+│                                                              scanners parameter.                 │
+│                                                              [env var: ASH_EXCLUDED_SCANNERS]    │
+│ --mode                      <precommit|container|local|nix>  Execution mode preset. 'local'      │
+│                                                              (default) runs the scan in this     │
+│                                                              process with the scanner tools      │
+│                                                              installed on this machine.          │
+│                                                              'precommit' is a local scan that    │
+│                                                              runs only bandit, detect-secrets,   │
+│                                                              checkov, cdk-nag, npm-audit, plus   │
+│                                                              any --scanners, with simplified     │
+│                                                              output and no progress display; in  │
+│                                                              workspace mode it changes only the  │
+│                                                              output. 'container' builds the ASH  │
+│                                                              container image and runs the scan   │
+│                                                              inside it. 'nix' runs the scan      │
+│                                                              inside `nix develop`, whose shell   │
+│                                                              supplies pinned scanner versions,   │
+│                                                              and always offline.                 │
+│                                                              [env var: ASH_MODE]                 │
+│                                                              [default: local]                    │
+│ --config            -c      <str>                            The path to the configuration file. │
+│                                                              By default, ASH looks for the       │
+│                                                              following config file names in the  │
+│                                                              source directory of a scan:         │
+│                                                              ['.ash.yml', '.ash.yaml',           │
+│                                                              '.ash.json', 'ash.yml', 'ash.yaml', │
+│                                                              'ash.json'] (each at the root, then │
+│                                                              in .ash/), then ['.ashrc.toml',     │
+│                                                              '.ashrc.yaml', '.ashrc.yml',        │
+│                                                              '.ashrc.json', 'ashrc.toml',        │
+│                                                              'ashrc.yaml', 'ashrc.yml',          │
+│                                                              'ashrc.json'] at the root, then the │
+│                                                              tool.ash table of pyproject.toml at │
+│                                                              the root; the first found is used.  │
+│                                                              Alternatively, the full path to a   │
+│                                                              config file can be provided by      │
+│                                                              setting the ASH_CONFIG environment  │
+│                                                              variable before running ASH.        │
+│                                                              [env var: ASH_CONFIG]               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Reports ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --output-dir                                              <str>  The directory to output results │
+│                                                                  to                              │
+│                                                                  [env var: ASH_OUTPUT_DIR]       │
+│ --output-formats,--output-form…  -f                       <str>  The output formats to use       │
+│                                                                  (comma-separated). Available    │
+│                                                                  formats: text, flat-json, yaml, │
+│                                                                  csv, html, junitxml, markdown,  │
+│                                                                  sarif, ocsf, cyclonedx, spdx,   │
+│                                                                  github-ghas, gitlab-sast,       │
+│                                                                  gitlab-cyclonedx,               │
+│                                                                  unused-suppressions. With the   │
+│                                                                  AWS plugin module               │
+│                                                                  (ash_aws_plugins) in            │
+│                                                                  ash_plugin_modules, also, once  │
+│                                                                  enabled: aws-security-hub,      │
+│                                                                  bedrock-summary-reporter,       │
+│                                                                  cloudwatch-logs, s3. Also       │
+│                                                                  accepted, though no reporter    │
+│                                                                  writes them: aggregated, dict,  │
+│                                                                  asff, custom.                   │
+│ --inspect                            --no-inspect                Enable inspection of SARIF      │
+│                                                                  fields after running. This adds │
+│                                                                  the inspect phase to the        │
+│                                                                  execution.                      │
+│                                                                  [default: no-inspect]           │
+│ --use-existing                       --no-use-existing           Use an existing                 │
+│                                                                  ash_aggregated_results.json     │
+│                                                                  file in the output-dir. If      │
+│                                                                  True, the scan phase will be    │
+│                                                                  skipped and reports will be     │
+│                                                                  generated from this file.       │
+│                                                                  [default: no-use-existing]      │
+│ --show-summary                       --no-show-summary           Show metrics table and results  │
+│                                                                  summary                         │
+│                                                                  [default: show-summary]         │
+│ --compact-report                                                 Produce a shorter markdown      │
+│                                                                  report suitable for PR          │
+│                                                                  comments. Omits the severity    │
+│                                                                  legend, scan metadata, footer,  │
+│                                                                  and rows for scanners that were │
+│                                                                  skipped or had zero findings.   │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Configuration and plugins ──────────────────────────────────────────────────────────────────────╮
+│ --ash-plugin-modules        <str>  List of Python modules to import containing ASH plugins       │
+│                                    and/or event subscribers. These are loaded in addition to the │
+│                                    default modules.                                              │
+│                                    [env var: ASH_PLUGIN_MODULES]                                 │
+│ --config-overrides          <str>  Configuration overrides specified as key-value pairs (e.g.,   │
+│                                    'reporters.cloudwatch-logs.options.aws_region=us-west-2').    │
+│                                    Supports lists with , append mode with key+=, and JSON        │
+│                                    syntax. See                                                   │
+│                                    https://awslabs.github.io/automated-security-helper/latest/h… │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Execution ──────────────────────────────────────────────────────────────────────────────────────╮
+│ --offline                 --no-offline                                    Run scan in            │
+│                                                                           offline/airgapped      │
+│                                                                           mode. npm-audit does   │
+│                                                                           not run offline,       │
+│                                                                           because npm, yarn and  │
+│                                                                           pnpm audit by asking   │
+│                                                                           the registry: a        │
+│                                                                           project with a         │
+│                                                                           lockfile reports it    │
+│                                                                           MISSING, and one       │
+│                                                                           without reports it     │
+│                                                                           SKIPPED. IMPORTANT:    │
+│                                                                           Online access is       │
+│                                                                           needed when building   │
+│                                                                           ASH to prepare it for  │
+│                                                                           usage during a scan!   │
+│                                                                           If selecting Offline   │
+│                                                                           while performing a     │
+│                                                                           build, the ASH         │
+│                                                                           container image will   │
+│                                                                           be built in offline    │
+│                                                                           mode and any typically │
+│                                                                           online-only            │
+│                                                                           dependencies like      │
+│                                                                           downloadable tool      │
+│                                                                           vulnerability          │
+│                                                                           databases will be      │
+│                                                                           cached in the image    │
+│                                                                           itself before          │
+│                                                                           publishing for scan    │
+│                                                                           usage.                 │
+│                                                                           [default: no-offline]  │
+│ --sandbox                                          <off|auto|bwrap|firej  Run every scanner      │
+│                                                    ail|landlock|sandbox-  subprocess in an       │
+│                                                    exec>                  OS-level sandbox:      │
+│                                                                           read-only source,      │
+│                                                                           writable results       │
+│                                                                           directory only,        │
+│                                                                           private home and       │
+│                                                                           temporary directory,   │
+│                                                                           no network unless the  │
+│                                                                           scanner needs one      │
+│                                                                           (never under           │
+│                                                                           --offline). 'auto'     │
+│                                                                           picks the best         │
+│                                                                           available (Linux:      │
+│                                                                           bwrap, firejail,       │
+│                                                                           landlock; macOS:       │
+│                                                                           sandbox-exec). A       │
+│                                                                           scanner that cannot be │
+│                                                                           sandboxed as requested │
+│                                                                           is reported MISSING.   │
+│                                                                           Overrides the config   │
+│                                                                           file's sandbox.mode;   │
+│                                                                           default off. Refused   │
+│                                                                           with --mode container  │
+│                                                                           (exit 5), which runs   │
+│                                                                           the scanners           │
+│                                                                           unsandboxed inside the │
+│                                                                           container. See         │
+│                                                                           docs/content/docs/sca… │
+│ --offline-semgrep-rul…                             <str>                  Specify Semgrep        │
+│                                                                           rulesets for use in    │
+│                                                                           ASH offline mode       │
+│                                                                           [default: p/ci]        │
+│ --strategy                                         <sequential|parallel>  Whether to run         │
+│                                                                           scanners in parallel   │
+│                                                                           or sequential          │
+│                                                                           [default: parallel]    │
+│ --cleanup                 --no-cleanup                                    Clean up 'converted'   │
+│                                                                           directory and other    │
+│                                                                           temporary files after  │
+│                                                                           scan completes.        │
+│                                                                           Defaults to False.     │
+│                                                                           Note: Scans will       │
+│                                                                           always clean up        │
+│                                                                           existing files in the  │
+│                                                                           output directory       │
+│                                                                           before a new scan      │
+│                                                                           starts. This parameter │
+│                                                                           only affects the       │
+│                                                                           cleanup of the         │
+│                                                                           temporary work         │
+│                                                                           directory after a scan │
+│                                                                           has completed,         │
+│                                                                           typically for          │
+│                                                                           inspection of          │
+│                                                                           temporary artifacts.   │
+│                                                                           [default: no-cleanup]  │
+│ --phases                                           <convert|scan|report|  The phases to run.     │
+│                                                    inspect>               Defaults to all phases │
+│                                                                           except inspect.        │
+│ --python-only,--pytho…    --full,--all-enabled…                           Exclude execution of   │
+│                                                                           any plugins or tools   │
+│                                                                           that have depencies    │
+│                                                                           external to Python.    │
+│                                                                           [default: full]        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Output and logging ─────────────────────────────────────────────────────────────────────────────╮
+│ --progress   -p  --no-progress  -P                                 Show progress of each job     │
+│                                                                    live in the console. Defaults │
+│                                                                    to True.                      │
+│                                                                    [default: progress]           │
+│ --quiet          --no-quiet                                        Hide all log output           │
+│                                                                    [default: no-quiet]           │
+│ --log-level                         <QUIET|SIMPLE|ERROR|INFO|VERB  Set the log level.            │
+│                                     OSE|DEBUG|TRACE>               [default: INFO]               │
+│ --verbose    -v                                                    Enable verbose logging. Any   │
+│                                                                    log flag on the command line  │
+│                                                                    overrides ASH_VERBOSE.        │
+│                                                                    [env var: ASH_VERBOSE]        │
+│ --debug      -d                                                    Enable debug logging. Any log │
+│                                                                    flag on the command line      │
+│                                                                    overrides ASH_DEBUG.          │
+│                                                                    [env var: ASH_DEBUG]          │
+│ --color          --no-color                                        Enable/disable colorized      │
+│                                                                    output                        │
+│                                                                    [default: color]              │
+│ --simple         --no-simple                                       Simplified output mode with   │
+│                                                                    minimal logging               │
+│                                                                    [default: no-simple]          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Exit policy ────────────────────────────────────────────────────────────────────────────────────╮
+│ --fail-on-findings        --no-fail-on-findings                           Enable/disable         │
+│                                                                           throwing               │
+│                                                                           non-successful exit    │
+│                                                                           codes if any           │
+│                                                                           actionable findings    │
+│                                                                           are found. Defaults to │
+│                                                                           unset, which prefers   │
+│                                                                           the configuration      │
+│                                                                           value. If this is set  │
+│                                                                           directly, it takes     │
+│                                                                           precedence over the    │
+│                                                                           configuration value.   │
+│ --fail-on-incomplete-…    --no-fail-on-incompl…                           Exit 1 when a selected │
+│                                                                           scanner did not        │
+│                                                                           complete -- ERROR (ran │
+│                                                                           and failed) or MISSING │
+│                                                                           (dependencies          │
+│                                                                           unavailable, so it     │
+│                                                                           never ran). Without    │
+│                                                                           this, a run where      │
+│                                                                           nothing ran exits 0,   │
+│                                                                           the same code as a     │
+│                                                                           clean scan, because no │
+│                                                                           scanner produced any   │
+│                                                                           finding. A SKIPPED     │
+│                                                                           scanner, one you did   │
+│                                                                           not select or one with │
+│                                                                           nothing of its kind to │
+│                                                                           scan, does not trip it │
+│                                                                           by itself, so          │
+│                                                                           --scanners and         │
+│                                                                           --exclude-scanners     │
+│                                                                           both narrow what is    │
+│                                                                           gated; but a run in    │
+│                                                                           which every scanner is │
+│                                                                           SKIPPED, such as one   │
+│                                                                           where no selected      │
+│                                                                           scanner had a file to  │
+│                                                                           scan, exits 1.         │
+│                                                                           Independent of         │
+│                                                                           --fail-on-findings,    │
+│                                                                           and takes precedence   │
+│                                                                           over it when both      │
+│                                                                           would fail: a partial  │
+│                                                                           scan's findings are    │
+│                                                                           real but its clean     │
+│                                                                           bill of health is not. │
+│                                                                           Defaults to unset,     │
+│                                                                           which prefers the      │
+│                                                                           configuration value    │
+│                                                                           and then on. Pass      │
+│                                                                           --no-fail-on-incomple… │
+│                                                                           to accept a partial    │
+│                                                                           scan's exit code, or   │
+│                                                                           --exclude-scanners for │
+│                                                                           a tool you do not      │
+│                                                                           have, which records it │
+│                                                                           SKIPPED and says so in │
+│                                                                           the report.            │
+│ --allow-stale-content…    --no-allow-stale-con…                           Let the scan pass when │
+│                                                                           a scanner's content    │
+│                                                                           database (grype's or   │
+│                                                                           trivy's vulnerability  │
+│                                                                           database, the offline  │
+│                                                                           semgrep/opengrep       │
+│                                                                           rulesets) is older     │
+│                                                                           than its declared      │
+│                                                                           bound -- for grype,    │
+│                                                                           120h after the         │
+│                                                                           database was built.    │
+│                                                                           Without it such a scan │
+│                                                                           exits 1, except for    │
+│                                                                           trivy's database in an │
+│                                                                           image built with       │
+│                                                                           OFFLINE=YES, which     │
+│                                                                           warns by default. With │
+│                                                                           it the scan proceeds   │
+│                                                                           and the warning is     │
+│                                                                           recorded in the log    │
+│                                                                           and in the reports.    │
+│                                                                           --no-allow-stale-cont… │
+│                                                                           forces the failure,    │
+│                                                                           for that database too. │
+│                                                                           Defaults to unset,     │
+│                                                                           which prefers the      │
+│                                                                           `content_db_staleness` │
+│                                                                           config value and then  │
+│                                                                           'fail'; either form of │
+│                                                                           the flag takes         │
+│                                                                           precedence over the    │
+│                                                                           config.                │
+│ --ignore-suppressions     --no-ignore-suppress…                           Ignore all suppression │
+│                                                                           rules and report all   │
+│                                                                           findings regardless of │
+│                                                                           suppression status.    │
+│                                                                           [default:              │
+│                                                                           no-ignore-suppression… │
+│ --min-severity                                     <critical|high|medium  Minimum severity to    │
+│                                                    |low|none>             trigger non-zero exit  │
+│                                                                           code (critical, high,  │
+│                                                                           medium, low, none).    │
+│                                                                           'critical' and 'high'  │
+│                                                                           are equivalent because │
+│                                                                           SARIF does not         │
+│                                                                           distinguish them.      │
+│                                                                           Findings below this    │
+│                                                                           threshold are still    │
+│                                                                           reported but don't     │
+│                                                                           affect the exit code.  │
+│                                                                           [default: low]         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ CI and sharding ────────────────────────────────────────────────────────────────────────────────╮
+│ --changed-files-only               Report only findings in files changed between --base-ref and  │
+│                                    HEAD, for example on a pull request. Scanners still scan      │
+│                                    every file; findings located in other files are dropped from  │
+│                                    every report, the summary counts and the exit code. Findings  │
+│                                    with no file location are kept. When git cannot list the      │
+│                                    changes, everything is reported; when nothing changed inside  │
+│                                    --source-dir, nothing is. Not supported with --mode           │
+│                                    container, which refuses it (exit 5).                         │
+│                                    [env var: ASH_CHANGED_FILES_ONLY]                             │
+│ --base-ref                  <str>  Git ref to diff against when --changed-files-only is set.     │
+│                                    [env var: ASH_BASE_REF]                                       │
+│                                    [default: origin/main]                                        │
+│ --shard-index               <int>  Zero-based index of this shard when one scan is split across  │
+│                                    several executors. Requires --shard-count. A 3-way split uses │
+│                                    indices 0, 1 and 2. Each shard runs a disjoint subset of the  │
+│                                    scanners and records which ones in its results; recombine     │
+│                                    them with 'ash merge'.                                        │
+│                                    [env var: ASH_SHARD_INDEX]                                    │
+│ --shard-count               <int>  Total number of shards this scan is split across. Requires    │
+│                                    --shard-index. Balance is by scanner count rather than        │
+│                                    scanner cost, so counts above about four buy little: wall     │
+│                                    clock is bounded by the slowest single scanner.               │
+│                                    [env var: ASH_SHARD_COUNT]                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Workspace ──────────────────────────────────────────────────────────────────────────────────────╮
+│ --workspace                     <str>  Path to a '.code-workspace' file whose folders are        │
+│                                        scanned as separate, independently-scoped projects. Pass  │
+│                                        'auto' to use the single '*.code-workspace' file in the   │
+│                                        current directory. Mutually exclusive with --source-dir.  │
+│                                        [env var: ASH_WORKSPACE]                                  │
+│ --workspace-config              <str>  Path to the workspace policy file (severity ceiling,      │
+│                                        workspace-wide suppressions and ignore paths, additional  │
+│                                        scanners). Without this, ASH looks for                    │
+│                                        'ash-workspace.{yaml,yml,json}' in the workspace root or  │
+│                                        its '.ash' directory; finding none is not an error. Must  │
+│                                        not be any project's own ASH config: workspace policy     │
+│                                        governs every project, so reading one project's config as │
+│                                        policy would apply its settings to its siblings.          │
+│                                        [env var: ASH_WORKSPACE_CONFIG]                           │
+│ --allow-missing-projects               In workspace mode, skip project folders that are absent   │
+│                                        or unreadable instead of failing. Skipped projects are    │
+│                                        recorded in the plan. Without this, a missing project     │
+│                                        fails the whole workspace, so a typo or an un-cloned      │
+│                                        repository cannot pass as a clean scan.                   │
+│ --dry-run                              In workspace mode, print the resolved execution plan and  │
+│                                        exit without scanning anything.                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Container ──────────────────────────────────────────────────────────────────────────────────────╮
+│ --build                      -b  --no-build  -B                 Whether to build the ASH         │
+│                                                                 container image                  │
+│                                                                 [default: build]                 │
+│ --run                        -r  --no-run    -R                 Whether to run the ASH container │
+│                                                                 image                            │
+│                                                                 [default: run]                   │
+│ --force                                                         Force rebuild of the ASH         │
+│                                                                 container image                  │
+│ --oci-runner,--oci,--runner  -o                  <str>          Use the specified OCI runner     │
+│                                                                 instead of docker to run the     │
+│                                                                 containerized tools              │
+│                                                                 [env var: OCI_RUNNER]            │
+│ --build-target                                   <non-root|ci>  The ASH image stage to build and │
+│                                                                 run: 'non-root' (an unprivileged │
+│                                                                 user, the default) or 'ci'       │
+│                                                                 (root, the default on Windows).  │
+│                                                                 CI environment variables do not  │
+│                                                                 change it;                       │
+│                                                                 --custom-containerfile builds on │
+│                                                                 'ci'.                            │
+│ --container-uid              -u                  <str>          UID to use for the container     │
+│                                                                 user                             │
+│ --container-gid              -g                  <str>          GID to use for the container     │
+│                                                                 user                             │
+│ --ash-revision-to-install                        <str>          ASH branch, tag or full commit   │
+│                                                                 id to install in the container   │
+│                                                                 image for usage during           │
+│                                                                 containerized scans              │
+│ --custom-containerfile                           <str>          Path to a custom container       │
+│                                                                 definition (e.g. Dockerfile)     │
+│                                                                 that you would like to build     │
+│                                                                 *after* the ASH container image  │
+│                                                                 builds. This is typically used   │
+│                                                                 when building a custom container │
+│                                                                 image for ASH and including      │
+│                                                                 custom tooling that ASH does not │
+│                                                                 come with by default. The fully  │
+│                                                                 qualified image name for the ASH │
+│                                                                 image is passed in as the        │
+│                                                                 `ASH_BASE_IMAGE` build-arg so    │
+│                                                                 you can use it as a base.        │
+│                                                                 IMPORTANT: When a                │
+│                                                                 custom_containerfile path is     │
+│                                                                 provided, the build-target is    │
+│                                                                 set to `ci` so the container     │
+│                                                                 run-as configuration is not      │
+│                                                                 shifted to the non-root user. If │
+│                                                                 you are using this parameter,    │
+│                                                                 you are responsible for securing │
+│                                                                 your final container as          │
+│                                                                 appropriate.                     │
+│ --custom-build-arg                               <str>          Custom build arguments to pass   │
+│                                                                 to the container build           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ scan             Runs an ASH scan against the source-dir, outputting results to the output-dir.  │
-│                  This is the default command used when there is no explicit. subcommand          │
-│                  specified.                                                                      │
-│ build-image      Builds the ASH container image then runs a scan with it.                        │
+│ scan             Scan code, infrastructure, secrets, and dependencies.                           │
+│ build-image      Builds the ASH container image, then scans the current directory with it unless │
+│                  --no-run is given.                                                              │
 │ report           Generate a report from ASH scan results using the specified reporter plugin.    │
 │ merge            Merges the results of a sharded scan into one unified report.                   │
 │ mcp              Start the ASH MCP server (Model Context Protocol)                               │
-│ get-genai-guide  Download the ASH GenAI Integration Guide for use with AI assistants and LLMs.   │
+│ get-genai-guide  Write the ASH GenAI Integration Guide for AI assistants and LLMs to a file.     │
 │ config           ASH configuration management                                                    │
 │ dependencies     Install dependencies for ASH plugins                                            │
 │ inspect          Inspect and analyze ASH outputs and reports                                     │
