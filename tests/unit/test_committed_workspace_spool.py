@@ -265,18 +265,23 @@ def test_a_junction_at_the_spool_name_is_replaced_not_written_through(
 
 
 def test_a_link_at_a_spool_file_is_replaced_not_written_through(tmp_path):
+    """A link at a spool file's name is refused, not written through and not
+    replaced: the spool is written with ``fs_guard.open_for_atomic_write`` below
+    the workspace output directory (workspace/aggregation.WorkspaceAggregator.add),
+    which refuses a link at the name. The link and its target are left as they
+    were."""
+    from automated_security_helper.utils.sandbox.fs_guard import OutputLinkRefused
+
     outside = _outside(tmp_path)
     aggregator, output = _aggregator(tmp_path)
     (output / SPOOL).mkdir()
     (output / SPOOL / "api.run.json").symlink_to(outside / "target.json")
     outside_before = _entries(outside)
 
-    _spool_one_project(aggregator)
+    with pytest.raises(OutputLinkRefused, match="symlink"):
+        _spool_one_project(aggregator)
 
     assert _entries(outside) == outside_before, "the run was written into the target"
     spooled = output / SPOOL / "api.run.json"
-    assert not spooled.is_symlink()
-    assert json.loads(spooled.read_text(encoding="utf-8"))["results"][0]["ruleId"] == (
-        "RULE-API"
-    )
+    assert spooled.is_symlink()
     assert sorted(p.name for p in (output / SPOOL).iterdir()) == ["api.run.json"]
