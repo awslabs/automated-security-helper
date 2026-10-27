@@ -326,7 +326,7 @@ def test_a_notebook_without_an_exporter_is_copied_byte_for_byte(
     (call,) = observed.calls
     assert call["notebook"] != tree / "nb.ipynb", "nbconvert was given the tree path"
     assert call["staged_bytes"] == original
-    assert converted.read_text() == "print('café')\n"
+    assert converted.read_text(encoding="utf-8") == "print('café')\n"
 
 
 PATTERN_NAMES = [
