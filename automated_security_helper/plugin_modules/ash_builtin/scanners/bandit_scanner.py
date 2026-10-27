@@ -276,7 +276,7 @@ def bandit_excluded_path_globs(anchor: str, path: str) -> List[str]:
 
 class BanditScannerConfigOptions(ScannerOptionsBase):
     config_file: Annotated[
-        str | None,
+        Path | str | None,
         Field(
             description="Path to Bandit configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory."
             f" {SET_BY_THE_OPERATOR}"
