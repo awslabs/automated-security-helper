@@ -57,7 +57,7 @@ def _construct_semgrep(monkeypatch, context) -> tuple[SemgrepScanner, list[str]]
         lambda self, message, *args, **kwargs: logged.append(str(message)),
     )
     scanner = SemgrepScanner(context=context)
-    scanner._resolve_deferred_tool_version()
+    scanner.resolve_deferred_tool_version()
     return scanner, logged
 
 
