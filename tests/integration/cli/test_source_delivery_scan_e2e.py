@@ -217,8 +217,16 @@ def delivered_source_server(tmp_path_factory) -> Iterator[Dict[str, Any]]:
 @pytest.mark.slow
 def test_uploaded_source_is_scanned_and_reports_its_own_findings(
     delivered_source_server,
+    monkeypatch,
 ) -> None:
     """Upload a tree, scan it without naming it, and get findings from it back."""
+    # The server reads ASH_MCP_WORKSPACE_ROOT per request, and tests/conftest.py's
+    # autouse _mcp_workspace_root_outside_home sets it per test, after the
+    # module-scoped fixture above set it: the fixture's root is set again here,
+    # for this test, so the tree lands where the assertions below look.
+    monkeypatch.setenv(
+        "ASH_MCP_WORKSPACE_ROOT", str(delivered_source_server["workspace_root"])
+    )
     import anyio
     import httpx
     from mcp.client.session import ClientSession
