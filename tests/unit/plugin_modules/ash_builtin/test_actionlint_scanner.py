@@ -624,7 +624,11 @@ def test_no_workflows_does_not_run_actionlint_and_evaluates_nothing(
     report = scanner.scan(target=source, target_type="source")
 
     assert fake.calls == []
-    assert isinstance(report, SarifReport) and report.runs == []
+    # True with no target attempted is what the executor grades as SKIPPED, as
+    # zizmor returns on the same tree. A SARIF report with no run is refused as
+    # "nothing to grade" and reads as ERROR, which failed the Nix validation leg
+    # on a fixture that has no workflow.
+    assert report is True
     assert scanner.targets_attempted == 0
 
 
@@ -1116,7 +1120,7 @@ def test_each_target_starts_from_a_clean_exit_code(
         assert converted.runs[0].results == []
         assert converted.runs[0].invocations[0].exitCode == 0
     else:
-        assert converted.runs == []
+        assert converted is True
 
 
 def test_a_credentials_finding_does_not_copy_the_password_into_the_report():
