@@ -33,6 +33,7 @@ from automated_security_helper.core.previous_results import (
     RESTORED_MARKER_NAME,
     holds_restored_results,
 )
+from automated_security_helper.utils.output_dir_links import OUTPUT_GITIGNORE
 from tests.utils.tasks import drain
 
 _ENGINE = (
@@ -185,6 +186,10 @@ async def test_a_refused_rescan_right_after_a_cancel(tmp_path, _server, monkeypa
     assert holds_restored_results(output)
     files = _files(output)
     files.pop(RESTORED_MARKER_NAME, None)
+    # The first scan, which did start, wrote the output directory's .gitignore
+    # before its scanners (ASHScanOrchestrator.ensure_directories); it is not a
+    # previous result and the restore leaves it.
+    files.pop(OUTPUT_GITIGNORE, None)
     assert files == PREVIOUS
 
 

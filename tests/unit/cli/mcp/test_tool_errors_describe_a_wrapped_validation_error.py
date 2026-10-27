@@ -19,13 +19,17 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from pydantic import BaseModel
 
 from automated_security_helper.cli import mcp_tools
 from automated_security_helper.cli.mcp.profile_registry import (
     clear_profile_registry,
     clear_all_session_state,
 )
-from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.asharp_model import (
+    AshAggregatedResults,
+    ReportMetadata,
+)
 
 TOKEN = "tok-0123456789abcdef"
 
@@ -40,10 +44,22 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     clear_all_session_state()
 
 
+class _ResultsThatQuoteInputs(BaseModel):
+    """A results-shaped model whose validation errors quote the input.
+
+    AshAggregatedResults is read from results files and hides inputs in its own
+    errors (``hide_input_in_errors``), so an error built from it would carry no
+    token to strip, and the tools' description of the wrapped error would be
+    untested. This model keeps pydantic's default, so the control below holds.
+    """
+
+    metadata: ReportMetadata
+
+
 def _wrapped() -> RuntimeError:
     """An error raised from a ValidationError, quoting it."""
     try:
-        AshAggregatedResults.model_validate({"metadata": TOKEN})
+        _ResultsThatQuoteInputs.model_validate({"metadata": TOKEN})
     except ValueError as refused:
         try:
             raise RuntimeError(f"could not read the results: {refused}") from refused

@@ -142,7 +142,16 @@ def _model(findings: List[Dict[str, Any]]):
 
 def _write(output_dir: Path, findings: List[Dict[str, Any]]):
     """The results file and reports/ash.sarif, which the exit code reads."""
+    from automated_security_helper.utils.inner_run_outcome import (
+        record_reports_written,
+    )
+
     model = _model(findings)
+    # As the report phase records it: the exit code reads reports/ash.sarif only
+    # when the results say this run's SARIF reporter wrote it
+    # (run_ash_scan.report_file_written_as); otherwise it counts the model's own
+    # per-scanner metrics, which attribute a finding with no scanner to none.
+    record_reports_written(model, [("ash.sarif", "sarif")])
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "ash_aggregated_results.json").write_text(
         model.model_dump_json(by_alias=True), encoding="utf-8"

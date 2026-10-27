@@ -261,7 +261,18 @@ def _a_report_that_will_not_go(output: Path, monkeypatch) -> None:
 def test_previous_output_a_container_or_nix_scan_cannot_remove(
     arrange, tree, registry, monkeypatch
 ) -> None:
-    opts = SimpleNamespace(existing_results=None, output_dir=tree["output"])
+    from automated_security_helper.core.enums import RunMode
+
+    # What _discard_prior_run_artifacts reads of a ScanOptions: the link check it
+    # runs first (_refuse_symlinked_output_dir) reads mode, source_dir and
+    # workspace_plan too.
+    opts = SimpleNamespace(
+        existing_results=None,
+        output_dir=tree["output"],
+        source_dir=tree["source"],
+        mode=RunMode.local,
+        workspace_plan=None,
+    )
     with pytest.MonkeyPatch.context() as refusing:
         arrange(tree["output"], refusing)
         cli_exit, logged = _logged_refusal(
