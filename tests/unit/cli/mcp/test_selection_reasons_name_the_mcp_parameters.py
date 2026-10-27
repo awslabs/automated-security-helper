@@ -581,12 +581,20 @@ def test_a_cli_scan_of_a_scanner_that_cannot_construct_exits_one(
 # A scanner's error never carries a value the config read from the environment
 # ---------------------------------------------------------------------------
 #
-# A project config can take an option from the environment (``${VAR}``), and an
-# exception that names the option's value, a path the scanner could not open say,
-# then carries that value. The scanner's error goes to its report, the project's
-# and the workspace's results files, scanner_reasons in the MCP response, and
-# ash.log, and env values are never written: each is redacted with the config's
-# environment values, as error_text does for every other config-derived error.
+# The operator's config can take an option from the environment (``${VAR}``), and
+# an exception that names the option's value, a path the scanner could not open
+# say, then carries that value. The scanner's error goes to its report, the
+# project's and the workspace's results files, scanner_reasons in the MCP
+# response, and ash.log, and env values are never written: each is redacted with
+# the config's environment values, as error_text does for every other
+# config-derived error.
+#
+# The option is bandit's ``config_file``, which only the operator sets: from a
+# config inside the scanned tree it is replaced by the trusted base's value with
+# a warning (config/tool_config_trust.confine_scanner_config_files), so a
+# project's own ``.ash/ash.yaml`` could not carry it to the scanner. The
+# operator's chain (``ASH_CONFIG``, outside the tree) resolves ``${VAR}`` for a
+# local caller and is the config each project of a workspace scan starts from.
 
 ENV_CANARY = "/nonexistent/ENVCANARY-scanner-error/bandit.toml"
 
@@ -606,12 +614,15 @@ def env_value(request):
     return ENV_CANARY
 
 
-def _project_config_reading_the_environment(workspace, monkeypatch, value):
+def _operator_config_reading_the_environment(workspace, monkeypatch, value):
+    """The operator's ``ASH_CONFIG``, outside the scanned tree, gives bandit its
+    config file from the environment."""
     workspace_file, _ = workspace
     monkeypatch.setenv("ASH_CONFIG_FILE_FROM_ENV", value)
-    ash_dir = workspace_file.parent / "api" / ".ash"
-    ash_dir.mkdir(parents=True, exist_ok=True)
-    (ash_dir / "ash.yaml").write_text(
+    operator_dir = workspace_file.parent.parent / "operator"
+    operator_dir.mkdir(parents=True, exist_ok=True)
+    operator = operator_dir / "ash.yaml"
+    operator.write_text(
         "project_name: api\n"
         "scanners:\n"
         "  bandit:\n"
@@ -619,6 +630,7 @@ def _project_config_reading_the_environment(workspace, monkeypatch, value):
         "      config_file: ${ASH_CONFIG_FILE_FROM_ENV}\n",
         encoding="utf-8",
     )
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
 
 
 def _assert_no_env_value(workspace, response, records):
@@ -647,7 +659,7 @@ async def test_a_constructor_error_carries_no_environment_value(
         bandit_scanner,
     )
 
-    _project_config_reading_the_environment(workspace, monkeypatch, env_value)
+    _operator_config_reading_the_environment(workspace, monkeypatch, env_value)
 
     def _raise(self, _context):
         path = getattr(getattr(self.config, "options", None), "config_file", None)
@@ -673,7 +685,7 @@ async def test_a_scan_error_carries_no_environment_value(
         bandit_scanner,
     )
 
-    _project_config_reading_the_environment(workspace, monkeypatch, env_value)
+    _operator_config_reading_the_environment(workspace, monkeypatch, env_value)
     seen = []
 
     def _scan(self, target, target_type, global_ignore_paths=None, config=None):
@@ -710,7 +722,7 @@ async def test_an_unexpected_scanner_failure_carries_no_environment_value(
         bandit_scanner,
     )
 
-    _project_config_reading_the_environment(workspace, monkeypatch, env_value)
+    _operator_config_reading_the_environment(workspace, monkeypatch, env_value)
     monkeypatch.setattr(
         bandit_scanner.BanditScanner, "validate_plugin_dependencies", lambda self: True
     )
@@ -757,7 +769,7 @@ async def test_the_tools_own_lines_carry_no_environment_value(
         bandit_scanner,
     )
 
-    _project_config_reading_the_environment(workspace, monkeypatch, env_value)
+    _operator_config_reading_the_environment(workspace, monkeypatch, env_value)
     monkeypatch.setattr(
         bandit_scanner.BanditScanner, "validate_plugin_dependencies", lambda self: True
     )
@@ -819,7 +831,7 @@ async def test_a_missing_reason_carries_no_environment_value(
         bandit_scanner,
     )
 
-    _project_config_reading_the_environment(workspace, monkeypatch, env_value)
+    _operator_config_reading_the_environment(workspace, monkeypatch, env_value)
     seen = []
 
     def _reason(self):
@@ -915,7 +927,7 @@ async def test_a_failed_rows_missing_reason_carries_no_environment_value(
         bandit_scanner,
     )
 
-    _project_config_reading_the_environment(workspace, monkeypatch, env_value)
+    _operator_config_reading_the_environment(workspace, monkeypatch, env_value)
     workspace_file, out = workspace
     # An archive, so the converter writes files and the scan has a converted tree.
     with zipfile.ZipFile(workspace_file.parent / "api" / "bundle.zip", "w") as bundle:

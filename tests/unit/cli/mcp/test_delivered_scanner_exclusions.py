@@ -1284,14 +1284,20 @@ def _scanner_option_models() -> Dict[str, Any]:
 
 
 def test_every_scanner_option_is_classified() -> None:
-    """Each option of each shipped scanner is denied, marked, or reviewed.
+    """Each option of each shipped scanner is denied, marked, operator-only, or reviewed.
 
     An explicit table rather than a guess from the option's name, so an option
-    whose name says nothing about findings is classified too.
+    whose name says nothing about findings is classified too. An operator-only
+    option (``config/operator_only_options.OPERATOR_ONLY_SCANNER_OPTIONS``) is
+    classified by the product itself: a file inside the scanned tree or one a
+    client delivered cannot set it, so it is neither denied nor reviewed here.
     """
     from automated_security_helper.config.ash_config import RuntimeOverridesConfig
     from automated_security_helper.config.client_scanner_exclusions import (
         SCANNER_EXCLUSION_OPTIONS,
+    )
+    from automated_security_helper.config.operator_only_options import (
+        OPERATOR_ONLY_SCANNER_OPTIONS,
     )
     from automated_security_helper.config.runtime_patch import _SHIPPED_PLUGIN_KEYS
 
@@ -1305,6 +1311,7 @@ def test_every_scanner_option_is_classified() -> None:
             if (
                 (scanner, option) in marked
                 or _denied_at_or_below(f"/scanners/{scanner}/options/{option}", denied)
+                or option in OPERATOR_ONLY_SCANNER_OPTIONS.get(scanner, ())
                 or (scanner, option) in _REVIEWED_OPTIONS
                 or ("*", option) in _REVIEWED_OPTIONS
             ):
