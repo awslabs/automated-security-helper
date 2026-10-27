@@ -164,10 +164,9 @@ def test_a_scan_target_with_a_broken_tool_ash_table_is_answered_not_raised(tmp_p
     """A pin on the scan-start path: discovery reads the target's pyproject.toml
     to learn whether it configures ASH, and one that declares [tool.ash] but
     cannot be parsed fails that read with the same error class get_config's
-    discovery fix handles. Here it is caught where it is raised — the env check's
-    own try, whose catch covers the class — so the tool answers a response,
-    never a raise out of the tool; grading the unloadable config is the scan's
-    own job."""
+    discovery fix handles. The scan-start config pre-check catches it where it
+    is raised and answers a response, never a raise out of the tool, and no
+    scan is registered or started for a config that cannot be loaded."""
     target = tmp_path / "allowed" / "project"
     target.mkdir(parents=True, exist_ok=True)
     (target / "app.py").write_text("x = 1\n", encoding="utf-8")
@@ -175,15 +174,14 @@ def test_a_scan_target_with_a_broken_tool_ash_table_is_answered_not_raised(tmp_p
         "[tool.ash]\nproject_name = [unclosed\n", encoding="utf-8"
     )
 
+    from automated_security_helper.cli import mcp_tools
     from automated_security_helper.core.resource_management.scan_registry import (
         get_scan_registry,
     )
 
     async def _scan_to_its_end():
-        from automated_security_helper.cli import mcp_tools
-
         answer = await mcp_scan_directory(directory_path=str(target))
-        # One await drives the backgrounded scan to its terminal state before
+        # One await drives any backgrounded scan to its terminal state before
         # the loop closes; the start has already answered.
         await asyncio.gather(*mcp_tools._scan_tasks)
         return answer
@@ -192,16 +190,18 @@ def test_a_scan_target_with_a_broken_tool_ash_table_is_answered_not_raised(tmp_p
 
     # The start answers: the scan-start config pre-check in cli/mcp_tools.py
     # (its ASHConfigValidationError arm at the discovery read) refuses an
-    # unloadable discovered config as a response before any scan starts. What
-    # this pins is the boundary: no raise reaches the caller.
+    # unloadable discovered config as a response before register_scan runs.
+    # What this pins is the boundary: no raise reaches the caller, and the
+    # refusal registers and starts nothing.
     assert isinstance(response, dict), response
     assert response.get("success") is False, response
     assert response.get("error_type") == "MCPResourceError", response
     assert "cannot be loaded" in response.get("error", ""), response
-    assert response.get("scan_id"), response
-    # The scan's own grade of the config it could not load: the entry ends
-    # FAILED with the invalid-config code, never completed and never raised.
-    entry = get_scan_registry().get_scan(response["scan_id"])
-    assert entry is not None, response
-    assert str(entry.status).lower().endswith("failed"), entry.status
-    assert entry.exit_code == 3, entry.exit_code
+    assert "scan_id" not in response, response
+    registered_here = [
+        scan
+        for scan in get_scan_registry().list_scans()
+        if str(getattr(scan, "directory_path", "")) == str(target)
+    ]
+    assert registered_here == [], registered_here
+    assert not mcp_tools._scan_tasks, mcp_tools._scan_tasks
