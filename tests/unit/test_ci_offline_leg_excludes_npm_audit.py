@@ -174,9 +174,45 @@ _SCAN = [
     "LOCAL",
 ]
 _OFFLINE = ["--offline", "--exclude-scanners", "npm-audit"]
-_COMMUNITY = ["--config", ".ash/.ash_community_plugins.yaml"]
+#: The community legs read .ash/.ash_community_plugins.yaml, a config inside the
+#: scanned tree, which cannot load ash_snyk_plugins itself, so the step names the
+#: module on the command line.
+_COMMUNITY = [
+    "--config",
+    ".ash/.ash_community_plugins.yaml",
+    "--ash-plugin-modules",
+    "automated_security_helper.plugin_modules.ash_snyk_plugins",
+]
+#: Every leg names the repository's own bandit and grype configs: a config file
+#: inside the scanned tree no longer chooses a scanner's config file, so the
+#: operator does. These select no scanner and leave none out.
+_OVERRIDES = [
+    "--config-overrides",
+    "scanners.bandit.options.config_file=.ash/bandit.yaml",
+    "--config-overrides",
+    "scanners.grype.options.config_file=.ash/.grype.yaml",
+]
+#: The community config's own `use_default_config: false` is ignored for the same
+#: reason, so the community legs set it the same way.
+_COMMUNITY_OVERRIDES = [
+    "--config-overrides",
+    "scanners.ferret-scan.options.use_default_config=false",
+]
 #: No ASH_* variable besides the ASH_TEST_* inputs reaches the scan.
 _NO_ASH_ENV = [_ENV_MARK]
+
+
+def _expected_scan(offline: bool, config_file: str) -> list[str]:
+    """The one `ash` record the step's scan writes, in the step's argument order."""
+    argv = list(_SCAN)
+    if offline:
+        argv += _OFFLINE
+    if config_file == "community":
+        argv += _COMMUNITY
+    argv += _OVERRIDES
+    if config_file == "community":
+        argv += _COMMUNITY_OVERRIDES
+    return argv + _NO_ASH_ENV
 
 
 def test_the_step_takes_the_offline_and_config_inputs():
@@ -885,8 +921,7 @@ def test_the_offline_leg_leaves_npm_audit_out(tmp_path, config_file):
     """Exactly npm-audit: no other scanner left out, by argument or environment."""
     (scan,) = _scans(_scan_argv(tmp_path, "true", config_file))
 
-    expected = _SCAN + _OFFLINE + (_COMMUNITY if config_file == "community" else [])
-    assert scan == expected + _NO_ASH_ENV, scan
+    assert scan == _expected_scan(True, config_file), scan
 
 
 @posix_only
@@ -894,8 +929,7 @@ def test_the_offline_leg_leaves_npm_audit_out(tmp_path, config_file):
 def test_an_online_leg_runs_npm_audit(tmp_path, config_file):
     (scan,) = _scans(_scan_argv(tmp_path, "false", config_file))
 
-    expected = _SCAN + (_COMMUNITY if config_file == "community" else [])
-    assert scan == expected + _NO_ASH_ENV, scan
+    assert scan == _expected_scan(False, config_file), scan
 
 
 @pytest.mark.parametrize(
