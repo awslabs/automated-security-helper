@@ -231,6 +231,12 @@ def _rows(plugin_context, monkeypatch, name: str, runs, earlier_run_code=None):
     goes through ``_run_subprocess`` does.
     """
     scanner = _scanner_class(name)(context=plugin_context)
+    # semgrep and opengrep are disabled by default on Windows (their config sets
+    # ``enabled`` from the platform), and a disabled scanner never reaches its
+    # tool: the executor logs "is not enabled" and the row has no result. Which
+    # exit codes a scanner accepts does not depend on the platform default, so the
+    # scanner is enabled here, as an operator's ``enabled: true`` would do.
+    scanner.config.enabled = True
     captured = {}
     targets = [{"path": plugin_context.source_dir, "type": "source"}]
     by_type = {"source": runs[0]}
