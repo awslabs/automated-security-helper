@@ -4432,6 +4432,10 @@ def _resolve_config(
                     discovered_label is not None
                     and not refusal.after_overrides
                     and repository_file is not None
+                    # A tree an MCP client delivered is the client's request, by
+                    # any name on the way (a link inside it included): its
+                    # refused config refuses the run, as a NAMED delivery does.
+                    and not _has_a_client_file(refusal.document)
                     and all(
                         repository_file(path, named)
                         for path in refused_files
