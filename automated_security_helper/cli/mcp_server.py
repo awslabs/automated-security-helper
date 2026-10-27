@@ -3094,9 +3094,12 @@ if __name__ == "__main__":
     # `python -m automated_security_helper.cli.mcp_server` starts the way `ash mcp`
     # does, with the same arguments, so it makes the same startup checks
     # (ASH_CONFIG, ASH_MCP_TRANSPORT, the options) and the same process setup
-    # before it serves.
+    # before it serves. Run through the entry point's failure path, as the other
+    # command modules are, so an exception that escapes is shown, not obeyed
+    # (tests/unit/cli/test_typer_output_is_shown_not_obeyed.py).
     import sys
 
+    from automated_security_helper.cli.entrypoint import run_module_app
     from automated_security_helper.cli.main import app
 
-    app(["mcp", *sys.argv[1:]])
+    run_module_app(lambda: app(["mcp", *sys.argv[1:]]))
