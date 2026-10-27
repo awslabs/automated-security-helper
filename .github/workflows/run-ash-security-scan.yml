@@ -7,14 +7,6 @@ permissions:
   pull-requests: write # Required for writing comments with scan results to pull requests
 on:
   workflow_call:
-    outputs:
-      artifact-id:
-        description: >-
-          Id of the ash_output artifact the scan uploaded; empty when the scan
-          uploaded none (it failed before ASH wrote its reports). A caller job that
-          downloads ash_output, such as one calling upload-ash-sarif.yml, should
-          start only when this is set.
-        value: ${{ jobs.ash.outputs.artifact-id }}
     inputs:
       # BEHAVIOR CHANGE -- read this before upgrading if you call this workflow.
       #
@@ -441,9 +433,7 @@ jobs:
             given="${!var}"
             value="${given%$'\n'}"
             name="${var#INPUT_}"
-            # tr, not ${name,,}: macOS runners execute these steps with bash
-            # 3.2, which has no case substitution ("bad substitution").
-            name="$(printf '%s' "${name}" | tr '[:upper:]' '[:lower:]')"
+            name="${name,,}"
             case "${value}" in
               *[[:cntrl:]]* | *$'\xc2'[$'\x80'-$'\x9f']* | *$'\xe2\x80'[$'\xa8\xa9']* | *'##['*)
                 echo "::error::the ${name//_/-} input holds a line break, another control character or the legacy command marker, so it is refused without being printed. A block scalar of one line is fine; more than one line is refused."
@@ -498,7 +488,7 @@ jobs:
             text="${text//$'\xc2'[$'\x80'-$'\x9f']/ }"
             text="${text//$'\xe2\x80'[$'\xa8\xa9']/ }"
             while [[ "${text}" == *::* ]]; do text="${text//::/: :}"; done
-            while [[ "${text}" == *'##['* ]]; do text=${text//'##['/'# #['}; done
+            while [[ "${text}" == *'##['* ]]; do text="${text//'##['/'# #['}"; done
             printf '%s' "${text}"
           }
           __wcs_clock() {
@@ -762,9 +752,7 @@ jobs:
             exit 1
           fi
           if [[ "${ASH_VERSION}" =~ ^[0-9a-fA-F]{40}$ ]]; then
-            # tr, not ${ASH_VERSION,,}: bash 3.2 (macOS runners) has no case
-            # substitution.
-            COMMIT="$(printf '%s' "${ASH_VERSION}" | tr '[:upper:]' '[:lower:]')"
+            COMMIT="${ASH_VERSION,,}"
           else
             if [[ "${ASH_VERSION}" == refs/* ]]; then
               CANDIDATES=("${ASH_VERSION}")
@@ -789,11 +777,8 @@ jobs:
             elif [ "${UNIQUE}" -eq 1 ]; then
               COMMIT="${COMMITS[0]}"
             elif [[ "${ASH_VERSION}" =~ ^[0-9a-fA-F]{7,39}$ ]]; then
-              # An abbreviated commit id is not expanded here, and each later step
-              # would expand it on its own, so it would not stay one commit for the
-              # run. It is refused before it reaches a URL.
-              echo "::error::ash-version '${ASH_VERSION}' is an abbreviated commit id and not a branch or tag of ${ASH_REPO}. Use the full 40-character commit id."
-              exit 1
+              # An abbreviated commit id names one commit already; uv resolves it.
+              COMMIT="${ASH_VERSION}"
             else
               echo "::error::ash-version '$(one_line "${ASH_VERSION}")' is not a branch, tag or commit of $(one_line "${ASH_REPO}")."
               exit 1
@@ -1098,93 +1083,6 @@ jobs:
           fi
           echo "path=${DEST}" >> "$GITHUB_OUTPUT"
           echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
-
-      # THE CONFIG CAN COME FROM ANOTHER COMMIT THAN THE ONE SCANNED
-      #
-      # Without config-ref, ASH reads its config from the checkout: the file `config`
-      # names, or the one it discovers there. On a pull request that is the pull
-      # request's own config, so it could add suppressions or ignore paths to the
-      # scan that gates it. With config-ref, the file `config` names is read from that
-      # commit, written outside the checkout, and handed to the scan and report steps
-      # as --config, which also stops ASH from discovering one in the checkout.
-      # ash-repo-scan.yml passes the pull request's base commit.
-      #
-      # A commit without the file fails the step. The caller named a config, and
-      # ASH's defaults can be a weaker gate than the one asked for (a config that
-      # turns on scanners that are off by default, or lowers the severity
-      # threshold), so a typo or a case variant in `config` must not fall back to
-      # them. config-ref-missing: defaults is the explicit opt-in for the one case
-      # where defaults are right, the pull request that adds a repository's first
-      # config: the scan then uses an empty config, so discovery cannot fall back to
-      # the checkout's either.
-      #
-      # The file lands outside the scanned tree, so ASH treats it like any --config
-      # outside the tree: as the operator's. The caller chose that commit; the
-      # checkout did not.
-      #
-      # Only this one file comes from config-ref. Tool config files it names by a
-      # relative path (scanners.<name>.options.config_file) are still read from the
-      # checkout, and a config that `extends` another file fails to load here.
-      - name: Read the ASH config from config-ref
-        id: config-ref
-        if: inputs.config-ref != ''
-        env:
-          CONFIG_REF: ${{ inputs.config-ref }}
-          CONFIG_PATH: ${{ inputs.config }}
-          CONFIG_REF_MISSING: ${{ inputs.config-ref-missing }}
-        run: |
-          set -euo pipefail
-          case "${CONFIG_REF_MISSING}" in
-            refuse|defaults|"") ;;
-            *)
-              echo "::error::config-ref-missing must be 'refuse' or 'defaults', not '${CONFIG_REF_MISSING}'."
-              exit 1
-              ;;
-          esac
-          # git fetch reads a refspec that starts with '-' as an option, wherever it
-          # sits on the command line, and runs the command `--upload-pack=` names for
-          # a local or ssh remote. No branch, tag or commit name starts with '-' or
-          # holds a space, so such a value is refused before git sees it.
-          if [[ "${CONFIG_REF}" == -* || "${CONFIG_REF}" =~ [[:space:][:cntrl:]] ]]; then
-            echo "::error::config-ref is not a branch, tag or commit name: it starts with '-', or holds a space or a control character."
-            exit 1
-          fi
-          if [ -z "${CONFIG_PATH}" ]; then
-            echo "::error::config-ref is set but config is empty. Name the config file to read from ${CONFIG_REF}, for example 'config: .ash/.ash.yaml'."
-            exit 1
-          fi
-          RELATIVE="${CONFIG_PATH#./}"
-          # A path git would read differently from how it is written (absolute, with
-          # an empty, `.` or `..` segment) is refused rather than read as missing.
-          case "/${RELATIVE}/" in
-            *//*|*/./*|*/../*)
-              echo "::error::config must be a plain path inside the repository when config-ref is set, not '${CONFIG_PATH}'."
-              exit 1
-              ;;
-          esac
-          DEST_ROOT="${RUNNER_TEMP}/ash-config-ref"
-          DEST="${DEST_ROOT}/${RELATIVE}"
-          rm -rf "${DEST_ROOT}"
-          mkdir -p "$(dirname "${DEST}")"
-          git fetch --no-tags --no-recurse-submodules --depth=1 origin "${CONFIG_REF}"
-          ENTRY="$(git --literal-pathspecs ls-tree FETCH_HEAD -- "${RELATIVE}")"
-          if [ -z "${ENTRY}" ]; then
-            if [ "${CONFIG_REF_MISSING}" != "defaults" ]; then
-              echo "::error::${CONFIG_REF} has no ${RELATIVE}, so the config this scan was asked to use does not exist there; refusing to scan with ASH's defaults instead. Check the config input, or set config-ref-missing: defaults for the pull request that adds the first config."
-              exit 1
-            fi
-            printf '{}\n' > "${DEST}"
-            echo "::warning::${CONFIG_REF} has no ${RELATIVE}, and config-ref-missing is defaults, so this scan uses ASH's default config, not the checkout's."
-          else
-            read -r MODE TYPE OBJECT ENTRY_PATH <<< "${ENTRY}"
-            if [ "${TYPE}" != "blob" ] || [ "${MODE}" = "120000" ] || [ "${ENTRY_PATH}" != "${RELATIVE}" ]; then
-              echo "::error::${RELATIVE} at ${CONFIG_REF} is not a regular file (${ENTRY}); refusing to scan with it."
-              exit 1
-            fi
-            git cat-file blob "${OBJECT}" > "${DEST}"
-            echo "Scanning with ${RELATIVE} as of ${CONFIG_REF} (blob ${OBJECT}), not the checkout's copy"
-          fi
-          echo "path=${DEST}" >> "$GITHUB_OUTPUT"
 
       - name: Install uv
         id: setup-uv
@@ -2333,13 +2231,7 @@ jobs:
           ASH_OUTPUT_DIR: ${{ steps.inputs.outputs.output_dir }}
         run: |-
           cat "${ASH_OUTPUT_DIR}/reports/ash.summary.md" >> "${GITHUB_STEP_SUMMARY}"
-          # The listing holds names the scanned repository chose, so each line goes
-          # through one_line before the runner reads it.
-          . "${RUNNER_TEMP}/ash-one-line.sh"
-          tree "${ASH_OUTPUT_DIR}" | while IFS= read -r line || [ -n "${line}" ]; do
-            one_line "${line}"
-            printf '\n'
-          done
+          tree "${ASH_OUTPUT_DIR}"
 
       # Only reports/ and the aggregated results, which are all the reporting job and
       # a SARIF upload read, plus their per-project copies when `ash-args` makes this a
