@@ -1757,7 +1757,7 @@ class TestGlobDenialsNameKnownPlugins:
         caught too.
         """
         import json as json_module
-        import subprocess
+        import subprocess  # nosec B404 - starts a fresh interpreter to count plugins
         import sys
 
         from automated_security_helper.config.runtime_patch import (
@@ -1780,7 +1780,7 @@ class TestGlobDenialsNameKnownPlugins:
             "    for section, kind in (('scanners', 'scanner'), ('reporters', 'reporter'),\n"
             "                          ('converters', 'converter'))}))\n"
         )
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - fixed argv: this interpreter, literal probe
             [sys.executable, "-c", code],
             cwd=tmp_path,
             capture_output=True,
@@ -1794,7 +1794,7 @@ class TestGlobDenialsNameKnownPlugins:
 
     def test_building_the_keys_imports_no_plugin_module(self, tmp_path) -> None:
         """Importing a plugin module registers its plugins, and a scan runs them all."""
-        import subprocess
+        import subprocess  # nosec B404 - starts a fresh interpreter to watch imports
         import sys
 
         code = (
@@ -1813,7 +1813,7 @@ class TestGlobDenialsNameKnownPlugins:
             "assert 'standin_not_imported' not in sys.modules\n"
             "print('unchanged')\n"
         )
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - fixed argv: this interpreter, literal probe
             [sys.executable, "-c", code],
             cwd=tmp_path,
             capture_output=True,

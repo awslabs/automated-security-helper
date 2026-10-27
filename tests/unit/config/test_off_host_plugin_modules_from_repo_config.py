@@ -583,7 +583,7 @@ def test_every_plugin_package_that_sends_data_off_the_host_is_listed(tmp_path):
         OFF_HOST_PLUGIN_PACKAGES,
     )
 
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 - fixed argv: this interpreter, literal probe
         [sys.executable, "-c", code],
         cwd=tmp_path,
         capture_output=True,
@@ -854,7 +854,7 @@ def test_no_reporter_outside_those_packages_connects_or_starts_a_process(tmp_pat
         off_host_package,
     )
 
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 - fixed argv: this interpreter, literal probe
         [
             sys.executable,
             "-c",

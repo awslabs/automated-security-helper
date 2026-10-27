@@ -83,7 +83,7 @@ def test_a_value_pattern_refuses_the_leaf_it_binds() -> None:
 
 def test_a_value_pattern_sees_mapping_keys_as_in_a_patch_op() -> None:
     keys = _denied_keys(
-        {"scanners": {"bandit": {"options": {"env": {"AWS_SECRET_ACCESS_KEY": "x"}}}}},
+        {"scanners": {"bandit": {"options": {"env": {"AWS_SECRET_ACCESS_KEY": "x"}}}}},  # nosec B105 - an env var name in a fixture, not a credential
         denied_paths=[],
         denied_value_patterns={"/scanners/*/options/**": "^AWS_"},
     )
