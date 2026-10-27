@@ -18,8 +18,19 @@ import os
 import signal
 import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
-from typing import Annotated, AsyncIterator, Dict, Any, Iterable, NamedTuple, Optional
+from typing import (
+    Annotated,
+    AsyncIterator,
+    Callable,
+    Dict,
+    Any,
+    Iterable,
+    Literal,
+    NamedTuple,
+    Optional,
+)
 from pathlib import Path
 
 import anyio
@@ -27,7 +38,6 @@ from mcp.server.mcpserver import MCPServer, Context
 from pydantic import Field
 
 from automated_security_helper.cli.mcp_tools import (
-    CONFIG_CHECK_FAILED,
     CONFIG_ENV_NOT_RESOLVED,
     REFUSED_CONFIG_EXIT_CODE,
     REFUSED_INTERNAL_EXIT_CODE,
@@ -106,6 +116,8 @@ from automated_security_helper.cli.mcp.session_identity import (
     session_identity_refusal,
 )
 from automated_security_helper.cli.mcp.source_delivery import (
+    CLONE_MAX_WORKERS,
+    DELIVERY_MAX_WORKERS,
     MAX_CLONE_DEPTH,
     delivered_session_count,
     get_session_source_dir,
@@ -148,11 +160,6 @@ _DELIVERY_EXECUTOR = ThreadPoolExecutor(
     max_workers=DELIVERY_MAX_WORKERS, thread_name_prefix="ash-mcp-delivery"
 )
 
-#: Runs the other three source-delivery tools: appending a chunk, finalizing an
-#: upload and clearing a session. They take milliseconds to seconds, and have their
-#: own pool at ``ThreadPoolExecutor``'s default size so that no number of clones
-#: queues them.
-_DELIVERY_EXECUTOR = ThreadPoolExecutor(thread_name_prefix="ash-mcp-delivery")
 
 async def _run_on(
     executor: ThreadPoolExecutor, function: Callable[..., Any], kwargs: Dict[str, Any]
