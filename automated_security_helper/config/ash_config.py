@@ -1335,7 +1335,7 @@ class RuntimeOverridesConfig(RedactedSection):
         Dict[str, str],
         Field(
             description=(
-                "Map of JSON-Pointer pattern → regex. add/replace ops are rejected when "
+                "Map of JSON-Pointer pattern to regex. add/replace ops are rejected when "
                 "any string leaf reachable from the op's value matches the regex; lists "
                 "and dicts are walked recursively so a forbidden token cannot be hidden "
                 "inside a nested structure. The `test` op is exempt because it is "
