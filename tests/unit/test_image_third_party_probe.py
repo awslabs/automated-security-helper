@@ -264,7 +264,7 @@ class TestTheHostScript:
 
     @staticmethod
     def _run(monkeypatch, *, returncode=0, stdout="", wrapper=""):
-        import subprocess
+        import subprocess  # nosec B404 - only builds a CompletedProcess for the fake run
 
         seen = {}
 

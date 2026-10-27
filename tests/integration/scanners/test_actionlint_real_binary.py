@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404 - runs the real ash CLI under test
 import sys
 from pathlib import Path
 
@@ -77,7 +77,7 @@ def repo(tmp_path) -> Path:
 def _ash(
     *args: str, env: dict | None = None, cwd: Path | None = None
 ) -> subprocess.CompletedProcess:
-    return subprocess.run(
+    return subprocess.run(  # nosec B603 - starts the real ash CLI under test, fixed argv
         [sys.executable, "-m", "automated_security_helper.cli.main", *args],
         capture_output=True,
         text=True,

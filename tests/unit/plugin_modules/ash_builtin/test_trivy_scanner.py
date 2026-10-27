@@ -1554,7 +1554,7 @@ class _FakeTrivy:
         time.sleep(self.hold)
         with self._lock:
             self.active -= 1
-        import subprocess as sp
+        import subprocess as sp  # nosec B404 - only builds a CompletedProcess for the fake run
 
         return sp.CompletedProcess(argv, self.returncode, "", self.stderr)
 
