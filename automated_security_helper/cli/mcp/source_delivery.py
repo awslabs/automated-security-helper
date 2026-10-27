@@ -2471,9 +2471,10 @@ def _finalize_zip_upload(
             final.unlink()
         raise ValueError(f"zip too large: {actual_size} > {_MAX_ZIP_BYTES} bytes")
 
-        # Verify checksum before opening the archive.
-        digest = hashlib.sha256()
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
+    # Verify checksum before opening the archive.
+    digest = hashlib.sha256()
+    with final.open("rb") as f:
+        for block in iter(lambda: f.read(1024 * 1024), b""):
             digest.update(block)
     actual_sha = digest.hexdigest()
     if actual_sha.lower() != expected_sha256.lower():
