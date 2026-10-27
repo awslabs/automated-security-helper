@@ -61,7 +61,7 @@ scanners:
 uv run ash --scanners trivy-repo
 
 # Scan specific directory
-uv run ash --scanners trivy-repo /path/to/project
+uv run ash --scanners trivy-repo --source-dir /path/to/project
 ```
 
 ## Configuration Options
@@ -196,7 +196,7 @@ trivy image --download-db-only
 
 **Permission errors**:
 
-trivy-repo keeps its scan cache in memory (`--cache-backend=memory`), so an
+trivy-repo keeps its scan cache in memory (`trivy --cache-backend=memory`), so an
 offline or sandboxed scan, which does not update the database itself, works from a
 cache directory it may only read, such as one shared between jobs or baked into an
 image. Downloading or updating the database, which an unsandboxed online scan does

@@ -27,7 +27,7 @@ TUI screenshots honor `NO_COLOR`. To review the color palette on macOS/Linux, sc
 env -u NO_COLOR TERM=xterm-256color uv run --group dev python scripts/preview_interfaces.py
 ```
 
-Use `--skip-tui` for a browser-only preview. `--output /path/to/previews` changes the artifact destination.
+Use `npm run capture -- --skip-tui` for a browser-only preview. `--output /path/to/previews` changes the artifact destination.
 
 ## Browser configuration
 
