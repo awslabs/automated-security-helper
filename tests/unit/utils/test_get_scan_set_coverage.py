@@ -659,14 +659,20 @@ def test_get_changed_files_rejects_a_ref_that_fails_the_allowlist(bad_ref):
 
 
 def test_get_changed_files_accepts_a_conventional_ref_and_parses_the_diff(tmp_path):
-    with patch.object(
-        gss.subprocess, "run", return_value=_completed(0, b"a/b.py\0 c.py\0")
-    ) as run:
+    # git runs by the absolute path _git_executable resolves, never the bare name.
+    resolved_git = "/opt/resolved/bin/git"
+    with (
+        patch.object(gss, "_git_executable", return_value=resolved_git),
+        patch.object(
+            gss.subprocess, "run", return_value=_completed(0, b"a/b.py\0 c.py\0")
+        ) as run,
+    ):
         changed = get_changed_files(base_ref="origin/main", cwd=tmp_path)
 
-    # git_argv's options come right after git, then the diff's own.
+    # git_argv's options come right after git, then the diff's own, and the
+    # trailing "--" that keeps git reading the range only as revisions.
     assert run.call_args.args[0] == [
-        "git",
+        resolved_git,
         "-c",
         "core.fsmonitor=false",
         "-c",
@@ -677,6 +683,7 @@ def test_get_changed_files_accepts_a_conventional_ref_and_parses_the_diff(tmp_pa
         "--name-only",
         "-z",
         "origin/main...HEAD",
+        "--",
     ]
     assert changed == [Path("a/b.py"), Path(" c.py")]
 

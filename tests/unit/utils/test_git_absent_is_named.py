@@ -283,13 +283,21 @@ def test_get_changed_files_prints_a_bracketed_path_verbatim(tmp_path, markup_con
     assert "falling back" not in printed, printed
 
 
-def test_an_invalid_base_ref_is_printed_verbatim(tmp_path, markup_console):
-    """--base-ref is echoed in the warning; "a[/x]" reads as a closing Rich tag."""
-    from automated_security_helper.utils.get_scan_set import get_changed_files
+def test_an_invalid_base_ref_is_refused_and_named_verbatim(tmp_path, monkeypatch):
+    """--base-ref is named in the refusal; "a[/x]" reads as a closing Rich tag.
 
-    assert get_changed_files(base_ref="a[/x]", cwd=tmp_path) is None
-    printed = _printed(markup_console)
-    assert "Invalid base_ref 'a[/x]'; reporting every finding" in printed, printed
+    get_changed_files refuses a base ref it would not pass to git
+    (validate_base_ref) instead of falling back to every finding, and starts no
+    git process for it.
+    """
+    from automated_security_helper.utils import get_scan_set
+
+    git = _HungGit()
+    monkeypatch.setattr(get_scan_set, "subprocess", git)
+    with pytest.raises(get_scan_set.InvalidBaseRefError) as refused:
+        get_scan_set.get_changed_files(base_ref="a[/x]", cwd=tmp_path)
+    assert "Refusing --base-ref 'a[/x]'" in str(refused.value), refused.value
+    assert git.started == [], git.started
 
 
 def test_a_hung_git_diff_is_named(tmp_path, monkeypatch, caplog):
@@ -322,23 +330,31 @@ def test_a_git_that_will_not_start_is_not_called_missing(tmp_path, monkeypatch, 
     assert "git is not installed" not in warned, warned
 
 
-@pytest.mark.parametrize(
-    "base_ref, returncode",
-    [("bad ref", None), ("origin/main", 128)],
-    ids=["invalid-ref", "git-failed"],
-)
-def test_the_other_fallbacks_say_every_finding_is_reported(
-    base_ref, returncode, tmp_path, monkeypatch, caplog
+def test_a_failed_git_diff_says_every_finding_is_reported(
+    tmp_path, monkeypatch, caplog
 ):
     from automated_security_helper.utils import get_scan_set
 
     class _Failing(_HungGit):
         def run(self, argv, **kwargs):
-            return subprocess.CompletedProcess(argv, returncode, "", "fatal: bad")
+            return subprocess.CompletedProcess(argv, 128, "", "fatal: bad")
 
     monkeypatch.setattr(get_scan_set, "subprocess", _Failing())
     with caplog.at_level(logging.WARNING):
-        assert get_scan_set.get_changed_files(base_ref=base_ref, cwd=tmp_path) is None
+        assert (
+            get_scan_set.get_changed_files(base_ref="origin/main", cwd=tmp_path) is None
+        )
     warned = " ".join(caplog.messages)
     assert "reporting every finding" in warned, warned
     assert "falling back" not in warned, warned
+
+
+def test_an_invalid_base_ref_is_refused_before_git_starts(tmp_path, monkeypatch):
+    """A base ref with a space is not a fallback to every finding: it is refused."""
+    from automated_security_helper.utils import get_scan_set
+
+    git = _HungGit()
+    monkeypatch.setattr(get_scan_set, "subprocess", git)
+    with pytest.raises(get_scan_set.InvalidBaseRefError):
+        get_scan_set.get_changed_files(base_ref="bad ref", cwd=tmp_path)
+    assert git.started == [], git.started
