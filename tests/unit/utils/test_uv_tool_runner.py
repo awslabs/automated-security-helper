@@ -23,6 +23,10 @@ from automated_security_helper.utils.uv_tool_runner import (
     invalidate_tool_version_cache,
 )
 
+#: Where the mocked uv lives. ASH refuses to spawn a program whose path is not
+#: anchored (a drive letter is needed on Windows), so /opt/uv/bin/uv gets one there.
+UV_PATH = os.path.abspath("/opt/uv/bin/uv")
+
 
 @pytest.fixture(autouse=True)
 def _unresolved_names_reach_the_mocked_spawn(monkeypatch):
@@ -1237,14 +1241,14 @@ class TestFindUvOrNone:
     def test_returns_path_when_uv_present(self, reset_module_caches):
         with patch(
             "automated_security_helper.utils.subprocess_utils.find_executable",
-            return_value="/opt/uv/bin/uv",
+            return_value=UV_PATH,
         ):
-            assert find_uv_or_none() == "/opt/uv/bin/uv"
+            assert find_uv_or_none() == UV_PATH
 
     def test_memoizes_result(self, reset_module_caches):
         with patch(
             "automated_security_helper.utils.subprocess_utils.find_executable",
-            return_value="/opt/uv/bin/uv",
+            return_value=UV_PATH,
         ) as mock_find:
             find_uv_or_none()
             find_uv_or_none()
@@ -1285,7 +1289,7 @@ class TestGetUvToolCommand:
         with (
             patch(
                 "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-                return_value="/opt/uv/bin/uv",
+                return_value=UV_PATH,
             ),
             patch(
                 "automated_security_helper.utils.uv_tool_runner.subprocess.run"
@@ -1313,7 +1317,7 @@ class TestGetUvToolCommand:
         with (
             patch(
                 "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-                return_value="/opt/uv/bin/uv",
+                return_value=UV_PATH,
             ),
             patch(
                 "automated_security_helper.utils.uv_tool_runner.subprocess.run"
@@ -1326,7 +1330,7 @@ class TestGetUvToolCommand:
         probe = mock_run.call_args
         if offline:
             assert probe.args[0] == [
-                "/opt/uv/bin/uv",
+                UV_PATH,
                 "tool",
                 "run",
                 "--offline",
@@ -1336,7 +1340,7 @@ class TestGetUvToolCommand:
             assert probe.kwargs["env"]["UV_OFFLINE"] == "1"
         else:
             assert probe.args[0] == [
-                "/opt/uv/bin/uv",
+                UV_PATH,
                 "tool",
                 "run",
                 "bandit",
@@ -1350,7 +1354,7 @@ class TestGetUvToolCommand:
         with (
             patch(
                 "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-                return_value="/opt/uv/bin/uv",
+                return_value=UV_PATH,
             ),
             patch(
                 "automated_security_helper.utils.uv_tool_runner.subprocess.run"
@@ -1397,7 +1401,7 @@ class TestGetUvToolCommand:
         with (
             patch(
                 "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-                return_value="/opt/uv/bin/uv",
+                return_value=UV_PATH,
             ),
             patch(
                 "automated_security_helper.utils.uv_tool_runner.subprocess.run",
@@ -1432,7 +1436,7 @@ class TestGetUvToolCommand:
         with (
             patch(
                 "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-                return_value="/opt/uv/bin/uv",
+                return_value=UV_PATH,
             ),
             patch(
                 "automated_security_helper.utils.uv_tool_runner.subprocess.run"
@@ -1507,7 +1511,7 @@ class TestGetUvToolCommandThreadSafety:
         with (
             patch(
                 "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-                return_value="/opt/uv/bin/uv",
+                return_value=UV_PATH,
             ),
             patch(
                 "automated_security_helper.utils.uv_tool_runner.subprocess.run",
@@ -1538,7 +1542,7 @@ class TestGetUvToolCommandThreadSafety:
         with (
             patch(
                 "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-                return_value="/opt/uv/bin/uv",
+                return_value=UV_PATH,
             ),
             patch(
                 "automated_security_helper.utils.uv_tool_runner.subprocess.run"
@@ -1843,7 +1847,7 @@ class TestProbeLocksAreNamespaced:
             runner.get_tool_version("bandit", "bandit")
             with patch(
                 "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-                return_value="/opt/uv/bin/uv",
+                return_value=UV_PATH,
             ):
                 get_uv_tool_command("bandit")
 
