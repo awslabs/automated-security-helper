@@ -14,7 +14,11 @@ What the host judges: a file that is missing, a directory, unreadable, a FIFO, n
 UTF-8, not valid YAML (aliases included), or not a valid config, whether it is named
 with ``--config``, named by ``ASH_CONFIG``, or found by discovery, and a discovered
 name that is a link to nothing. Options of a plugin the image may hold and the host
-does not are left to the scan inside, as before.
+does not are left to the scan inside, as before. So is the model's refusal of the
+file ``ASH_CONFIG`` names in container mode without a build: the image's ASH may
+carry another schema, so parse and confinement stay the host's and the schema is
+the scan inside's to judge (``run_ash_scan._image_schema_may_differ``); the host
+starts the container and carries the inner refusal's exit 3.
 
 The runners are stand-ins first on PATH (``docker``, ``podman``, ``finch``,
 ``nerdctl``, ``nix``) that record each call and exit 97, so nothing real starts.
@@ -58,6 +62,17 @@ class Stage:
         if not self.runner_log.exists():
             return []
         return self.runner_log.read_text(encoding="utf-8").splitlines()
+
+    def inner_run_refuses(self, code: int = 3) -> None:
+        """Make the stand-in runners exit as the scan inside does when it refuses
+        its config: 3, ASH's invalid-config status, instead of the 97 that marks a
+        runner that should never have been reached."""
+        for name in RUNNERS:
+            stub = self.root / "bin" / name
+            stub.write_text(
+                f'#!/bin/sh\necho "{name} $*" >> "{self.runner_log}"\nexit {code}\n',
+                encoding="utf-8",
+            )
 
     def output_snapshot(self) -> Dict[str, bytes]:
         return {
@@ -241,6 +256,30 @@ def _printed(capsys) -> str:
     return captured.out + captured.err
 
 
+def _left_to_the_scan_inside(mode: str, make: Callable[[Path], None]) -> bool:
+    """Whether the host leaves the file ``ASH_CONFIG`` names to the scan inside.
+
+    Only a model refusal, and only in container mode without a build, where the
+    image's ASH may carry another schema (``run_ash_scan._image_schema_may_differ``).
+    A file that does not parse, is not a file or cannot be read is the host's in
+    every mode, and so is a named ``--config`` the model refuses.
+    """
+    return mode == "container" and make is _make_model_violation
+
+
+def _assert_left_to_the_scan_inside(stage: Stage, code, output):
+    """The host started the container, did not refuse the file itself, and
+    carried the inner refusal's exit 3 with the line that names it."""
+    calls = stage.runner_calls()
+    assert any(call.split()[1:2] == ["run"] for call in calls), (calls, output)
+    assert code == 3, output
+    flat = " ".join(output.split())
+    assert "The container exited with 3 (invalid config or refused input)" in flat, (
+        output
+    )
+    assert "Invalid configuration" not in output, output
+
+
 @pytest.mark.parametrize("mode", MODES)
 @pytest.mark.parametrize("make", REASONS)
 def test_a_named_config(stage, mode, make):
@@ -259,6 +298,8 @@ def test_a_named_config(stage, mode, make):
 def test_the_file_ash_config_names(stage, mode, make):
     make(stage.named)
     before = stage.output_snapshot()
+    if _left_to_the_scan_inside(mode, make):
+        stage.inner_run_refuses()
 
     result = _promptly(
         make,
@@ -266,7 +307,10 @@ def test_the_file_ash_config_names(stage, mode, make):
         lambda: _cli(stage, mode, env={"ASH_CONFIG": str(stage.named)}),
     )
 
-    _assert_refused_on_the_host(stage, before, result.exit_code, result.output)
+    if _left_to_the_scan_inside(mode, make):
+        _assert_left_to_the_scan_inside(stage, result.exit_code, result.output)
+    else:
+        _assert_refused_on_the_host(stage, before, result.exit_code, result.output)
 
 
 @pytest.mark.parametrize("mode", MODES)
@@ -278,10 +322,15 @@ def test_ash_config_when_an_api_caller_names_no_config(
     make(stage.named)
     monkeypatch.setenv("ASH_CONFIG", str(stage.named))
     before = stage.output_snapshot()
+    if _left_to_the_scan_inside(mode, make):
+        stage.inner_run_refuses()
 
     code = _promptly(make, stage.named, lambda: _api(stage, mode))
 
-    _assert_refused_on_the_host(stage, before, code, _printed(capsys))
+    if _left_to_the_scan_inside(mode, make):
+        _assert_left_to_the_scan_inside(stage, code, _printed(capsys))
+    else:
+        _assert_refused_on_the_host(stage, before, code, _printed(capsys))
 
 
 @pytest.mark.parametrize("entry", ["cli", "api"])
@@ -297,6 +346,8 @@ def test_ash_config_beside_a_valid_named_config(
     stage.named.write_text("project_name: fine\n", encoding="utf-8")
     monkeypatch.setenv("ASH_CONFIG", str(stage.env))
     before = stage.output_snapshot()
+    if _left_to_the_scan_inside(mode, make):
+        stage.inner_run_refuses()
 
     if entry == "cli":
         result = _promptly(
@@ -307,6 +358,9 @@ def test_ash_config_beside_a_valid_named_config(
         code = _promptly(make, stage.env, lambda: _api(stage, mode, stage.named))
         output = _printed(capsys)
 
+    if _left_to_the_scan_inside(mode, make):
+        _assert_left_to_the_scan_inside(stage, code, output)
+        return
     _assert_refused_on_the_host(stage, before, code, output)
     assert stage.env.name in " ".join(output.split()), output
 
