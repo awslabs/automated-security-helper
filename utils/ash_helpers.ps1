@@ -222,11 +222,11 @@ function Invoke-ASH {
     The target stage to build in the Dockerfile, `ci` or `non-root`, in any case. Any
     other value is refused with exit 3. Tab completion offers the two.
 
-    Defaults to `ci` when `CI`, `IsCI`, `ISCI`, or `CODEBUILD_BUILD_ID` is set, the
-    variables `ash --mode container` reads, on Windows, or under PowerShell 5, and to
-    `non-root` otherwise. Off Windows the names are case-sensitive. A variable set to an
-    empty value counts as unset here, where `ash --mode container` counts it as set.
-    `./ash` reads none of them and builds `non-root` unless given --build-target.
+    Defaults to `ci` on Windows and under PowerShell 5, where the non-root user cannot
+    write the bind-mounted output directory, and to `non-root` everywhere else, as
+    `./ash` and `ash --mode container` do. `CI`, `IsCI`, `ISCI` and `CODEBUILD_BUILD_ID`
+    play no part in the choice. A `non-root` build whose user would get UID 0 or GID 0,
+    which a caller running as root gives it, is refused and names `-BuildTarget ci`.
 
     .PARAMETER Offline
     If $true, runs ASH in offline mode.
@@ -297,8 +297,10 @@ function Invoke-ASH {
         # completer registered after this function.
         [parameter()]
         [string]
-        # The CI variables `ash --mode container` reads (run_ash_container.py).
-        $BuildTarget = $(if($env:CI -or $env:IsCI -or $env:ISCI -or $env:CODEBUILD_BUILD_ID -or $PSVersionTable.PSVersion.Major -le 5 -or $IsWindows){"ci"}else{"non-root"}),
+        # ci on Windows, where the non-root user cannot write the bind-mounted output,
+        # and non-root everywhere else, the default of ./ash and `ash --mode container`
+        # (run_ash_container.py, _resolve_build_target). The CI variables play no part.
+        $BuildTarget = $(if ($PSVersionTable.PSVersion.Major -le 5 -or $IsWindows) { "ci" } else { "non-root" }),
         [parameter()]
         [switch]
         $Offline,
@@ -368,6 +370,10 @@ function Invoke-ASH {
             $global:LASTEXITCODE = $refusalExitCode
             throw "-BuildTarget '$(Format-AshShownValue $BuildTarget)' is not a stage the image has. Use ci or non-root."
         }
+        # The stage under the name the Dockerfile gives it, so the image tag and
+        # --target read the same whatever case the caller wrote, as `ash --mode
+        # container` lower-cases it.
+        $BuildTarget = [string]$knownStage
         # -LiteralPath, so a directory named src[1] is that directory: Test-Path $_
         # read the name as a wildcard and matched src1, or nothing. A directory of the
         # file system, not any provider's container: Env: and Function: passed a
@@ -511,22 +517,15 @@ function Invoke-ASH {
         # the one place they are used.
         if (-not $NoBuild -and -not $onWindows -and (-not $ContainerUID -or -not $ContainerGID)) {
             if (Get-Command id -ErrorAction SilentlyContinue) {
-                $callerUID = "$(& id -u)".Trim()
-                # A root caller is the exception. ./ash and `ash --mode container` pass
-                # UID=0 for one, which the non-root stage's adduser refuses (root exists),
-                # so the image's own 500:100 is kept instead.
-                if ($callerUID -match '^0+$') {
-                    if ($BuildTarget -eq 'non-root') {
-                        Write-Warning "Running as root, so the image is built for its default UID and GID (500:100), which cannot write an output directory that only root may write to. Pass -BuildTarget ci for the image that runs as root, or -ContainerUID and -ContainerGID."
-                    }
+                # A root caller's ids are taken like any other's: under non-root the
+                # check below refuses UID 0 and GID 0 and names -BuildTarget ci, as
+                # ./ash and `ash --mode container` refuse them, and under ci they are
+                # the ids that stage runs as anyway.
+                if (-not $ContainerUID) {
+                    $ContainerUID = "$(& id -u)".Trim()
                 }
-                else {
-                    if (-not $ContainerUID) {
-                        $ContainerUID = $callerUID
-                    }
-                    if (-not $ContainerGID) {
-                        $ContainerGID = "$(& id -g)".Trim()
-                    }
+                if (-not $ContainerGID) {
+                    $ContainerGID = "$(& id -g)".Trim()
                 }
             }
             else {
@@ -550,11 +549,11 @@ function Invoke-ASH {
         if (-not $NoBuild -and $BuildTarget -eq 'non-root') {
             if ("$ContainerUID" -match '\A0+\z') {
                 $global:LASTEXITCODE = $refusalExitCode
-                throw "The non-root image stage creates a user with UID 0, which is root: -ContainerUID 0 was given. Pass -BuildTarget ci to build the image that runs as root. Another -ContainerUID and -ContainerGID work only when the output directory is writable by that UID: the container runs as that user and writes its reports there."
+                throw "The non-root image stage creates a user with UID 0, which is root: Invoke-ASH is running as root, or -ContainerUID 0 was given. Pass -BuildTarget ci to build the image that runs as root. Another -ContainerUID and -ContainerGID work only when the output directory is writable by that UID: the container runs as that user and writes its reports there."
             }
             if ("$ContainerGID" -match '\A0+\z') {
                 $global:LASTEXITCODE = $refusalExitCode
-                throw "The non-root image stage gives its user GID 0, which is root's group: -ContainerGID 0 was given. Pass -BuildTarget ci to build the image that runs as root. Another -ContainerGID works only when the output directory is writable by the container's user, which writes its reports there."
+                throw "The non-root image stage gives its user GID 0, which is root's group: Invoke-ASH is running with GID 0, or -ContainerGID 0 was given. Pass -BuildTarget ci to build the image that runs as root. Another -ContainerGID works only when the output directory is writable by the container's user, which writes its reports there."
             }
         }
 

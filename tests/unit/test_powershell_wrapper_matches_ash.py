@@ -2713,27 +2713,25 @@ _CI_VARIABLES = ("CI", "IsCI", "ISCI", "CODEBUILD_BUILD_ID")
     reason="Windows always builds ci, and its variable names ignore case (ISCI is IsCI)",
 )
 @pytest.mark.parametrize(
-    ("variable", "value", "target"),
+    "variable",
     [
-        *[pytest.param(name, "1", "ci", id=name) for name in _CI_VARIABLES],
-        pytest.param(None, None, "non-root", id="none"),
-        # An empty value counts as unset, as PowerShell reads it; `ash --mode
-        # container` counts it as set. The help says so.
-        pytest.param("ISCI", "", "non-root", id="ISCI-empty"),
+        *[pytest.param(name, id=name) for name in _CI_VARIABLES],
+        pytest.param(None, id="none"),
     ],
 )
-def test_the_default_build_target_follows_the_ci_variables(
-    tmp_path, variable, value, target
-):
-    # The same four names `ash --mode container` reads (run_ash_container.py). Names
-    # are case-sensitive here, so ISCI and IsCI are two variables. The others are
-    # removed in the script, since the test's own environment may be a CI runner's.
+def test_the_ci_variables_do_not_choose_the_stage(tmp_path, variable):
+    # The four names CI systems set play no part in the stage, as for `ash --mode
+    # container` and ./ash (run_ash_container.py, _resolve_build_target;
+    # docs/content/docs/cli-reference.md): off Windows it is non-root unless
+    # -BuildTarget names another. Names are case-sensitive here, so ISCI and IsCI are
+    # two variables. The others are removed in the script, since the test's own
+    # environment may be a CI runner's.
     others = [name for name in _CI_VARIABLES if name != variable]
     removals = "".join(
         f"Remove-Item -LiteralPath 'Env:{name}' -ErrorAction SilentlyContinue\n"
         for name in others
     )
-    env = {variable: value} if variable else {}
+    env = {variable: "1"} if variable else {}
     result, calls = _run_script(
         tmp_path,
         removals + "Invoke-ASH -NoRun -SourceDir src -OutputDir out\nexit 0\n",
@@ -2741,35 +2739,52 @@ def test_the_default_build_target_follows_the_ci_variables(
     )
     assert result.returncode == 0, result.stdout + result.stderr
     build = _build_call(result, calls)
-    assert build[build.index("--target") + 1] == target, build
+    assert build[build.index("--target") + 1] == "non-root", build
 
 
 @pytest.mark.skipif(
     os.name == "nt", reason="the IDs are taken from id only off Windows"
 )
-@pytest.mark.parametrize("target", ["non-root", "ci"])
-def test_a_root_caller_builds_with_the_images_default_ids(tmp_path, target):
-    # On the base commit ./ash and `ash --mode container` pass UID=0 for a root caller,
-    # which the non-root stage's adduser refuses, since root already exists. So the
-    # IDs taken from id are not passed for UID 0, and the image's 500:100 applies,
-    # with a warning for the non-root stage, whose user cannot write a root-owned
-    # output directory. See the CHANGELOG.
+def test_a_root_caller_is_refused_the_non_root_stage(tmp_path):
+    # ./ash and `ash --mode container` take a root caller's ids like any other's and
+    # refuse UID 0 and GID 0 for the non-root stage before any build, naming the ci
+    # stage (the `ash` script's "The non-root image stage creates a user with UID 0"
+    # and run_ash_container.py's; docs/content/docs/cli-reference.md).
+    result, calls = _run_script(
+        tmp_path,
+        _wrapped("Invoke-ASH -SourceDir src -OutputDir out -BuildTarget non-root"),
+        preamble=_ROOT_ID_STUB,
+    )
+    assert result.returncode == REFUSAL_EXIT, result.stdout + result.stderr
+    assert calls == [], calls
+    message = " ".join(result.stderr.split())
+    assert "Invoke-ASH is running as root" in message, message
+    assert "Pass -BuildTarget ci" in message, message
+
+
+@pytest.mark.skipif(
+    os.name == "nt", reason="the IDs are taken from id only off Windows"
+)
+def test_a_root_caller_builds_ci_with_its_own_ids(tmp_path):
+    # The ci stage runs as root anyway, so a root caller's UID 0 and GID 0 are passed
+    # as any caller's ids are, with nothing to warn about.
     result, calls = _invoke(
         tmp_path,
-        f"Invoke-ASH -SourceDir src -OutputDir out -BuildTarget {target}",
+        "Invoke-ASH -SourceDir src -OutputDir out -BuildTarget ci",
         preamble=_ROOT_ID_STUB,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert _uid_gid_args(_build_call(result, calls)) == []
-    warned = "Running as root" in result.stdout + result.stderr
-    assert warned == (target == "non-root"), result.stdout + result.stderr
+    assert _uid_gid_args(_build_call(result, calls)) == ["UID=0", "GID=0"]
+    assert "Running as root" not in result.stdout + result.stderr
 
 
-def test_an_explicit_container_uid_of_0_is_still_passed(tmp_path):
-    # Only the IDs read from id are dropped; an explicit choice is the caller's.
+def test_an_explicit_container_uid_of_0_is_passed_to_the_ci_stage(tmp_path):
+    # An explicit choice is the caller's, and the ci stage takes it; the non-root
+    # stage refuses 0 whether it came from id or from the caller.
     result, calls = _invoke(
         tmp_path,
-        "Invoke-ASH -SourceDir src -OutputDir out -ContainerUID 0 -ContainerGID 0",
+        "Invoke-ASH -SourceDir src -OutputDir out -BuildTarget ci "
+        "-ContainerUID 0 -ContainerGID 0",
         preamble=_ROOT_ID_STUB,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -2779,7 +2794,7 @@ def test_an_explicit_container_uid_of_0_is_still_passed(tmp_path):
 @pytest.mark.skipif(os.name == "nt", reason="id(1) and os.getuid are POSIX")
 @pytest.mark.skipif(
     os.name != "nt" and os.getuid() == 0,
-    reason="as root the image's default IDs are kept; see the root-caller test",
+    reason="as root the non-root build is refused; see the root-caller tests",
 )
 def test_the_real_id_command_supplies_the_uid_and_gid(tmp_path):
     result, calls = _invoke(tmp_path, "Invoke-ASH -SourceDir src -OutputDir out")
