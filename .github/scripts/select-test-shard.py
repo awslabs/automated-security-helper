@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Write the list of test files one unit-test shard runs.
 
-The unit suite is about 47,000 items. On a 4-worker GitHub runner it needs well over an
-hour, so one job per OS and Python version never finished inside its timeout. The
+The unit suite is about 23,900 items. On a 4-worker GitHub runner a whole run takes
+10 to 25 minutes, so most legs sat at the 20-minute timeout and 14 of 25 were cut. The
 unit-test job in ash-unified-ci.yml now fans each of those legs out into shards, and
 this script says which files a shard owns.
 
@@ -14,7 +14,7 @@ neighbouring modules (``test_a_...`` families run in clusters) land in different
 shards. A file belongs to exactly one shard, by construction.
 
 Passing files as arguments also stops each shard from collecting the whole tree, which
-alone took about four and a half minutes per worker pool on the unsharded run.
+every worker pool of the unsharded run did before its first test.
 
 A shard is written ``<index>of<count>``, for example ``3of8``. The text carries its own
 count, so a matrix entry cannot be re-read against a different total than the one it was

@@ -5,9 +5,9 @@
 
 Why this file exists
 --------------------
-The whole suite is about 47,000 items, which a 4-worker runner cannot finish inside any
-sensible job timeout, so ash-unified-ci.yml splits each OS and Python combination of the
-``unit-test`` job into shards. Four things have to agree for that to run every test
+The whole suite is about 23,900 items, which a 4-worker runner finishes in 10 to 25
+minutes, too close to a 20-minute job timeout to rely on, so ash-unified-ci.yml splits
+each OS and Python combination of the ``unit-test`` job into shards. Four things have to agree for that to run every test
 exactly once and still gate coverage:
 
 * the ``shard`` axis in the workflow, one literal list whose entries each carry the total
