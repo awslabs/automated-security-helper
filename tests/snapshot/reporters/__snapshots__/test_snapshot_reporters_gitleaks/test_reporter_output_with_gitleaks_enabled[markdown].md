@@ -1,149 +1,166 @@
-# ASH Security Scan Report
+# ASH security scan report
 
-- **Report generated**: 2026-01-15T12:00:42+00:00
-- **Time since scan**: 0 minutes
+> [!CAUTION]
+> **Review required**
+>
+> 5 findings at or above the configured scanner thresholds.
+>
+> **5 actionable** · 0 below threshold · 0 suppressed · 1/1 scanners completed
+>
+> Next action: Review findings by severity, then inspect the source.
 
-## Scan Metadata
-
-- **Project**: ASH
-- **Scan executed**: 2026-01-15T12:00:00+00:00
-- **ASH version**: <ASH_VERSION>
+Project: ASH · Scan executed: 2026-01-15T12:00:00+00:00
 
 ## Summary
 
-### Scanner Results
-
-The table below shows findings by scanner, with status based on severity thresholds and dependencies:
-
-- **Severity levels**:
-  - **Suppressed (S)**: Findings that have been explicitly suppressed and don't affect scanner status
-  - **Critical (C)**: Highest severity findings that require immediate attention
-  - **High (H)**: Serious findings that should be addressed soon
-  - **Medium (M)**: Moderate risk findings
-  - **Low (L)**: Lower risk findings
-  - **Info (I)**: Informational findings with minimal risk
-- **Actionable**: Number of findings at or above the threshold severity level that require attention
-- **Result**:
-  - **PASSED** = No findings at or above threshold
-  - **FAILED** = Findings at or above threshold
-  - **MISSING** = Required dependencies not available
-  - **SKIPPED** = Scanner explicitly disabled
-  - **ERROR** = Scanner execution error
-- **Threshold**: The minimum severity level that will cause a scanner to fail
-  - Thresholds: ALL, LOW, MEDIUM, HIGH, CRITICAL
-  - Source: Values in parentheses indicate where the threshold is set:
-    - `global` (global_settings section in the ASH_CONFIG used)
-    - `config` (scanner config section in the ASH_CONFIG used)
-    - `scanner` (default configuration in the plugin, if explicitly set)
-- **Statistics calculation**:
-  - All statistics are calculated from the final aggregated SARIF report
-  - Suppressed findings are counted separately and do not contribute to actionable findings
-  - Scanner status is determined by comparing actionable findings to the threshold
+### Scanner results
 
 | Scanner | Suppressed | Critical | High | Medium | Low | Info | Actionable | Result | Threshold |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
 | gitleaks | 0 | 5 | 0 | 0 | 0 | 0 | 5 | FAILED | MEDIUM (global) |
 
-### Top 3 Hotspots
+<details>
+<summary>How to read scanner results</summary>
 
-Files with the highest number of security findings:
+**Severity levels:** Critical, High, Medium, Low, Info. Suppressed findings are counted separately.
 
-| Finding Count | File Location |
+**Actionable** counts findings at or above each scanner's threshold.
+
+**Result:** PASSED = no actionable findings; FAILED = threshold exceeded; MISSING = dependencies unavailable; SKIPPED = disabled; ERROR = execution error.
+
+**Threshold** shows the minimum severity and its source: `global`, `config`, or `scanner`.
+
+**Statistics calculation:** final aggregated SARIF, with suppressed findings excluded from actionable counts.
+
+</details>
+
+
+### Top 3 hotspots
+
+Files with the most actionable findings.
+
+| Finding count | File location |
 | ---: | --- |
 | 3 | app/settings.py |
 | 1 | docs/example.md |
-| 1 | app/inline_allowed.py |
+| 1 | app/inline\_allowed.py |
 
-<h2>Detailed Findings</h2>
+## Detailed findings
+
+Showing 5 of 5 actionable findings, highest severity first.
 
 <details>
-<summary>Show 5 actionable findings</summary>
+<summary>1. CRITICAL · github-pat · app/inline_allowed.py:2</summary>
 
 ### Finding 1: github-pat
 
-- **Severity**: CRITICAL
-- **Scanner**: gitleaks
-- **Rule ID**: github-pat
-- **Location**: docs/example.md:5
+- Severity: CRITICAL
+- Scanner: gitleaks
+- Rule ID: github-pat
+- Location: app/inline\_allowed.py:2
 
-**Description**:
-github-pat has detected secret for file docs/example.md.
+github-pat has detected secret for file app/inline\_allowed.py.
 
-**Code Snippet**:
-```
-[masked: a secret finding reports this line]
-```
+Code snippet:
 
----
-
-### Finding 2: slack-bot-token
-
-- **Severity**: CRITICAL
-- **Scanner**: gitleaks
-- **Rule ID**: slack-bot-token
-- **Location**: app/settings.py:6
-
-**Description**:
-slack-bot-token has detected secret for file app/settings.py.
-
-**Code Snippet**:
-```
-[masked: a secret finding reports this line]
-```
-
----
-
-### Finding 3: github-pat
-
-- **Severity**: CRITICAL
-- **Scanner**: gitleaks
-- **Rule ID**: github-pat
-- **Location**: app/settings.py:4
-
-**Description**:
-github-pat has detected secret for file app/settings.py.
-
-**Code Snippet**:
-```
-[masked: a secret finding reports this line]
-```
-
----
-
-### Finding 4: aws-access-token
-
-- **Severity**: CRITICAL
-- **Scanner**: gitleaks
-- **Rule ID**: aws-access-token
-- **Location**: app/settings.py:5
-
-**Description**:
-aws-access-token has detected secret for file app/settings.py.
-
-**Code Snippet**:
-```
-[masked: a secret finding reports this line]
-```
-
----
-
-### Finding 5: github-pat
-
-- **Severity**: CRITICAL
-- **Scanner**: gitleaks
-- **Rule ID**: github-pat
-- **Location**: app/inline_allowed.py:2
-
-**Description**:
-github-pat has detected secret for file app/inline_allowed.py.
-
-**Code Snippet**:
 ```
 [masked: a secret finding reports this line]
 ```
 
 </details>
 
----
+<details>
+<summary>2. CRITICAL · github-pat · app/settings.py:4</summary>
+
+### Finding 2: github-pat
+
+- Severity: CRITICAL
+- Scanner: gitleaks
+- Rule ID: github-pat
+- Location: app/settings.py:4
+
+github-pat has detected secret for file app/settings.py.
+
+Code snippet:
+
+```
+[masked: a secret finding reports this line]
+```
+
+</details>
+
+<details>
+<summary>3. CRITICAL · aws-access-token · app/settings.py:5</summary>
+
+### Finding 3: aws-access-token
+
+- Severity: CRITICAL
+- Scanner: gitleaks
+- Rule ID: aws-access-token
+- Location: app/settings.py:5
+
+aws-access-token has detected secret for file app/settings.py.
+
+Code snippet:
+
+```
+[masked: a secret finding reports this line]
+```
+
+</details>
+
+<details>
+<summary>4. CRITICAL · slack-bot-token · app/settings.py:6</summary>
+
+### Finding 4: slack-bot-token
+
+- Severity: CRITICAL
+- Scanner: gitleaks
+- Rule ID: slack-bot-token
+- Location: app/settings.py:6
+
+slack-bot-token has detected secret for file app/settings.py.
+
+Code snippet:
+
+```
+[masked: a secret finding reports this line]
+```
+
+</details>
+
+<details>
+<summary>5. CRITICAL · github-pat · docs/example.md:5</summary>
+
+### Finding 5: github-pat
+
+- Severity: CRITICAL
+- Scanner: gitleaks
+- Rule ID: github-pat
+- Location: docs/example.md:5
+
+github-pat has detected secret for file docs/example.md.
+
+Code snippet:
+
+```
+[masked: a secret finding reports this line]
+```
+
+</details>
+
+<details>
+<summary>Scan metadata</summary>
+
+## Scan metadata
+
+- Project: ASH
+- Scan executed: 2026-01-15T12:00:00+00:00
+- Report generated: 2026-01-15T12:00:42+00:00
+- ASH version: <ASH_VERSION>
+
+</details>
 
 *Report generated by [Automated Security Helper (ASH)](https://github.com/awslabs/automated-security-helper) at 2026-01-15T12:00:42+00:00*
+
+Build with <3 at Amazon Web Services

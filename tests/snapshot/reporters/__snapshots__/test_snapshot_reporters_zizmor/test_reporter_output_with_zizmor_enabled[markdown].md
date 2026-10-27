@@ -1,74 +1,170 @@
-# ASH Security Scan Report
+# ASH security scan report
 
-- **Report generated**: 2026-01-15T12:00:42+00:00
-- **Time since scan**: 0 minutes
+> [!CAUTION]
+> **Review required**
+>
+> 6 findings at or above the configured scanner thresholds.
+>
+> **6 actionable** · 1 below threshold · 0 suppressed · 1/1 scanners completed
+>
+> Next action: Review findings by severity, then inspect the source.
 
-## Scan Metadata
-
-- **Project**: ASH
-- **Scan executed**: 2026-01-15T12:00:00+00:00
-- **ASH version**: <ASH_VERSION>
+Project: ASH · Scan executed: 2026-01-15T12:00:00+00:00
 
 ## Summary
 
-### Scanner Results
-
-The table below shows findings by scanner, with status based on severity thresholds and dependencies:
-
-- **Severity levels**:
-  - **Suppressed (S)**: Findings that have been explicitly suppressed and don't affect scanner status
-  - **Critical (C)**: Highest severity findings that require immediate attention
-  - **High (H)**: Serious findings that should be addressed soon
-  - **Medium (M)**: Moderate risk findings
-  - **Low (L)**: Lower risk findings
-  - **Info (I)**: Informational findings with minimal risk
-- **Actionable**: Number of findings at or above the threshold severity level that require attention
-- **Result**:
-  - **PASSED** = No findings at or above threshold
-  - **FAILED** = Findings at or above threshold
-  - **MISSING** = Required dependencies not available
-  - **SKIPPED** = Scanner explicitly disabled
-  - **ERROR** = Scanner execution error
-- **Threshold**: The minimum severity level that will cause a scanner to fail
-  - Thresholds: ALL, LOW, MEDIUM, HIGH, CRITICAL
-  - Source: Values in parentheses indicate where the threshold is set:
-    - `global` (global_settings section in the ASH_CONFIG used)
-    - `config` (scanner config section in the ASH_CONFIG used)
-    - `scanner` (default configuration in the plugin, if explicitly set)
-- **Statistics calculation**:
-  - All statistics are calculated from the final aggregated SARIF report
-  - Suppressed findings are counted separately and do not contribute to actionable findings
-  - Scanner status is determined by comparing actionable findings to the threshold
+### Scanner results
 
 | Scanner | Suppressed | Critical | High | Medium | Low | Info | Actionable | Result | Threshold |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
 | zizmor | 0 | 0 | 5 | 1 | 1 | 0 | 6 | FAILED | MEDIUM (global) |
 
-### Top 2 Hotspots
+<details>
+<summary>How to read scanner results</summary>
 
-Files with the highest number of security findings:
+**Severity levels:** Critical, High, Medium, Low, Info. Suppressed findings are counted separately.
 
-| Finding Count | File Location |
+**Actionable** counts findings at or above each scanner's threshold.
+
+**Result:** PASSED = no actionable findings; FAILED = threshold exceeded; MISSING = dependencies unavailable; SKIPPED = disabled; ERROR = execution error.
+
+**Threshold** shows the minimum severity and its source: `global`, `config`, or `scanner`.
+
+**Statistics calculation:** final aggregated SARIF, with suppressed findings excluded from actionable counts.
+
+</details>
+
+
+### Top 2 hotspots
+
+Files with the most actionable findings.
+
+| Finding count | File location |
 | ---: | --- |
 | 4 | .github/workflows/vulnerable.yml |
 | 2 | actions/greet/action.yml |
 
-<h2>Detailed Findings</h2>
+## Detailed findings
+
+Showing 6 of 6 actionable findings, highest severity first.
 
 <details>
-<summary>Show 6 actionable findings</summary>
+<summary>1. HIGH · zizmor/dangerous-triggers · .github/workflows/vulnerable.yml:2-5</summary>
 
-### Finding 1: zizmor/excessive-permissions
+### Finding 1: zizmor/dangerous-triggers
 
-- **Severity**: MEDIUM
-- **Scanner**: zizmor
-- **Rule ID**: zizmor/excessive-permissions
-- **Location**: .github/workflows/vulnerable.yml:7-15
+- Severity: HIGH
+- Scanner: zizmor
+- Rule ID: zizmor/dangerous-triggers
+- Location: .github/workflows/vulnerable.yml:2-5
 
-**Description**:
+use of fundamentally insecure workflow trigger: pull\_request\_target is almost always used insecurely
+
+Code snippet:
+
+```
+on:
+  pull_request_target:
+  issues:
+    types: [opened]
+```
+
+</details>
+
+<details>
+<summary>2. HIGH · zizmor/unpinned-uses · .github/workflows/vulnerable.yml:10</summary>
+
+### Finding 2: zizmor/unpinned-uses
+
+- Severity: HIGH
+- Scanner: zizmor
+- Rule ID: zizmor/unpinned-uses
+- Location: .github/workflows/vulnerable.yml:10
+
+unpinned action reference: action is not pinned to a hash (required by blanket policy)
+
+Code snippet:
+
+```
+actions/checkout@v4
+```
+
+</details>
+
+<details>
+<summary>3. HIGH · zizmor/template-injection · .github/workflows/vulnerable.yml:14</summary>
+
+### Finding 3: zizmor/template-injection
+
+- Severity: HIGH
+- Scanner: zizmor
+- Rule ID: zizmor/template-injection
+- Location: .github/workflows/vulnerable.yml:14
+
+code injection via template expansion: may expand into attacker-controllable code
+
+Code snippet:
+
+```
+echo "${{ github.event.issue.title }}"
+```
+
+</details>
+
+<details>
+<summary>4. HIGH · zizmor/template-injection · actions/greet/action.yml:11</summary>
+
+### Finding 4: zizmor/template-injection
+
+- Severity: HIGH
+- Scanner: zizmor
+- Rule ID: zizmor/template-injection
+- Location: actions/greet/action.yml:11
+
+code injection via template expansion: may expand into attacker-controllable code
+
+Code snippet:
+
+```
+echo "hello ${{ github.event.issue.title }} ${{ inputs.who }}"
+```
+
+</details>
+
+<details>
+<summary>5. HIGH · zizmor/template-injection · actions/greet/action.yml:11</summary>
+
+### Finding 5: zizmor/template-injection
+
+- Severity: HIGH
+- Scanner: zizmor
+- Rule ID: zizmor/template-injection
+- Location: actions/greet/action.yml:11
+
+code injection via template expansion: may expand into attacker-controllable code
+
+Code snippet:
+
+```
+echo "hello ${{ github.event.issue.title }} ${{ inputs.who }}"
+```
+
+</details>
+
+<details>
+<summary>6. MEDIUM · zizmor/excessive-permissions · .github/workflows/vulnerable.yml:7-15</summary>
+
+### Finding 6: zizmor/excessive-permissions
+
+- Severity: MEDIUM
+- Scanner: zizmor
+- Rule ID: zizmor/excessive-permissions
+- Location: .github/workflows/vulnerable.yml:7-15
+
 overly broad permissions: default permissions used due to no permissions: block
 
-**Code Snippet**:
+Code snippet:
+
 ```
 greet:
     runs-on: ubuntu-latest
@@ -80,96 +176,20 @@ greet:
         run: echo "${{ github.event.issue.title }}"
 ```
 
----
+</details>
 
-### Finding 2: zizmor/dangerous-triggers
+<details>
+<summary>Scan metadata</summary>
 
-- **Severity**: HIGH
-- **Scanner**: zizmor
-- **Rule ID**: zizmor/dangerous-triggers
-- **Location**: .github/workflows/vulnerable.yml:2-5
+## Scan metadata
 
-**Description**:
-use of fundamentally insecure workflow trigger: pull_request_target is almost always used insecurely
-
-**Code Snippet**:
-```
-on:
-  pull_request_target:
-  issues:
-    types: [opened]
-```
-
----
-
-### Finding 3: zizmor/template-injection
-
-- **Severity**: HIGH
-- **Scanner**: zizmor
-- **Rule ID**: zizmor/template-injection
-- **Location**: .github/workflows/vulnerable.yml:14
-
-**Description**:
-code injection via template expansion: may expand into attacker-controllable code
-
-**Code Snippet**:
-```
-echo "${{ github.event.issue.title }}"
-```
-
----
-
-### Finding 4: zizmor/unpinned-uses
-
-- **Severity**: HIGH
-- **Scanner**: zizmor
-- **Rule ID**: zizmor/unpinned-uses
-- **Location**: .github/workflows/vulnerable.yml:10
-
-**Description**:
-unpinned action reference: action is not pinned to a hash (required by blanket policy)
-
-**Code Snippet**:
-```
-actions/checkout@v4
-```
-
----
-
-### Finding 5: zizmor/template-injection
-
-- **Severity**: HIGH
-- **Scanner**: zizmor
-- **Rule ID**: zizmor/template-injection
-- **Location**: actions/greet/action.yml:11
-
-**Description**:
-code injection via template expansion: may expand into attacker-controllable code
-
-**Code Snippet**:
-```
-echo "hello ${{ github.event.issue.title }} ${{ inputs.who }}"
-```
-
----
-
-### Finding 6: zizmor/template-injection
-
-- **Severity**: HIGH
-- **Scanner**: zizmor
-- **Rule ID**: zizmor/template-injection
-- **Location**: actions/greet/action.yml:11
-
-**Description**:
-code injection via template expansion: may expand into attacker-controllable code
-
-**Code Snippet**:
-```
-echo "hello ${{ github.event.issue.title }} ${{ inputs.who }}"
-```
+- Project: ASH
+- Scan executed: 2026-01-15T12:00:00+00:00
+- Report generated: 2026-01-15T12:00:42+00:00
+- ASH version: <ASH_VERSION>
 
 </details>
 
----
-
 *Report generated by [Automated Security Helper (ASH)](https://github.com/awslabs/automated-security-helper) at 2026-01-15T12:00:42+00:00*
+
+Build with <3 at Amazon Web Services

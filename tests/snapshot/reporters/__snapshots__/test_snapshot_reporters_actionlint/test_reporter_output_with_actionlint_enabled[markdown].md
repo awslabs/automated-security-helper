@@ -1,121 +1,122 @@
-# ASH Security Scan Report
+# ASH security scan report
 
-- **Report generated**: 2026-01-15T12:00:42+00:00
-- **Time since scan**: 0 minutes
+> [!CAUTION]
+> **Review required**
+>
+> 4 findings at or above the configured scanner thresholds.
+>
+> **4 actionable** · 4 below threshold · 0 suppressed · 1/1 scanners completed
+>
+> Next action: Review findings by severity, then inspect the source.
 
-## Scan Metadata
-
-- **Project**: ASH
-- **Scan executed**: 2026-01-15T12:00:00+00:00
-- **ASH version**: <ASH_VERSION>
+Project: ASH · Scan executed: 2026-01-15T12:00:00+00:00
 
 ## Summary
 
-### Scanner Results
-
-The table below shows findings by scanner, with status based on severity thresholds and dependencies:
-
-- **Severity levels**:
-  - **Suppressed (S)**: Findings that have been explicitly suppressed and don't affect scanner status
-  - **Critical (C)**: Highest severity findings that require immediate attention
-  - **High (H)**: Serious findings that should be addressed soon
-  - **Medium (M)**: Moderate risk findings
-  - **Low (L)**: Lower risk findings
-  - **Info (I)**: Informational findings with minimal risk
-- **Actionable**: Number of findings at or above the threshold severity level that require attention
-- **Result**:
-  - **PASSED** = No findings at or above threshold
-  - **FAILED** = Findings at or above threshold
-  - **MISSING** = Required dependencies not available
-  - **SKIPPED** = Scanner explicitly disabled
-  - **ERROR** = Scanner execution error
-- **Threshold**: The minimum severity level that will cause a scanner to fail
-  - Thresholds: ALL, LOW, MEDIUM, HIGH, CRITICAL
-  - Source: Values in parentheses indicate where the threshold is set:
-    - `global` (global_settings section in the ASH_CONFIG used)
-    - `config` (scanner config section in the ASH_CONFIG used)
-    - `scanner` (default configuration in the plugin, if explicitly set)
-- **Statistics calculation**:
-  - All statistics are calculated from the final aggregated SARIF report
-  - Suppressed findings are counted separately and do not contribute to actionable findings
-  - Scanner status is determined by comparing actionable findings to the threshold
+### Scanner results
 
 | Scanner | Suppressed | Critical | High | Medium | Low | Info | Actionable | Result | Threshold |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
 | actionlint | 0 | 0 | 2 | 2 | 4 | 0 | 4 | FAILED | MEDIUM (global) |
 
-### Top 1 Hotspots
+<details>
+<summary>How to read scanner results</summary>
 
-Files with the highest number of security findings:
+**Severity levels:** Critical, High, Medium, Low, Info. Suppressed findings are counted separately.
 
-| Finding Count | File Location |
+**Actionable** counts findings at or above each scanner's threshold.
+
+**Result:** PASSED = no actionable findings; FAILED = threshold exceeded; MISSING = dependencies unavailable; SKIPPED = disabled; ERROR = execution error.
+
+**Threshold** shows the minimum severity and its source: `global`, `config`, or `scanner`.
+
+**Statistics calculation:** final aggregated SARIF, with suppressed findings excluded from actionable counts.
+
+</details>
+
+
+### Top 1 hotspots
+
+Files with the most actionable findings.
+
+| Finding count | File location |
 | ---: | --- |
 | 4 | .github/workflows/vulnerable.yml |
 
-<h2>Detailed Findings</h2>
+## Detailed findings
+
+Showing 4 of 4 actionable findings, highest severity first.
 
 <details>
-<summary>Show 4 actionable findings</summary>
+<summary>1. HIGH · credentials · .github/workflows/vulnerable.yml:17</summary>
 
 ### Finding 1: credentials
 
-- **Severity**: HIGH
-- **Scanner**: actionlint
-- **Rule ID**: credentials
-- **Location**: .github/workflows/vulnerable.yml:17
+- Severity: HIGH
+- Scanner: actionlint
+- Rule ID: credentials
+- Location: .github/workflows/vulnerable.yml:17
 
-**Description**:
-"password" section in "db" service should be specified via secrets. do not put password value directly
+&quot;password&quot; section in &quot;db&quot; service should be specified via secrets. do not put password value directly
 
----
+</details>
+
+<details>
+<summary>2. HIGH · expression · .github/workflows/vulnerable.yml:20</summary>
 
 ### Finding 2: expression
 
-- **Severity**: HIGH
-- **Scanner**: actionlint
-- **Rule ID**: expression
-- **Location**: .github/workflows/vulnerable.yml:20
+- Severity: HIGH
+- Scanner: actionlint
+- Rule ID: expression
+- Location: .github/workflows/vulnerable.yml:20
 
-**Description**:
-"github.event.issue.title" is potentially untrusted. avoid using it directly in inline scripts. instead, pass it through an environment variable. see https://docs.github.com/en/actions/reference/security/secure-use#good-practices-for-mitigating-script-injection-attacks for more details
+&quot;github.event.issue.title&quot; is potentially untrusted. avoid using it directly in inline scripts. instead, pass it through an environment variable. see https://docs.github.com/en/actions/reference/security/secure-use\#good-practices-for-mitigating-script-injection-attacks for more details
 
-**Code Snippet**:
+Code snippet:
+
 ```
 run: echo "${{ github.event.issue.title }}"
                        ^~~~~~~~~~~~~~~~~~~~~~~~
 ```
 
----
+</details>
+
+<details>
+<summary>3. MEDIUM · deprecated-commands · .github/workflows/vulnerable.yml:24</summary>
 
 ### Finding 3: deprecated-commands
 
-- **Severity**: MEDIUM
-- **Scanner**: actionlint
-- **Rule ID**: deprecated-commands
-- **Location**: .github/workflows/vulnerable.yml:24
+- Severity: MEDIUM
+- Scanner: actionlint
+- Rule ID: deprecated-commands
+- Location: .github/workflows/vulnerable.yml:24
 
-**Description**:
-workflow command "set-env" was deprecated. use `echo "{name}={value}" >> $GITHUB_ENV` instead: https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions
+workflow command &quot;set-env&quot; was deprecated. use \`echo &quot;\{name\}=\{value\}&quot; &gt;&gt; $GITHUB\_ENV\` instead: https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions
 
-**Code Snippet**:
+Code snippet:
+
 ```
 run: echo "::set-env name=MODE::fast"
              ^~~~
 ```
 
----
+</details>
+
+<details>
+<summary>4. MEDIUM · if-cond · .github/workflows/vulnerable.yml:26</summary>
 
 ### Finding 4: if-cond
 
-- **Severity**: MEDIUM
-- **Scanner**: actionlint
-- **Rule ID**: if-cond
-- **Location**: .github/workflows/vulnerable.yml:26
+- Severity: MEDIUM
+- Scanner: actionlint
+- Rule ID: if-cond
+- Location: .github/workflows/vulnerable.yml:26
 
-**Description**:
-if: condition "${{ github.event_name == 'issues' }} && false" is always evaluated to true because extra characters are around ${{ }}
+if: condition &quot;$\{\{ github.event\_name == &\#x27;issues&\#x27; \}\} &amp;&amp; false&quot; is always evaluated to true because extra characters are around $\{\{ \}\}
 
-**Code Snippet**:
+Code snippet:
+
 ```
 if: ${{ github.event_name == 'issues' }} && false
             ^~~
@@ -123,6 +124,18 @@ if: ${{ github.event_name == 'issues' }} && false
 
 </details>
 
----
+<details>
+<summary>Scan metadata</summary>
+
+## Scan metadata
+
+- Project: ASH
+- Scan executed: 2026-01-15T12:00:00+00:00
+- Report generated: 2026-01-15T12:00:42+00:00
+- ASH version: <ASH_VERSION>
+
+</details>
 
 *Report generated by [Automated Security Helper (ASH)](https://github.com/awslabs/automated-security-helper) at 2026-01-15T12:00:42+00:00*
+
+Build with <3 at Amazon Web Services
