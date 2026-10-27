@@ -790,37 +790,6 @@ global_settings:
         Same as test_mcp_sse_host_binding.py: asserts the streamable-http app is
         built with the host AgentCore requires, so the address is the value under
         test. Same entry as in .ash/.ash.yaml.
-    - rule_id: B104
-      path: tests/unit/cli/test_mcp_non_loopback_bind_is_refused.py
-      reason: >-
-        The wildcard address is the input `ash mcp` is proven to refuse without an
-        allowed host or the documented opt-out, so it cannot be avoided in the
-        test. Same entry as in .ash/.ash.yaml.
-    - rule_id: B104
-      path: tests/unit/cli/test_mcp_loopback_accepts_only_its_own_origin.py
-      reason: >-
-        Builds apps on the wildcard address to assert the Origin check still
-        refuses foreign origins on a non-loopback bind; the address is the
-        condition under test. Same entry as in .ash/.ash.yaml.
-    - rule_id: B104
-      path: tests/unit/cli/test_mcp_upstream_host_check.py
-      reason: >-
-        Covers the opt-out that exists only for non-loopback binds behind a trusted
-        proxy; each wildcard address is the bind the opt-out is tested against.
-        Same entry as in .ash/.ash.yaml.
-    - rule_id: B103
-      path: tests/unit/utils/test_tool_config_dir.py
-      reason: >-
-        The chmod builds the world-writable directory the test expects
-        tool_config_scope to refuse as a temporary directory. The permissive mask is
-        the input being refused. Same entry as in .ash/.ash.yaml.
-    - rule_id: B301
-      path: tests/unit/utils/test_link_refusal_family.py
-      reason: >-
-        A pickle round trip of ASH's own refusal exceptions, the way worker
-        processes hand them back to the parent. The bytes come from dumping the
-        test's own object in the same process; nothing untrusted is loaded. Same
-        entry as in .ash/.ash.yaml.
     - rule_id: B108
       path: deploy/terraform/modules/codecommit-gate/files/ash_pr_gate.py
       reason: >-
