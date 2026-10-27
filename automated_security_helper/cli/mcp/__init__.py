@@ -751,6 +751,11 @@ def build_streamable_http_app(
         auth_header_name, auth_header_value
     )
     workspace_ttl = _workspace_ttl(session_workspace_ttl)
+    # Stateful only: the SDK's handshake-version list, read at the top of the
+    # build so a missing list fails the build itself (see Raises above). A
+    # stateless boundary never reads the list, and must stay buildable
+    # without it.
+    handshake_versions = None if stateless_http else _handshake_protocol_versions()
     security = _transport_security(host, allowed_hosts, trust_upstream_host_check, port)
     # Import here to keep the stdio path zero-cost when the streamable-HTTP
     # transport is not used.
@@ -1792,7 +1797,7 @@ def mcp_command(
         # would bury it. Exit 3, as for the other operator-configuration errors.
         _logger.error(str(e))
         if not quiet:
-            _stderr.print(f"[red]{escape(str(e))}[/red]", highlight=False)
+            _stderr.print(f"[red]{escape_markup(str(e))}[/red]", highlight=False)
         raise typer.Exit(3)
     except Exception as e:
         # Also what run_mcp_server raises when the stdio server fails while it
