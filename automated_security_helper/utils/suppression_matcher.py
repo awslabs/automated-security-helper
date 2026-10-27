@@ -23,7 +23,7 @@ from automated_security_helper.utils.path_matching import (
     ignore_path_pattern,
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
-from automated_security_helper.utils.log import ASH_LOGGER, escape_markup
+from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
     open_in_scanned_tree,
@@ -141,12 +141,14 @@ def warn_unmatched_directory_suppressions(
         directory = path.rstrip("/\\")
         if not directory:
             continue
+        # A plain message: the log sinks show it, values included, once. Escaping
+        # the values for Rich here showed them a second time.
         ASH_LOGGER.warning(
-            f"The suppression with path '{escape_markup(path)}' matched no finding: "
+            f"The suppression with path '{path}' matched no finding: "
             "a suppression path ending in '/' matches only that literal path, not "
             "the files in the directory, as an ignore path's does. To suppress the "
             "findings below it, write "
-            f"'{escape_markup(directory_spelling(directory, ignore_path=False))}'."
+            f"'{directory_spelling(directory, ignore_path=False)}'."
         )
 
 
