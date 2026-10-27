@@ -2348,11 +2348,28 @@ def _clear_the_callers_display_variables() -> None:
     child pytest with all six set and checks that a test there sees none of them,
     and that a console its module builds when it is imported is not sized or
     colored by them.
+
+    typer forces a terminal, escape codes into a pipe included, when GITHUB_ACTIONS,
+    FORCE_COLOR or PY_COLORS is set (typer.rich_utils.FORCE_TERMINAL, read once when
+    typer is imported), and ASH's typer_console (utils/console.py) follows the same
+    rule at each call. On a GitHub runner every usage error then carried escape
+    codes: a line read as "\\x1b[1;31mError: ", and "--mode" came out as three styled
+    segments, so a test that read "Error: " at the start of a line, an option as one
+    token or no ESC in the output failed for the runner, not for ASH. Both honor the
+    same opt-out, set here for the run, before any test module imports typer, and
+    inherited by the children the tests start. GITHUB_ACTIONS itself stays: the
+    in_ci fixture and the command-reading-runner check read it. A test of the
+    forcing builds its own Console(force_terminal=True).
     """
     from automated_security_helper.utils.process_env import DISPLAY_VARIABLES
 
     for name in DISPLAY_VARIABLES:
         os.environ.pop(name, None)
+    os.environ["_TYPER_FORCE_DISABLE_TERMINAL"] = "1"
+    # typer read its constant already if something imported it before this ran.
+    rich_utils = sys.modules.get("typer.rich_utils")
+    if rich_utils is not None:
+        rich_utils.FORCE_TERMINAL = False
 
 
 # Set up when pytest imports this module.
