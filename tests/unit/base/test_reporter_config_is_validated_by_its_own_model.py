@@ -65,7 +65,12 @@ def test_a_config_of_another_class_is_validated_by_its_own_model(context):
     own = _OwnConfig()
     assert _OwnReporter(context=context, config=own).config is own
 
-    fitting = ReporterPluginConfigBase(name="own", options={"count": 2})
+    # Built without validation: the generic base refuses an option it does not
+    # declare, so a base-class config carrying this reporter's options can only
+    # exist unvalidated. The reporter still validates it by its own model.
+    fitting = ReporterPluginConfigBase.model_construct(
+        name="own", options=ReporterOptionsBase.model_construct(count=2)
+    )
     rebuilt = _OwnReporter(context=context, config=fitting).config
     assert type(rebuilt) is _OwnConfig
     assert rebuilt.options.count == 2
@@ -73,5 +78,7 @@ def test_a_config_of_another_class_is_validated_by_its_own_model(context):
     with pytest.raises(ValidationError):
         _OwnReporter(
             context=context,
-            config=ReporterPluginConfigBase(name="own", options={"count": 6}),
+            config=ReporterPluginConfigBase.model_construct(
+                name="own", options=ReporterOptionsBase.model_construct(count=6)
+            ),
         )
