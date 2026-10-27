@@ -1610,6 +1610,13 @@ disable_error_code = [
     "union-attr",
 ]
 
+[tool.uv]
+# filelock 4.1.1 and later require Python 3.11, and every release from 3.20.4
+# through 4.2.0 is affected by GHSA-v4x8-3wr5-3wq8. Python 3.10 therefore has no
+# patched filelock. 4.1.0 is affected by three more advisories that 4.0.x is not,
+# so the 3.10 resolution stays on 4.0.x; 3.11 and later take the patched 4.2.x line.
+constraint-dependencies = [ "filelock<4.1; python_full_version < '3.11'",]
+
 [tool.uv.workspace]
 members = [ ".",]
 
