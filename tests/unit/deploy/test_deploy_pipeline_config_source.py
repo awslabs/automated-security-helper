@@ -144,6 +144,13 @@ def ash_env(child_env: dict[str, str], tmp_path: pathlib.Path) -> dict[str, str]
             "XDG_CACHE_HOME": str(home / ".cache"),
             "XDG_CONFIG_HOME": str(home / ".config"),
             "XDG_DATA_HOME": str(home / ".local" / "share"),
+            # uv reads these before the XDG directories, and the unit tests' tool
+            # guard points both into the test's checked home (tests/unit/conftest.py),
+            # where ash's tool probes under `uv tool run` would then leave uv's
+            # cache and fail the check of what a test left in its HOME. Under this
+            # home instead, beside the XDG directories.
+            "UV_CACHE_DIR": str(home / ".cache" / "uv"),
+            "UV_TOOL_DIR": str(home / ".local" / "share" / "uv" / "tools"),
         }
     )
     ash = shutil.which("ash", path=env["PATH"])
