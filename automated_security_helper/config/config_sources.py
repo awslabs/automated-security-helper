@@ -1864,7 +1864,7 @@ def _read_config_file(
     expect: Optional[FileIdentity],
     refuse_env: Optional[RefuseEnv],
 ) -> Tuple[Any, List[EnvironmentReference]]:
-    if path.name.endswith(".json"):
+    if is_json_file(path):
         # utf-8-sig: a leading byte order mark is dropped, as YAML and TOML drop
         # it; Windows PowerShell 5 writes one.
         return (
@@ -1872,7 +1872,7 @@ def _read_config_file(
             [],
         )
     delivered = (refuse_env or config_is_client_delivered)(path)
-    if path.name.endswith(".toml"):
+    if is_toml_file(path):
         document = toml_config_table(path, toml_config_text(path, expect=expect))
         if delivered:
             key = _toml_env_reference(document)
