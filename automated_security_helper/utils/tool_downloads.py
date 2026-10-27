@@ -151,7 +151,7 @@ TOOL_VERSIONS: dict[str, str] = {
     "syft": "v1.54.1",
     "trivy": "v0.75.0",
     # Tagged without a leading "v" upstream, so the release URL has none either.
-    "uv": "0.12.23",
+    "uv": "0.13.4",
 }
 
 # The gem version cfn-nag installs at, kept beside the binary pins so there is one
@@ -379,9 +379,9 @@ _DIGESTS: dict[str, str] = {
     "opengrep_osx_x86": "fcf47da30d5c3a11119f2ec4e0d1ee55e3c3822e8f90d909bf9f33dfce99044a",  # pragma: allowlist secret
     "opengrep_osx_arm64": "f1aaa30b88959cb82522c4e1475816278a1f161f994509a518453c0455f9d24b",  # pragma: allowlist secret
     "opengrep_windows_x86.exe": "523b1074a81006436fec457e2daccf7cf7cacc04000d4482f1072a1b19bc6372",  # pragma: allowlist secret
-    # uv 0.12.23
-    "uv-x86_64-unknown-linux-gnu.tar.gz": "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6",  # pragma: allowlist secret
-    "uv-aarch64-unknown-linux-gnu.tar.gz": "6524bd338177ed50d035d39354e12545e993bbeba2ecbddf0480c5b3a81d313f",  # pragma: allowlist secret
+    # uv 0.13.4
+    "uv-x86_64-unknown-linux-gnu.tar.gz": "2b428396f12572d4429cf210ca234dd599a33b3af0958a4d5ed569d63e3f344f",  # pragma: allowlist secret
+    "uv-aarch64-unknown-linux-gnu.tar.gz": "1ae72b4718729e2ccc4f1ae2c6d1e531ca8467800e0546e9130b3886023a60ab",  # pragma: allowlist secret
 }
 
 # SHA256 of the executable inside each archive above; see the comment before _DIGESTS.
@@ -426,9 +426,9 @@ _EXECUTABLE_DIGESTS: dict[str, str] = {
     "trivy_0.75.0_macOS-64bit.tar.gz": "484287e06ab2e4038c42ba396da8637aaaca0967e3e65840563706a0284169b4",  # pragma: allowlist secret
     "trivy_0.75.0_macOS-ARM64.tar.gz": "32b84c068e11e5381fc85d3fe2e8ac238659ab22524ce1b2b9dfcbd0b1f7331a",  # pragma: allowlist secret
     "trivy_0.75.0_windows-64bit.zip": "3b4fcf6fec53c4c73c325cfd518c7264100695b19e6c59c6a777e4a67dc9f0e6",  # pragma: allowlist secret
-    # uv 0.12.23
-    "uv-x86_64-unknown-linux-gnu.tar.gz": "abdc39eab8b4ad341dca91f3823a23a343fae94bdb22ebdd9e91694415206f2f",  # pragma: allowlist secret
-    "uv-aarch64-unknown-linux-gnu.tar.gz": "ed797a095bf9aea58135fa7081c290e51a14cfd3a7b1f24e55cb1d1a0c1007b0",  # pragma: allowlist secret
+    # uv 0.13.4
+    "uv-x86_64-unknown-linux-gnu.tar.gz": "5b2a2df4ef04c5d778d50702d6e1d1ff22909fc883086b4ef406a4f115e3c4fb",  # pragma: allowlist secret
+    "uv-aarch64-unknown-linux-gnu.tar.gz": "7ecaf349a12fb60c605c1848e8e1bbd313bbf9a362a6c3043c8f786ec570c491",  # pragma: allowlist secret
 }
 
 # What each rules bundle archive extracts to; see the comment before _DIGESTS.
@@ -450,7 +450,7 @@ _BUNDLE_CONTENTS_DIGESTS: dict[str, str] = {
 _DIGESTS_TAKEN_AT: dict[str, str] = {
     "cfn-guard": "3.2.1",
     "opengrep": "v1.30.2",
-    "uv": "0.12.23",
+    "uv": "0.13.4",
 }
 
 # Tools whose release asset is the executable itself rather than an archive.
@@ -881,7 +881,7 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "syft commit": "b254e6d92f28c3868a755f62fb3ca8f26e9fee76",  # pragma: allowlist secret
     "trivy commit": "591e9799316a602e703f0b484f6c6d7b234ec8f3",  # pragma: allowlist secret
     "trivy/NOTICE": "aed9bc6dab87c6f6567d20bf0f5c0433a8ccd3ad7873322cf79b9244eb720a1f",  # pragma: allowlist secret
-    "uv commit": "46b84fd0bfec23b72f29e8e2185ba68a65052f48",  # pragma: allowlist secret
+    "uv commit": "7456b60bc6bc348e13e06e3691bf08e78d3aef54",  # pragma: allowlist secret
     "uv/LICENSE-APACHE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",  # pragma: allowlist secret
     "uv/LICENSE-MIT": "860e3d7a86b84e6a7012c7a635fc64df475cebc6cce34dfeb73a5982ec58176c",  # pragma: allowlist secret
     "zizmor commit": "99a054ed9283c90abdd2d5b9fb5101d27dde9783",  # pragma: allowlist secret
@@ -1068,7 +1068,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     # The release archive holds uv and uvx and nothing else.
     "uv": ThirdPartyLicense(
         tool="uv",
-        version="0.12.23",
+        version="0.13.4",
         license="MIT OR Apache-2.0",
         repository="https://github.com/astral-sh/uv",
         commit=_THIRD_PARTY_HASHES["uv commit"],
