@@ -224,6 +224,10 @@ _RUN_ENV_KEYS = {
     "ASH_ACTUAL_SOURCE_DIR",
     "ASH_ACTUAL_OUTPUT_DIR",
     "ASH_DEBUG",
+    # The mounted paths as the scan inside reads them: ./ash hands them over as
+    # variables, so a subcommand that takes no --source-dir still runs.
+    "ASH_SOURCE_DIR",
+    "ASH_OUTPUT_DIR",
     "ASH_OUTPUT_FORMAT",
     "COLUMNS",
     "LINES",
