@@ -142,7 +142,7 @@ pipeline {
   post {
     always {
       junit allowEmptyResults: true, testResults: '.ash/ash_output/reports/ash.junit.xml'
-      archiveArtifacts allowEmptyArchive: true, artifacts: '.ash/ash_output/**'
+      archiveArtifacts allowEmptyArchive: true, artifacts: '.ash/ash_output/reports/**, .ash/ash_output/ash_aggregated_results.json'
     }
   }
 }
@@ -301,8 +301,11 @@ jobs:
       - store_test_results:
           path: /tmp/ash-test-results
       - store_artifacts:
-          path: .ash/ash_output
-          destination: ash-output
+          path: .ash/ash_output/reports
+          destination: ash-output/reports
+      - store_artifacts:
+          path: .ash/ash_output/ash_aggregated_results.json
+          destination: ash-output/ash_aggregated_results.json
 workflows:
   ash:
     jobs:
@@ -330,8 +333,8 @@ workflows:
   `~/.ash/share/cfn-guard-rules`, are installed again on every run.
 - A non-zero exit from `ash scan` fails its step and the job. `store_test_results` and
   `store_artifacts` run after a failed step, so the JUnit file appears in the job's
-  **Tests** tab, one failed test per actionable finding, and `.ash/ash_output/` is kept
-  as the job's artifacts. Neither runs when the job is canceled or times out.
+  **Tests** tab, one failed test per actionable finding, and `.ash/ash_output/reports/` and
+  `.ash/ash_output/ash_aggregated_results.json` are kept as the job's artifacts. Neither runs when the job is canceled or times out.
 - CircleCI's test results `path` must not be a hidden directory, and `.ash` is one, so
   the step before `store_test_results` copies the JUnit file out of it. Its
   `when: always` runs it after a failed scan.

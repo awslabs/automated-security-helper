@@ -366,12 +366,16 @@ jobs:
             2>&1 || status=$?
           printf '\n::%s::\n' "${token}"
           exit "${status}"
-      - name: Upload the output directory
+      - name: Upload the reports and the results file
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ash-output
-          path: .ash/ash_output
+          # Not the whole output directory: scanners/ and converted/ hold each
+          # tool's raw output, which is not masked.
+          path: |
+            .ash/ash_output/reports
+            .ash/ash_output/ash_aggregated_results.json
       - name: Upload SARIF to code scanning
         if: ${{ !cancelled() }}
         uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2

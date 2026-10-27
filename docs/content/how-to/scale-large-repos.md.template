@@ -238,7 +238,12 @@ jobs:
         if: ${{ !cancelled() }}
         with:
           name: ash-shard-${{ matrix.shard }}
-          path: .ash/ash_output
+          # Not the whole output directory: scanners/ and converted/ hold each
+          # tool's raw output, which is not masked. `ash merge` reads each
+          # shard's ash_aggregated_results.json.
+          path: |
+            .ash/ash_output/reports
+            .ash/ash_output/ash_aggregated_results.json
   merge:
     needs: shard
     if: ${{ !cancelled() }}
