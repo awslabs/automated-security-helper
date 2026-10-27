@@ -233,7 +233,12 @@ def test_a_workspace_definition_the_caller_names_outside_is_a_config_refusal(
     assert MARKER not in json.dumps(response, default=str), response
 
 
-def test_control_an_in_root_policy_is_read_and_applied(layout) -> None:
+def test_control_an_in_root_policy_is_read_and_applied(layout, monkeypatch) -> None:
+    """A policy sets suppressions and ignore paths for every project, so a
+    discovered one is used only when the operator set its directory aside in
+    ASH_MCP_ALLOWED_CONFIG_ROOTS (``_refuse_a_client_chosen_policy``); the
+    control grants the workspace root as a config root."""
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(layout["root"]))
     (layout["root"] / ".ash-workspace.yaml").write_text(
         OUTSIDE_POLICY, encoding="utf-8"
     )
