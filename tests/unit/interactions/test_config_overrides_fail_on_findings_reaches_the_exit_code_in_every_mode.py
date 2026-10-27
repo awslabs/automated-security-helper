@@ -19,6 +19,7 @@ is reached.
 
 from __future__ import annotations
 
+import os
 from typing import Optional
 from unittest.mock import MagicMock, patch
 
@@ -28,6 +29,7 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.enums import RunMode
 from automated_security_helper.interactions import run_ash_scan as ras
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.utils.inner_run_outcome import OUTER_RUN_ID_ENV
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 from tests.utils.helpers import stand_in_host_ids
 
@@ -71,21 +73,24 @@ def _exit_code_of(mode: RunMode, tmp_path, monkeypatch, file_value, overrides, f
 
     def container_stand_in(**kwargs):
         inner_calls.append(kwargs)
-        # The entrypoint is this same CLI: it gets the host's arguments.
+        # The entrypoint is this same CLI: it gets the host's arguments, and the
+        # outer run's ID in its environment (the runner is handed it with -e), so
+        # the inner run records that it completed and the host reads it back.
         code: Optional[int] = 0
         try:
-            ras.run_ash_scan(
-                source_dir=str(src),
-                output_dir=str(out),
-                mode=RunMode.local,
-                config=str(config),
-                config_overrides=kwargs["config_overrides"],
-                fail_on_findings=kwargs["fail_on_findings"],
-                progress=False,
-                show_summary=False,
-                quiet=True,
-                min_severity="none",
-            )
+            with patch.dict(os.environ, {OUTER_RUN_ID_ENV: kwargs["outer_run_id"]}):
+                ras.run_ash_scan(
+                    source_dir=str(src),
+                    output_dir=str(out),
+                    mode=RunMode.local,
+                    config=str(config),
+                    config_overrides=kwargs["config_overrides"],
+                    fail_on_findings=kwargs["fail_on_findings"],
+                    progress=False,
+                    show_summary=False,
+                    quiet=True,
+                    min_severity="none",
+                )
         except SystemExit as exited:
             code = exited.code
         return create_completed_process(args=[], returncode=code, stdout="", stderr="")

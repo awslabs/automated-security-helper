@@ -30,6 +30,10 @@ from automated_security_helper.core.enums import RunMode
 from automated_security_helper.interactions import run_ash_container
 from automated_security_helper.interactions import run_ash_scan as ras
 from automated_security_helper.utils import subprocess_utils
+from automated_security_helper.utils.inner_run_outcome import (
+    OUTER_RUN_ID_ENV,
+    completion_marker,
+)
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 
@@ -92,6 +96,17 @@ def recording_runner(monkeypatch):
         cmd = [str(item) for item in cmd_list if item is not None]
         commands.append(cmd)
         if len(cmd) > 1 and cmd[1] == "run":
+            # The scan inside records that the run with the host's ID completed
+            # (utils/inner_run_outcome.py); the ID reaches the runner through
+            # its environment, named with -e and no value on the command line.
+            run_id = (kwargs.get("env") or {}).get(OUTER_RUN_ID_ENV)
+            document = {
+                "sarif": None,
+                "scanners": [],
+                "validation_checkpoints": (
+                    [completion_marker(run_id)] if run_id else []
+                ),
+            }
             for i, arg in enumerate(cmd[:-1]):
                 if arg == "--mount":
                     fields = dict(
@@ -100,9 +115,7 @@ def recording_runner(monkeypatch):
                     if fields.get("destination") == "/out":
                         Path(
                             fields["source"], "ash_aggregated_results.json"
-                        ).write_text(
-                            '{"sarif": null, "scanners": []}', encoding="utf-8"
-                        )
+                        ).write_text(json.dumps(document), encoding="utf-8")
         return create_completed_process(args=cmd, returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(subprocess_utils, "get_host_uid", lambda: 1000)
@@ -2788,10 +2801,14 @@ def test_each_outer_mode_hands_the_gates_answer_to_the_record_repair(
     src.mkdir()
     opts = ras.ScanOptions(source_dir=src, output_dir=tmp_path / "out")
 
-    def inner(*_args, **_kwargs):
+    def inner(*_args, **kwargs):
         opts.output_dir.mkdir(parents=True, exist_ok=True)
+        # As the inner run writes it: with the record that the run the outer
+        # process gave this ID completed, or the read-back refuses the file.
+        document = json.loads(_results_with_an_unreadable_reference())
+        document["validation_checkpoints"] = [completion_marker(kwargs["outer_run_id"])]
         (opts.output_dir / "ash_aggregated_results.json").write_text(
-            _results_with_an_unreadable_reference(), encoding="utf-8"
+            json.dumps(document), encoding="utf-8"
         )
         return create_completed_process(args=[], returncode=0, stdout="", stderr="")
 
