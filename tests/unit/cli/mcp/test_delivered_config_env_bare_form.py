@@ -67,8 +67,15 @@ def test_get_config_refuses_a_delivered_reference(server, reference, raw):
 
     result = mcp_get_config(config_path=str(delivered), raw=raw, session_id=SESSION)
 
-    assert result["success"] is False, result
-    assert result["error_type"] == ENV_REFUSED, result
+    if raw:
+        # Raw mode asks for a document, not a run, so it judges nothing and
+        # reads nothing from the environment: the reference comes back as the
+        # file writes it, marked (mcp_tools.ENV_VALUE_PREFIX), in every form.
+        marked = "!ENV " + reference.removeprefix("!ENV ")
+        assert result == {"project_name": marked}, result
+    else:
+        assert result["success"] is False, result
+        assert result["error_type"] == ENV_REFUSED, result
     assert VALUE not in repr(result)
 
 

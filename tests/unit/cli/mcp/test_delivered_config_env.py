@@ -54,6 +54,18 @@ TAGGED = f"project_name: !ENV ${{{PROBE_VAR}:unset}}\n"
 # The implicit resolver tags a plain scalar of this shape as !ENV without the tag.
 UNTAGGED = f"project_name: ${{{PROBE_VAR}:unset}}\n"
 ENV_REFUSED = "config_env_not_resolved"
+#: The refusal's own words (config_sources._environment_read_refusal): given
+#: before any reference is resolved, so it quotes no value and is the same
+#: whether or not the variable is set.
+REFUSAL_TEXT = (
+    "reads a value from the environment (an !ENV tag or a ${VAR} reference), "
+    "which a config an MCP client delivered may not, so the file is refused"
+)
+#: What raw get_config shows for a value the loader would read from the
+#: environment: the reference as written, marked (mcp_tools.ENV_VALUE_PREFIX).
+#: Raw mode asks for a document, not a run, so it judges nothing and reads
+#: nothing from the environment.
+AS_WRITTEN = f"!ENV ${{{PROBE_VAR}:unset}}"
 
 #: Looked up rather than imported so that, against a tree without the class, each
 #: test fails on its own instead of the module failing to collect.
@@ -201,9 +213,11 @@ def _assert_refused_scan(entry: Any, outcomes: List[Any], named: str) -> None:
     assert isinstance(outcomes[-1], ASHConfigEnvNotResolvedError), outcomes
     message = str(outcomes[-1])
     assert named in message
-    assert "!ENV is not resolved in a config an MCP client delivered" in message
+    assert REFUSAL_TEXT in message
     assert PROBE not in message
-    assert entry.error_message == "ASH exited with code 3"
+    # The code, then the text the CLI showed for the refusal
+    # (mcp_tools._exit_message).
+    assert entry.error_message.startswith("ASH exited with code 3"), entry.to_dict()
     assert PROBE not in json.dumps(entry.to_dict(), default=str)
 
 
@@ -233,8 +247,13 @@ def test_get_config_returns_nothing_from_the_environment(_server, text, raw):
 
     result = _get_config(source / ".ash" / ".ash.yaml", raw=raw)
 
-    assert result.get("error_type") == ENV_REFUSED, result
-    assert ".ash/.ash.yaml" in result["error"]
+    if raw:
+        # The document as written, the reference marked and never read: the
+        # plain scalar the loader would tag !ENV comes back marked too.
+        assert result == {"project_name": AS_WRITTEN}, result
+    else:
+        assert result.get("error_type") == ENV_REFUSED, result
+        assert ".ash/.ash.yaml" in result["error"]
     _assert_carries_no_probe(result)
 
 
@@ -272,10 +291,17 @@ def test_a_delivered_toml_config_is_refused_naming_the_key(_server):
 
     entry, outcomes = _scan(source)
 
+    # Refused on the file's text, before the TOML is parsed into keys
+    # (config_sources.parse_config_text), so the refusal names the file and no
+    # key or value: the same words whether or not the variable is set.
     _assert_refused_scan(entry, outcomes, ".ashrc.toml")
-    assert "global_settings.ignore_paths[0]" in str(outcomes[-1])
     raw = _get_config(source / ".ashrc.toml", raw=True)
-    assert raw["error_type"] == ENV_REFUSED, raw
+    # Raw mode judges nothing: the table as written, the one string the loader
+    # would resolve marked, in its place (mcp_tools._mark_toml_references).
+    assert raw == {
+        "project_name": "delivered",
+        "global_settings": {"ignore_paths": [AS_WRITTEN]},
+    }, raw
     _assert_carries_no_probe(raw)
 
 

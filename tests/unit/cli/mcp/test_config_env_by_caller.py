@@ -47,6 +47,12 @@ ENV_REFUSED = "config_env_not_resolved"
 # What get_config shows for the value a config read from the environment: the
 # reference, marked, and never the value.
 READ = f"<from ${{{PROBE_VAR}:unset}}>"
+# What raw get_config shows for a value the loader would read from the
+# environment: the reference as the file writes it, marked, never the value
+# (mcp_tools.ENV_VALUE_PREFIX). Raw mode asks for a document, not a run, so it
+# judges nothing and reads nothing from the environment, for an operator's file
+# or a client's.
+AS_WRITTEN = f"!ENV ${{{PROBE_VAR}:unset}}"
 
 
 def _assert_read(got: dict) -> None:
@@ -184,6 +190,7 @@ def _scan(
     from automated_security_helper.cli import mcp_tools
     from automated_security_helper.config import resolve_config as rc
     from automated_security_helper.core import orchestrator
+    from automated_security_helper.core.resource_management import scan_management
     from automated_security_helper.core.resource_management.scan_registry import (
         ScanRegistry,
     )
@@ -204,13 +211,19 @@ def _scan(
     output = target / ".ash" / "ash_output"
     output.mkdir(parents=True, exist_ok=True)
     registry = ScanRegistry()
+    # Registered for the session, in the registry the whole process reads: the
+    # scan's copy of a session profile is the server's only while a live scan of
+    # that session holds it (sandbox._is_a_live_scan_copy_of_this_sessions_file
+    # asks scan_management.session_holds_scan), so a scan no session holds would
+    # read its own copy of the profile as a client's file.
     scan_id = registry.register_scan(
-        directory_path=str(target), output_directory=str(output)
+        directory_path=str(target), output_directory=str(output), session_id=session_id
     )
     with (
         patch.object(ras, "_setup_logger", lambda opts: _QuietLogger()),
         patch.object(orchestrator, "resolve_config", recording),
         patch.object(mcp_tools, "get_scan_registry", return_value=registry),
+        patch.object(scan_management, "get_scan_registry", return_value=registry),
     ):
         asyncio.run(
             mcp_tools._run_scan_async(
@@ -299,7 +312,8 @@ def test_remote_named_config_outside_the_config_roots_is_refused(_server):
     validated = mcp_validate_config(config_path=str(named), session_id=SESSION)
 
     assert got.get("error_type") == ENV_REFUSED, got
-    assert raw.get("error_type") == ENV_REFUSED, raw
+    # Raw mode judges nothing: the document as written, the reference marked.
+    assert raw == {"project_name": AS_WRITTEN}, raw
     assert ENV_REFUSED in [e["type"] for e in validated["errors"]], validated
     assert not _carries_probe([got, raw, validated])
 
@@ -319,7 +333,12 @@ def test_remote_config_discovered_in_a_search_dir_is_refused(_server, name, text
         search_dir=str(_server["other"]), raw=raw, session_id=SESSION
     )
 
-    assert result.get("error_type") == ENV_REFUSED, result
+    if raw:
+        # The document as written, the reference marked (a TOML string that
+        # starts with a reference is marked the same way).
+        assert result == {"project_name": AS_WRITTEN}, result
+    else:
+        assert result.get("error_type") == ENV_REFUSED, result
     assert not _carries_probe(result)
 
 
@@ -396,7 +415,9 @@ def test_remote_scan_target_own_config_is_refused(_server):
     assert started_result.get("error_type") == ENV_REFUSED, started_result
     started.assert_not_called()
     assert isinstance(outcomes[-1], ASHConfigEnvNotResolvedError), outcomes
-    assert entry.error_message == "ASH exited with code 3"
+    # The code, then the text the CLI showed for the refusal
+    # (mcp_tools._exit_message); the text names the file and never the value.
+    assert entry.error_message.startswith("ASH exited with code 3"), entry.to_dict()
     assert not _carries_probe([started_result, str(outcomes[-1]), entry.to_dict()])
 
 
@@ -478,7 +499,10 @@ def test_raw_get_config_shows_an_operator_reference_as_written(_server):
 
     result = mcp_get_config(config_path=str(operator), raw=True, session_id=SESSION)
 
-    assert result == {"project_name": f"${{{PROBE_VAR}:unset}}"}
+    # Marked, so a client can tell a reference from a quoted string that only
+    # looks like one (mcp_tools._config_as_written); the value is never read.
+    assert result == {"project_name": AS_WRITTEN}
+    assert not _carries_probe(result)
 
 
 def test_a_suppression_shaped_like_a_reference_is_written_literally(tmp_path):

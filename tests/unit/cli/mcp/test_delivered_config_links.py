@@ -432,15 +432,18 @@ def test_the_log_line_for_it_does_not_quote_it_either(_server, caplog) -> None:
 
     source = _linked_tree(_server, NOT_YAML)
 
-    with caplog.at_level(logging.ERROR, logger=ASH_LOGGER.name):
-        with pytest.raises(ASHConfigSourceError):
+    with caplog.at_level(logging.DEBUG, logger=ASH_LOGGER.name):
+        with pytest.raises(ASHConfigSourceError) as raised:
             resolve_config(source_dir=source)
 
-    (line,) = [
-        r.getMessage() for r in caplog.records if "Failed to load" in r.getMessage()
-    ]
-    assert "could not be parsed" in line, line
-    assert YAML_CANARY not in line
+    # A discovered file that does not parse is reported once, by the raised
+    # refusal, which each caller prints in its own words; no "Failed to load
+    # configuration file" record is written beside it (config/resolve_config.py,
+    # the unparsed-config branch). Whatever is logged, nothing quotes the line.
+    assert "could not be parsed" in str(raised.value), raised.value
+    assert YAML_CANARY not in str(raised.value)
+    quoting = [r.getMessage() for r in caplog.records if YAML_CANARY in r.getMessage()]
+    assert quoting == [], quoting
 
 
 @pytest.mark.usefixtures("host_set_aside")
@@ -629,7 +632,11 @@ def test_the_scan_itself_refuses_it_without_reading_it(_server) -> None:
     read = _reads(run)
     entry = registry.get_scan(scan_id)
 
-    assert entry.error_message == "ASH exited with code 3", entry.to_dict()
+    # The code, then the text the CLI showed for the refusal
+    # (mcp_tools._exit_message); it names the link by its in-tree path.
+    assert entry.error_message.startswith("ASH exited with code 3"), entry.to_dict()
+    assert (source / ".ash" / ".ash.yaml").as_posix() in entry.error_message
+    assert str(_server["host"]) not in repr(entry.to_dict())
     assert (_server["host"] / "ash.yaml").resolve() not in read
     assert CANARY not in repr(entry.to_dict())
 
