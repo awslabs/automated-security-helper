@@ -151,7 +151,10 @@ def test_no_new_processes_holds_the_process_limit_at_one_and_restores_it():
         held_soft, held_hard = resource.getrlimit(resource.RLIMIT_NPROC)
         assert held_soft == 1
         # Set is not held: the kernel must refuse the next task, as it refuses a fork.
-        assert not _a_thread_can_start()
+        # macOS counts only processes, not threads, against RLIMIT_NPROC, so a thread
+        # still starts there with the soft limit at one.
+        if sys.platform != "darwin":
+            assert not _a_thread_can_start()
     unlimited = resource.RLIM_INFINITY
     if held_hard != unlimited and (before_soft == unlimited or before_soft > held_hard):
         expected_soft = held_hard
