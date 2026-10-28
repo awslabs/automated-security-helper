@@ -1516,9 +1516,7 @@ def test_the_sandbox_debug_line_hides_the_scopes_values(
 
 
 @pytest.mark.skipif(os.name != "posix", reason="links and the sandbox are POSIX's case")
-@pytest.mark.parametrize(
-    "mode", ["as-built", "plain-open", "no-sweep", "plain-open-no-sweep"]
-)
+@pytest.mark.parametrize("mode", ["as-built", "plain-open", "plain-open-no-sweep"])
 @pytest.mark.parametrize("path", _LINK_PATHS)
 def test_the_plans_cleanup_removes_a_planted_link_before_the_write(
     link_layout, monkeypatch, caplog, path, mode
@@ -1527,26 +1525,30 @@ def test_the_plans_cleanup_removes_a_planted_link_before_the_write(
     sweep_writable over the policy's writable dirs as the plan's FIRST cleanup
     step, so on the real path the cleanup removes a link a scanner left at a
     log's name before ASH writes; open_for_write below the registered root is
-    the second defense. "plain-open" removes the second defense and the sweep
-    alone keeps the write off the link; "no-sweep" removes the first and
-    open_for_write alone replaces the link in place; the plain-open-no-sweep
-    control removes both and asserts the hazard ITSELF -- the stderr write
-    lands in the link's target and the link survives -- which is what makes
-    the other columns measurements. An ordinary assertion, not an xfail: an
-    xfail is satisfied by ANY failure (a changed sweep signature raising
-    TypeError in the stub, say), so only the specific outside read proves the
-    write FOLLOWED the link."""
+    the second defense, and it refuses a link instead of replacing it (the
+    tests after this one). "plain-open" removes the second defense and the
+    sweep alone keeps the write off the link; the plain-open-no-sweep control
+    removes both and asserts the hazard ITSELF -- the stderr write lands in the
+    link's target and the link survives -- which is what makes the other
+    columns measurements. An ordinary assertion, not an xfail: an xfail is
+    satisfied by ANY failure (a changed sweep signature raising TypeError in the
+    stub, say), so only the specific outside read proves the write FOLLOWED the
+    link."""
     from automated_security_helper.utils import subprocess_utils as spu
     from automated_security_helper.utils.sandbox import scope as scope_module
 
     _source, _output, results, outside = link_layout
     if mode in ("plain-open", "plain-open-no-sweep"):
-
-        def _plain_open(path, encoding="utf-8", errors="strict", mode=0o666):
+        # The production call's signature, ``root`` included: a stub without it
+        # raises TypeError, the write never happens, and the control stops
+        # measuring the hazard.
+        def _plain_open(
+            path, encoding="utf-8", errors="strict", mode=0o666, root=None, **kwargs
+        ):
             return open(path, "w", encoding=encoding, errors=errors)
 
         monkeypatch.setattr(spu, "open_for_write", _plain_open)
-    if mode in ("no-sweep", "plain-open-no-sweep"):
+    if mode == "plain-open-no-sweep":
         monkeypatch.setattr(
             scope_module, "sweep_writable", lambda roots, values=(), **kwargs: 0
         )
@@ -1590,10 +1592,61 @@ def test_the_plans_cleanup_removes_a_planted_link_before_the_write(
     )
     assert not log.is_symlink(), "the planted link is still there"
     assert log.read_text(encoding="utf-8") == "diag from the tool", response
-    if mode == "no-sweep":
-        assert not swept, "no sweep ran, so no sweep record can exist"
-    else:
-        assert swept, "no sweep record: the cleanup did not remove the link"
+    assert swept, "no sweep record: the cleanup did not remove the link"
+
+
+#: What fs_guard's refusal says, whichever path met the link.
+_LINK_REFUSAL = (
+    "is a symlink, and ASH does not write through a symlink below its output directory"
+)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="links and the sandbox are POSIX's case")
+@pytest.mark.parametrize("path", _LINK_PATHS)
+def test_without_the_sweep_the_write_refuses_a_planted_link(
+    link_layout, monkeypatch, caplog, path
+):
+    """The second link defense alone. With the plan's sweep removed, the link a
+    scanner left at the stderr log's name is still there when ASH writes, and
+    open_for_write below the registered root refuses it (fs_guard.py: a link at
+    the file name raises OutputLinkRefused and is left where it is, as
+    tests/integration/sandbox/test_fs_guard.py and TestStreamLogs in
+    test_output_dir_links_are_refused.py pin). The link's target is never
+    written, the link survives, and the run's reason names the refusal. An
+    earlier version of this test asserted the link was replaced in place; that
+    contradicted the refusal those tests pin."""
+    from automated_security_helper.utils.sandbox import scope as scope_module
+
+    _source, _output, results, outside = link_layout
+    monkeypatch.setattr(
+        scope_module, "sweep_writable", lambda roots, values=(), **kwargs: 0
+    )
+    with caplog.at_level(logging.DEBUG, logger="ash"):
+        response = _run_linked_path(path, link_layout, monkeypatch)
+    log = results / "stderr.log"
+    assert os.path.lexists(log), ("no stderr log, so this shows nothing", response)
+    crashed = [
+        record.getMessage()
+        for record in caplog.records
+        if "Sandbox cleanup failed" in record.getMessage()
+    ]
+    assert not crashed, crashed
+    swept = [
+        record.getMessage()
+        for record in caplog.records
+        if "removed 1 symlink" in record.getMessage()
+    ]
+    assert not swept, "no sweep ran, so no sweep record can exist"
+    if path == "timeout":
+        assert response.get("timed_out") is True, response
+    elif path != "completed":
+        assert response.get("post_run_error") is True, response
+    assert outside.read_text(encoding="utf-8") == "untouched", (
+        "the write followed the planted link",
+        response,
+    )
+    assert log.is_symlink(), "the refusal leaves the link where it was"
+    assert _LINK_REFUSAL in str(response.get("error")), response
 
 
 @pytest.mark.skipif(os.name != "posix", reason="links and the sandbox are POSIX's case")
@@ -1631,7 +1684,7 @@ def test_the_cleanup_runs_once_and_before_the_stderr_write(
     "os.fwalk), so the guarded path under test does not exist there",
 )
 @pytest.mark.parametrize("which_handler", ["first-handler", "fallback"])
-def test_a_failed_waits_write_replaces_a_link_a_scanner_planted(
+def test_a_failed_waits_write_refuses_a_link_a_scanner_planted(
     monkeypatch, tmp_path, which_handler
 ):
     """A sandboxed scanner can leave a symlink at the stderr log's name, and
@@ -1639,9 +1692,13 @@ def test_a_failed_waits_write_replaces_a_link_a_scanner_planted(
     points. The first defense is the cleanup's sweep_writable step
     (scope.prepare_spawn inserts it; the two-defense cells above); this cell
     runs with NO plan, so it measures the SECOND defense alone: open_for_write
-    below the registered writable root replaces the link and writes a regular
-    file, and the link's target is never touched. Parametrized over both
-    failed-wait builders, as the cleanup-order cell is."""
+    below the registered writable root refuses the link (OutputLinkRefused,
+    fs_guard.py) and leaves it where it was, so the link's target is never
+    touched and the run's reason names the refusal. An earlier version of this
+    test asserted that the link was replaced by a regular file; that contradicted
+    the refusal fs_guard documents and tests/integration/sandbox/test_fs_guard.py
+    and TestStreamLogs pin. Parametrized over both failed-wait builders, as the
+    cleanup-order test is."""
     from automated_security_helper.utils import subprocess_utils as spu
     from automated_security_helper.utils.sandbox import fs_guard
 
@@ -1704,8 +1761,8 @@ def test_a_failed_waits_write_replaces_a_link_a_scanner_planted(
     else:
         assert ", then: " not in reason, response
     log = results / "stderr.log"
-    assert not log.is_symlink(), "the planted link was followed, not replaced"
-    assert log.read_text(encoding="utf-8") == "diag before the stop", response
+    assert log.is_symlink(), "the refusal leaves the link where it was"
+    assert _LINK_REFUSAL in reason, response
     assert outside.read_text(encoding="utf-8") == "untouched", (
         "the write escaped the results directory through the planted link"
     )

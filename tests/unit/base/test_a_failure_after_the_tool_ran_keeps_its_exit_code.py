@@ -1083,8 +1083,14 @@ def test_a_scanner_whose_tool_ash_stopped_is_an_error(tmp_path, scanner_class):
 _UNSTOPPABLE_PID = 2**30 + 7
 
 #: The command the stand-in child is started for. Nothing runs it. The markup in
-#: its name shows as text wherever the reason is shown.
-_UNSTOPPABLE = ["unstoppable[/x]", "scan"]
+#: its name shows as text wherever the reason is shown. The name is an absolute
+#: path: a name with a directory part that is not anchored is a path relative to
+#: the working directory, which the spawn refuses before it starts anything, so the
+#: stand-in would never be built.
+_UNSTOPPABLE = [
+    os.path.join(os.path.abspath(os.sep), "ash-test-no-such-dir", "unstoppable[/x]"),
+    "scan",
+]
 
 #: What reading the stand-in's output raises in the post_run_error case.
 _READ_FAILED = "reading the output failed [/x]"
