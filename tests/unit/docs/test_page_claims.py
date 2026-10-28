@@ -50,6 +50,7 @@ import contextlib
 import csv
 import dataclasses
 import difflib
+import errno
 import getpass
 import hashlib
 import http.client
@@ -8054,6 +8055,44 @@ os.execvp(sys.argv[2], sys.argv[2:])
 #: The server children the running test started; ``_reap_server_children`` ends them.
 _SERVER_CHILDREN: List[subprocess.Popen] = []
 
+#: How many times a server start is tried when the operating system answers that it
+#: cannot make a process now (``EAGAIN``), and the pause after the first refusal. The
+#: pause after attempt ``n`` is ``n`` times this, so five attempts wait 0.2, 0.4, 0.6
+#: and 0.8 seconds, 2 seconds in all.
+_START_ATTEMPTS = 5
+_START_PAUSE_SECONDS = 0.2
+
+
+def _popen_after_eagain(
+    argv: List[str],
+    kwargs: Dict[str, Any],
+    *,
+    popen: Optional[Callable[..., Any]] = None,
+    pause: Optional[Callable[[float], None]] = None,
+) -> Any:
+    """``popen(argv, **kwargs)``, tried again when the operating system refuses to make
+    a process for now.
+
+    A macOS runner answered ``BlockingIOError: [Errno 35] Resource temporarily
+    unavailable`` from ``fork_exec`` for a server start on some jobs and not on others
+    running the same test, so the refusal is a property of the host at that moment and
+    not of the call. Only ``EAGAIN`` is tried again, at most ``_START_ATTEMPTS`` times
+    with a growing pause; the last refusal is raised unchanged, and any other error
+    (a missing program, a refused argument) is raised at the first attempt.
+
+    ``popen`` and ``pause`` default to ``subprocess.Popen`` and ``time.sleep``, looked
+    up when called, and are parameters so a test can answer the start and skip the
+    pause.
+    """
+    for attempt in range(1, _START_ATTEMPTS + 1):
+        try:
+            return (popen or subprocess.Popen)(argv, **kwargs)
+        except BlockingIOError as refused:
+            if refused.errno != errno.EAGAIN or attempt == _START_ATTEMPTS:
+                raise
+        (pause or time.sleep)(_START_PAUSE_SECONDS * attempt)
+    raise AssertionError("unreachable: the last attempt returns or raises")
+
 
 def _server_popen(argv: List[str], **kwargs: Any) -> subprocess.Popen:
     """``subprocess.Popen(argv, **kwargs)`` for a server child that must not outlive
@@ -8076,7 +8115,7 @@ def _server_popen(argv: List[str], **kwargs: Any) -> subprocess.Popen:
         ]
     if os.name != "nt":
         kwargs["start_new_session"] = True
-    process = subprocess.Popen(argv, **kwargs)
+    process = _popen_after_eagain(argv, kwargs)
     _SERVER_CHILDREN.append(process)
     return process
 
@@ -8108,6 +8147,110 @@ def _reap_server_children() -> Iterator[None]:
     yield
     while _SERVER_CHILDREN:
         _end_server_child(_SERVER_CHILDREN.pop())
+
+
+def _eagain() -> BlockingIOError:
+    """The error a host gives when it cannot make a process now."""
+    return BlockingIOError(errno.EAGAIN, "Resource temporarily unavailable")
+
+
+def _fake_popen(
+    outcomes: List[Any],
+) -> Tuple[Callable[..., Any], List[Tuple[List[str], Dict[str, Any]]]]:
+    """A stand-in for ``subprocess.Popen`` that answers each call with the next
+    outcome, raising it when it is an exception, and the calls it received. No process
+    starts."""
+    calls: List[Tuple[List[str], Dict[str, Any]]] = []
+
+    def popen(argv: List[str], **kwargs: Any) -> Any:
+        calls.append((argv, kwargs))
+        outcome = outcomes[len(calls) - 1]
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    return popen, calls
+
+
+def test_a_server_start_the_host_refuses_twice_is_made_a_third_time() -> None:
+    """Two ``EAGAIN`` answers are waited out with a growing pause, and the third
+    attempt's process is the result. Each attempt gets the same arguments."""
+    started = object()
+    popen, calls = _fake_popen([_eagain(), _eagain(), started])
+    pauses: List[float] = []
+    result = _popen_after_eagain(
+        ["server", "--quiet"], {"cwd": "here"}, popen=popen, pause=pauses.append
+    )
+    assert result is started
+    assert calls == [(["server", "--quiet"], {"cwd": "here"})] * 3, calls
+    assert pauses == pytest.approx([0.2, 0.4]), pauses
+
+
+def test_a_server_start_the_host_always_refuses_raises_the_last_refusal() -> None:
+    """The attempts are bounded, there is no pause after the last one, and the error
+    raised is the last one itself, not a copy or a wrapper."""
+    refusals = [_eagain() for _ in range(_START_ATTEMPTS)]
+    popen, calls = _fake_popen(list(refusals))
+    pauses: List[float] = []
+    with pytest.raises(BlockingIOError) as raised:
+        _popen_after_eagain(["server"], {}, popen=popen, pause=pauses.append)
+    assert raised.value is refusals[-1]
+    assert len(calls) == _START_ATTEMPTS, calls
+    expected = [_START_PAUSE_SECONDS * n for n in range(1, _START_ATTEMPTS)]
+    assert pauses == pytest.approx(expected), pauses
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        pytest.param(FileNotFoundError(errno.ENOENT, "no such program"), id="missing"),
+        pytest.param(PermissionError(errno.EACCES, "not executable"), id="denied"),
+        pytest.param(
+            BlockingIOError(errno.EBADF, "not an EAGAIN answer"), id="other-errno"
+        ),
+    ],
+)
+def test_a_server_start_failing_for_another_reason_is_not_tried_again(
+    error: OSError,
+) -> None:
+    """Only ``EAGAIN`` is waited out: a program that is not there, one that cannot run,
+    and a ``BlockingIOError`` with another errno each raise at the first attempt, with
+    no pause."""
+    popen, calls = _fake_popen([error, object()])
+    pauses: List[float] = []
+    with pytest.raises(OSError) as raised:
+        _popen_after_eagain(["server"], {}, popen=popen, pause=pauses.append)
+    assert raised.value is error
+    assert len(calls) == 1, calls
+    assert pauses == []
+
+
+def test_a_server_start_made_by_the_helper_the_tests_use_goes_through_the_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``_server_popen``, which every server start in this file uses, starts through
+    ``_popen_after_eagain`` and keeps the child for ``_reap_server_children``."""
+    started = object()
+    seen: List[Tuple[List[str], Dict[str, Any]]] = []
+
+    def answer(argv: List[str], kwargs: Dict[str, Any]) -> Any:
+        seen.append((argv, dict(kwargs)))
+        return started
+
+    monkeypatch.setattr(sys.modules[__name__], "_popen_after_eagain", answer)
+    try:
+        assert _server_popen(["server", "--quiet"], cwd="here") is started
+        assert _SERVER_CHILDREN[-1] is started
+    finally:
+        # The stand-in is not a process: keep it from the reaper that follows.
+        with contextlib.suppress(ValueError):
+            _SERVER_CHILDREN.remove(started)
+    assert len(seen) == 1, seen
+    argv, kwargs = seen[0]
+    assert argv[-2:] == ["server", "--quiet"], argv
+    assert kwargs["cwd"] == "here"
+    if os.name != "nt":
+        assert kwargs["start_new_session"] is True, kwargs
 
 
 def _mcp_serving_stdio(
