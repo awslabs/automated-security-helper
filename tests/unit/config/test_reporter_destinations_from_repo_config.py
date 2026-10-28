@@ -28,6 +28,7 @@ from automated_security_helper.config.reporter_trust import (
 )
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.utils.log import ASH_LOGGER
+from tests.utils.helpers import mark_git_checkout
 
 #: Values that read like what a repository would write, for some options, each of
 #: the type its options model validates and none of them a default. Every other
@@ -484,10 +485,10 @@ def test_an_ash_config_in_another_checkout_neither_turns_on_nor_points_a_reporte
     from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
 
     ops = tmp_path / "ops"
-    (ops / ".git").mkdir(parents=True)
+    mark_git_checkout(ops)
     monkeypatch.setenv("ASH_CONFIG", str(_ops_config(ops / "ash")))
     source = tmp_path / "repo"
-    (source / ".git").mkdir(parents=True)
+    mark_git_checkout(source)
 
     config = resolve_config(source_dir=source)
 
@@ -505,7 +506,7 @@ def test_control_the_same_ash_config_outside_every_checkout_is_the_operators(
 ):
     monkeypatch.setenv("ASH_CONFIG", str(_ops_config(tmp_path / "ops" / "ash")))
     source = tmp_path / "repo"
-    (source / ".git").mkdir(parents=True)
+    mark_git_checkout(source)
 
     config = resolve_config(source_dir=source)
 
@@ -923,7 +924,7 @@ def test_a_base_the_tree_extends_sets_no_destination_either(tmp_path, ash_log):
 def test_a_config_inside_the_checkout_but_outside_the_source_dir(tmp_path, ash_log):
     """CLI scan of a directory in a checkout: the tree is the whole checkout."""
     checkout = tmp_path / "checkout"
-    (checkout / ".git").mkdir(parents=True)
+    mark_git_checkout(checkout)
     source = checkout / "services" / "api"
     source.mkdir(parents=True)
     shared = _write_config(

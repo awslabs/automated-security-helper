@@ -14,6 +14,7 @@ into the shell would show up there.
 from __future__ import annotations
 
 import json
+import os
 import subprocess  # nosec B404 - only CompletedProcess is used, to fake the shell's result
 import sys
 from pathlib import Path
@@ -38,6 +39,12 @@ SCAN = [
 
 #: The host prints "ASH Scan Completed in <duration>" from its own wall clock.
 pytestmark = pytest.mark.snapshot_masking(mask_durations=True)
+
+#: The snapshots are POSIX text by construction: they name the fake nix path.
+_POSIX_TEXT = pytest.mark.skipif(
+    os.name == "nt",
+    reason="the recorded text is POSIX by construction: it names /nix/var/nix/profiles/default/bin/nix",
+)
 
 
 class FakeNixShell:
@@ -151,6 +158,7 @@ def _seen(result, shell: FakeNixShell) -> dict:
     }
 
 
+@_POSIX_TEXT
 def test_nix_not_installed(scan, snapshot, monkeypatch):
     from automated_security_helper.interactions import run_ash_nix
 
@@ -158,17 +166,20 @@ def test_nix_not_installed(scan, snapshot, monkeypatch):
     assert scan(SCAN) == snapshot
 
 
+@_POSIX_TEXT
 def test_already_inside_a_nix_shell(scan, snapshot, nix_shell, monkeypatch):
     monkeypatch.setenv("ASH_IN_NIX", "1")
     assert _seen(scan(SCAN), nix_shell) == snapshot
 
 
+@_POSIX_TEXT
 @pytest.mark.parametrize("returncode", [0, 1])
 def test_shell_left_no_results(returncode, scan, snapshot, nix_shell):
     nix_shell.returncode = returncode
     assert _seen(scan(SCAN), nix_shell) == snapshot
 
 
+@_POSIX_TEXT
 def test_shell_exit_with_results(scan, snapshot, nix_shell, fixture_model):
     # The inner scan found something and exited 2; the host reports the shell's
     # status as a warning and reaches its own verdict from the results.
@@ -179,6 +190,7 @@ def test_shell_exit_with_results(scan, snapshot, nix_shell, fixture_model):
     )
 
 
+@_POSIX_TEXT
 def test_results_the_inner_run_did_not_mark_completed(
     scan, snapshot, nix_shell, fixture_model
 ):
@@ -192,6 +204,7 @@ def test_results_the_inner_run_did_not_mark_completed(
     )
 
 
+@_POSIX_TEXT
 def test_unparseable_results(scan, snapshot, nix_shell):
     nix_shell.results_json = "{not json"
     assert _seen(scan(SCAN), nix_shell) == snapshot
@@ -232,6 +245,7 @@ def test_unparseable_results_are_not_quoted(scan, nix_shell, results_json, reaso
     assert "\x1b[31m" not in shown and "\n::" not in shown, repr(shown)
 
 
+@_POSIX_TEXT
 def test_equals_form_of_mode_is_rewritten(scan, snapshot, nix_shell):
     # `--mode=nix` is one token; the inner invocation must still get --mode=local,
     # or it would try to enter the shell again.

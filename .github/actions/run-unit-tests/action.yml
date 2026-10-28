@@ -122,6 +122,11 @@ runs:
     # python_files match, so pytest collects exactly as it does for the whole suite and the
     # hook only removes modules, which are then never imported.
     #
+    # The variable is read once, in tests/conftest.py's pytest_configure, and removed from
+    # the environment there, so a pytest a test starts does not inherit it (it would drop
+    # the modules other shards own when it collected a directory). xdist workers get the
+    # setting through workerinput instead.
+    #
     # Coverage is measured, with no threshold, because a shard covers only part of the
     # package; --cov-report= prints and writes no report. The data stays in pytest-cov's
     # default .coverage, not a COVERAGE_FILE set here: that variable would reach every

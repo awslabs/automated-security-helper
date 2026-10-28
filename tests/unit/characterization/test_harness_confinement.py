@@ -53,6 +53,13 @@ from tests.unit.characterization._harness import Exit, Hang, LaunchViolation
 
 NONEXISTENT = "/nonexistent-char-probe/x"
 
+# By the build, not the platform: CPython leaves os.waitid out on some systems
+# (macOS, Windows). The harness installs its refusing stub only where the function
+# exists, so a test that calls os.waitid itself has nothing to run against there.
+needs_waitid = pytest.mark.skipif(
+    not hasattr(os, "waitid"), reason="this build of Python has no os.waitid"
+)
+
 # Bound at collection, before any guard is installed.
 _THIRD_PARTY = types.ModuleType("char_third_party_probe")
 _THIRD_PARTY.Popen = subprocess.Popen
@@ -144,12 +151,23 @@ def test_no_new_processes_holds_the_process_limit_at_one_and_restores_it():
     )
     if exemption is not None:
         pytest.skip(f"RLIMIT_NPROC does not bind this process ({exemption})")
-    before = resource.getrlimit(resource.RLIMIT_NPROC)
+    before_soft, _ = resource.getrlimit(resource.RLIMIT_NPROC)
     with _harness.no_new_processes():
-        assert resource.getrlimit(resource.RLIMIT_NPROC) == (1, before[1])
+        # The hard limit is read here, not taken from before: the kernel may have
+        # lowered it when the soft limit was set (macOS holds it to the per-user cap).
+        held_soft, held_hard = resource.getrlimit(resource.RLIMIT_NPROC)
+        assert held_soft == 1
         # Set is not held: the kernel must refuse the next task, as it refuses a fork.
-        assert not _a_thread_can_start()
-    assert resource.getrlimit(resource.RLIMIT_NPROC) == before
+        # macOS counts only processes, not threads, against RLIMIT_NPROC, so a thread
+        # still starts there with the soft limit at one.
+        if sys.platform != "darwin":
+            assert not _a_thread_can_start()
+    unlimited = resource.RLIM_INFINITY
+    if held_hard != unlimited and (before_soft == unlimited or before_soft > held_hard):
+        expected_soft = held_hard
+    else:
+        expected_soft = before_soft
+    assert resource.getrlimit(resource.RLIMIT_NPROC) == (expected_soft, held_hard)
 
 
 def test_a_process_limit_that_is_not_set_lets_a_thread_start(monkeypatch):
@@ -160,6 +178,82 @@ def test_a_process_limit_that_is_not_set_lets_a_thread_start(monkeypatch):
     monkeypatch.setattr(resource, "setrlimit", lambda *_: None)
     with _harness.no_new_processes():
         assert _a_thread_can_start()
+
+
+@pytest.fixture
+def clamped_process_limit(monkeypatch):
+    """A process limit that behaves as macOS does, on every platform.
+
+    It starts at (1000, 2000). A write that asks for a hard limit above 1333 gets 1333
+    (the per-user cap), and a write that asks to raise the hard limit above its
+    current value is refused. Yields the dict that holds the current pair.
+    """
+    import resource
+
+    state = {"limit": (1000, 2000)}
+    per_user_cap = 1333
+
+    def getrlimit(which):
+        assert which == resource.RLIMIT_NPROC
+        return state["limit"]
+
+    def setrlimit(which, limits):
+        assert which == resource.RLIMIT_NPROC
+        soft, hard = limits
+        if hard > state["limit"][1]:
+            raise ValueError("not allowed to raise maximum limit")
+        if soft > hard:
+            raise ValueError("current limit exceeds maximum limit")
+        state["limit"] = (soft, min(hard, per_user_cap))
+
+    monkeypatch.setattr(_harness, "require_process_limit", lambda: None)
+    monkeypatch.setattr(resource, "getrlimit", getrlimit)
+    monkeypatch.setattr(resource, "setrlimit", setrlimit)
+    return state
+
+
+def test_no_new_processes_restores_against_the_hard_limit_the_kernel_kept(
+    clamped_process_limit,
+):
+    """With a hard limit that is clamped on the lowering write and cannot be raised
+    back, the block still exits cleanly and leaves the soft limit as it was."""
+    import resource
+
+    with _harness.no_new_processes():
+        assert resource.getrlimit(resource.RLIMIT_NPROC) == (1, 1333)
+    assert resource.getrlimit(resource.RLIMIT_NPROC) == (1000, 1333)
+
+
+def test_restoring_the_original_pair_fails_against_the_clamped_limit(
+    clamped_process_limit,
+):
+    """Control for the test above: the restore this module used to make, the original
+    pair written back, is refused by the same stand-in, so the stand-in can fail."""
+    import resource
+
+    soft, hard = resource.getrlimit(resource.RLIMIT_NPROC)
+    resource.setrlimit(resource.RLIMIT_NPROC, (1, hard))
+    assert resource.getrlimit(resource.RLIMIT_NPROC) == (1, 1333)
+    with pytest.raises(ValueError, match="not allowed to raise maximum limit"):
+        resource.setrlimit(resource.RLIMIT_NPROC, (soft, hard))
+
+
+def test_the_restored_process_limit_never_asks_to_raise_the_hard_limit():
+    """Infinity counts as larger than every number, on the soft and the hard limit; it
+    reads as -1 on Linux, so a plain comparison would call it the smallest."""
+    import resource
+
+    unlimited = resource.RLIM_INFINITY
+    cases = [
+        ((1000, 1333), (1000, 1333)),
+        ((2000, 1333), (1333, 1333)),
+        ((unlimited, 1333), (1333, 1333)),
+        ((1000, unlimited), (1000, unlimited)),
+        ((unlimited, unlimited), (unlimited, unlimited)),
+    ]
+    for (original_soft, held_hard), expected in cases:
+        restored = _harness._process_limit_to_restore(original_soft, held_hard)
+        assert restored == expected, (original_soft, held_hard)
 
 
 # The kernel ignores RLIMIT_NPROC for a process that is root or holds CAP_SYS_RESOURCE
@@ -557,6 +651,7 @@ def _zombie(char) -> subprocess.Popen:
     return proc
 
 
+@needs_waitid
 def test_a_hang_that_leaves_a_zombie_is_observed_unreaped_and_reachable(char):
     """``leaves_zombie``: the SIGTERM ends it with ``returncode`` still None;
     ``os.waitid`` with ``WNOWAIT`` reports the exit, every time, without reaping it;
@@ -584,6 +679,7 @@ def test_a_hang_that_leaves_a_zombie_is_observed_unreaped_and_reachable(char):
     ]
 
 
+@needs_waitid
 @pytest.mark.parametrize("reap", ["poll", "wait", "communicate"])
 def test_the_first_wait_of_a_zombie_reaps_it_and_sets_its_code(char, reap):
     proc = _zombie(char)
@@ -644,6 +740,7 @@ def _reap_with_waitid(pid: int) -> tuple[int, int]:
 _OUTSIDE_REAPS = {"waitpid": _reap_with_waitpid, "waitid": _reap_with_waitid}
 
 
+@needs_waitid
 @pytest.mark.parametrize("wait", list(_POPEN_WAITS))
 @pytest.mark.parametrize("child", ["zombie", "exited"])
 @pytest.mark.parametrize("reap", list(_OUTSIDE_REAPS))
@@ -670,6 +767,7 @@ def test_an_outside_reap_takes_the_exit_and_every_popen_wait_then_records_0(
         os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
 
 
+@needs_waitid
 def test_an_exited_tool_looked_at_with_wnowait_is_not_waited_for(char):
     """``os.waitid`` with ``WNOWAIT`` reads the exit of a tool that has exited and
     waits for nothing, as it does for a zombie: the Popen is not told, so
@@ -695,6 +793,7 @@ def test_an_exited_tool_looked_at_with_wnowait_is_not_waited_for(char):
     ]
 
 
+@needs_waitid
 def test_an_exited_leader_is_a_zombie_to_every_look_and_reaped_by_waitpid(char):
     """The questions a launcher puts to its leader, in its order: look without
     waiting, signal the group, look again, reap. A tool that has exited and that
@@ -794,6 +893,7 @@ def test_kill_getpgid_getsid_and_waitpid_answer_for_the_fake(char):
     ]
 
 
+@needs_waitid
 def test_waitid_observes_a_fake_and_reaps_it_only_without_wnowait(char):
     char.tool("tool", lambda call: Exit(3))
     char.tool("slow", lambda call: Hang())
@@ -894,11 +994,13 @@ def test_a_wait_cell_is_skipped_unless_the_worker_has_no_child(tmp_path):
             lambda: os.waitid(os.P_PID, os.getpid(), os.WEXITED | os.WNOHANG),
             False,
             id="waitid-self",
+            marks=needs_waitid,
         ),
         pytest.param(
             lambda: os.waitid(os.P_ALL, 0, os.WEXITED | os.WNOHANG),
             True,
             id="waitid-any",
+            marks=needs_waitid,
         ),
         pytest.param(
             lambda: os.pidfd_open(1),

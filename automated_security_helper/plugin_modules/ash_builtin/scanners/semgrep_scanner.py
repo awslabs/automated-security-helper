@@ -135,10 +135,10 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         self.tool_type = ScannerToolType.SAST
 
         self._setup_uv_tool_install_commands()
-        # Under a scan phase the probe is deferred until the dependency check
-        # asks (uv_tool_mixin.deferred_tool_version_probes), so nothing runs
-        # here then; see resolve_deferred_tool_version.
-        self.tool_version = self._get_uv_tool_version("semgrep")
+        # The version probe is recorded here and run once, by the dependency
+        # check, the SARIF step or the inventory (resolve_deferred_tool_version):
+        # construction must start nothing, whoever constructs the scanner.
+        self._deferred_tool_version_probe = ("semgrep", self._uv_from_spec())
         self.args = ToolArgs(
             format_arg=None,
             format_arg_value=None,

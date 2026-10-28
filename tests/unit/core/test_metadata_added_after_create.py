@@ -32,6 +32,12 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 #: Stands for "the saved set does not have this key at all".
 _ABSENT = object()
 
+#: One scanner's entry, which is what a scan phase records for every scanner it
+#: considered. A saved set with no scanner results and no findings holds no scan,
+#: and --use-existing refuses it (utils/inner_run_outcome.py,
+#: existing_results_problem); these tests are about the metadata it carries.
+_SCANNED = {"bandit": {"source": {"scanner_name": "bandit", "status": "PASSED"}}}
+
 
 def _create(tmp_path, **kwargs):
     source = tmp_path / "src"
@@ -45,7 +51,7 @@ def _create(tmp_path, **kwargs):
 
 
 def _saved(tmp_path, *, scan_source=_ABSENT, changed_files_only=_ABSENT):
-    saved = AshAggregatedResults()
+    saved = AshAggregatedResults(scanner_results=_SCANNED)
     if scan_source is not _ABSENT:
         setattr(saved.metadata, "scan_source", scan_source)
     if changed_files_only is not _ABSENT:

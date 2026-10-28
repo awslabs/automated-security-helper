@@ -50,6 +50,12 @@ from automated_security_helper.utils.terminal_text import shown_on_one_line
 from automated_security_helper.workspace.resolver import resolve_workspace
 from tests.utils.helpers import checkout_env
 
+#: For the tests that build a name from bytes that are not UTF-8 themselves.
+_NO_NON_UTF8_NAMES = pytest.mark.skipif(
+    os.name == "nt",
+    reason="NTFS names are UTF-16; a name that is not UTF-8 bytes cannot exist",
+)
+
 #: The checkout under test, which a child process is pointed at.
 _CHECKOUT = Path(automated_security_helper.__file__).resolve().parents[1]
 
@@ -174,6 +180,7 @@ def test_a_folder_that_is_not_utf8_is_refused_and_named(tmp_path):
     assert not _has_a_surrogate(message), ascii(message)
 
 
+@_NO_NON_UTF8_NAMES
 def test_a_workspace_file_whose_name_is_not_utf8_is_refused(tmp_path):
     root = tmp_path / "cafe"
     definition = _workspace(root, ["api"], name=os.fsdecode(b"caf\xe9.code-workspace"))
@@ -197,7 +204,16 @@ def test_the_name_is_shown_not_obeyed(tmp_path):
     assert not _has_a_surrogate(message), ascii(message)
 
 
-@pytest.mark.parametrize("where", ["root", "folder", "file", "policy", "config"])
+@pytest.mark.parametrize(
+    "where",
+    [
+        "root",
+        "folder",
+        pytest.param("file", marks=_NO_NON_UTF8_NAMES),
+        "policy",
+        "config",
+    ],
+)
 def test_the_refusal_holds_each_path_as_it_is_on_one_line(tmp_path, where):
     """Raised with raw text, so each sink shows it once; one line, so showing it
     on one line changes only what a name holds."""
@@ -448,6 +464,7 @@ def test_the_mcp_response_hides_a_value_a_complete_code_splits(tmp_path, carried
 # --------------------------------------------------------------------------- #
 
 
+@_NO_NON_UTF8_NAMES
 def test_the_workspace_run_shows_the_refusal_once(tmp_path, capsys):
     """run_ash_scan's handler around execute_workspace, given the error as it is
     raised: the whole message shown once, on one line, and exit 4."""

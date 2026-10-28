@@ -19,7 +19,7 @@ that applies the form, so a model added there without it fails here.
 from __future__ import annotations
 
 import inspect
-import os
+import sys
 import typing
 from pathlib import Path
 from types import ModuleType
@@ -54,9 +54,21 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils import undecodable_text
 from automated_security_helper.utils.undecodable_text import text_of_undecodable
 
-#: A latin-1 file name as Python lists it, and as a record holds it.
-ODD = os.fsdecode(b"secr\xe9t.py")
+#: A latin-1 file name as Python lists it, and as a record holds it. Decoded with
+#: surrogateescape on every platform: os.fsdecode gives that on POSIX, but on
+#: Windows the filesystem encoding is UTF-8 with surrogatepass (PEP 529), so the
+#: lone 0xe9 would raise UnicodeDecodeError while this module is collected.
+ODD = b"secr\xe9t.py".decode(sys.getfilesystemencoding(), "surrogateescape")
 RECORDED = "secr\\udce9t.py"
+
+
+def test_the_odd_name_round_trips_to_its_bytes():
+    """The name is the one Python lists for the file on a POSIX filesystem: the
+    undecodable byte is kept as a lone surrogate, and encoding it back with the
+    same handler gives the bytes the file has."""
+    assert ODD.encode(sys.getfilesystemencoding(), "surrogateescape") == b"secr\xe9t.py"
+    assert ODD == "secr\udce9t.py"
+
 
 RESULT_MODULES: List[ModuleType] = [
     sarif_schema_model,

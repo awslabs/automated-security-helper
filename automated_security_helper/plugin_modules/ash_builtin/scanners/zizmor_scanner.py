@@ -511,7 +511,10 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             "composite actions."
         )
         self._setup_uv_tool_install_commands()
-        self.tool_version = self._get_uv_tool_version("zizmor")
+        # The version probe is recorded here and run once, by the dependency
+        # check, the SARIF step or the inventory (resolve_deferred_tool_version):
+        # construction must start nothing, whoever constructs the scanner.
+        self._deferred_tool_version_probe = ("zizmor", self._uv_from_spec())
         # Arguments are assembled in _execute_scan; ToolArgs is unused but kept
         # at its neutral value so _resolve_arguments is never surprised.
         self.args = ToolArgs()
@@ -588,6 +591,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         3. If neither works, MISSING, with the reason logged and recorded in
            ``dependency_unavailable_reason``.
         """
+        self.resolve_deferred_tool_version()
         if self.dependency_unavailable_reason:
             return False
 

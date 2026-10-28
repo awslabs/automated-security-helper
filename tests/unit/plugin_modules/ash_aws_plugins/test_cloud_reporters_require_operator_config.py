@@ -328,4 +328,7 @@ class TestCloudReportersNeedTheOperator:
                 encoding="utf-8"
             )
         )
-        assert "findings_count" in written
+        # The import receipt (SecurityHubReporter._receipt): no findings in the
+        # fixture tree, so nothing was sent, and the receipt says so.
+        assert written["imported"] == 0
+        assert written["findings"] == []

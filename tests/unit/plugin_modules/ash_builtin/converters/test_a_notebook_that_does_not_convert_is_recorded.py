@@ -408,7 +408,9 @@ def test_a_partial_conversion_shows_both_counts_in_its_progress_row(world):
     ) -> subprocess.CompletedProcess:
         argv = ["uv", "tool", "run", "--from", str(package_name), tool_name, *args]
         world.uv.runs.append(argv)
-        if any("bad.ipynb" in str(a) for a in args):
+        # The staged copy carries a fixed name, so the failing run is the second
+        # one: the scan set is [good, bad] and convert() keeps that order.
+        if len(world.uv.runs) == 2:
             return subprocess.CompletedProcess(argv, 1, "", "")
         launches._write_output([str(a) for a in args])
         return subprocess.CompletedProcess(argv, 0, "", "")

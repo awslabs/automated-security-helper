@@ -31,6 +31,12 @@ import pytest
 from tests.utils.helpers import checkout_env
 from tests.utils.isolated_tool_env import network_containment
 
+#: For the tests that plant the file whose name is not UTF-8.
+_NO_NON_UTF8_NAMES = pytest.mark.skipif(
+    os.name == "nt",
+    reason="NTFS names are UTF-16; a name that is not UTF-8 bytes cannot exist",
+)
+
 #: What the child runs first: the probes answered, uv's cache and installs answered
 #: unavailable, and an audit hook that refuses and logs every program start apart
 #: from ASH's own detect-secrets worker. Source, not a call: the child cannot
@@ -218,6 +224,7 @@ def _plain_rules(tmp_path: Path) -> List[str]:
     return rules
 
 
+@_NO_NON_UTF8_NAMES
 def test_a_file_named_so_keeps_the_results_file_and_both_files_findings(tmp_path):
     plain_rules = _plain_rules(tmp_path)
     source = _tree(tmp_path / "both", {_PLAIN: _SECRET, _ODD: _SECRET})
@@ -274,6 +281,7 @@ def test_a_repository_config_spelling_such_a_name_keeps_the_results_file(
     assert _rules_for(_findings(output), "secret.py") == plain_rules
 
 
+@_NO_NON_UTF8_NAMES
 def test_an_ignore_path_naming_such_a_file_ignores_it(tmp_path):
     """The live configuration keeps the name it read, so the file is not scanned."""
     plain_rules = _plain_rules(tmp_path)
@@ -291,6 +299,7 @@ def test_an_ignore_path_naming_such_a_file_ignores_it(tmp_path):
     assert _rules_for(findings, _ODD_RECORDED) == [], findings
 
 
+@_NO_NON_UTF8_NAMES
 def test_use_existing_applies_the_ignore_path_the_scan_applied(tmp_path):
     """The results record the ignore path in its record form, and a run that reads
     them back reads it as the name, so it ignores the same file."""

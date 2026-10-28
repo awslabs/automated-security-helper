@@ -194,11 +194,17 @@ def _is_an_ash_worker(args: Sequence[str]) -> bool:
     """*args*, the arguments after this interpreter, start one of ASH's worker children.
 
     The detect-secrets scan (``python -m`` ``DETECT_SECRETS_WORKER``) and the cdk-nag
-    evaluation, whose ``-c`` code has to be cdk_nag_worker's own bootstrap.
+    evaluation, whose ``-c`` code has to be cdk_nag_worker's own bootstrap. Both are
+    started through ``python_child``, which puts ``-P`` right after the interpreter on
+    Python 3.11 and later (``_SAFE_PATH_FLAGS``), so a leading ``-P`` is not part of
+    what the child runs.
     """
     from automated_security_helper.utils.cdk_nag_worker import _CHILD_BOOTSTRAP
 
-    return list(args[:2]) in (["-m", DETECT_SECRETS_WORKER], ["-c", _CHILD_BOOTSTRAP])
+    args = list(args)
+    if args[:1] == ["-P"]:
+        args = args[1:]
+    return args[:2] in (["-m", DETECT_SECRETS_WORKER], ["-c", _CHILD_BOOTSTRAP])
 
 
 def _inside_the_landlock_wrapper(args: Sequence[str]) -> list[str] | None:
@@ -1842,16 +1848,25 @@ def files_left_in(home: Path) -> list[str]:
 #: ``.ash/bin`` ran as the test's own and, allowed here, was never seen.
 ASH_HOME_STATE = (".ash/install-receipts", ".cache/ash-mcp", ".ash/state/containers")
 
+#: On Windows, PowerShell writes its own startup-profile cache under HOME every time
+#: it starts, so a test that runs ``pwsh`` always leaves it. It is PowerShell's own
+#: cache, not a file a tool the test started wrote.
+POWERSHELL_HOME_CACHE = ("AppData/Local/Microsoft/PowerShell",)
+
 
 def tool_files_left_in(home: Path) -> list[str]:
     """``files_left_in(home)`` without ASH's own state (``ASH_HOME_STATE``).
 
     What is left is a tool's: semgrep's ``.semgrep``, checkov's ``.cache/checkov``,
     uv's tool directory and cache, written by a tool a test started, in this process
-    or in a child.
+    or in a child. PowerShell's own startup cache (``POWERSHELL_HOME_CACHE``) is not
+    a tool's leftovers.
     """
     return [
         name
         for name in files_left_in(home)
-        if not any(name.startswith(f"{state}/") for state in ASH_HOME_STATE)
+        if not any(
+            name.startswith(f"{state}/")
+            for state in (*ASH_HOME_STATE, *POWERSHELL_HOME_CACHE)
+        )
     ]

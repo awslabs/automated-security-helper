@@ -411,7 +411,9 @@ CFN_CANDIDATE_SUFFIXES = (".json", ".yaml", ".yml")
 
 
 def cloudformation_candidate_files(
-    context: "PluginContext", target_type: str
+    context: "PluginContext",
+    target_type: str,
+    global_ignore_paths: Iterable[object] | None = None,
 ) -> list[str]:
     """The files cfn-nag and cdk-nag consider in one tree, as posix paths, sorted.
 
@@ -422,9 +424,12 @@ def cloudformation_candidate_files(
     scanners and by their ``nothing_to_scan_reason``, so the answer "there is
     nothing to scan" comes from the selection the scan makes.
 
-    The ignore paths are the configuration's entries that have not expired, the
-    list the scanners are given (``core/orchestrator.py``), matched as ASH matches
-    them when it drops findings (``link_exclusions.drop_ignored``).
+    ``global_ignore_paths`` is the list the scanner's ``scan()`` was given
+    (``core/orchestrator.py``: the operator's unexpired entries, and none under
+    ``--ignore-suppressions``), matched as ASH matches them when it drops
+    findings (``link_exclusions.drop_ignored``). An empty list ignores nothing.
+    None, from a caller that has no list (``nothing_to_scan_reason``), reads the
+    configuration's unexpired entries instead.
     """
     if target_type == "converted":
         files = [Path(p) for p in Path(context.work_dir).glob("**/*.*")]
@@ -438,9 +443,13 @@ def cloudformation_candidate_files(
             active_ignore_paths,
         )
 
-        global_settings = getattr(
-            getattr(context, "config", None), "global_settings", None
-        )
+        if global_ignore_paths is None:
+            global_settings = getattr(
+                getattr(context, "config", None), "global_settings", None
+            )
+            global_ignore_paths = active_ignore_paths(
+                getattr(global_settings, "ignore_paths", None) or []
+            )
         files = [
             Path(p)
             for p in drop_ignored(
@@ -453,9 +462,7 @@ def cloudformation_candidate_files(
                     run_id=getattr(context, "run_id", None),
                 ),
                 context.source_dir,
-                active_ignore_paths(
-                    getattr(global_settings, "ignore_paths", None) or []
-                ),
+                global_ignore_paths,
             )
         ]
     return sorted(

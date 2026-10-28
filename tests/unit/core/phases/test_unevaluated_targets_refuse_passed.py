@@ -40,6 +40,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scann
     CfnNagScanner,
     CfnNagScannerConfig,
 )
+from automated_security_helper.utils.normalizers import get_normalized_filename
 
 RENDERS_TEMPLATE = """Resources:
   MyRole:
@@ -154,8 +155,11 @@ def _row(
     """One executor row for a cfn-nag run whose tool answers from *responses*.
 
     *responses* maps a template's file name to the subprocess response its
-    invocation gets, found by the ``--input-path`` argument as the scanner's own
-    behavior tests find it. The stand-in replaces
+    invocation gets. The ``--input-path`` argument names a copy of the template
+    under a fixed name (``template`` plus the template's extension) in a results
+    directory named after the template, so the template is read off that
+    directory's name, as the scanner's own behavior tests read it. The stand-in
+    replaces
     ``subprocess_utils.run_command_with_output_handling``, the call under the
     real ``_run_subprocess``, so the plugin's own bookkeeping of a response (the
     exit code, a timeout, a spawn failure, a post-run error) runs as production
@@ -189,11 +193,22 @@ def _row(
     unmatched = []
     served = set()
 
+    def template_of(staged: str):
+        """The template a staged cfn_nag input was copied from: the copy sits in
+        ``<results dir>/<normalized template path>/.ash-cfn-nag-input/``, so its
+        directory's name ends with the template's normalized name."""
+        results_dir = Path(staged).parent.parent.name
+        for name in responses:
+            normalized = get_normalized_filename(name)
+            if results_dir == normalized or results_dir.endswith(f"__{normalized}"):
+                return name
+        return None
+
     def tool(command=None, **kwargs):
         parts = [str(part) for part in command or []]
         if "--input-path" in parts:
-            template = Path(parts[parts.index("--input-path") + 1]).name
-            if template in responses:
+            template = template_of(parts[parts.index("--input-path") + 1])
+            if template is not None:
                 served.add(template)
                 return dict(responses[template])
         unmatched.append(" ".join(parts))

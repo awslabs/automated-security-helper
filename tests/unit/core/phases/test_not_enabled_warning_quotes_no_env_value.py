@@ -166,14 +166,14 @@ def test_the_scan_logs_name_the_type(runs):
 
 
 def test_the_runs_start_no_tool(runs):
-    """The stub caught the one start the scan asks for, detect-secrets' CLI probe."""
+    """The scan starts no tool: the one start it used to ask for, detect-secrets'
+    CLI probe, is gone, so the refused-starts log is empty or absent."""
     log = runs["root"] / "refused-starts.log"
     refused = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
 
-    assert refused, runs["scan"].stderr[-2000:]
-    # Every recorded start is that probe: anything else would have been a tool
-    # the scan tried to run through the subprocess layer.
-    assert all("detect-secrets" in line for line in refused), refused
+    # Any recorded start would be a tool the scan tried to run through the
+    # subprocess layer.
+    assert refused == [], refused
 
 
 def test_ash_report_refuses_it_without_the_value(runs):

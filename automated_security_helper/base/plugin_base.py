@@ -65,9 +65,11 @@ from automated_security_helper.utils.subprocess_utils import (
     RESPONSE_FLAGS,
     WAS_KILLED_ENDING,
     could_not_stop_default,
+    exit_status,
     flagged_returncode,
     is_exit_code,
     response_could_not_stop,
+    signal_ending,
 )
 
 
@@ -675,14 +677,17 @@ def worse_exit_code(current: int | None, new: int) -> int:
     """The worse of two runs' exit codes, for a plugin's accumulated ``exit_code``.
 
     A negative code is a signal death, which no exit code describes and no
-    accepted set admits: it outranks every exit code and is kept as it is, never
-    folded into a positive one that an accepted set could admit. Otherwise the
-    larger code.
+    accepted set admits. It is recorded as the shell reports it, ``128 + N``
+    (``exit_status``), the form ``_record_target_exit_code`` records for the run
+    that scanned one target, so the two readers agree on one number; its
+    absolute value is never used, because that would put SIGHUP's 1 inside a
+    ``{0, 1}`` set. A signal death outranks every code a tool returned before
+    it. Otherwise the larger code.
     """
-    if current is not None and current < 0:
-        return current
     if new < 0:
-        return new
+        return exit_status(new)
+    if current is not None and current < 0:
+        return exit_status(current)
     return max(current if current is not None else 0, new)
 
 
@@ -1185,6 +1190,26 @@ class PluginBase(UVToolMixin, BaseModel):
             new_code = flagged_returncode(response)
             if new_code is None:
                 new_code = 125
+        # A negative code is a signal death by the runner's own reading
+        # (``signal_ending``: POSIX only, never for a code of 0 or more). The
+        # accumulated code records it as the shell reports it, ``128 + N``
+        # (``worse_exit_code``), and that number alone cannot be told from a
+        # tool's own count of findings by a reader whose accepted band is wide
+        # (cfn_nag's violation count, yarn audit's severity bitmask). So the
+        # death is kept as the run's cause as well, where every such reader
+        # looks before any band (``_sarif_execution_successful``): a run a
+        # signal ended is never a completed one, whatever number it left.
+        # ``_run_subprocess`` records the same cause from its response's flag
+        # and overwrites this one with the response's own text; a caller of
+        # this seam that hands over a bare negative code gets the same
+        # judgment. Worded without an attribution: the response may have
+        # withheld the flag because ASH itself may have ended the tool.
+        if self._scan_kept_flag is None:
+            ending = signal_ending(
+                new_code, str(getattr(self, "command", "") or "tool")
+            )
+            if ending is not None:
+                self._scan_kept_flag = ("signaled", ending[1])
         self.exit_code = worse_exit_code(self.exit_code, new_code)
 
     @property

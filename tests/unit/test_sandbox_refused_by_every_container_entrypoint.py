@@ -62,6 +62,7 @@ from tests.unit.test_build_date_reaches_every_build_entrypoint import (
     _write_python_command,
     _write_runner_guards,
 )
+from tests.utils.helpers import mark_git_checkout
 
 REPO_ROOT = Path(__file__).resolve().parents[1].parent
 ASH_SCRIPT = REPO_ROOT / "ash"
@@ -1502,7 +1503,7 @@ class TestThePowerShellEntrypoint:
         if os.name == "nt":
             pytest.skip("creating a symbolic link needs a privilege on Windows")
         root = tmp_path / "set"
-        (root / ".git").mkdir(parents=True)
+        mark_git_checkout(root)
         (root / "src").mkdir()
         elsewhere = tmp_path / "elsewhere"
         (elsewhere / "dir").mkdir(parents=True)
@@ -1529,7 +1530,7 @@ class TestThePowerShellEntrypoint:
         if os.name == "nt":
             pytest.skip("creating a symbolic link needs a privilege on Windows")
         root = tmp_path / "set"
-        (root / ".git").mkdir(parents=True)
+        mark_git_checkout(root)
         (root / "src").mkdir()
         (root / ".ash").mkdir()
         outside = tmp_path / "outside.yaml"
@@ -1559,7 +1560,7 @@ class TestThePowerShellEntrypoint:
         root = tmp_path / "set"
         root.mkdir()
         real = tmp_path / "data-root" / "repo"
-        (real / ".git").mkdir(parents=True)
+        mark_git_checkout(real)
         shared = tmp_path / "data-root" / "shared"
         shared.mkdir()
         (shared / "cfg.yaml").write_text("project_name: shared\n", encoding="utf-8")
@@ -1594,7 +1595,7 @@ class TestThePowerShellEntrypoint:
         root = tmp_path / "set"
         root.mkdir()
         real = tmp_path / "data-root" / "repo"
-        (real / ".git").mkdir(parents=True)
+        mark_git_checkout(real)
         outside = tmp_path / "outside.yaml"
         outside.write_text("project_name: outside\n", encoding="utf-8")
         (real / "lnk.yaml").symlink_to(outside)
@@ -1844,7 +1845,7 @@ class TestThePowerShellEntrypoint:
         its own mark is passed; the scan's --config is -Config's file, whose mark
         the scan inside works out itself."""
         checkout = tmp_path / "set"
-        (checkout / ".git").mkdir(parents=True)
+        mark_git_checkout(checkout)
         (checkout / "ci").mkdir()
         held = checkout / "ci" / "ash.yaml"
         held.write_text("project_name: held\n", encoding="utf-8")
@@ -1874,7 +1875,7 @@ class TestThePowerShellEntrypoint:
         self, pwsh, tmp_path
     ):
         checkout = tmp_path / "set"
-        (checkout / ".git").mkdir(parents=True)
+        mark_git_checkout(checkout)
         (checkout / "ci").mkdir()
         held = checkout / "ci" / "ash.yaml"
         held.write_text("project_name: held\n", encoding="utf-8")

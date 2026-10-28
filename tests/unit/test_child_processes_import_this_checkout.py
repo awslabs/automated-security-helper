@@ -269,6 +269,15 @@ ALLOWED: Dict[str, str] = {
     "::test_the_detect_secrets_and_cdk_nag_workers_may_start"
     "::unread-code#1@_popen_event": (_AUDIT_EVENT_ONLY),
     "tests/utils/test_tool_guard.py"
+    "::test_the_detect_secrets_and_cdk_nag_workers_may_start"
+    "::module#2@_popen_event": (_AUDIT_EVENT_ONLY),
+    "tests/utils/test_tool_guard.py"
+    "::test_the_detect_secrets_and_cdk_nag_workers_may_start"
+    "::unread-code#2@_popen_event": (_AUDIT_EVENT_ONLY),
+    "tests/utils/test_tool_guard.py"
+    "::test_a_flag_other_than_the_safe_path_flag_does_not_make_a_worker"
+    "::module#1@_popen_event": (_AUDIT_EVENT_ONLY),
+    "tests/utils/test_tool_guard.py"
     "::test_a_tool_inside_the_landlock_wrapper_is_judged_by_itself"
     "::isolated-unread-script#1@_popen_event": (_AUDIT_EVENT_ONLY),
     "tests/utils/test_tool_guard.py"

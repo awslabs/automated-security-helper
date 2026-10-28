@@ -58,6 +58,7 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_con
 from automated_security_helper.utils import subprocess_utils, uv_tool_runner
 from automated_security_helper.utils.normalizers import get_normalized_filename
 from tests.unit.converters.nbconvert_stand_in import (
+    accept_stand_in_nbconvert,
     expand,
     notebook_patterns,
     run_like_nbconvert,
@@ -159,9 +160,11 @@ def replace_subprocess(monkeypatch, run) -> None:
             SubprocessError=subprocess.SubprocessError,
         ),
     )
-    # The converter starts nbconvert through spawn_run, so a scanner sandbox can
-    # confine it.
+    # The converter starts nbconvert through spawn_run under a sandbox, so a
+    # scanner sandbox can confine it, and through run_ended_with_the_server
+    # otherwise (jupyter_converter._run_nbconvert); both are this double.
     monkeypatch.setattr(jupyter_converter, "spawn_run", run)
+    monkeypatch.setattr(jupyter_converter, "run_ended_with_the_server", run)
 
 
 @pytest.fixture(autouse=True)
@@ -227,6 +230,11 @@ def direct(make_converter, monkeypatch, outside):
     observed = Observed()
     jupyter = fake_executable(outside / "bin", NBCONVERT)
     monkeypatch.setenv("PATH", str(jupyter.parent))
+    # A conversion runs a jupyter-nbconvert only once verify_pre_installed_tool
+    # says its nbconvert satisfies the requirement, and the fake belongs to no
+    # nbconvert distribution; these tests are about what the verified copy is
+    # handed, so the verification accepts it. The lookup's refusals still hold.
+    accept_stand_in_nbconvert(monkeypatch)
     replace_subprocess(monkeypatch, direct_route_run(observed))
     return converter, observed, jupyter
 
@@ -268,15 +276,24 @@ def convert_one(converter, notebook_path: Path, monkeypatch) -> list[Path]:
 
 
 def failed(converter) -> list[dict]:
-    return [record.model_dump() for record in converter.failed_inputs]
+    """Each failed input's path and reason. The record carries more (kind,
+    accepted, accepted_reason, accepted_by), which these tests do not assert."""
+    return [
+        {"path": record.path, "reason": record.reason}
+        for record in converter.failed_inputs
+    ]
 
 
 def gate(converter) -> list[tuple[str, str]]:
-    """What the completeness gate says about a results row built from ``converter``."""
+    """What the completeness gate says about a results row built from ``converter``,
+    as (name, reason); the row's third field, ``kinds``, is not asserted here."""
     row = ConverterStatusInfo(**_input_record_fields(converter))
-    return incomplete_converters(
-        AshAggregatedResults(converter_results={"jupyter": row})
-    )
+    return [
+        (listed.name, listed.reason)
+        for listed in incomplete_converters(
+            AshAggregatedResults(converter_results={"jupyter": row})
+        )
+    ]
 
 
 @pytest.mark.parametrize(
@@ -431,7 +448,9 @@ class TestAFailedConversionIsRecorded:
 
         ((path, reason),) = [(r["path"], r["reason"]) for r in failed(converter)]
         assert path == "nb.ipynb"
-        assert reason.startswith("FileNotFoundError: uv could not run nbconvert")
+        assert reason == (
+            "uv could not run nbconvert, and no other jupyter-nbconvert is run in its place"
+        )
 
     def test_the_gate_names_at_most_five_and_counts_the_rest(
         self, direct, tree, monkeypatch
@@ -474,7 +493,7 @@ class TestTheDirectRouteRunsAResolvedNbconvert:
         return tree / "nb.ipynb"
 
     def test_one_reached_only_through_the_working_directory_is_not_run(
-        self, direct, tree, monkeypatch
+        self, direct, tree, monkeypatch, ash_warnings
     ):
         converter, observed, _ = direct
         fake_executable(tree, NBCONVERT)
@@ -486,7 +505,15 @@ class TestTheDirectRouteRunsAResolvedNbconvert:
 
         assert observed.calls == [], "a jupyter-nbconvert in the cwd was run"
         ((_, reason),) = [(r["path"], r["reason"]) for r in failed(converter)]
-        assert "no jupyter-nbconvert executable was found on PATH" in reason
+        # The record carries a fixed, path-free sentence; the lookup's own
+        # words (why no copy could be run) are logged once.
+        assert reason == (
+            "the jupyter-nbconvert the dependency check chose cannot be used now, "
+            "and no other jupyter-nbconvert is run in its place"
+        )
+        assert [m for m in ash_warnings if "nbconvert is not run for" in m], (
+            ash_warnings
+        )
 
     def test_an_installed_one_later_on_path_is_run_instead(
         self, direct, tree, monkeypatch
@@ -582,12 +609,29 @@ class TestTheVersionProbe:
     """validate_plugin_dependencies' direct check runs the same resolved program."""
 
     def probe_calls(self, monkeypatch) -> list[dict]:
+        """Record the verification's probe: verify_pre_installed_tool runs
+        ``<copy> --version`` through pre_installed_tool's own spawn_run. The
+        environment check that follows it (the interpreter beside the copy, uv's
+        dry run) is stubbed as satisfied, so only the probe is observed."""
+        from automated_security_helper.utils import pre_installed_tool
+
         calls: list[dict] = []
 
         def run(argv, *args, **kwargs):
             calls.append({"argv": list(argv), "cwd": kwargs.get("cwd")})
             return subprocess.CompletedProcess(argv, 0, "7.17.1\n", "")
 
+        pre_installed_tool.reset_pre_installed_tool_cache()
+        monkeypatch.setattr(pre_installed_tool, "spawn_run", run)
+        monkeypatch.setattr(
+            pre_installed_tool,
+            "find_tool_interpreter",
+            lambda executable: sys.executable,
+        )
+        monkeypatch.setattr(uv_tool_runner, "find_uv_or_none", lambda: "uv")
+        monkeypatch.setattr(
+            pre_installed_tool, "_dry_run", lambda *a, **k: ("satisfied", "")
+        )
         replace_subprocess(monkeypatch, run)
         return calls
 
@@ -600,6 +644,9 @@ class TestTheVersionProbe:
         fake_executable(tree, NBCONVERT)
         monkeypatch.setenv("PATH", os.pathsep.join([".", str(nbconvert.parent)]))
         monkeypatch.chdir(tree)
+        # The check looks for nbconvert only when the scan set holds a notebook
+        # (jupyter_converter._validate_dependencies).
+        (tree / "nb.ipynb").write_bytes(as_nbformat_writes(notebook("python", None)))
         calls = self.probe_calls(monkeypatch)
 
         assert converter.validate_plugin_dependencies() is True
@@ -617,6 +664,9 @@ class TestTheVersionProbe:
         fake_executable(tree, NBCONVERT)
         monkeypatch.setenv("PATH", os.pathsep.join(["", "."]))
         monkeypatch.chdir(tree)
+        # The check looks for nbconvert only when the scan set holds a notebook
+        # (jupyter_converter._validate_dependencies).
+        (tree / "nb.ipynb").write_bytes(as_nbformat_writes(notebook("python", None)))
         calls = self.probe_calls(monkeypatch)
 
         assert converter.validate_plugin_dependencies() is False

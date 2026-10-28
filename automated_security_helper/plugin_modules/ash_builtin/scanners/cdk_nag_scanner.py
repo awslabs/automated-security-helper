@@ -905,9 +905,6 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         Raises:
             ScannerError: If scanning fails
         """
-        if global_ignore_paths is None:
-            global_ignore_paths = []
-
         # Per-call state, reset before anything else in the method can return.
         #
         # ``errors`` is reset here for the same reason and by the same argument as the two
@@ -1029,7 +1026,9 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # nothing_to_scan_reason, which answers from this same selection. The
         # selection drops the files the global ignore paths ignore and honors the
         # repository's ignore files as the scan set does.
-        scannable = cloudformation_candidate_files(self.context, target_type)
+        scannable = cloudformation_candidate_files(
+            self.context, target_type, global_ignore_paths
+        )
 
         # The counters are already at 0 here, set at the top of the method. Deliberately not
         # re-initialized at this point: the empty-scan-set return just below is one of four

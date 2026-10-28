@@ -13,9 +13,13 @@ default_stages: [pre-commit]
 repos:
   - repo: local
     hooks:
+      # --frozen because this hook runs under the committer's own uv. Without it, a uv
+      # that disagrees with uv.lock re-resolves and rewrites the lockfile as part of the
+      # commit, so a commit can carry pin changes nobody asked for. --frozen reads the
+      # lock as committed and fails the hook when it does not satisfy pyproject.toml.
       - id: generate-schemas
         name: Generate ASH JSON schemas
-        entry: uv run python -m automated_security_helper.schemas.generate_schemas
+        entry: uv run --frozen python -m automated_security_helper.schemas.generate_schemas
         language: system
         verbose: true
         pass_filenames: false
@@ -240,10 +244,12 @@ repos:
       #
       # Manual-staged means it never fires from a git hook. Invoke it deliberately:
       #   pre-commit run --hook-stage manual ash
+      #
+      # --frozen for the reason given on generate-schemas: it never rewrites uv.lock.
       - id: ash
         name: (manual) ASH dev manual scan
         description: Runs various code scanners from Python directly
-        entry: uv run ash --mode=precommit
+        entry: uv run --frozen ash --mode=precommit
         pass_filenames: false
         verbose: true
         language: system

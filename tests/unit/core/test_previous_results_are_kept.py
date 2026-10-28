@@ -47,6 +47,7 @@ from automated_security_helper.core.previous_results import (
     RESTORED_MARKER_NAME,
     holds_restored_results,
 )
+from automated_security_helper.utils.output_dir_links import OUTPUT_GITIGNORE
 from tests.utils.tasks import drain
 
 PREVIOUS = {
@@ -75,13 +76,24 @@ def _with_previous_results(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def _contents(output: Path) -> Dict[str, str]:
-    """Every file under the output directory except the logs and the marker."""
+    """Every file under the output directory except the run's own files.
+
+    Those are the logs, the restored marker, and the ``.gitignore`` the
+    orchestrator writes at the top of an output directory inside the scanned
+    tree (core/orchestrator.ensure_directories,
+    utils/output_dir_links.ignore_output_dir_in_git), as the fixture's is. None
+    of them is a scan result: none is among ``RESULT_ENTRIES``, so a set aside
+    leaves them and a restore does not remove them. Only the top-level
+    ``.gitignore`` is left out; one under ``reports/`` or ``scanners/`` would be
+    a previous result and is compared.
+    """
     return {
         p.relative_to(output).as_posix(): p.read_text(encoding="utf-8")
         for p in sorted(output.rglob("*"))
         if p.is_file()
         and not p.name.startswith("ash.log")
         and p.name != RESTORED_MARKER_NAME
+        and p.relative_to(output).as_posix() != OUTPUT_GITIGNORE
     }
 
 

@@ -73,7 +73,7 @@ def test_a_converter_failure_is_inert_in_the_gate_reason():
         failure=f"OSError: cannot read {ESCAPE_RESET} or {REORDERED}"
     )
 
-    ((name, reason),) = incomplete_converters(model)
+    ((name, reason, _),) = incomplete_converters(model)
 
     assert name == "archive"
     assert_inert(reason)
@@ -82,7 +82,7 @@ def test_a_converter_failure_is_inert_in_the_gate_reason():
 def test_more_than_five_failed_inputs_are_named_up_to_five_and_counted():
     names = [f"f{i}.zip" for i in range(7)]
 
-    ((_, reason),) = gate(failed=names)
+    ((_, reason, _),) = gate(failed=names)
 
     assert reason.startswith("could not convert 7 inputs: ")
     assert ", ".join(names[:5]) + " and 2 more" in reason

@@ -90,7 +90,6 @@ from automated_security_helper.utils.sandbox.fs_guard import (
     read_bytes_at_most,
     unlink_beneath,
 )
-from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 from automated_security_helper.models.core import IgnorePathWithReason
 
 
@@ -373,14 +372,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         if self.dependency_unavailable_reason:
             return False
 
-        # Consulted for diagnostic logging only — its return value never gates the
-        # result, because this scanner uses the in-process Python API and not the CLI.
-        cmd = get_uv_tool_command("detect-secrets", fallback_binary="detect-secrets")
-        if cmd is not None:
-            ASH_LOGGER.debug(
-                f"detect-secrets CLI also reachable via {cmd[0]}; "
-                "scanner will continue to use the in-process Python API."
-            )
+        # The scan runs the in-process library (utils/detect_secrets_worker.py), never
+        # the CLI, so there is nothing to ask uv; a probe here started a tool for a log line.
         return True
 
     def _baseline_in_use(self) -> bool:

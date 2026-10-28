@@ -718,6 +718,11 @@ _CLASS_ARGUMENT_SITES = {
         "type(plugin_instance)",
     ): "names the config section a plugin's class reads",
     (
+        "automated_security_helper/core/phases/report_phase.py",
+        "warn_off_host_section_without_enabled",
+        "type(plugin_instance)",
+    ): "names the off-host reporter whose section leaves it off",
+    (
         "automated_security_helper/core/phases/scan_phase.py",
         "self.validation_manager.update_scanner_state",
         "plugin_instance.__class__",

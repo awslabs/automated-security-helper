@@ -2616,9 +2616,13 @@ def _write_lists(
     """
     output_path.mkdir(parents=True, exist_ok=True)
     digests = {}
+    # root=output_path: the pair may be written where no PluginContext registered
+    # the output directory (the command line, a scanner run on its own), and a
+    # link at a list's name is refused there too, never replaced or written
+    # through (fs_guard.open_for_write's root argument names these lists).
     for name, lines in zip(SCAN_START_FILE_NAMES, (ignore_lines, scan_set_lines)):
         data = _list_bytes(lines)
-        write_bytes_atomically(output_path / name, data)
+        write_bytes_atomically(output_path / name, data, root=output_path)
         digests[name] = hashlib.sha256(data).hexdigest()
     if run_id is not None:
         reusable = not any("\n" in line for line in scan_set_lines)
@@ -2637,6 +2641,7 @@ def _write_lists(
                 },
                 indent=2,
             ),
+            root=output_path,
         )
 
 

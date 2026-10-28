@@ -117,7 +117,9 @@ def test_the_code_on_a_processed_container_reaches_the_row(tmp_path):
 
 @pytest.mark.parametrize("missing", [None, True, "7"], ids=["absent", "bool", "str"])
 def test_a_report_without_an_integer_code_leaves_the_default(missing):
-    """Control: no target says what its tool exited with, so the row keeps 0."""
+    """Control: no target says what its tool exited with, so the row carries the
+    metrics' default, None (``ScannerTargetStatusInfo.exit_code``: "None ... when no
+    target recorded one"), never a 0 that reads as a clean exit."""
     row = _row({"source": _report(ScannerStatus.ERROR, missing)})
 
-    assert row.exit_code == 0
+    assert row.exit_code is None

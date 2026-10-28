@@ -2965,8 +2965,7 @@ def get_uv_tool_command(
     The uv branch names ``uv`` bare while the probe ran ``find_uv_or_none``'s copy,
     which prefers the uv installed with ASH over PATH's. A spawn of the bare name
     would look it up on PATH instead, so the two can be different files. No caller
-    spawns this command: the scanners test it for None and detect-secrets logs its
-    first word. A caller that starts it must run the uv the probe ran
+    spawns this command: the scanners test it for None. A caller that starts it must run the uv the probe ran
     (``find_uv_or_none()``), not the name.
     """
     binary = fallback_binary or tool_name
