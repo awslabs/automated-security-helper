@@ -9193,6 +9193,32 @@ def _assert_previous_results_back(output: Path) -> None:
     )
 
 
+def _assert_previous_results_intact(output: Path) -> None:
+    """The previous results of a server that was ended at once are intact, in one of
+    the states the product allows: still held in ``.ash_previous_results``, halfway
+    back in ``.ash_previous_results.restoring`` (a restore renames the held set there
+    and moves the entries back from it), or put back where they were, each entry as
+    the setup wrote it. Which one is a race between the scan unwinding and the exit."""
+    found = {
+        name: (output / name).read_text(encoding="utf-8")
+        if (output / name).is_file()
+        else None
+        for name in _MCP_PREVIOUS_RESULTS
+    }
+    states = []
+    if (output / ".ash_previous_results").is_dir():
+        states.append("held")
+    if (output / ".ash_previous_results.restoring").is_dir():
+        states.append("halfway back")
+    if found == _MCP_PREVIOUS_RESULTS:
+        states.append("put back")
+    assert states, (
+        "the previous results are in none of the states the product allows (held, "
+        f"halfway back, put back): found {found}, the output directory holds "
+        f"{sorted(entry.name for entry in output.iterdir())}"
+    )
+
+
 @pytest.mark.parametrize("stop", ["sigterm", "sighup", "ctrl-c"])
 def test_a_signal_stops_a_stdio_scan_while_the_client_keeps_the_connection_open(
     tmp_path: Path, stop: str
@@ -9589,8 +9615,12 @@ def test_an_http_mcp_server_waits_at_most_5_seconds_for_open_requests_when_it_st
     results back, with its own ``ash.log`` beside them.
 
     With a second Ctrl-C a second after the first, the server must exit with 130
-    within half the wait of it, before the 5 seconds are up. The tool must be gone,
-    and the previous results still held in ``.ash_previous_results``. The next MCP scan
+    within half the wait of it, before the 5 seconds are up. The tool must be gone.
+    The second Ctrl-C does not wait for the scans, and the page says: "previous
+    results a scan had not put back stay in `.ash_previous_results`". A scan that
+    unwound first may have put them back, or be halfway through, so they must be
+    intact in one of three states: still held, halfway back in
+    ``.ash_previous_results.restoring``, or put back where they were. The next MCP scan
     of that directory, over stdio and canceled while its tool runs, must then put
     those results back, as it puts back previous results it found in place.
 
@@ -9675,7 +9705,7 @@ def test_an_http_mcp_server_waits_at_most_5_seconds_for_open_requests_when_it_st
                 "once the wait was over, not at the second"
             )
             assert _gone_soon(pid), "the scan's tool outlived the server"
-            assert held_dir.is_dir(), "the previous results are no longer held"
+            _assert_previous_results_intact(setup.output)
         else:
             if held_open:
                 running_until(
