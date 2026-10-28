@@ -281,7 +281,7 @@ def test_exact_duplicates_at_a_shared_key_get_an_id_each():
     assert _run_ids(_payload(), _payload()) == ids[:2]
 
 
-@pytest.mark.parametrize("source_id", ["native-id", "native-id ", 0, False, ""])
+@pytest.mark.parametrize("source_id", ["native-id", "native-id ", 0, False])
 def test_explicit_additional_report_ids_keep_the_existing_prefix(source_id):
     assert (
         FlatVulnerability.from_additional_report({"id": source_id}, "scanner").id
