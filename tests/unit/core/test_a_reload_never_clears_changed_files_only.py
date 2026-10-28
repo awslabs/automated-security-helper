@@ -32,12 +32,13 @@ import pytest
 from automated_security_helper.core.enums import ExecutionPhase, ExportFormat
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from tests.utils.helpers import results_of_a_scan
 
 
 def _report_over_saved(tmp_path, saved_marker, this_run_marker):
     source = tmp_path / "src"
     source.mkdir()
-    saved = AshAggregatedResults()
+    saved = results_of_a_scan()
     if saved_marker is not None:
         setattr(saved.metadata, "changed_files_only", saved_marker)
     saved_path = tmp_path / "saved.json"
@@ -96,7 +97,7 @@ def test_a_report_over_saved_filtered_results_through_run_ash_scan_keeps_true(
 
     source = tmp_path / "src"
     source.mkdir()
-    saved = AshAggregatedResults()
+    saved = results_of_a_scan()
     setattr(saved.metadata, "changed_files_only", True)
     saved_path = tmp_path / "saved.json"
     saved_path.write_text(saved.model_dump_json(by_alias=True), encoding="utf-8")

@@ -28,6 +28,7 @@ import pytest
 from automated_security_helper.core.enums import ExecutionPhase, ExportFormat
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from tests.utils.helpers import results_of_a_scan
 
 #: Stands for "the saved set does not have this key at all".
 _ABSENT = object()
@@ -45,7 +46,8 @@ def _create(tmp_path, **kwargs):
 
 
 def _saved(tmp_path, *, scan_source=_ABSENT, changed_files_only=_ABSENT):
-    saved = AshAggregatedResults()
+    # Results that hold a scan: --use-existing refuses a set with none.
+    saved = results_of_a_scan()
     if scan_source is not _ABSENT:
         setattr(saved.metadata, "scan_source", scan_source)
     if changed_files_only is not _ABSENT:
