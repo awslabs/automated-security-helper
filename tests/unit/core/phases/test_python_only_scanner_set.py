@@ -41,17 +41,21 @@ AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
 
 #: What each shipped scanner needs. Python-only: a Python package ASH installs with
-#: uv (bandit, checkov, semgrep) or imports (detect-secrets).
-PYTHON_ONLY = {"bandit", "checkov", "detect-secrets", "semgrep"}
+#: uv (bandit, cfn-lint, checkov, semgrep, zizmor) or imports (detect-secrets).
+PYTHON_ONLY = {"bandit", "cfn-lint", "checkov", "detect-secrets", "semgrep", "zizmor"}
 NOT_PYTHON_ONLY = {
+    "actionlint",  # a Go binary
     "cdk-nag",  # Node.js, through jsii
+    "cfn-guard",  # a Rust binary
     "cfn-nag",  # a Ruby gem
     "ferret-scan",  # a Go binary
+    "gitleaks",  # a Go binary
     "grype",
     "npm-audit",  # npm, yarn or pnpm
     "opengrep",
     "snyk-code",  # the Snyk CLI
     "syft",
+    "trivy",  # a Go binary
     "trivy-repo",
 }
 
