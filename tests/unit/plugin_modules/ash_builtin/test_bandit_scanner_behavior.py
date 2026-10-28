@@ -588,8 +588,8 @@ def test_execute_scan_writes_converted_results_to_their_own_directory(scanner):
 def test_global_ignore_paths_reach_the_exclude_argument(scanner):
     """Globally ignored paths are excluded from the bandit invocation.
 
-    Matched as ASH matches them when it drops findings, so the entry is the
-    ignored directory itself, as bandit's walk spells it.
+    The entry is the glob over the ignored directory, anchored at the target as
+    bandit's walk spells it (``bandit_exclude_globs``).
     """
     source = scanner.context.source_dir
     (source / "generated").mkdir()
@@ -607,7 +607,7 @@ def test_global_ignore_paths_reach_the_exclude_argument(scanner):
     exclude = [a for a in final_args if a.startswith("--exclude=")]
     assert len(exclude) == 1, f"expected one --exclude token in argv: {final_args}"
     entries = exclude[0][len("--exclude=") :].split(",")
-    assert f"{source.as_posix()}/generated/" in entries
+    assert f"{source.as_posix()}/generated/*" in entries
     assert not any(entry.endswith("app.py") for entry in entries)
 
 
