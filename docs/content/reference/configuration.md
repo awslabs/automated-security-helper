@@ -58,7 +58,7 @@ A key not listed here is ignored, without an error, when the configuration is lo
 | <a id="project_name"></a>`project_name` | string | from `ASH_PROJECT_NAME`, else `ash-scan` | Name of the project being scanned |
 | <a id="global_settings"></a>`global_settings` | [section](#section-global_settings) | see the section | Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence. |
 | <a id="fail_on_findings"></a>`fail_on_findings` | boolean | `true` | Whether to exit with non-zero code if findings are detected |
-| <a id="fail_on_incomplete_scanners"></a>`fail_on_incomplete_scanners` | boolean | `true` | Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). A SKIPPED scanner, one not selected or one with nothing of its kind to scan, does not trip this by itself, but a run in which every scanner is SKIPPED, such as one where no selected scanner had a file to scan, exits 1 while this is on. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Selects on the scanner's status, so it covers only a failure that reached that status. Defaults to True, so a scanner recorded ERROR or MISSING does not report the exit code of a clean scan. Converters count too: one that crashed, one that could not convert some of its inputs, and one whose tool is missing while it had inputs make the scan exit non-zero the same way. Set it to False, or pass --no-fail-on-incomplete-scanners, to accept a partial scan's exit code; excluding the scanner whose tool is unavailable is usually better, because an excluded scanner is recorded SKIPPED and the report then says what was not measured. |
+| <a id="fail_on_incomplete_scanners"></a>`fail_on_incomplete_scanners` | boolean | `true` | Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). A SKIPPED scanner, one not selected or one with nothing of its kind to scan, does not trip this by itself, but a run in which every scanner is SKIPPED, such as one where no selected scanner had a file to scan, exits 1 while this is on. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Selects on the scanner's status, so it covers only a failure that reached that status. Defaults to True, so a scanner recorded ERROR or MISSING does not report the exit code of a clean scan. Converters count too: one that crashed, one that could not convert some of its inputs, and one whose tool is missing while it had inputs make the scan exit non-zero the same way. Set it to False, or pass --no-fail-on-incomplete-scanners, to accept a partial scan's exit code; excluding the scanner whose tool is unavailable is usually better, because an excluded scanner is recorded SKIPPED and the report then says what was not measured. One ending overrides this setting: a run where ASH could not stop a scanner's tool exits 1 either way, because the tool may still be running and writing into the output directory. |
 | <a id="honor_ignore_files"></a>`honor_ignore_files` | boolean | `true` | Whether the .gitignore and .ignore files in the scanned tree decide which files are left out of ASH's scan set, the file list detect-secrets, cfn-nag, cdk-nag, cfn-lint, cfn-guard, actionlint, zizmor, npm-audit and the converters read. True (the default) leaves out every file they match. False scans those files too; ASH's own exclusions (.git, CDK assets, its own output directory) still apply. An operator setting: a config file inside the scanned tree, or one an MCP client supplied, cannot change it, and its value there is ignored with a warning. Set it in a config file outside the tree, with --config-overrides, or with --no-honor-ignore-files / --honor-ignore-files. Every scan records the outcome in metadata.ignore_file_exclusions. |
 | <a id="sandbox"></a>`sandbox` | [section](#section-sandbox) | see the section | OS-level sandboxing of scanner subprocesses. |
 | <a id="content_db_staleness"></a>`content_db_staleness` | one of `fail`, `warn` | `fail` | What a scan does when a scanner's content database (grype's or trivy's vulnerability database, the offline semgrep/opengrep rulesets) was built longer ago than the bound declared for it in automated_security_helper/utils/content_databases.py. 'fail' (the default) keeps the scanner's findings and exits 1, naming the database, its build time, its age and the bound. 'warn' lets the scan pass and records the same warning in the log and in the reports (summary, SARIF invocation notifications, flat JSON). The CLI flag --allow-stale-content-db sets 'warn' for one scan and takes precedence over this value; --no-allow-stale-content-db sets 'fail'. |
@@ -66,11 +66,12 @@ A key not listed here is ignored, without an error, when the configuration is lo
 | <a id="content_db_staleness_offline_image_default"></a>`content_db_staleness_offline_image_default` | boolean | `true` | Whether an image built with OFFLINE=YES holds trivy-db to 'warn' rather than to content_db_staleness: fail. Such an image carries the trivy database it was built with, and trivy's own bound would fail every scan in it from a day after the build; with this, those scans pass and every report records the stale database. Only trivy-db: grype-db and the offline rulesets keep content_db_staleness. ASH_OFFLINE_AT_BUILD_TIME=YES in ASH's environment, which the image sets from its OFFLINE build argument, turns it on; without that variable this does nothing, whatever it says. Set false to hold trivy-db to content_db_staleness in the image too. A content_db_staleness_overrides entry for trivy-db outranks it, and either form of --allow-stale-content-db sets this to false for that scan. |
 | <a id="ash_plugin_modules"></a>`ash_plugin_modules` | list of string | `[]` | List of Python modules to import containing ASH plugins and/or event subscribers. These are loaded in addition to the default modules. |
 | <a id="external_reports_to_include"></a>`external_reports_to_include` | list of string | `[]` | List of external reports to include in the final report. These can be paths to SARIF or CycloneDX reports produced by other tools. |
-| <a id="build"></a>`build` | [section](#section-build) or null | `null` | Build-time configuration settings. `ash config validate` rejects this key as an internal field, although a scan accepts it. |
+| <a id="build"></a>`build` | [section](#section-build) or null | `null` | Build-time configuration settings. `ash config validate` warns that this key is an internal field, and still passes the config; a scan accepts it. |
 | <a id="converters"></a>`converters` | [section](#section-converters) | see the section | Converter configurations by name. |
 | <a id="scanners"></a>`scanners` | [section](#section-scanners) | see the section | Scanner configurations by name. |
 | <a id="reporters"></a>`reporters` | [section](#section-reporters) | see the section | Reporter configurations by name. |
-| <a id="mcp-resource-management"></a>`mcp-resource-management` | [section](#section-mcp-resource-management) | see the section | Configuration for MCP server resource management and limits. A scan also accepts it as `mcp_resource_management`, which `ash config validate` reports as an unknown top-level field. |
+| <a id="output_formats"></a>`output_formats` | list of one of `aggregated`, `text`, `flat-json`, `yaml`, `csv`, `html`, `dict`, `junitxml`, `markdown`, `sarif`, `asff`, `ocsf`, `cyclonedx`, `spdx`, `custom`, `github-ghas`, `gitlab-sast`, `gitlab-cyclonedx`, `unused-suppressions`, `aws-security-hub`, `bedrock-summary-reporter`, `cloudwatch-logs`, `s3` | `[]` | Reports to write, by reporter name (for example sarif, markdown, github-ghas): a list, one name, or names separated by commas. Narrows the enabled reporters; it does not enable a disabled one. Empty or null writes every enabled reporter. A --output-formats list on the command line replaces this list. |
+| <a id="mcp-resource-management"></a>`mcp-resource-management` | [section](#section-mcp-resource-management) | see the section | Configuration for MCP server resource management and limits. Also accepted as `mcp_resource_management`. |
 | <a id="workspace"></a>`workspace` | [section](#section-workspace) | see the section | Workspace-mode execution settings. Read from the config resolved for the workspace root; a project's own copy of this block is ignored, because how many projects run at once is not a project's decision. |
 | <a id="extends"></a>`extends` | string, list of string, or null | `null` | Base config file(s) this config extends: a path, or a list of paths applied in order, relative to this file. Mappings merge key by key; lists and scalars from this file replace the base's. Paths must stay inside the repository being scanned; URLs are refused. Read when the file is loaded and not written back when a config is saved. |
 | <a id="patch"></a>`patch` | list of mapping of string to any or null | `null` | RFC 6902 JSON-Patch operations (add, remove, replace, test) applied after this file is merged over its bases. Use 'add' at '/global_settings/suppressions/-' to append to a base's list. Read when the file is loaded and not written back when a config is saved. |
@@ -95,14 +96,14 @@ Represents a path exclusion entry.
 
 Each entry in the list has these keys.
 
-A key not listed here is ignored, without an error, when the configuration is loaded.
+A key not listed here is accepted and kept, without validation.
 
 <!-- doctest: options of=global_settings.ignore_paths -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | <a id="global_settings.ignore_paths.path"></a>`path` | string | required | Path or pattern to exclude |
 | <a id="global_settings.ignore_paths.reason"></a>`reason` | string | required | Reason for exclusion |
-| <a id="global_settings.ignore_paths.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD) |
+| <a id="global_settings.ignore_paths.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. |
 | <a id="global_settings.ignore_paths.client_supplied"></a>`client_supplied` | boolean | `false` | Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored. |
 
 ### <a id="section-global_settings-suppressions"></a>`global_settings.suppressions[]`
@@ -111,14 +112,14 @@ Represents a finding suppression rule.
 
 Each entry in the list has these keys.
 
-A key not listed here is ignored, without an error, when the configuration is loaded.
+A key not listed here is accepted and kept, without validation.
 
 <!-- doctest: options of=global_settings.suppressions -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | <a id="global_settings.suppressions.path"></a>`path` | string | required | Path or pattern to exclude |
 | <a id="global_settings.suppressions.reason"></a>`reason` | string | required | Reason for exclusion |
-| <a id="global_settings.suppressions.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD) |
+| <a id="global_settings.suppressions.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. |
 | <a id="global_settings.suppressions.client_supplied"></a>`client_supplied` | boolean | `false` | Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored. |
 | <a id="global_settings.suppressions.rule_id"></a>`rule_id` | string or null | `null` | Rule ID to suppress |
 | <a id="global_settings.suppressions.line_start"></a>`line_start` | integer or null | `null` | (Optional) Starting line number |
@@ -163,7 +164,7 @@ A key not listed here is an error when the configuration is loaded.
 <!-- doctest: options of=sandbox -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| <a id="sandbox.mode"></a>`mode` | one of `off`, `auto`, `bwrap`, `firejail`, `landlock`, `sandbox-exec` | `"off"` | How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. A mode that --sandbox, ASH_CONFIG or the operator's config file sets is a floor: a config file inside a git checkout or the scanned directory cannot turn it off or switch backends. Ignored in container mode, where the container is the boundary. |
+| <a id="sandbox.mode"></a>`mode` | one of `off`, `auto`, `bwrap`, `firejail`, `landlock`, `sandbox-exec` | `"off"` | How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. A mode that --sandbox, ASH_CONFIG or the operator's config file sets is a floor: a config file inside a git checkout or the scanned directory cannot turn it off or switch backends. Not applied in container mode, where the container is the boundary; ASH logs a warning when it is set there. |
 | <a id="sandbox.network_scanners"></a>`network_scanners` | list of string or null | `null` | Scanners allowed a network when the scan is online. Null (the default) uses each scanner's declared need: semgrep, opengrep, grype, trivy, npm-audit and snyk-code fetch rules, databases or audit data. A list replaces those defaults. Under --offline no scanner gets a network. Honored only from --config-overrides or a config file outside every git checkout and the scanned directory; set by any other config file, a list can only remove network. |
 | <a id="sandbox.extra_read_paths"></a>`extra_read_paths` | list of string | `[]` | Additional host paths every sandboxed scanner may read, for example a corporate CA bundle or a shared rule directory. '~' and $VARS expand. Honored only from --config-overrides or a config file outside every git checkout and the scanned directory. |
 | <a id="sandbox.read_path_scanners"></a>`read_path_scanners` | list of string | `[]` | Scanners allowed the extra host paths their own options ask for (a rules file or baseline outside the source tree, for example). Under a sandbox, without this, a scanner whose read paths come from its options gets only the default policy, and ASH does not read a detect-secrets baseline_file outside the source tree. With it, a granted path, that baseline included, is used only when it resolves inside the source tree or an extra_read_paths entry. Honored only from --config-overrides or a config file outside every git checkout and the scanned directory. |
@@ -196,7 +197,7 @@ A key not listed here is an error when the configuration is loaded.
 |-----|------|---------|-------------|
 | <a id="build.build_mode"></a>`build_mode` | one of `ONLINE`, `OFFLINE` | `ONLINE` | Build mode for the container image build. If enabled, also enables offline mode during the scan phase without any explicit directive when scanning. |
 | <a id="build.tool_install_scripts"></a>`tool_install_scripts` | mapping of string to list of string | `{}` | Map of tool names to their installation scripts |
-| <a id="build.custom_scanners"></a>`custom_scanners` | list of mapping | `[]` | Scanner configurations by type |
+| <a id="build.custom_scanners"></a>`custom_scanners` | list of mapping, length at most 0 | `[]` | Not supported: nothing reads these entries, so the list must stay empty. Configure scanners under their own sections. |
 
 ### <a id="section-mcp-resource-management"></a>`mcp-resource-management`
 
@@ -207,23 +208,23 @@ A key not listed here is an error when the configuration is loaded.
 <!-- doctest: options of=mcp-resource-management -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| <a id="mcp-resource-management.max_concurrent_scans"></a>`max_concurrent_scans` | integer, at least 1, at most 10 | `3` | Maximum number of concurrent scans allowed |
+| <a id="mcp-resource-management.max_concurrent_scans"></a>`max_concurrent_scans` | integer or null, at least 0, at most 100 | `3` | Maximum number of scans the MCP server runs at once, across every session; a scan started beyond it is refused. A workspace scan counts as one scan, however many projects it has. 0 or null for no limit. Read from the operator's ASH_CONFIG only. |
 | <a id="mcp-resource-management.max_concurrent_scans_per_session"></a>`max_concurrent_scans_per_session` | integer, at least 0, at most 100 | `2` | Maximum number of scans one session of a network transport (streamable-http, sse) may run at once; 0 for no per-session limit. A run_ash_workspace_scan counts once. Read from the operator's config (ASH_CONFIG) only, never from a scanned or delivered one. stdio's single session is not limited. |
-| <a id="mcp-resource-management.max_concurrent_tasks"></a>`max_concurrent_tasks` | integer, at least 1, at most 50 | `20` | Maximum number of concurrent async tasks allowed |
-| <a id="mcp-resource-management.thread_pool_max_workers"></a>`thread_pool_max_workers` | integer, at least 1, at most 20 | `4` | Maximum number of worker threads in the shared thread pool |
-| <a id="mcp-resource-management.scan_timeout_seconds"></a>`scan_timeout_seconds` | integer, at least 60, at most 7,200 | `1800` | Maximum time allowed for a single scan operation in seconds |
-| <a id="mcp-resource-management.operation_timeout_seconds"></a>`operation_timeout_seconds` | integer, at least 30, at most 600 | `180` | Default timeout for general operations in seconds |
-| <a id="mcp-resource-management.shutdown_timeout_seconds"></a>`shutdown_timeout_seconds` | integer, at least 5, at most 300 | `30` | Maximum time to wait for graceful shutdown in seconds |
-| <a id="mcp-resource-management.memory_warning_threshold_mb"></a>`memory_warning_threshold_mb` | integer, at least 100, at most 8,192 | `1024` | Memory usage threshold in MB that triggers warnings |
-| <a id="mcp-resource-management.memory_critical_threshold_mb"></a>`memory_critical_threshold_mb` | integer, at least 200, at most 16,384 | `2048` | Memory usage threshold in MB that triggers protective actions |
-| <a id="mcp-resource-management.task_count_warning_threshold"></a>`task_count_warning_threshold` | integer, at least 5, at most 100 | `15` | Active task count that triggers warnings |
-| <a id="mcp-resource-management.max_message_size_bytes"></a>`max_message_size_bytes` | integer, at least 1,024, at most 104,857,600 | `10485760` | Maximum size of MCP messages in bytes |
-| <a id="mcp-resource-management.max_path_length"></a>`max_path_length` | integer, at least 256, at most 8,192 | `4096` | Maximum allowed path length for security validation |
-| <a id="mcp-resource-management.max_directory_size_mb"></a>`max_directory_size_mb` | integer, at least 10, at most 10,240 | `1000` | Maximum directory size in MB that can be scanned |
-| <a id="mcp-resource-management.enable_health_checks"></a>`enable_health_checks` | boolean | `true` | Enable periodic health checks and resource monitoring |
-| <a id="mcp-resource-management.health_check_interval_seconds"></a>`health_check_interval_seconds` | integer, at least 10, at most 300 | `60` | Interval between health checks in seconds |
-| <a id="mcp-resource-management.enable_resource_logging"></a>`enable_resource_logging` | boolean | `true` | Enable detailed resource management logging |
-| <a id="mcp-resource-management.log_resource_operations"></a>`log_resource_operations` | boolean | `false` | Log individual resource operations for debugging |
+| <a id="mcp-resource-management.max_concurrent_tasks"></a>`max_concurrent_tasks` | integer, at least 1, at most 50 | `20` | Not enforced: nothing reads this setting. Maximum number of concurrent async tasks allowed |
+| <a id="mcp-resource-management.thread_pool_max_workers"></a>`thread_pool_max_workers` | integer, at least 1, at most 20 | `4` | Not enforced: nothing reads this setting. Maximum number of worker threads in the shared thread pool |
+| <a id="mcp-resource-management.scan_timeout_seconds"></a>`scan_timeout_seconds` | integer or null, at least 0, at most 86,400 | `1800` | Longest a single MCP scan may run, in seconds, counted from when it starts running (after any wait for another scan of its session); a scan still running then is stopped and reported as failed. For a workspace scan it covers the whole workspace, and every project is stopped and reported as failed. 60 to 86400, or 0 or null for no limit. Read from the operator's ASH_CONFIG only. |
+| <a id="mcp-resource-management.operation_timeout_seconds"></a>`operation_timeout_seconds` | integer, at least 30, at most 600 | `180` | Not enforced: nothing reads this setting. Default timeout for general operations in seconds |
+| <a id="mcp-resource-management.shutdown_timeout_seconds"></a>`shutdown_timeout_seconds` | integer, at least 5, at most 300 | `30` | Not enforced: nothing reads this setting. Maximum time to wait for graceful shutdown in seconds |
+| <a id="mcp-resource-management.memory_warning_threshold_mb"></a>`memory_warning_threshold_mb` | integer, at least 100, at most 8,192 | `1024` | Not enforced: nothing reads this setting. Memory usage threshold in MB that triggers warnings |
+| <a id="mcp-resource-management.memory_critical_threshold_mb"></a>`memory_critical_threshold_mb` | integer, at least 200, at most 16,384 | `2048` | Not enforced: nothing reads this setting. Memory usage threshold in MB that triggers protective actions |
+| <a id="mcp-resource-management.task_count_warning_threshold"></a>`task_count_warning_threshold` | integer, at least 5, at most 100 | `15` | Not enforced: nothing reads this setting. Active task count that triggers warnings |
+| <a id="mcp-resource-management.max_message_size_bytes"></a>`max_message_size_bytes` | integer, at least 1,024, at most 104,857,600 | `10485760` | Not enforced: nothing reads this setting. Maximum size of MCP messages in bytes |
+| <a id="mcp-resource-management.max_path_length"></a>`max_path_length` | integer, at least 256, at most 8,192 | `4096` | Not enforced: nothing reads this setting. Maximum allowed path length for security validation |
+| <a id="mcp-resource-management.max_directory_size_mb"></a>`max_directory_size_mb` | integer, at least 10, at most 10,240 | `1000` | Not enforced: nothing reads this setting. Maximum directory size in MB that can be scanned |
+| <a id="mcp-resource-management.enable_health_checks"></a>`enable_health_checks` | boolean | `true` | Not enforced: nothing reads this setting. Enable periodic health checks and resource monitoring |
+| <a id="mcp-resource-management.health_check_interval_seconds"></a>`health_check_interval_seconds` | integer, at least 10, at most 300 | `60` | Not enforced: nothing reads this setting. Interval between health checks in seconds |
+| <a id="mcp-resource-management.enable_resource_logging"></a>`enable_resource_logging` | boolean | `true` | Not enforced: nothing reads this setting. Enable detailed resource management logging |
+| <a id="mcp-resource-management.log_resource_operations"></a>`log_resource_operations` | boolean | `false` | Not enforced: nothing reads this setting. Log individual resource operations for debugging |
 
 ### <a id="section-workspace"></a>`workspace`
 
@@ -244,7 +245,7 @@ A key not listed here is an error when the configuration is loaded.
 <!-- doctest: options of=scanners.* -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `name` | string, length at least 1, matches `^[a-zA-Z][\w-]+$` | the plugin's own name | Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter. `ash config validate` rejects it in a scanner, reporter, or converter entry as internal-only, although a scan accepts it. |
+| `name` | string, length at least 1, matches `^[a-zA-Z][\w-]+$` | the plugin's own name | Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter. `ash config validate` warns that it is internal-only in a scanner, reporter, or converter entry, and still passes the config; a scan accepts it. |
 | `enabled` | boolean | `true` | Whether the component is enabled |
 | `options` | mapping | the plugin's defaults | The plugin's options. Each plugin's are listed on its reference page: [scanners](scanners.md), [reporters](reporters.md), [converters](converters.md). |
 
@@ -343,14 +344,14 @@ Represents a finding suppression rule.
 
 Each entry in the list has these keys.
 
-A key not listed here is ignored, without an error, when the configuration is loaded.
+A key not listed here is accepted and kept, without validation.
 
 <!-- doctest: options of=workspace-policy.workspace.suppressions -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | <a id="workspace-policy.workspace.suppressions.path"></a>`path` | string | required | Path or pattern to exclude |
 | <a id="workspace-policy.workspace.suppressions.reason"></a>`reason` | string | required | Reason for exclusion |
-| <a id="workspace-policy.workspace.suppressions.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD) |
+| <a id="workspace-policy.workspace.suppressions.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. |
 | <a id="workspace-policy.workspace.suppressions.client_supplied"></a>`client_supplied` | boolean | `false` | Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored. |
 | <a id="workspace-policy.workspace.suppressions.rule_id"></a>`rule_id` | string or null | `null` | Rule ID to suppress |
 | <a id="workspace-policy.workspace.suppressions.line_start"></a>`line_start` | integer or null | `null` | (Optional) Starting line number |
@@ -366,12 +367,12 @@ Represents a path exclusion entry.
 
 Each entry in the list has these keys.
 
-A key not listed here is ignored, without an error, when the configuration is loaded.
+A key not listed here is accepted and kept, without validation.
 
 <!-- doctest: options of=workspace-policy.workspace.ignore_paths -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | <a id="workspace-policy.workspace.ignore_paths.path"></a>`path` | string | required | Path or pattern to exclude |
 | <a id="workspace-policy.workspace.ignore_paths.reason"></a>`reason` | string | required | Reason for exclusion |
-| <a id="workspace-policy.workspace.ignore_paths.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD) |
+| <a id="workspace-policy.workspace.ignore_paths.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. |
 | <a id="workspace-policy.workspace.ignore_paths.client_supplied"></a>`client_supplied` | boolean | `false` | Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored. |

@@ -84,7 +84,7 @@ Formats results as a flattened JSON array of findings.
 - File extension: `.flat.json`
 - Runs with `--python-only`: yes
 
-Options, under `reporters.flat-json.options`. A key not listed here is accepted and kept, without validation.
+Options, under `reporters.flat-json.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=reporters.flat-json -->
 | Option | Type | Default | Description |
@@ -103,7 +103,7 @@ Produces a SARIF report optimized for GitHub Advanced Security Code Scanning.
 - File extension: `.ghas.sarif`
 - Runs with `--python-only`: yes
 
-Options, under `reporters.github-ghas.options`. A key not listed here is accepted and kept, without validation.
+Options, under `reporters.github-ghas.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=reporters.github-ghas -->
 | Option | Type | Default | Description |
@@ -120,7 +120,7 @@ Enriches CycloneDX SBOM with GitLab dependency scanning properties.
 - File extension: `.gl-dependency-scanning-report.cdx.json`
 - Runs with `--python-only`: yes
 
-Options, under `reporters.gitlab-cyclonedx.options`. A key not listed here is accepted and kept, without validation.
+Options, under `reporters.gitlab-cyclonedx.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=reporters.gitlab-cyclonedx -->
 | Option | Type | Default | Description |
@@ -140,7 +140,7 @@ Formats vulnerability findings report as GitLab SAST format.
 - File extension: `.gl-sast-report.json`
 - Runs with `--python-only`: yes
 
-Options, under `reporters.gitlab-sast.options`. A key not listed here is accepted and kept, without validation.
+Options, under `reporters.gitlab-sast.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=reporters.gitlab-sast -->
 | Option | Type | Default | Description |
@@ -169,7 +169,7 @@ Formats results as JUnitXML.
 - File extension: `.junit.xml`
 - Runs with `--python-only`: yes
 
-Options, under `reporters.junitxml.options`. A key not listed here is accepted and kept, without validation.
+Options, under `reporters.junitxml.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=reporters.junitxml -->
 | Option | Type | Default | Description |
@@ -178,7 +178,7 @@ Options, under `reporters.junitxml.options`. A key not listed here is accepted a
 
 ## `markdown`
 
-Formats results as a human-readable Markdown document.
+A triage-first report shared by files, CI summaries, and GitHub comments.
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.reporters.markdown_reporter.MarkdownReporter`
 - Provided by: built in, loaded on every scan
@@ -186,13 +186,13 @@ Formats results as a human-readable Markdown document.
 - File extension: `.summary.md`
 - Runs with `--python-only`: yes
 
-Options, under `reporters.markdown.options`. A key not listed here is accepted and kept, without validation.
+Options, under `reporters.markdown.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=reporters.markdown -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="reporters.markdown.options.include_summary"></a>`include_summary` | boolean | `true` | No description in the code. |
-| <a id="reporters.markdown.options.include_findings_table"></a>`include_findings_table` | boolean | `false` | No description in the code. The comment on its line in the code: This can be lengthy, default to False. |
+| <a id="reporters.markdown.options.include_findings_table"></a>`include_findings_table` | boolean | `false` | No description in the code. |
 | <a id="reporters.markdown.options.include_detailed_findings"></a>`include_detailed_findings` | boolean | `true` | No description in the code. |
 | <a id="reporters.markdown.options.max_detailed_findings"></a>`max_detailed_findings` | integer | `20` | No description in the code. |
 | <a id="reporters.markdown.options.top_hotspots_limit"></a>`top_hotspots_limit` | integer | `10` | No description in the code. |
@@ -245,7 +245,7 @@ Formats results as a human-readable plain text document.
 - File extension: `.summary.txt`
 - Runs with `--python-only`: yes
 
-Options, under `reporters.text.options`. A key not listed here is accepted and kept, without validation.
+Options, under `reporters.text.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=reporters.text -->
 | Option | Type | Default | Description |
@@ -267,7 +267,7 @@ Identifies and reports suppressions that were not applied to any findings.
 - Runs with `--python-only`: yes
 - Also writes, with the default options: `reports/ash.unused-suppressions.md`
 
-Options, under `reporters.unused-suppressions.options`. A key not listed here is accepted and kept, without validation.
+Options, under `reporters.unused-suppressions.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=reporters.unused-suppressions -->
 | Option | Type | Default | Description |
@@ -296,14 +296,19 @@ Sends security findings to AWS Security Hub in ASFF format.
 - File extension: `.aws-security-hub.asff.json`
 - Runs with `--python-only`: yes
 
-Options, under `reporters.aws-security-hub.options`. A key not listed here is accepted and kept, without validation.
+Options, under `reporters.aws-security-hub.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=reporters.aws-security-hub -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="reporters.aws-security-hub.options.aws_region"></a>`aws_region` | string or null | from `AWS_REGION`, else from `AWS_DEFAULT_REGION`, else `null` | AWS Region for Security Hub integration |
 | <a id="reporters.aws-security-hub.options.aws_profile"></a>`aws_profile` | string or null | from `AWS_PROFILE`, else `null` | AWS Profile to use for authentication |
-| <a id="reporters.aws-security-hub.options.account_id"></a>`account_id` | string or null | `null` | AWS Account ID (will be auto-detected if not provided) |
+| <a id="reporters.aws-security-hub.options.account_id"></a>`account_id` | string or null | `null` | AWS account ID the findings are imported into. Looked up from the credentials if not set; when set, it must be the credentials' account, because Security Hub accepts findings sent with the account's default product ARN only from the account they name |
+| <a id="reporters.aws-security-hub.options.max_retries"></a>`max_retries` | integer, at most 10 | `3` | Maximum number of retries for a throttled or failed BatchImportFindings request |
+| <a id="reporters.aws-security-hub.options.base_delay"></a>`base_delay` | number, at most 60 | `1.0` | Base delay in seconds between retry attempts |
+| <a id="reporters.aws-security-hub.options.max_delay"></a>`max_delay` | number, at most 60 | `60.0` | Maximum delay in seconds between retry attempts |
+| <a id="reporters.aws-security-hub.options.findings_scope"></a>`findings_scope` | string or null, length at most 1,024 | `null` | Name of the findings this scan owns in Security Hub, unique among the repositories that import into the same account and Region: finding Ids are derived from it, and archiving touches only the findings recorded with it. Required; project_name is not used. Set it only in the operator's configuration (--config-overrides, or a config file outside the scanned tree), because it decides which findings a scan updates and archives |
+| <a id="reporters.aws-security-hub.options.archive_resolved_findings"></a>`archive_resolved_findings` | boolean | `false` | Archive findings an earlier scan of the same scope imported that this scan no longer reports, for the scanners that lost no target. Off by default: a finding a scan did not report is not always fixed. Needs securityhub:GetFindings, which is also used to keep each existing finding's CreatedAt. Set it only in the operator's configuration |
 
 ## `bedrock-summary-reporter`
 
@@ -315,7 +320,7 @@ Generates a summary of security findings using Amazon Bedrock.
 - File extension: `.bedrock.summary.md`
 - Runs with `--python-only`: yes
 
-Options, under `reporters.bedrock-summary-reporter.options`. A key not listed here is accepted and kept, without validation.
+Options, under `reporters.bedrock-summary-reporter.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=reporters.bedrock-summary-reporter -->
 | Option | Type | Default | Description |
@@ -334,7 +339,7 @@ Options, under `reporters.bedrock-summary-reporter.options`. A key not listed he
 | <a id="reporters.bedrock-summary-reporter.options.enable_caching"></a>`enable_caching` | boolean | `true` | Whether to cache Bedrock responses to avoid duplicate API calls. |
 | <a id="reporters.bedrock-summary-reporter.options.output_markdown"></a>`output_markdown` | boolean | `true` | Whether to output the report as a markdown file. |
 | <a id="reporters.bedrock-summary-reporter.options.output_file"></a>`output_file` | string | `ash.bedrock.summary.md` | Filename for the main output markdown report, a file name in the reports directory. |
-| <a id="reporters.bedrock-summary-reporter.options.max_retries"></a>`max_retries` | integer, at most 10 | `3` | Maximum number of retries for Bedrock API calls. |
+| <a id="reporters.bedrock-summary-reporter.options.max_retries"></a>`max_retries` | integer or null, at most 10 | `null` | Maximum number of retries for Bedrock API calls. Unset, a model call is retried 3 times and a model listing makes 3 attempts. |
 | <a id="reporters.bedrock-summary-reporter.options.base_delay"></a>`base_delay` | number, at most 60 | `1.0` | Base delay in seconds between retries (will be increased exponentially). |
 | <a id="reporters.bedrock-summary-reporter.options.max_delay"></a>`max_delay` | number, at most 60 | `60.0` | Maximum delay in seconds between retries. |
 | <a id="reporters.bedrock-summary-reporter.options.enable_fallback_models"></a>`enable_fallback_models` | boolean | `true` | Whether to try fallback models if the primary model fails. |
@@ -363,7 +368,7 @@ Formats results and publishes to CloudWatch Logs.
 - File extension: `.cwlog.json`
 - Runs with `--python-only`: yes
 
-Options, under `reporters.cloudwatch-logs.options`. A key not listed here is accepted and kept, without validation.
+Options, under `reporters.cloudwatch-logs.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=reporters.cloudwatch-logs -->
 | Option | Type | Default | Description |
@@ -385,7 +390,7 @@ Formats results and uploads to an S3 bucket.
 - File extension: `.s3.json`
 - Runs with `--python-only`: yes
 
-Options, under `reporters.s3.options`. A key not listed here is accepted and kept, without validation.
+Options, under `reporters.s3.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=reporters.s3 -->
 | Option | Type | Default | Description |

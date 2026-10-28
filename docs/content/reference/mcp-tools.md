@@ -19,7 +19,7 @@ Starts a scan in the server process and returns a `scan_id` at once. The scan st
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `source_dir` | string \| null | not set | Absolute path to scan. When not set: the tree this session delivered with `set_source_git` or `set_source_zip_finalize`. With none delivered, a call with no session id (stdio) scans the server's working directory, and a call with a session id is refused |
-| `severity_threshold` | string | `"MEDIUM"` | The least severe finding that counts as actionable: `ALL`, `LOW`, `MEDIUM`, `HIGH`, or `CRITICAL`, in any case. It can make the config's `global_settings.severity_threshold` stricter for this scan, never looser: the scan runs at the stricter of the two, so `LOW` over a configured `MEDIUM` applies and `CRITICAL` does not. It tightens a scanner's own `severity_threshold` option the same way, and a scanner without one follows the tightened global threshold. The threshold decides which findings are actionable and whether a scanner reports FAILED. When not set: the config's threshold |
+| `severity_threshold` | string \| null | not set | Least severe finding that counts as actionable, any case; it can make the config's `global_settings.severity_threshold` stricter for this scan, never looser |
 | `config_path` | string \| null | not set | Custom config path. When not set: the profile this session bound with `select_profile`, else the config ASH discovers in the source directory, else the file `ASH_CONFIG` names in the server's environment, else the built-in defaults |
 | `clean_output` | boolean | `true` | Set the previous scan's results in the output directory aside as soon as the scan is registered; with `false`, the scan's own set-up does it a moment later. Either way they are deleted once the scan has results of its own, and put back if it fails or is canceled. A refused call leaves the previous results as they were |
 
@@ -45,11 +45,19 @@ Returns:
 
 The `directory_path` field tells you the resolved absolute path the server is scanning — derive `output_dir` for `get_scan_results` from this value (`<directory_path>/.ash/ash_output`) rather than constructing it independently.
 
-Poll `get_scan_progress` until `is_complete` is `true`, as the `important.next_steps` array says, then read `status`. (See `get_scan_progress` below.)
+Poll `get_scan_progress` until `is_complete` is `true`, then read `status`. `is_complete` is `true` for every ending, including `failed` and `cancelled`. (See `get_scan_progress` below.)
 
-A scan beyond the operator's `max_concurrent_scans` is refused with `error_type` `scan_start_failure` and an `error` that names the limit; start it again once a scan finishes or is canceled. A scan of a directory whose canceled scan is still stopping is refused the same way; retry once it has stopped. A scan still running after the operator's `scan_timeout_seconds` is stopped as `cancel_scan` stops one, and ends `failed` with an `error_message` that names the limit.
+A refused config keeps its own `error_type`. The scan does not start, and the response is `success: false` with one of these `error_type` values and the reason in `error`:
 
-On failure, `error_type` is one of `config_check_failed`, `config_env_not_resolved`, `config_field_denied`, `config_input_not_permitted`, `config_policy_unreadable`, `delivered_source_missing`, `invalid_session_id`, `no_source_delivered`, `output_dir_not_permitted`, `scan_start_failure`, `scan_target_not_permitted`, `session_identity_required`, `session_scan_limit`, `session_source_mismatch` and `source_delivery_busy`, or the class name of an exception.
+- `config_input_not_permitted`: `config_path`, or a base its `extends` chain names, is outside the directories this session may read a config from.
+- `config_check_failed`: the check of the config sources in the scan target could not finish (an unreadable entry, a link loop), so the scan was not started. The config was not found to be outside the permitted roots -- that case is `config_input_not_permitted` -- so check the config files in the target for unreadable entries and link loops.
+- `config_field_denied`: a config file an MCP client delivered or named sets a field the session's runtime-override policy denies. `error` names each field and why.
+- `config_policy_unreadable`: that policy cannot be established, for example because the profile the session bound is no longer registered. `error` starts with `A config an MCP client delivered cannot be checked:`.
+- `config_env_not_resolved`: a file of the config uses an `!ENV` tag, or a plain value that starts with a `${VAR}` or `${VAR:default}` reference, where none is resolved. For a remote caller that is any file the operator did not set aside (outside the directories `ASH_MCP_ALLOWED_CONFIG_ROOTS` names, other than the profile files the server writes in the calling session's `config/` directory), the scan target's own config included, and every base such a file extends; for a stdio caller, a file a client delivered. The server's own config, the file `ASH_CONFIG` names outside the MCP workspace root and each registered profile, is not refused. `error` names the file and the line or key.
+
+The target and source checks have their own `error_type` values too (`scan_target_not_permitted`, `output_dir_not_permitted`, `no_source_delivered`, `session_source_mismatch`, `delivered_source_missing`, `invalid_session_id`). A directory that already has a scan is refused with `error_type: MCPResourceError` and `error_category: resource_exhausted`; `error` says the directory `already has an active scan`, or, for a scan that was cancelled or stopped at its timeout and has not finished stopping, `has a scan that is still stopping`. That `error_type` is the exception's class name, and an unexpected error while the scan is being started arrives as `MCPResourceError` too, with `error_category: unexpected_error`, so `MCPResourceError` alone does not prove a deliberate refusal: branch on `error_category`. The server's `max_concurrent_scans` limit is refused the same way (`resource_exhausted`); its `context` holds `max_concurrent_scans`: wait for a running scan to finish, then retry. The busy-directory refusal's `context` names the running scan's `scan_id` only when the scan is this session's: poll `get_scan_progress` with it, or `cancel_scan` it if it is no longer needed (`list_active_scans` lists this session's scans). Without a `scan_id`, another session's scan holds the directory and the server does not name it: wait and retry, or scan another directory. After a `cancel_scan` of that directory the refusal repeats until the scan has stopped (see `cancel_scan`): retry after a few seconds. Any other reason the scan could not be started returns `error_type: scan_start_failure`, and an unexpected error returns the exception's class name. Branch on `error_type` and `error_category`, never on the text of `error`.
+
+On failure, `error_type` is one of `committed_output_files`, `config_env_not_resolved`, `config_field_denied`, `config_input_not_permitted`, `config_policy_unreadable`, `delivered_source_missing`, `invalid_session_id`, `no_source_delivered`, `output_dir_not_permitted`, `output_dir_not_usable`, `scan_start_failure`, `scan_target_not_permitted`, `session_identity_required`, `session_scan_limit`, `session_source_mismatch`, `source_delivery_busy` and `source_dir_not_usable`, or the class name of an exception.
 
 ## get_scan_progress
 
@@ -71,21 +79,25 @@ Returns:
   "start_time": "<iso8601>",
   "end_time": "<iso8601 | null>",
   "status": "pending | running | completed | incomplete | failed | cancelled",
-  "severity_threshold": "<the threshold the scan was judged by once it is completed or incomplete; null before that, and for a failed or cancelled scan>",
+  "severity_threshold": "<the threshold the scan was judged by; null until it finishes when none was named>",
   "config_path": "<path | null>",
   "warnings": [...],
   "error_message": "<str | null>",
   "is_complete": bool,
+  "results_available": bool,
+  "output_holds_previous_results": bool,
   "coverage_complete": "bool | null",
   "incomplete_scanners": [
     { "scanner": "grype", "status": "MISSING", "reason": "missing_dependencies", "detail": "MISSING" }
   ],
   "no_scanner_ran": bool,
-  "incomplete_converters": [{ "converter": "...", "reason": "..." }],
+  "incomplete_converters": [{ "converter": "...", "reason": "...", "failed_input_kinds": ["..."] }],
   "unevaluated_rules": ["..."],
   "stale_content_databases": [{ "name": "grype-db", "scanner": "grype", "built": "<iso8601 | null>", "age": "...", "max_age": "...", "refresh": "..." }],
   "completed_scanners": int,
+  "finished_scanners": int,
   "total_scanners": int,
+  "scanner_status_counts": { "passed": int, "failed": int, "skipped": int, "running": int, "pending": int },
   "total_findings": int,
   "severity_counts": { "critical": int, "high": int, "medium": int, "low": int, "info": int, "suppressed": int },
   "scanners": {
@@ -96,13 +108,15 @@ Returns:
 }
 ```
 
-There is no overall percentage field. To compute progress, use `completed_scanners / total_scanners`: `completed_scanners` counts only the scanners whose progress status is completed, so it can stay below `total_scanners` when the scan ends with a scanner that failed or was skipped. Guard against `total_scanners == 0` during the pre-flight phase (before any scanner has registered). Show "initializing" or 0% when `total_scanners` is zero.
+There is no overall percentage field. To compute progress, use `finished_scanners / total_scanners`: `finished_scanners` counts every scanner that has ended, whatever its status, and `completed_scanners` only the ones that PASSED. `scanner_status_counts` splits them into `passed`, `failed` (FAILED or ERROR), `skipped` (MISSING or SKIPPED), `running`, and `pending`. Guard against `total_scanners == 0` during the pre-flight phase (before any scanner has registered). Show "initializing" or 0% when `total_scanners` is zero.
 
 There is no top-level `duration` field; derive elapsed time from `start_time` and `end_time` (or from current time while running).
 
-`is_complete` is `true` for `completed` and `incomplete`, the scans whose results `get_scan_results` can read. Poll until it is `true`, then read `status`.
+`is_complete` is `true` once the scan has ended, whatever the ending: `completed`, `incomplete`, `failed` or `cancelled`. It is decided by the scan's state alone, never by a results file on disk, which can be a previous scan's. `results_available` is `true` for `completed` and `incomplete`, the scans whose results `get_scan_results` can read.
 
-`incomplete` is terminal, with partial coverage. The run finished and its results are readable, but a selected scanner was `MISSING` or `ERROR` (or lost targets), no scanner reached a verdict, a converter did not run, a rule could not be evaluated, or a content database was past its declared age bound. `incomplete_scanners` names each scanner and why, and `stale_content_databases` each stale database. The findings are real but partial, so read them, and do not report the target as clean. `failed` means the run crashed, left no readable results, or ran past the server's `scan_timeout_seconds`. `coverage_complete` is `null` while running and for `failed` or `cancelled`; with `fail_on_incomplete_scanners: false` a scan is `completed` with `coverage_complete: false` when scanners did not run.
+A failed or cancelled scan leaves the previous scan's results in place. ASH puts them back in `output_directory`, and `output_holds_previous_results` is then `true` and the scanner fields are empty, because those files are not this scan's. `get_scan_results` on that directory reads the previous scan's results.
+
+`incomplete` is terminal, with partial coverage. The run finished and its results are readable, but a selected scanner was `MISSING` or `ERROR` (or lost targets), no scanner reached a verdict, a converter did not run or could not convert some of its inputs, a rule could not be evaluated, or a content database was past its declared age bound. `incomplete_scanners` names each scanner and why, and `stale_content_databases` each stale database. The findings are real but partial, so read them, and do not report the target as clean. `failed` means the run crashed, left no readable results, or ran past the server's `scan_timeout_seconds`. `coverage_complete` is `null` while running and for `failed` or `cancelled`; with `fail_on_incomplete_scanners: false` a scan is `completed` with `coverage_complete: false` when scanners did not run.
 
 Status enum: the documented values are `pending | running | completed | incomplete | failed | cancelled`. The registry uses `pending` briefly while a scan is queued, transitions to `running` once execution begins, and may also expose the legacy `in_progress` string from older `ScanProgress` instances. Treat `pending`, `running`, and `in_progress` as equivalent "not done yet" states.
 
@@ -119,7 +133,7 @@ Fetch finalized results with filtering. Run only after `get_scan_progress` repor
 | `filter_level` | string | `"full"` | `full`, `summary`, `minimal` |
 | `scanners` | string | not set | Comma-separated subset; not set means every scanner |
 | `severities` | string | not set | Comma-separated subset of `critical,high,medium,low,info,suppressed`; not set means every severity |
-| `actionable_only` | boolean | `false` | `true` to add `findings` and `findings_count` to a `full` response: one entry for each unsuppressed finding at or above the severity threshold its scanner was judged by, the findings that give an `ash` scan exit code 2. Findings below it are left out. Each entry has `rule_id`, `severity`, `message`, `scanner`, `file_path`, `line_start`, and `line_end`. The list honors `scanners` and `severities`, and a `summary` or `minimal` response has none. It also sets the suppressed counts to zero and `summary_stats.total` to the actionable count |
+| `actionable_only` | boolean | `false` | Keep only the actionable findings, the ones behind exit code 2: unsuppressed and at or above the severity threshold the scan was judged by (a scanner's own where its config sets one). Drop the rest and add `findings`, a flat list of them that honors `scanners` and `severities` (`full` level only) |
 
 With `filter_level` `full`, `raw_results` is the aggregated results document without its `sarif`, `cyclonedx`, and `ash_config` sections; `summary` returns the metadata and the counts by severity and by scanner, and `minimal` the status. Individual findings are in the report files: `get_scan_result_paths` lists them, and the `flat-json` reporter, which is enabled by default, writes `reports/ash.flat.json` under `output_dir`.
 
@@ -163,30 +177,34 @@ On failure, `error_type` is one of `invalid_session_id` and `session_identity_re
 
 ## cancel_scan
 
-Stops a running scan. The scanner tool running at the time is stopped with every process it started (SIGTERM, then SIGKILL after 10 seconds). The scan halts at its next cancel check, and no further scanner, phase, or reporter starts, so a scan canceled before its report phase writes no reports. Work that is not waiting on a child process, such as a scanner parsing its tool's output, can still finish and write under `scanners/` or `converted/`, but `ash_aggregated_results.json` is not written after the cancel. When the output directory held a previous scan's results, they are put back in place of every result the canceled scan wrote; its log, `ash.log`, stays, and an `ash.log.jsonl` already there is left as it was. With no previous results, what the scan wrote before it stopped stays, except that a cancel during the report phase removes the reports that phase wrote. `reports/ash.unused-suppressions.md`, which its reporter writes on its own, stays even then.
+Stop a running scan. The scanner running at the time is stopped, no further scanner starts, and no reports or results file are written after the cancel.
 
 <!-- doctest: options of=mcp.cancel_scan -->
 | Param | Type | Notes |
 |-------|------|-------|
-| `scan_id` | string | The scan to cancel |
+| `scan_id` | string | The scan to stop |
 
-Returns `success`, `status`, and `message`. The status is `cancelled` at once. A running scan stops within about 10 seconds; one still waiting for another scan of its session stops when that scan ends. Until it has stopped, `run_ash_scan` refuses another scan of the same directory as still stopping, and the scan counts against `max_concurrent_scans`. A scan that has already ended is not changed, and the response has `success: false` and the scan's status. For a `run_ash_workspace_scan`, `cancel_scan` takes one project's scan id and stops that project, which ends `failed`; the other projects carry on.
+Returns `success: true` and `status: cancelled`. A scan that already finished cannot be cancelled: `success` is `false` and `status` is the status it finished with.
+
+The status is `cancelled` at once, while the scan takes up to about 10 seconds to stop and put the previous results back. Until then a new `run_ash_scan` of the same directory is refused as still stopping, with `error_type: MCPResourceError` and `error_category: resource_exhausted` (see `run_ash_scan`); retry after a few seconds.
 
 On failure, `error_type` is one of `invalid_session_id` and `session_identity_required`, or the class name of an exception.
 
 ## check_installation
 
-Reports whether ASH can scan: its version and, for each built-in scanner, whether its tool can run. Enabled means enabled in ASH's defaults: the call reads no project's config and checks no plugin scanner. It runs each scanner's dependency check, which can start the tool, so it takes several seconds, and it installs and downloads nothing. The tool of a scanner that ASH installs with uv is installed when `uv tool list` lists it, when its executable is on `PATH` or in a directory ASH also searches, such as `~/.ash/bin`, or when uv can run it from its cache. A scanner whose tool is not, when the server is online and has uv, is listed in `installs_on_first_scan`, because the first scan installs it with uv, which needs network access. Offline, or without uv, it is listed in `missing_dependencies`. Offline, semgrep is also missing when it has no rules cache.
+Report whether ASH can scan: its version, and for each built-in scanner whether its tool is available. Run before the first scan in a session if you're unsure of the install state. Each scanner's check may run its tool, so the call takes seconds.
 
-No parameters. Returns `installed` (at least one enabled scanner can run, or will once the first scan installs its tool), `ready` (every enabled scanner can run or will), `version`, `scanners` (each scanner's `name`, `enabled`, `dependencies_satisfied`, `installs_on_first_scan`, and `version`), `installs_on_first_scan`, `missing_dependencies` and `undetermined_dependencies` (the enabled scanners whose tool is missing and that a scan cannot install, or whose check could not run), and `ash_command_available` (whether an `ash` executable is on `PATH`, which the server does not need).
+No parameters. Returns `installed` (at least one enabled scanner can run), `ready` (all of them can), `version`, `scanners` (name, enabled, `dependencies_satisfied`, version) and the enabled scanners in `missing_dependencies` and `undetermined_dependencies`.
 
-On failure, `error_type` is the class name of an exception.
+On failure, `error_type` is `invalid_session_id`, or the class name of an exception.
 
 ## clear_source
 
 Delete this session's delivered source tree and workspace.
 
 No parameters. Deletes this session's delivered source tree and workspace.
+
+Refused while a scan of this session is running: `success: false`, `error_type: source_delivery_busy`. Clear again once the scan ends. Entries the server cannot delete (files another account owns) stay on disk; the session's delivered source is forgotten either way.
 
 On failure, `error_type` is one of `invalid_session_id`, `session_identity_required` and `source_delivery_busy`, or the class name of an exception.
 
@@ -209,7 +227,7 @@ Return structured details for a single finding by ID.
 <!-- doctest: options of=mcp.explain_finding -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
-| `finding_id` | string | *required* | The FlatVulnerability ID to look up (e.g. "bandit-B601-deadbeef"). |
+| `finding_id` | string | *required* | The FlatVulnerability ID to look up (e.g. "bandit-B601-880359fd90e1"). |
 | `results_path` | string \| null | not set | Optional path to the output directory containing ash_aggregated_results.json. Defaults to &lt;cwd&gt;/.ash/ash_output. |
 
 On failure, `error_type` is `invalid_session_id`, or the class name of an exception.
@@ -222,15 +240,18 @@ Get the resolved ASH config (defaults + user overrides merged).
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `config_path` | string \| null | not set | Optional explicit path to config file. If None, auto-discovers. |
-| `raw` | boolean | `false` | If True, returns the user file contents without merging defaults. |
+| `raw` | boolean | `false` | If True, returns the file's contents as written, without merging defaults or reading the environment. A value the config's loader would read from the environment (an `!ENV` value, or an unquoted `${VAR:default}`) comes back as `!ENV ` and the reference, never as its value; a quoted string that only looks like a reference comes back as written. |
+| `search_dir` | string \| null | not set | The directory the caller's scan will target (scan_directory's directory_path). With config_path None it is where the config is discovered; with a named config_path it is the target the file is judged for, so the answer refuses exactly what a scan of that target refuses -- an entry such a scan drops with a warning never refuses the answer. Without it, a named file is judged for this session's delivered source, or else the server's working directory. |
 
-On failure, `error_type` is one of `config_check_failed`, `config_env_not_resolved`, `config_field_denied`, `config_input_not_permitted`, `config_policy_unreadable` and `invalid_session_id`, or the class name of an exception.
+A config this session may not read, or one a client delivered that the server refuses, returns `success: false` with `error_type` `config_input_not_permitted`, `config_field_denied`, `config_policy_unreadable` or `config_env_not_resolved`, as `run_ash_scan` does for the same file.
+
+On failure, `error_type` is one of `config_env_not_resolved`, `config_field_denied`, `config_input_not_permitted`, `config_policy_unreadable`, `invalid_session_id`, `plugin_module_refused`, `scan_target_not_permitted` and `source_dir_not_usable`, or the class name of an exception.
 
 ## list_profiles
 
 List the config profiles the operator registered at server startup.
 
-No parameters. Returns `profiles`, the name and `path_sha256` (a SHA-256 of the file's absolute path) of each profile the operator registered with `ash mcp --profile NAME=path/to/ash.yaml`, sorted by name, and `count`. A client cannot register one; an empty list means the operator registered none.
+No parameters. Returns the config profiles the operator registered at server startup, each with `ash mcp --profile NAME=path/to/ash.yaml` (repeatable). A client cannot register one; an empty list means the operator registered none.
 
 On failure, `error_type` is the class name of an exception.
 
@@ -255,7 +276,7 @@ Resolve a VS Code workspace file into a scan plan without scanning anything.
 
 A workspace policy file, named or found in the workspace file's directory or its `.ash` directory, is used only when it is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names; any other refuses the workspace with exit code 4, or with exit code 3 when a client delivered it and it sets a field the server's policy denies.
 
-On failure, `error_type` is one of `config_env_not_resolved`, `config_input_not_permitted` and `invalid_session_id`, or the class name of an exception.
+On failure, `error_type` is one of `config_env_not_resolved`, `config_input_not_permitted`, `invalid_session_id` and `output_dir_not_usable`, or the class name of an exception.
 
 ## run_ash_workspace_scan
 
@@ -272,12 +293,12 @@ Scan every project in a VS Code workspace and return the per-project verdict.
 | `scanners` | array \| null | not set | Restrict every project to these scanner names. |
 | `excluded_scanners` | array \| null | not set | Exclude these scanners from every project. Takes precedence over `scanners`. |
 | `offline` | boolean | `false` | Run without network access. |
-| `clean_output` | boolean | `true` | Remove each project's previous aggregated-results file first. |
+| `clean_output` | boolean | `true` | Hide each project's previous results once the scan has its directory. Either way they are put back for a project whose scan does not finish. A scan refused because a project already has a scan touches nothing in any project's output. |
 | `profile` | string \| null | not set | Name of a registered config profile to scan under for this one call, instead of whatever select_profile bound to this session. An unknown name refuses the whole scan; running N repository scans under the default config because a profile name was misspelled, and reporting success, is exactly what the confinement refusal above exists to prevent. The fields the profile sets are final for every project, and a project's own config fills the rest. |
 
 A workspace policy file, named or found in the workspace file's directory or its `.ash` directory, is used only when it is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names; any other refuses the workspace with exit code 4, or with exit code 3 when a client delivered it and it sets a field the server's policy denies.
 
-On failure, `error_type` is one of `config_env_not_resolved`, `config_input_not_permitted`, `invalid_session_id`, `session_scan_limit` and `source_delivery_busy`, or the class name of an exception.
+On failure, `error_type` is one of `config_env_not_resolved`, `config_input_not_permitted`, `invalid_session_id`, `output_dir_not_usable`, `session_scan_limit` and `source_delivery_busy`, or the class name of an exception.
 
 ## select_profile
 
@@ -289,8 +310,6 @@ Bind one of the operator's registered config profiles to this session.
 | `profile_name` | string | *required* | Name the operator registered the profile under. |
 | `patch_ops` | array \| null | not set | JSON-Patch operations to apply to the profile's config. |
 | `override_yaml` | string \| null | not set | Complete ASH config YAML replacing the profile's. |
-
-Refused with `success: false` and `error_type: session_workspace_busy` while the server removes this session's workspace for being unused longer than its time to live. Select the profile again; any upload in progress is gone with the workspace and is sent again from chunk 0.
 
 On failure, `error_type` is one of `invalid_session_id`, `session_identity_required` and `session_workspace_busy`, or the class name of an exception.
 
@@ -304,11 +323,15 @@ Clone a repository into this session's workspace and make it the scan target.
 | `url` | string | *required* | Repository URL |
 | `ref` | string \| null | not set | Branch, tag, or commit; not set means the remote's default branch |
 | `ssh_key_id` | string \| null | not set | Leave it out: the server registers no SSH keys, so any value is refused |
-| `depth` | integer | `1` | Clone depth, a positive whole number of commits; any other value, `0` included, is refused before anything is created |
+| `depth` | integer | `1` | Clone depth, a whole number of commits from 1 to 1000 |
 
-A refusal returns `success: false` with an `error_type`: `clone_url_not_permitted` (a URL with a scheme other than `https` or `ssh`, or whose host or port the server cannot read), `local_clone_source_refused` (a local path or `file://` URL), `clone_host_not_permitted` (a host the server's `ASH_MCP_GIT_ALLOWED_HOSTS` does not list), `ssh_key_not_registered`, `invalid_session_id`, `source_delivery_busy` (a scan of the session runs), `clone_timed_out` (a git command ran past 10 minutes and was stopped), `clone_too_large` (the clone passed the archive size or entry limits; shrink the request), or `clone_tree_unreadable` (the tree git wrote could not be read, which is a server-side fault and not a size to reduce). A URL that begins with `-` or uses the `ext::` transport, a ref that begins with `-`, a `depth` that is not a positive whole number, and a git failure return `success: false` and an `error` message, with no `error_type`.
+Refused while a scan of this session is running, because the clone would replace the tree and config files that scan is reading. The response is `success: false`, `error_type: source_delivery_busy`, and `error` set to `a scan of this session is running; change the delivered source after it finishes`. Deliver the source again once `get_scan_progress` reports a terminal status.
 
-On failure, `error_type` is one of `clone_host_not_permitted`, `clone_timed_out`, `clone_too_large`, `clone_tree_unreadable`, `clone_url_not_permitted`, `invalid_session_id`, `local_clone_source_refused`, `session_identity_required`, `source_delivery_busy` and `ssh_key_not_registered`, or the class name of an exception.
+A refusal or a git failure returns `success: false` with an `error_type`: `clone_url_not_permitted` (a url beginning with `-` or using the `ext::` transport, a url holding a control character or a lone surrogate, or a url whose host cannot be read), `clone_ref_not_permitted` (a ref beginning with `-` or holding a control character or a lone surrogate), `invalid_clone_depth` (below 1 or above 1000; the limit is on how much history is fetched), `invalid_session_id`, `local_clone_source_refused` (a local path or `file://` url, which would read the server's own filesystem), `clone_host_not_permitted` (the host is not in `ASH_MCP_GIT_ALLOWED_HOSTS`), `ssh_key_not_registered` (an `ssh_key_id` was named), `clone_timed_out` (git ran past its time limit and was stopped), `git_clone_failed` or `git_checkout_failed` (git's own message is in `error`; `git_clone_failed` also covers a git that is not on `PATH` or cannot be started), or `session_workspace_unavailable` (the session's workspace could not take the clone: a directory of it could not be created, the previously delivered source could not be moved aside for it, or the clone could not be moved into place; each move is tried a few times before it fails). The clone is made beside the delivered source and replaces it only once it has worked, so a delivery that fails for any of these reasons, or is refused, leaves the previously delivered source in place, and `run_ash_scan` with no `source_dir` scans it. A partial clone that cannot be fully deleted stays beside the source, logged, for the next delivery to delete, and the error returned is still git's own. The one exception is a clone that could not be moved into place after the previous source had been moved aside and could not be put back: the recorded source then names a path that is gone, and `run_ash_scan` with no `source_dir` answers `delivered_source_missing` until a source is delivered again; that next delivery puts the previous source back first. A `session_workspace_unavailable` that names a refused rename can be retried with the same call: the refusal is usually a program holding a handle inside a tree (a virus scanner, a file indexer), and it passes.
+
+A re-delivery needs room for both trees at once, because the new clone is made beside the delivered source, which is deleted only after it. When the disk is short, call `clear_source` first to free the delivered one. A clone, fetch or checkout that fails for want of space returns `git_clone_failed` or `git_checkout_failed` with git's own message, and that advice added when the session has a delivered source to free.
+
+On failure, `error_type` is one of `clone_host_not_permitted`, `clone_ref_not_permitted`, `clone_timed_out`, `clone_too_large`, `clone_tree_unreadable`, `clone_url_not_permitted`, `git_checkout_failed`, `git_clone_failed`, `invalid_clone_depth`, `invalid_session_id`, `local_clone_source_refused`, `session_identity_required`, `session_workspace_unavailable`, `source_delivery_busy` and `ssh_key_not_registered`, or the class name of an exception.
 
 ## set_source_zip_chunk
 
@@ -324,9 +347,11 @@ Upload one base64 chunk of a zipped source tree.
 
 Pair with `set_source_zip_finalize`, which verifies the reassembled archive against `expected_sha256` before extracting it. A chunked upload that is never finalized is not a scan target.
 
-Refused with `success: false` and `error_type: session_workspace_busy` while the server removes this session's workspace for being unused longer than its time to live. The upload is gone with the workspace, so send the whole upload again, from chunk 0.
+When the session's workspace directory cannot be created, both upload tools return `success: false` with `error_type` `session_workspace_unavailable`.
 
-On failure, `error_type` is one of `invalid_session_id`, `session_identity_required` and `session_workspace_busy`, or the class name of an exception.
+While the server removes the session's workspace for being unused longer than its time to live, `set_source_zip_chunk` returns `success: false` with `error_type` `session_workspace_busy`. Send the upload again from its first chunk.
+
+On failure, `error_type` is one of `invalid_session_id`, `session_identity_required`, `session_workspace_busy` and `session_workspace_unavailable`, or the class name of an exception.
 
 ## set_source_zip_finalize
 
@@ -338,7 +363,11 @@ Verify an uploaded zip and extract it as this session's scan target.
 | `upload_id` | string | The identifier used for the preceding chunk calls. |
 | `expected_sha256` | string | Hex sha256 of the complete zip. |
 
-On failure, `error_type` is one of `invalid_session_id`, `session_identity_required` and `source_delivery_busy`, or the class name of an exception.
+Refused while a scan of this session is running, for the same reason as `set_source_git`: `success: false`, `error_type: source_delivery_busy`, and `error` set to `a scan of this session is running; change the delivered source after it finishes`. `set_source_zip_chunk` is not refused, so the chunks can be sent while the scan runs and the upload finalized after it ends.
+
+A finalize that cannot deliver returns `success: false` with an `error`. Its `error_type` is `session_workspace_unavailable` when the session's workspace could not take the tree: a directory of it could not be created, the previous tree could not be renamed aside (nothing is deleted where it stands), or the extracted one could not be moved into place, whatever the operating system error was. The previous tree stays delivered and the uploaded zip is kept, so the same call can be sent again; when the previous tree could not be put back either, `run_ash_scan` with no `source_dir` answers `delivered_source_missing`. A checksum mismatch, an upload that never received its last chunk, or an archive the limits refuse returns `error` with no `error_type`. An archive that is not a zip returns `error_type` `BadZipFile`, and a failure on disk while the archive is read or extracted (no space, no permission, a file that vanished) returns the class name of the exception, `OSError` or one of its subclasses; both carry an `error` that starts `Error finalizing source upload:`.
+
+On failure, `error_type` is one of `invalid_session_id`, `session_identity_required`, `session_workspace_unavailable` and `source_delivery_busy`, or the class name of an exception.
 
 ## suggest_suppression
 
@@ -352,7 +381,7 @@ Build a paste-ready AshSuppression entry for a specific finding.
 | `expiration` | string \| null | not set | Expiration date in YYYY-MM-DD format. Defaults to 90 days from today. |
 | `justification` | string \| null | not set | Human-readable reason for the suppression. |
 
-On failure, `error_type` is `invalid_session_id`, or the class name of an exception.
+On failure, `error_type` is one of `invalid_session_id` and `path_not_expressible`, or the class name of an exception.
 
 ## validate_config
 
@@ -366,7 +395,7 @@ Validate an ASH configuration file or content string.
 
 `config_content` counts as the client's config, and so does a `config_path` that a client delivered or that is outside the directories `ASH_MCP_ALLOWED_CONFIG_ROOTS` names and its session's `config/` directory. Each field such a config may not set under the server's runtime-override policy is an error of type `denied_by_runtime_policy`, and a policy the server cannot read is one error of type `config_policy_unreadable`; for `config_content`, both only when a remote client calls. A `${VAR}` or `${VAR:default}` reference at the start of a plain value, or an `!ENV` tag, in such a config is an error of type `config_env_not_resolved`.
 
-Each entry of `errors` has a `type` that is one of `config_env_not_resolved`, `config_input_not_permitted`, `config_policy_unreadable`, `denied_by_runtime_policy`, `duplicate_field`, `file_not_found`, `internal_field`, `invalid_field`, `invalid_session_id`, `json_parse_error`, `missing_input`, `missing_required_field`, `unknown_field`, `validation_error` and `yaml_parse_error`, or the class name of an exception.
+Each entry of `errors` has a `type` that is one of `config_env_not_resolved`, `config_input_not_permitted`, `duplicate_field`, `extends_error`, `file_not_found`, `internal_field`, `invalid_field`, `invalid_session_id`, `json_parse_error`, `missing_input`, `missing_required_field`, `toml_parse_error`, `unknown_field`, `validation_error` and `yaml_parse_error`, or the class name of an exception.
 
 ## Resources
 
@@ -382,4 +411,4 @@ Read these via the standard MCP resource read mechanism for context-free help.
 
 `CRITICAL` > `HIGH` > `MEDIUM` > `LOW` > `INFO` > `SUPPRESSED`
 
-`actionable_only=True` on `get_scan_results` sets the `SUPPRESSED` counts (false positives, accepted risks) to zero, and the `findings` list it adds holds only the unsuppressed findings at or above each scanner's threshold.
+`actionable_only=True` drops `SUPPRESSED` findings (false positives, accepted risks) and findings below the scan's severity threshold, which are reported but do not fail the scan.

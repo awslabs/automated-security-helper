@@ -19,7 +19,7 @@ ASH ships 19 scanners. The built-in ones are loaded on every scan. The others ar
 |---------|-----------|--------------------|-------------|---------|---------------------------|
 | [`actionlint`](#actionlint) | IAC | yes | built in | `actionlint` | no |
 | [`bandit`](#bandit) | SAST | yes | built in | `bandit` | yes |
-| [`cdk-nag`](#cdk-nag) | IAC | yes | built in | `python` | yes |
+| [`cdk-nag`](#cdk-nag) | IAC | yes | built in | `python` | no |
 | [`cfn-guard`](#cfn-guard) | IAC | yes | built in | `cfn-guard` | no |
 | [`cfn-lint`](#cfn-lint) | IAC | yes | built in | `cfn-lint` | yes |
 | [`cfn-nag`](#cfn-nag) | IAC | yes | built in | `cfn_nag_scan` | no |
@@ -33,8 +33,8 @@ ASH ships 19 scanners. The built-in ones are loaded on every scan. The others ar
 | [`syft`](#syft) | SBOM | yes | built in | `syft` | no |
 | [`trivy`](#trivy) | SCA | yes | built in | `trivy` | no |
 | [`zizmor`](#zizmor) | SAST | yes | built in | `zizmor` | yes |
-| [`ferret-scan`](#ferret-scan) | SECRETS | yes | community module `ash_ferret_plugins` | `ferret-scan` | yes |
-| [`snyk-code`](#snyk-code) | SAST | yes | community module `ash_snyk_plugins` | `snyk` | yes |
+| [`ferret-scan`](#ferret-scan) | SECRETS | yes | community module `ash_ferret_plugins` | `ferret-scan` | no |
+| [`snyk-code`](#snyk-code) | SAST | yes | community module `ash_snyk_plugins` | `snyk` | no |
 | [`trivy-repo`](#trivy-repo) | SAST | yes | community module `ash_trivy_plugins` | `trivy` | no |
 
 Tool type is the scanner's own `ScannerToolType`. `--python-only` keeps a scanner when its `is_python_only()` is true: the scanner class's own `python_only` when it states one; otherwise only when the scanner runs its tool through uv, declares no install commands, and has only pip dependencies. A scanner it does not keep is SKIPPED.
@@ -59,16 +59,17 @@ The network entry of each scanner below is its default. `sandbox.network_scanner
 - Environment passed into the sandbox: none beyond the baseline
 - Environment set under sandbox-exec: none
 
-Options, under `scanners.actionlint.options`. A key not listed here is accepted and kept, without validation.
+Options, under `scanners.actionlint.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=scanners.actionlint -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.actionlint.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.actionlint.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.actionlint.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
 | <a id="scanners.actionlint.options.config_file"></a>`config_file` | string or null | `null` | Path to an actionlint config file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Otherwise actionlint runs with an empty config, and a .github/actionlint.yaml in the scanned repository is not read. A path set here that does not exist fails the scan. |
 | <a id="scanners.actionlint.options.shellcheck"></a>`shellcheck` | string or null | `null` | Command name or path of shellcheck, which actionlint runs on every run: script. Unset (the default) disables the integration so results do not depend on what is installed on the host. Any config may set 'shellcheck', looked up on PATH. Another program, or a path that resolves outside the scanned tree: Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. From such a config it is ignored with a warning. When set and not found, the scanner reports MISSING. |
-| <a id="scanners.actionlint.options.pyflakes"></a>`pyflakes` | string or null | `null` | Command name or path of pyflakes, which actionlint runs on 'shell: python' steps. Unset (the default) disables the integration. Any config may set 'pyflakes', looked up on PATH. Another program, or a path that resolves outside the scanned tree: Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. From such a config it is ignored with a warning. When set and not found, the scanner reports MISSING. |
+| <a id="scanners.actionlint.options.pyflakes"></a>`pyflakes` | string or null | `null` | Command name or absolute path of pyflakes, which actionlint runs on 'shell: python' steps. Unset (the default) disables the integration. Any config may set 'pyflakes', looked up on PATH. Another program, or a path that resolves outside the scanned tree: Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. From such a config it is ignored with a warning. When set and not found, the scanner reports MISSING. |
 
 ## `bandit`
 
@@ -85,20 +86,21 @@ Bandit is a Python source code security analyzer.
 - Environment passed into the sandbox: `BANDIT_*`
 - Environment set under sandbox-exec: none
 
-Options, under `scanners.bandit.options`. A key not listed here is accepted and kept, without validation.
+Options, under `scanners.bandit.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=scanners.bandit -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.bandit.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.bandit.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.bandit.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
 | <a id="scanners.bandit.options.config_file"></a>`config_file` | path, string, or null | `null` | Path to Bandit configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. ASH does not look for one by name. A file named exactly `.bandit` is passed with `bandit --ini`, and any other file with `bandit --configfile`. Unless config_file names a `.bandit` file that exists, ASH passes bandit an empty config file with `bandit --ini`, so bandit does not read a `.bandit` file from the scanned tree. A path that is not a file is logged as a warning and ignored. |
-| <a id="scanners.bandit.options.confidence_level"></a>`confidence_level` | one of `all`, `low`, `medium`, `high` | `all` | Confidence level for Bandit findings |
-| <a id="scanners.bandit.options.ignore_nosec"></a>`ignore_nosec` | boolean | `false` | If True, do not skip lines with # nosec comments. Defaults to False. |
-| <a id="scanners.bandit.options.excluded_paths"></a>`excluded_paths` | list of mapping | `[]` | List of excluded paths and their corresponding reason to exclude from scanning |
-| <a id="scanners.bandit.options.additional_formats"></a>`additional_formats` | list of one of `csv`, `custom`, `html`, `json`, `sarif`, `txt`, `xml`, `yaml` | `[]` | List of additional formats to output |
-| <a id="scanners.bandit.options.tool_version"></a>`tool_version` | string or null | `">=1.7.0,<2.0.0"` | Version constraint for bandit installation, in pip requirement syntax. The default below is the constraint the scanner enforces. |
-| <a id="scanners.bandit.options.install_timeout"></a>`install_timeout` | integer | `300` | Timeout in seconds for tool installation |
+| <a id="scanners.bandit.options.confidence_level"></a>`confidence_level` | string, matches `^(all|low|medium|high)$` | `all` | Confidence level for bandit scan (all, low, medium, high) |
+| <a id="scanners.bandit.options.ignore_nosec"></a>`ignore_nosec` | boolean | `false` | Whether to ignore #nosec comments in the code |
+| <a id="scanners.bandit.options.excluded_paths"></a>`excluded_paths` | list of mapping | `[]` | List of paths to exclude from the bandit scan |
+| <a id="scanners.bandit.options.additional_formats"></a>`additional_formats` | list of string | `[]` | Additional output formats to generate (e.g., html, csv, xml) |
+| <a id="scanners.bandit.options.tool_version"></a>`tool_version` | string or null | `">=1.7.0,<2.0.0"` | Version constraint for bandit tool installation (e.g., '&gt;=1.7.0'). If not specified, uses '&gt;=1.7.0,&lt;2.0.0' for stability. |
+| <a id="scanners.bandit.options.install_timeout"></a>`install_timeout` | integer | `300` | Timeout in seconds for tool installation (default: 300) |
 
 ## `cdk-nag`
 
@@ -115,13 +117,14 @@ CDK Nag is a security scanner for AWS CloudFormation templates that applies indu
 - Environment passed into the sandbox: `JSII_*`
 - Environment set under sandbox-exec: `JSII_RUNTIME_PACKAGE_CACHE=disabled`
 
-Options, under `scanners.cdk-nag.options`. A key not listed here is accepted and kept, without validation.
+Options, under `scanners.cdk-nag.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=scanners.cdk-nag -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.cdk-nag.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.cdk-nag.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.cdk-nag.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
 | <a id="scanners.cdk-nag.options.nag_packs"></a>`nag_packs` | mapping | see the section | CDK Nag packs to enable |
 | <a id="scanners.cdk-nag.options.include_compliant_checks"></a>`include_compliant_checks` | boolean | `false` | Include INFO-level findings for compliant resources in the report. |
 
@@ -139,13 +142,14 @@ Options, under `scanners.cdk-nag.options`. A key not listed here is accepted and
 - Environment passed into the sandbox: none beyond the baseline
 - Environment set under sandbox-exec: none
 
-Options, under `scanners.cfn-guard.options`. A key not listed here is accepted and kept, without validation.
+Options, under `scanners.cfn-guard.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=scanners.cfn-guard -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.cfn-guard.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.cfn-guard.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.cfn-guard.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
 | <a id="scanners.cfn-guard.options.rule_sets"></a>`rule_sets` | list of string | `["wa-Security-Pillar"]` | Rule sets from the bundled AWS Guard Rules Registry to evaluate, by file name without the .guard extension, e.g. ['wa-Security-Pillar', 'cis-aws-benchmark-level-1']. Defaults to the Well-Architected Security Pillar set. Set to [] to evaluate only rules_paths. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning and the default set is evaluated. |
 | <a id="scanners.cfn-guard.options.rules_paths"></a>`rules_paths` | list of string | `[]` | Your own cfn-guard rules: .guard files or directories of them. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Evaluated in addition to rule_sets. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. cfn-guard prints a rules file it cannot parse, so a path the scanned repository chose could put any file the scan can read into the report. Set by such a config, it is ignored with a warning, and an empty rule_sets falls back to wa-Security-Pillar. In a directory, the .guard and .ruleset files are read, recursively; one that resolves outside the directory, through a symlink, is refused. |
 
@@ -163,13 +167,14 @@ Options, under `scanners.cfn-guard.options`. A key not listed here is accepted a
 - Environment passed into the sandbox: none beyond the baseline
 - Environment set under sandbox-exec: none
 
-Options, under `scanners.cfn-lint.options`. A key not listed here is accepted and kept, without validation.
+Options, under `scanners.cfn-lint.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=scanners.cfn-lint -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.cfn-lint.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.cfn-lint.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.cfn-lint.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
 | <a id="scanners.cfn-lint.options.config_file"></a>`config_file` | path, string, or null | `null` | Path to a cfn-lint configuration file (.cfnlintrc). A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. When unset, ASH gives cfn-lint an empty configuration, so a .cfnlintrc in the scanned repository or the home directory is NOT read: such a file can load Python rules (append_rules) and switch checks off. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree; otherwise it is ignored with a warning. |
 | <a id="scanners.cfn-lint.options.regions"></a>`regions` | list of string | `[]` | AWS regions to validate templates against, e.g. ['us-east-1', 'eu-west-1'], or ['ALL_REGIONS']. Empty validates against us-east-1, or the regions a template names in its own cfn-lint metadata or config_file names; AWS_REGION and AWS_DEFAULT_REGION are not read. |
 | <a id="scanners.cfn-lint.options.ignore_checks"></a>`ignore_checks` | list of string | `[]` | cfn-lint rule ids or prefixes to skip, e.g. ['W2001', 'W3']. Prefer ASH suppressions for individual findings; this removes the rule from every template. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning. |
@@ -185,19 +190,20 @@ Options, under `scanners.cfn-lint.options`. A key not listed here is accepted an
 - Enabled by default: yes
 - Tool type: IAC
 - Command: `cfn_nag_scan`
-- Install: `gem install cfn-nag -v 0.8.10` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
+- Install: none declared
 - Offline strategy: `bundled`
 - Network in the sandbox, by default: no
 - Environment passed into the sandbox: none beyond the baseline
 - Environment set under sandbox-exec: none
 
-Options, under `scanners.cfn-nag.options`. A key not listed here is accepted and kept, without validation.
+Options, under `scanners.cfn-nag.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=scanners.cfn-nag -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.cfn-nag.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.cfn-nag.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.cfn-nag.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
 
 ## `checkov`
 
@@ -212,20 +218,20 @@ Options, under `scanners.cfn-nag.options`. A key not listed here is accepted and
 - Environment passed into the sandbox: `CHECKOV_*`
 - Environment set under sandbox-exec: none
 
-Options, under `scanners.checkov.options`. A key not listed here is accepted and kept, without validation.
+Options, under `scanners.checkov.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=scanners.checkov -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.checkov.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.checkov.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.checkov.options.offline"></a>`offline` | boolean | `false` | Run in offline mode, disabling policy downloads. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
 | <a id="scanners.checkov.options.config_file"></a>`config_file` | path, string, or null | `null` | Path to Checkov configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Defaults to searching for `.checkov.yaml` and `.checkov.yml` in the root of the source directory. |
 | <a id="scanners.checkov.options.skip_path"></a>`skip_path` | list of mapping | `[]` | Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying "dir1" will skip any directory or subdirectory named "dir1". Ignored with -f. Can be specified multiple times. |
 | <a id="scanners.checkov.options.additional_formats"></a>`additional_formats` | list of one of `cli`, `csv`, `cyclonedx`, `cyclonedx_json`, `json`, `junitxml`, `github_failed_only`, `gitlab_sast`, `sarif`, `spdx` | `["cyclonedx_json"]` | List of additional formats to output. Defaults to including CycloneDX JSON |
-| <a id="scanners.checkov.options.offline"></a>`offline` | boolean | `false` | Run in offline mode, disabling policy downloads. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
 | <a id="scanners.checkov.options.frameworks"></a>`frameworks` | list of one of `all`, `ansible`, `argo_workflows`, `arm`, `azure_pipelines`, `bicep`, `bitbucket_pipelines`, `cdk`, `circleci_pipelines`, `cloudformation`, `dockerfile`, `github_configuration`, `github_actions`, `gitlab_configuration`, `gitlab_ci`, `bitbucket_configuration`, `helm`, `json`, `yaml`, `kubernetes`, `kustomize`, `openapi`, `sca_package`, `sca_image`, `secrets`, `serverless`, `terraform`, `terraform_json`, `terraform_plan`, `sast`, `sast_python`, `sast_java`, `sast_javascript`, `sast_typescript`, `sast_golang`, `3d_policy` | `["all"]` | Specific frameworks to include with Checkov. Defaults to `all`. |
 | <a id="scanners.checkov.options.skip_frameworks"></a>`skip_frameworks` | list of one of `all`, `ansible`, `argo_workflows`, `arm`, `azure_pipelines`, `bicep`, `bitbucket_pipelines`, `cdk`, `circleci_pipelines`, `cloudformation`, `dockerfile`, `github_configuration`, `github_actions`, `gitlab_configuration`, `gitlab_ci`, `bitbucket_configuration`, `helm`, `json`, `yaml`, `kubernetes`, `kustomize`, `openapi`, `sca_package`, `sca_image`, `secrets`, `serverless`, `terraform`, `terraform_json`, `terraform_plan`, `sast`, `sast_python`, `sast_java`, `sast_javascript`, `sast_typescript`, `sast_golang`, `3d_policy` | `[]` | Specific frameworks to exclude with Checkov. Defaults to none. |
-| <a id="scanners.checkov.options.skip_ash_output_dir"></a>`skip_ash_output_dir` | boolean | `true` | Skip ASH's own output directory when it sits inside the scanned directory, so Checkov does not parse ASH's previous reports. Defaults to true; set to false to scan it anyway. Has no effect on Windows, where Checkov's --skip-path matching is unreliable. |
+| <a id="scanners.checkov.options.skip_ash_output_dir"></a>`skip_ash_output_dir` | boolean | `true` | Tell Checkov to skip ASH's own output directories inside the scanned directory (this run's output directory and .ash/ash_output), so it does not parse ASH's previous reports. Defaults to true; set to false to let Checkov read them. Either way ASH drops the findings located there after the scan. Has no effect on Windows, where Checkov's --skip-path matching is unreliable. |
 | <a id="scanners.checkov.options.tool_version"></a>`tool_version` | string or null | `null` | Version constraint for checkov installation, in pip requirement syntax. Leave unset to use the scanner's own default constraint. |
 | <a id="scanners.checkov.options.install_timeout"></a>`install_timeout` | integer | `300` | Timeout in seconds for tool installation |
 
@@ -242,16 +248,18 @@ Options, under `scanners.checkov.options`. A key not listed here is accepted and
 - Environment passed into the sandbox: none beyond the baseline
 - Environment set under sandbox-exec: none
 
-Options, under `scanners.detect-secrets.options`. A key not listed here is accepted and kept, without validation.
+Options, under `scanners.detect-secrets.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=scanners.detect-secrets -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.detect-secrets.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.detect-secrets.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.detect-secrets.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
 | <a id="scanners.detect-secrets.options.baseline_file"></a>`baseline_file` | path, string, or null | `null` | Path to detect-secrets baseline file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Defaults to searching for `.secrets.baseline` in the root of the source directory. The settings from the baseline will be overwritten if scan_settings is provided. |
 | <a id="scanners.detect-secrets.options.scan_settings"></a>`scan_settings` | mapping | see the section | Settings to use with detect-secrets. Refer to the detect-secrets documentation for formatting information. By default, all plugins will be used and no filters are configured. scan_settings takes precedence over baseline_file |
 | <a id="scanners.detect-secrets.options.skip_generated_lockfiles"></a>`skip_generated_lockfiles` | boolean | `true` | Skip machine-generated dependency lockfiles (package-lock.json, yarn.lock, poetry.lock, and similar) before scanning. These are dense with integrity hashes and are regenerated rather than hand-edited, so findings in them are usually noise. Hand-authored dependency declarations such as requirements.txt, Pipfile and environment.yml are always scanned and are not affected by this option. Set to false to scan generated lockfiles as well. |
+| <a id="scanners.detect-secrets.options.max_worker_output_mib"></a>`max_worker_output_mib` | integer, greater than 0, at most 4,096 | `256` | The most of the detect-secrets worker's output read back, in MiB, at most 4096. A finding is about 300 bytes of output, so the default of 256 holds about 900,000 findings. Reading the output costs about three times its size in memory (1024 MiB of output needs about 3 GiB). A scan whose output is larger fails and records no findings, with an error that names this option. Honored only from --config-overrides or a config file outside the scanned tree. |
 
 ## `gitleaks`
 
@@ -267,13 +275,14 @@ Options, under `scanners.detect-secrets.options`. A key not listed here is accep
 - Environment passed into the sandbox: none beyond the baseline
 - Environment set under sandbox-exec: none
 
-Options, under `scanners.gitleaks.options`. A key not listed here is accepted and kept, without validation.
+Options, under `scanners.gitleaks.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=scanners.gitleaks -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.gitleaks.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.gitleaks.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.gitleaks.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
 | <a id="scanners.gitleaks.options.config_file"></a>`config_file` | path, string, or null | `null` | Path to a gitleaks TOML config. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Its rules and [[allowlists]] apply on top of ASH suppressions. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Unset, gitleaks uses GITLEAKS_CONFIG or GITLEAKS_CONFIG_TOML from the environment if one is set, else its default rules; a .gitleaks.toml in the scanned repository is not read. A path that does not exist fails the scan. |
 | <a id="scanners.gitleaks.options.baseline_path"></a>`baseline_path` | path, string, or null | `null` | Path to a gitleaks JSON report whose findings gitleaks ignores (gitleaks --baseline-path). A relative path is taken as for config_file. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. A path that does not exist fails the scan. |
 | <a id="scanners.gitleaks.options.honor_inline_ignores"></a>`honor_inline_ignores` | boolean | `false` | Honor gitleaks' inline `gitleaks:allow` comments. Off by default: ASH runs `gitleaks --ignore-gitleaks-allow`, so every finding reaches ASH, where suppressions are reported and counted. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning. |
@@ -292,15 +301,15 @@ Options, under `scanners.gitleaks.options`. A key not listed here is accepted an
 - Environment passed into the sandbox: `GRYPE_*`
 - Environment set under sandbox-exec: none
 
-Options, under `scanners.grype.options`. A key not listed here is accepted and kept, without validation.
+Options, under `scanners.grype.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=scanners.grype -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.grype.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | No description in the code. |
 | <a id="scanners.grype.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
-| <a id="scanners.grype.options.config_file"></a>`config_file` | path, string, or null | `null` | Path to Grype configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. ASH does not look for one by name. Without one, grype gets an empty config, so it does not read `.grype.yaml` from the scanned tree. |
 | <a id="scanners.grype.options.offline"></a>`offline` | boolean | `false` | Run in offline mode, disabling database updates and validation. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
+| <a id="scanners.grype.options.config_file"></a>`config_file` | path, string, or null | `null` | Path to Grype configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. ASH does not look for one by name. Without one, grype gets an empty config, so it does not read `.grype.yaml` from the scanned tree. |
 
 ## `npm-audit`
 
@@ -310,19 +319,19 @@ Options, under `scanners.grype.options`. A key not listed here is accepted and k
 - Tool type: SCA
 - Command: `npm`
 - Install: none declared
-- Offline strategy: `cache_flags`
+- Offline strategy: `skip_offline`
 - Network in the sandbox, by default: yes, unless the scan is offline
 - Environment passed into the sandbox: `npm_config_*`, `NPM_CONFIG_*`, `YARN_IGNORE_PATH`, `YARN_RC_FILENAME`
 - Environment set under sandbox-exec: none
 
-Options, under `scanners.npm-audit.options`. A key not listed here is accepted and kept, without validation.
+Options, under `scanners.npm-audit.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=scanners.npm-audit -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.npm-audit.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.npm-audit.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
-| <a id="scanners.npm-audit.options.offline"></a>`offline` | boolean | `false` | Run offline. npm, pnpm and yarn audit only against the package registry's advisory service, so offline npm-audit audits nothing: each lockfile is listed as not scanned, and with a lockfile the scanner is reported MISSING. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
+| <a id="scanners.npm-audit.options.offline"></a>`offline` | boolean | `false` | Treat this scanner as offline even if ASH is not. npm, yarn and pnpm audit by asking the registry, so offline npm-audit does not run: it is MISSING for a project with a lockfile and SKIPPED for one without. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
 
 ## `opengrep`
 
@@ -337,19 +346,19 @@ Options, under `scanners.npm-audit.options`. A key not listed here is accepted a
 - Environment passed into the sandbox: `OPENGREP_*`, `SEMGREP_*`
 - Environment set under sandbox-exec: none
 
-Options, under `scanners.opengrep.options`. A key not listed here is accepted and kept, without validation.
+Options, under `scanners.opengrep.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=scanners.opengrep -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.opengrep.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.opengrep.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.opengrep.options.offline"></a>`offline` | boolean | `false` | Run in offline mode, using locally cached rules. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
 | <a id="scanners.opengrep.options.config"></a>`config` | string | `p/ci` | YAML configuration file, directory of YAML files ending in .yml\|.yaml, URL of a configuration file, or Opengrep registry entry name. Defaults to 'p/ci' for consistent results across online and offline modes. |
 | <a id="scanners.opengrep.options.exclude"></a>`exclude` | list of string | `["*-converted.py", "*_report_result.txt"]` | Skip any file or directory whose path matches the pattern. |
 | <a id="scanners.opengrep.options.exclude_rule"></a>`exclude_rule` | list of string | `[]` | Skip any rule with the given id. |
 | <a id="scanners.opengrep.options.severity"></a>`severity` | list of one of `INFO`, `WARNING`, `ERROR` | `[]` | Report findings only from rules matching the supplied severity level. |
 | <a id="scanners.opengrep.options.metrics"></a>`metrics` | one of `auto`, `on`, `off` | `auto` | Configures how usage metrics are sent to the OpenGrep server. Deprecated in Opengrep v1.7.0+. This configuration is ignored if the installed version is &gt;= 1.7.0. |
-| <a id="scanners.opengrep.options.offline"></a>`offline` | boolean | `false` | Run in offline mode, using locally cached rules. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
 | <a id="scanners.opengrep.options.patterns"></a>`patterns` | list of string | `[]` | Patterns to search for with OpenGrep. |
 | <a id="scanners.opengrep.options.version"></a>`version` | string | `v1.30.2` | Version of OpenGrep to use. |
 | <a id="scanners.opengrep.options.sha256"></a>`sha256` | mapping of one of `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`, `windows/amd64` to string | `{}` | SHA256 of the OpenGrep release asset for a custom `version`, keyed by platform/arch (e.g. linux/amd64). Required for any version other than the one ASH pins; ignored for the pinned version, whose digests ship with ASH. Get it from GitHub's per-asset digest for the release, or by running sha256sum on the downloaded asset. |
@@ -367,19 +376,19 @@ Options, under `scanners.opengrep.options`. A key not listed here is accepted an
 - Environment passed into the sandbox: `SEMGREP_*`
 - Environment set under sandbox-exec: none
 
-Options, under `scanners.semgrep.options`. A key not listed here is accepted and kept, without validation.
+Options, under `scanners.semgrep.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=scanners.semgrep -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.semgrep.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.semgrep.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.semgrep.options.offline"></a>`offline` | boolean | `false` | Run in offline mode, using locally cached rules. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
 | <a id="scanners.semgrep.options.config"></a>`config` | string | `p/ci` | YAML configuration file, directory of YAML files ending in .yml\|.yaml, URL of a configuration file, or Semgrep registry entry name. Defaults to 'p/ci' for consistent results across online and offline modes. |
 | <a id="scanners.semgrep.options.exclude"></a>`exclude` | list of string | `["*-converted.py", "*_report_result.txt"]` | Skip any file or directory whose path matches the pattern. |
 | <a id="scanners.semgrep.options.exclude_rule"></a>`exclude_rule` | list of string | `[]` | Skip any rule with the given id. |
 | <a id="scanners.semgrep.options.severity"></a>`severity` | list of one of `INFO`, `WARNING`, `ERROR` | `[]` | Report findings only from rules matching the supplied severity level. |
 | <a id="scanners.semgrep.options.metrics"></a>`metrics` | one of `auto`, `on`, `off` | `auto` | Configures how usage metrics are sent to the Semgrep server. |
-| <a id="scanners.semgrep.options.offline"></a>`offline` | boolean | `false` | Run in offline mode, using locally cached rules. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
 | <a id="scanners.semgrep.options.tool_version"></a>`tool_version` | string or null | `null` | Version constraint for semgrep installation, in pip requirement syntax. Leave unset to use the scanner's own default constraint. |
 | <a id="scanners.semgrep.options.install_timeout"></a>`install_timeout` | integer | `300` | Timeout in seconds for tool installation |
 
@@ -396,17 +405,17 @@ Options, under `scanners.semgrep.options`. A key not listed here is accepted and
 - Environment passed into the sandbox: `SYFT_*`
 - Environment set under sandbox-exec: none
 
-Options, under `scanners.syft.options`. A key not listed here is accepted and kept, without validation.
+Options, under `scanners.syft.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=scanners.syft -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.syft.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.syft.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.syft.options.offline"></a>`offline` | boolean | `false` | Run in offline mode, disabling update checks. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
 | <a id="scanners.syft.options.config_file"></a>`config_file` | path, string, or null | `null` | Path to Syft configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. ASH does not look for one by name. Without one, syft gets an empty config, so it does not read `.syft.yaml` from the scanned tree. |
 | <a id="scanners.syft.options.exclude"></a>`exclude` | list of mapping | `[]` | Paths (files or directories) to skip, each a glob relative to the scanned directory and passed to syft as one --exclude. A glob must start with "./", "\*/" or "\*\*/", and syft fails the scan on any other. "\*" does not match across "/" and "\*\*" does: "./dir1/\*\*" skips the top-level "dir1", and "\*\*/dir1/\*\*" skips every directory named "dir1". |
 | <a id="scanners.syft.options.additional_outputs"></a>`additional_outputs` | list of one of `cyclonedx-json`, `cyclonedx-xml`, `github-json`, `spdx-json`, `spdx-tag-value`, `syft-json`, `syft-table`, `syft-text` | `["syft-table"]` | List of additional formats to output. Defaults to syft-table. |
-| <a id="scanners.syft.options.offline"></a>`offline` | boolean | `false` | Run in offline mode, disabling update checks. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
 
 ## `trivy`
 
@@ -422,13 +431,14 @@ Options, under `scanners.syft.options`. A key not listed here is accepted and ke
 - Environment passed into the sandbox: `TRIVY_*`
 - Environment set under sandbox-exec: none
 
-Options, under `scanners.trivy.options`. A key not listed here is accepted and kept, without validation.
+Options, under `scanners.trivy.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=scanners.trivy -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.trivy.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.trivy.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.trivy.options.offline"></a>`offline` | boolean | `false` | Run in offline mode: skip database and check updates and use the vulnerability database already in trivy's cache. ASH still fails the scan when that database is past its 24h bound. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
 | <a id="scanners.trivy.options.scanners"></a>`scanners` | list of one of `vuln`, `misconfig`, `secret`, `license`, length at least 1 | `["vuln"]` | Which trivy scanners to run. Defaults to vuln only: ASH's default scanners already cover secrets (detect-secrets) and IaC misconfigurations (checkov, cfn-nag, cdk-nag), and license findings are a compliance question. Add secret, misconfig or license to run trivy's checks for them as well. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, any set but the default is ignored with a warning. |
 | <a id="scanners.trivy.options.license_full"></a>`license_full` | boolean | `false` | Look for licenses in source file headers and license files too (trivy --license-full). Only used when scanners includes license. |
 | <a id="scanners.trivy.options.ignore_unfixed"></a>`ignore_unfixed` | boolean | `false` | Report only vulnerabilities that have a fixed version (trivy --ignore-unfixed). Off by default: an unfixed vulnerability is still one, and turning this on withholds it from the report. |
@@ -436,7 +446,6 @@ Options, under `scanners.trivy.options`. A key not listed here is accepted and k
 | <a id="scanners.trivy.options.config_file"></a>`config_file` | path, string, or null | `null` | A trivy config file (trivy.yaml), passed as --config. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree; otherwise it is ignored with a warning. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Unset or ignored, ASH passes TRIVY_CONFIG when that names a file outside the scanned tree (a relative path in it is taken from the working directory), and otherwise an empty config of its own, so a trivy.yaml in the scanned repository is not read: its settings (severity, scan.skip-files, db.repository, ...) can drop findings with nothing in the report saying so, and module.dir can load WASM modules. A path that does not exist fails the scan. |
 | <a id="scanners.trivy.options.ignore_file"></a>`ignore_file` | path, string, or null | `null` | A trivy ignore file, passed as --ignorefile. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree; a relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides and the environment variable. Unset, TRIVY_IGNOREFILE is used the same way, and otherwise trivy gets an empty one, so a .trivyignore in the scanned repository does not remove findings. As for trivy-repo. |
 | <a id="scanners.trivy.options.secret_config_file"></a>`secret_config_file` | path, string, or null | `null` | A trivy secret scanning config (trivy-secret.yaml), passed as --secret-config. Only read when scanners includes secret. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree, and a relative path is taken as for ignore_file. Unset, TRIVY_SECRET_CONFIG is used the same way, and otherwise trivy gets an empty one, so a trivy-secret.yaml in the scanned repository does not disable secret rules. As for trivy-repo. |
-| <a id="scanners.trivy.options.offline"></a>`offline` | boolean | `false` | Run in offline mode: skip database and check updates and use the vulnerability database already in trivy's cache. ASH still fails the scan when that database is past its 24h bound. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
 
 ## `zizmor`
 
@@ -454,13 +463,14 @@ zizmor finds security issues in GitHub Actions workflows and composite actions.
 - Environment passed into the sandbox: none beyond the baseline
 - Environment set under sandbox-exec: none
 
-Options, under `scanners.zizmor.options`. A key not listed here is accepted and kept, without validation.
+Options, under `scanners.zizmor.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=scanners.zizmor -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.zizmor.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.zizmor.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.zizmor.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
 | <a id="scanners.zizmor.options.config_file"></a>`config_file` | path, string, or null | `null` | Path to a zizmor configuration file, passed as `zizmor --config`. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory; an absolute path is used as given. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Otherwise it runs `zizmor --no-config`, so a `zizmor.yml` or `.github/zizmor.yml` in the scanned repository is not read. |
 | <a id="scanners.zizmor.options.persona"></a>`persona` | one of `regular`, `pedantic`, `auditor` | `regular` | zizmor persona. `regular` reports the fewest false positives; `pedantic` adds code-smell findings; `auditor` reports everything, false positives included. |
 | <a id="scanners.zizmor.options.online_audits"></a>`online_audits` | boolean | `false` | Allow zizmor's online audits. Off by default: ASH runs `zizmor --offline` and any GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN is removed from its environment. When true, ASH does not pass `zizmor --offline`, those variables reach zizmor unchanged, and zizmor may call the GitHub API with the token. ASH never reads or logs the token. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. It is ignored, with a warning, when ASH runs in offline mode. |
@@ -484,13 +494,14 @@ Ferret Scan is a sensitive data detection tool that scans files for potential se
 - Environment passed into the sandbox: `FERRET_*`
 - Environment set under sandbox-exec: none
 
-Options, under `scanners.ferret-scan.options`. A key not listed here is accepted and kept, without validation.
+Options, under `scanners.ferret-scan.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=scanners.ferret-scan -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.ferret-scan.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.ferret-scan.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.ferret-scan.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
 | <a id="scanners.ferret-scan.options.confidence_levels"></a>`confidence_levels` | one of `all`, `high`, `medium`, `low`, `high,medium`, `high,low`, `medium,low` | `all` | Confidence levels to display: 'high', 'medium', 'low', or combinations |
 | <a id="scanners.ferret-scan.options.checks"></a>`checks` | string | `all` | Specific checks to run, comma-separated. As of ferret-scan v2.4.5 through v2.5.2: BANK_ACCOUNT, CLOUD_RESOURCES, CREDIT_CARD, DATE_OF_BIRTH, DRIVERS_LICENSE, EMAIL, INTELLECTUAL_PROPERTY, IP_ADDRESS, MEDICAL_ID, METADATA, OTP, PASSPORT, PERSON_NAME, PHONE, PHYSICAL_ADDRESS, SECRETS, SOCIAL_MEDIA, SSN, VIN, or 'all'. The authoritative list for the installed version is 'ferret-scan --help checks'. |
 | <a id="scanners.ferret-scan.options.recursive"></a>`recursive` | boolean | `true` | Recursively scan directories |
@@ -526,13 +537,14 @@ Options, under `scanners.ferret-scan.options`. A key not listed here is accepted
 - Environment passed into the sandbox: `SNYK_*`, `SNYK_TOKEN`
 - Environment set under sandbox-exec: none
 
-Options, under `scanners.snyk-code.options`. A key not listed here is accepted and kept, without validation.
+Options, under `scanners.snyk-code.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=scanners.snyk-code -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.snyk-code.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.snyk-code.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.snyk-code.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
 | <a id="scanners.snyk-code.options.honor_tree_exclusions"></a>`honor_tree_exclusions` | boolean | `false` | Let snyk code test apply the exclusion files it finds in the scanned tree: the exclude.code and exclude.global entries of a .snyk file and the rules of a .dcignore file, which leave the files they name out of the analysis. snyk has no option that stops it reading them, so while this is false and the tree has one, snyk-code does not run and its error names the files. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. |
 
 ## `trivy-repo`
@@ -549,18 +561,18 @@ Options, under `scanners.snyk-code.options`. A key not listed here is accepted a
 - Environment passed into the sandbox: `TRIVY_*`
 - Environment set under sandbox-exec: none
 
-Options, under `scanners.trivy-repo.options`. A key not listed here is accepted and kept, without validation.
+Options, under `scanners.trivy-repo.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=scanners.trivy-repo -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.trivy-repo.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.trivy-repo.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.trivy-repo.options.offline"></a>`offline` | boolean | `false` | Run in offline mode, skipping DB updates and check-update calls. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
 | <a id="scanners.trivy-repo.options.scanners"></a>`scanners` | list of one of `vuln`, `misconfig`, `secret`, `license` | `["vuln", "secret", "misconfig", "license"]` | List of what security issues to detect with Trivy Repo specifically |
 | <a id="scanners.trivy-repo.options.license_full"></a>`license_full` | boolean | `true` | Eagerly look for licenses in source code headers and license files |
 | <a id="scanners.trivy-repo.options.ignore_unfixed"></a>`ignore_unfixed` | boolean | `true` | Display only fixed vulnerabilities |
 | <a id="scanners.trivy-repo.options.disable_telemetry"></a>`disable_telemetry` | boolean | `true` | Disable sending anonymous usage data to Aqua (--disable-telemetry). Only the operator sets it to false, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, may set it to true but not to false. Offline, trivy sends none whatever this says. |
-| <a id="scanners.trivy-repo.options.offline"></a>`offline` | boolean | `false` | Run in offline mode, skipping DB updates and check-update calls. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
 | <a id="scanners.trivy-repo.options.config_file"></a>`config_file` | path, string, or null | `null` | A trivy config file (trivy.yaml), passed as --config. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree; otherwise it is ignored with a warning. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Unset or ignored, ASH passes TRIVY_CONFIG when that names a file outside the scanned tree (a relative path in it is taken from the working directory), and otherwise an empty config of its own, so trivy does not load a trivy.yaml from the directory it runs in. A path that does not exist fails the scan. |
 | <a id="scanners.trivy-repo.options.module_dir"></a>`module_dir` | path, string, or null | `null` | A directory of trivy modules, passed as --module-dir. Unset, ASH passes an empty directory of its own. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The directory is used, and a relative path taken, as for config_file. A path that is not a directory fails the scan. |
 | <a id="scanners.trivy-repo.options.ignore_file"></a>`ignore_file` | string or null | `null` | A trivy ignore file, passed as --ignorefile. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree; a relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides and the environment variable. Unset, TRIVY_IGNOREFILE is used the same way, and otherwise trivy gets an empty one, so a .trivyignore in the scanned repository does not remove findings. |

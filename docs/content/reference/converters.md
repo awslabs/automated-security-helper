@@ -30,7 +30,7 @@ Converter implementation for Archive file extraction.
 - Command: none (runs in the ASH process)
 - Install: none declared
 
-Options, under `converters.archive.options`. A key not listed here is accepted and kept, without validation.
+Options, under `converters.archive.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=converters.archive -->
 | Option | Type | Default | Description |
@@ -50,7 +50,7 @@ Converter implementation for Jupyter notebooks security scanning.
 - Command: `jupyter-nbconvert`
 - Install: `uv tool install` on first use (`nbconvert>=7.16.0,<8.0.0`)
 
-Options, under `converters.jupyter.options`. A key not listed here is accepted and kept, without validation.
+Options, under `converters.jupyter.options`. An option not listed here refuses the configuration.
 
 <!-- doctest: options of=converters.jupyter -->
 | Option | Type | Default | Description |
