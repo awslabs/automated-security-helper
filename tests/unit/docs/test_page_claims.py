@@ -14951,6 +14951,59 @@ def test_a_profile_holding_an_environment_value_inside_a_path_is_refused_without
     assert _files_holding(tmp_path, _ENV_PROBE_VALUE) == []
 
 
+@pytest.mark.parametrize(
+    "how",
+    [
+        pytest.param("select_profile", id="select-profile"),
+        pytest.param(
+            "select_profile_with_patch_ops", id="select-profile-with-patch-ops"
+        ),
+        pytest.param("workspace_scan", id="a-workspace-scan-with-it"),
+    ],
+)
+def test_a_refused_profile_leaves_no_file_holding_the_environment_value(
+    tmp_path: Path, how: str
+) -> None:
+    """mcp-server.md (Config profiles). The planted control for the refusal above.
+
+    The same server and profile, bound the same ways, with the answer's
+    ``success`` left unread: the refusal must come before the write, so a
+    refusal that had already written the session's copy fails here. A file
+    holding the value is planted first, and the scan for it must find that one
+    file, so an empty answer afterwards is not a scan that cannot see.
+    """
+    assert_on_page(MCP_SERVER, _A_VALUE_INSIDE_A_LONGER_STRING_IS_REFUSED)
+    planted = tmp_path / "planted-control.txt"
+    planted.write_text(_ENV_PROBE_VALUE, encoding="utf-8")
+    assert _files_holding(tmp_path, _ENV_PROBE_VALUE) == [planted.name]
+    planted.unlink()
+    profile = _profile_anchoring_a_value(tmp_path / "operator")
+    env = {**_mcp_child_env(tmp_path), _ENV_PROBE: _ENV_PROBE_VALUE}
+    command = [*_ASH_MODULE, "mcp", "--quiet"]
+    command += ["--profile", f"{_PROFILE_NAME}={profile}"]
+    server = _McpStdioClient(command, tmp_path, env)
+    try:
+        if how == "workspace_scan":
+            answer = server.tool(
+                "run_ash_workspace_scan",
+                workspace_file=str(_a_workspace_of_one_project(tmp_path)),
+                profile=_PROFILE_NAME,
+            )
+        elif how == "select_profile_with_patch_ops":
+            answer = server.tool(
+                "select_profile",
+                profile_name=_PROFILE_NAME,
+                patch_ops=_ADD_AN_IGNORE_PATH,
+            )
+        else:
+            answer = server.tool("select_profile", profile_name=_PROFILE_NAME)
+    finally:
+        server.close()
+
+    assert _ENV_PROBE_VALUE not in json.dumps(answer), answer
+    assert _files_holding(tmp_path, _ENV_PROBE_VALUE) == []
+
+
 # --------------------------------------------------------------------------- #
 # A value read from the environment in a message
 # --------------------------------------------------------------------------- #
