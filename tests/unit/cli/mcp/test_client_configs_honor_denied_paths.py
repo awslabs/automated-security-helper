@@ -1679,7 +1679,12 @@ def test_a_broken_default_config_refuses_only_a_delivered_config_and_never_hangs
         mcp_tools.mcp_scan_directory(str(source), config_path=None, session_id=SESSION)
     )
     assert refused["success"] is False, refused
-    assert refused["error_type"] == "config_policy_unreadable", refused
+    # The server limits are read from the operator's config before any check of
+    # the delivered file, so a broken one refuses the scan as a config error,
+    # exit 3 (mcp_scan_directory's _resource_limits read;
+    # TestOneUnreadableOperatorConfigAnswersOneCategory).
+    assert refused["exit_code"] == 3, refused
+    assert refused["error"].startswith("The configuration cannot be loaded"), refused
 
     # Called directly, the scan's entry is closed rather than left PENDING.
     target = _server["target"]
