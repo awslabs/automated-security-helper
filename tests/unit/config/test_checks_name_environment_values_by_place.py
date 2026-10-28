@@ -52,6 +52,14 @@ SCANNER = "probecanaryscanner"
 LITERAL_MODULE = "literalprobemodule"
 LITERAL_DIRECTORY = "literalprobedir"
 
+#: A name outside ASH's plugin namespace is kept by the trust confinement for the
+#: scan's namespace refusal (``plugin_module_trust``, ``_is_allowed_module_path``),
+#: which imports nothing and warns of nothing. The in-tree warning is about a name
+#: inside the namespace that nothing installed provides, so the names those tests
+#: read end in the namespace suffix.
+NAMESPACE_SUFFIX = "_ash_plugins"
+LITERAL_NAMESPACED_MODULE = f"{LITERAL_MODULE}{NAMESPACE_SUFFIX}"
+
 CANARIES = (
     MODULE,
     DIRECTORY,
@@ -720,15 +728,21 @@ def test_mcp_get_config_shows_a_short_value_by_place(tmp_path: Path) -> None:
 
 
 def test_the_in_tree_module_warning_names_a_module_read_from_the_environment_by_place(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The warning for the ash_plugin_modules entries a file inside the scanned
     tree may not add: every module of an entry read from the environment, both
     pieces of the one that splits in two included, is <value>, and the module
-    the file wrote is named."""
+    the file wrote is named. Every name is inside ASH's plugin namespace
+    (``NAMESPACE_SUFFIX``) and provided by nothing installed: a name outside the
+    namespace is kept for the scan's own refusal and draws no warning here."""
     from automated_security_helper.config.resolve_config import resolve_config
     from automated_security_helper.utils.log import ASH_LOGGER
 
+    in_namespace_module = f"{MODULE}{NAMESPACE_SUFFIX}"
+    in_namespace_pair = tuple(f"{piece}{NAMESPACE_SUFFIX}" for piece in PAIR)
+    monkeypatch.setenv("ASH_PROBE_CANARY_MODULE", in_namespace_module)
+    monkeypatch.setenv("ASH_PROBE_CANARY_PAIR", ",".join(in_namespace_pair))
     source = tmp_path / "src"
     (source / ".ash").mkdir(parents=True)
     (source / ".ash" / ".ash.yaml").write_text(
@@ -736,7 +750,7 @@ def test_the_in_tree_module_warning_names_a_module_read_from_the_environment_by_
         "ash_plugin_modules:\n"
         "  - ${ASH_PROBE_CANARY_MODULE}\n"
         "  - ${ASH_PROBE_CANARY_PAIR}\n"
-        "  - literalprobemodule\n",
+        f"  - {LITERAL_NAMESPACED_MODULE}\n",
         encoding="utf-8",
     )
     records: List[logging.LogRecord] = []
@@ -760,9 +774,13 @@ def test_the_in_tree_module_warning_names_a_module_read_from_the_environment_by_
     assert len(warning) == 1, text
     _assert_hidden(text)
     assert warning[0].count(f"'{ENVIRONMENT_VALUE_SHOWN}'") == 3, warning
-    assert f"'{LITERAL_MODULE}'" in warning[0], warning
+    assert f"'{LITERAL_NAMESPACED_MODULE}'" in warning[0], warning
     # The check read the values: none of the refused modules is kept.
-    assert not set(config.ash_plugin_modules) & {MODULE, *PAIR, LITERAL_MODULE}
+    assert not set(config.ash_plugin_modules) & {
+        in_namespace_module,
+        *in_namespace_pair,
+        LITERAL_NAMESPACED_MODULE,
+    }
 
 
 #: The runtime policy's own entries, read from the environment by the profile's
@@ -1283,8 +1301,8 @@ def test_a_policy_entry_a_patch_moves_is_named_by_its_place(
 #: warning that names the files it was read from.
 _IN_TREE_SETTINGS = {
     "plugin-modules": (
-        "ash_plugin_modules:\n  - literalprobemodule\n",
-        f"Ignoring ash_plugin_modules entries '{LITERAL_MODULE}'",
+        f"ash_plugin_modules:\n  - {LITERAL_NAMESPACED_MODULE}\n",
+        f"Ignoring ash_plugin_modules entries '{LITERAL_NAMESPACED_MODULE}'",
     ),
     "sandbox-grants": (
         "sandbox:\n  network_scanners:\n    - bandit\n",
