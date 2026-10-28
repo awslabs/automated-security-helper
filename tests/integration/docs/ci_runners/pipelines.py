@@ -846,16 +846,22 @@ def _launch_jenkins(prepared: Prepared, session: Session) -> Launched:
         "bin_dir": session.options.bin_dir,
         "jenkins_dir": session.options.jenkins_dir,
         "jenkinsfile": project / prepared.path,
-        "cwd": project,
         "tool_cache": session.tool_cache,
         "outer": os.environ,
         "timeout": session.options.launch_timeout,
     }
+    # Jenkinsfile Runner explodes the WAR into a new directory of its working directory
+    # on every start. Neither start runs in the project, which ash scans, or the exploded
+    # core's files would be scanned as the project's own.
+    lint_cwd, run_cwd = work / "jenkins-cwd-lint", work / "jenkins-cwd-run"
+    lint_cwd.mkdir()
+    run_cwd.mkdir()
     lint_log = out / "jenkinsfile-runner-lint.log"
     lint, timed_out = _timed(
         lambda: run_jenkinsfile_runner.run_jenkinsfile_runner(
             leg,
             command="lint",
+            cwd=lint_cwd,
             jenkins_home=work / "jenkins-home-lint",
             workspace=None,
             plugin_copy=work / "plugins-lint",
@@ -873,6 +879,7 @@ def _launch_jenkins(prepared: Prepared, session: Session) -> Launched:
         lambda: run_jenkinsfile_runner.run_jenkinsfile_runner(
             leg,
             command="run",
+            cwd=run_cwd,
             jenkins_home=work / "jenkins-home",
             workspace=project,
             plugin_copy=work / "plugins-run",
