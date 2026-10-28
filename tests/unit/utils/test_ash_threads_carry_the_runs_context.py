@@ -111,11 +111,7 @@ def test_the_thread_factory_lives_in_its_own_module_and_the_guide_names_it():
         "the re-export from utils.log is not the factory itself"
     )
     guide = (
-        Path(PACKAGE).parents[0]
-        / "docs"
-        / "content"
-        / "plugins"
-        / "write-a-scanner.md"
+        Path(PACKAGE).parents[0] / "docs" / "content" / "plugins" / "write-a-scanner.md"
     ).read_text(encoding="utf-8")
     assert "from automated_security_helper.utils.threads import" in guide, (
         "the plugin guide does not import the thread factory from its own module"
