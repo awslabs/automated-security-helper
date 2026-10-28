@@ -339,6 +339,108 @@ class TestAToolKilledByASignalIsAnError:
         assert not scanner._exit_code_accepted()
 
 
+class TestASignalCauseIsAttributedOnlyWhenTheRunnerRecordedOne:
+    """The runner leaves ``signaled`` out of a post-run-error response when ASH's
+    own stop may have sent the signal (SIGKILL or SIGTERM after a failed wait
+    while the server is stopping), so that code names no sender.
+
+    ``_process_command_response`` still names a bare negative code from a caller
+    that handed over no flag at all, worded without an attribution. It must not
+    name one for a response that carries ``post_run_error``, on either path:
+    the seam itself, and ``_run_subprocess``'s handler, which folds the same
+    code after a recorder raised.
+    """
+
+    @staticmethod
+    def _withheld(returncode):
+        """What the runner returns when it withholds ``signaled``: the tool's own
+        negative code and ``post_run_error``, with no ``signaled`` key."""
+        return {
+            "stdout": "",
+            "stderr": "",
+            "returncode": returncode,
+            "post_run_error": True,
+            "spawn_failed": False,
+            "error": "the wait on the tool failed",
+        }
+
+    @staticmethod
+    def _bare(returncode):
+        return {"stdout": "", "stderr": "", "returncode": returncode}
+
+    @staticmethod
+    def _handled(plugin_context, monkeypatch, response):
+        """Run ``_run_subprocess`` on ``response`` with the timeout recorder
+        raising, so ``_process_command_response`` has already run on the
+        response when the handler takes over."""
+        from automated_security_helper.utils import subprocess_utils
+
+        monkeypatch.setattr(
+            subprocess_utils,
+            "run_command_with_output_handling",
+            lambda command, **kwargs: dict(response),
+        )
+        scanner_class = _scanner_class({0, 1})
+
+        def recorder_raises(self, response, timeout):
+            raise RuntimeError("a recorder failed after the code was folded")
+
+        monkeypatch.setattr(scanner_class, "_record_timeout", recorder_raises)
+        scanner = scanner_class(config=_ToolConfig(), context=plugin_context)
+
+        returned = scanner._run_subprocess([sys.executable, "-c", "pass"])
+
+        # The premises: the handler ran, and it kept the response's code.
+        assert returned["returncode"] == response["returncode"], returned
+        assert "a recorder failed after the code was folded" in returned["error"]
+        assert scanner.exit_code == 128 - response["returncode"], scanner.exit_code
+        return scanner
+
+    @pytest.mark.parametrize("returncode", [-9, -15], ids=["SIGKILL", "SIGTERM"])
+    def test_a_post_run_error_response_gets_no_signal_cause(
+        self, plugin_context, returncode
+    ):
+        scanner = _scanner_class({0, 1})(config=_ToolConfig(), context=plugin_context)
+
+        scanner._process_command_response(self._withheld(returncode))
+
+        assert scanner.exit_code == 128 - returncode, scanner.exit_code
+        assert scanner.scan_kept_flag is None, scanner.scan_kept_flag
+        assert not scanner._exit_code_accepted()
+
+    @pytest.mark.parametrize("returncode", [-9, -15], ids=["SIGKILL", "SIGTERM"])
+    def test_control_a_bare_negative_code_gets_the_unattributed_cause(
+        self, plugin_context, returncode
+    ):
+        scanner = _scanner_class({0, 1})(config=_ToolConfig(), context=plugin_context)
+
+        scanner._process_command_response(self._bare(returncode))
+
+        kept = scanner.scan_kept_flag
+        assert kept is not None and kept[0] == "signaled", kept
+        assert f"(signal {-returncode})" in kept[1], kept
+        assert "ASH did not send" not in kept[1], kept
+
+    @pytest.mark.parametrize("returncode", [-9, -15], ids=["SIGKILL", "SIGTERM"])
+    def test_the_handler_path_gets_no_signal_cause_for_a_post_run_error(
+        self, plugin_context, monkeypatch, returncode
+    ):
+        scanner = self._handled(plugin_context, monkeypatch, self._withheld(returncode))
+
+        assert scanner.scan_post_run_error is not None
+        assert scanner.scan_kept_flag is None, scanner.scan_kept_flag
+
+    @pytest.mark.parametrize("returncode", [-9, -15], ids=["SIGKILL", "SIGTERM"])
+    def test_control_the_handler_path_keeps_the_cause_of_a_bare_negative_code(
+        self, plugin_context, monkeypatch, returncode
+    ):
+        scanner = self._handled(plugin_context, monkeypatch, self._bare(returncode))
+
+        kept = scanner.scan_kept_flag
+        assert kept is not None and kept[0] == "signaled", kept
+        assert f"(signal {-returncode})" in kept[1], kept
+
+
 def test_each_target_is_judged_by_its_own_run(plugin_context, tmp_path):
     """The converted target's exit 1 is not hidden by the source target's exit 2.
 
