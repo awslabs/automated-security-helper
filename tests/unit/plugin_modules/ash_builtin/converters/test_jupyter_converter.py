@@ -1565,7 +1565,7 @@ class TestConvert:
         # nbconvert reads a copy made through the checked handle, never the tree
         # path itself, so a link swapped in after the check cannot be followed.
         staged = staged_notebook(cmd)
-        assert staged.name == notebook.name
+        assert staged.name == "notebook.ipynb", "the copy is staged under a fixed name"
         assert staged != notebook
         assert run.inputs == [notebook.read_bytes()]
         assert not staged.exists(), "the staged copy is removed afterwards"
@@ -1837,7 +1837,8 @@ class TestConvert:
 
         def _run(cmd, *args, **kwargs):
             launched.append(staged_notebook(cmd).name)
-            out = Path(cmd[cmd.index("--output") + 1] + ".py")
+            # Where nbconvert writes: --output-dir / --output plus ".py".
+            out = output_file(cmd)
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text("ok\n", encoding="utf-8")
             return subprocess.CompletedProcess(cmd, 0, "", "")
@@ -1851,7 +1852,9 @@ class TestConvert:
         assert len(results) == 1
         assert results[0].name.endswith(expected_output_name(good))
         assert not any("broken" in p.name for p in results)
-        assert launched == [good.name]
+        # nbconvert ran once, on the good notebook's staged copy (the copy is
+        # staged under a fixed name).
+        assert launched == ["notebook.ipynb"]
         # Exactly one failure was recorded, as an input error.
         errors = messages_at(ash_log_records, logging.ERROR)
         expected = (
@@ -1908,9 +1911,13 @@ class TestConvert:
         )
         use_stand_in_nbconvert(monkeypatch, converter)
         real = nbconvert_double()
+        launched: list = []
 
         def _run(cmd, *args, **kwargs):
-            if staged_notebook(cmd).name == first.name:
+            # Every copy is staged as notebook.ipynb, so the run is told apart by
+            # its order: the scan set's, first.ipynb then second.ipynb.
+            launched.append(list(cmd))
+            if len(launched) == 1:
                 raise ValueError("something unexpected")
             return real(cmd, *args, **kwargs)
 
