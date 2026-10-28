@@ -81,9 +81,9 @@ runs:
       # loaded.
       run: uv sync --extra cdk --extra symbols
 
-    # Prints the limits that decide how many processes a macOS job may hold, so the worker
-    # count passed to "Run PyTest shard" below can be read against them instead of guessed.
-    # Every command ends in `|| true`: this step reports and never fails the job.
+    # Prints the limits that decide how many processes a macOS job may hold, so that a refused
+    # process start in the tests can be read against them. It only reports and never fails the
+    # job: every command ends in `|| true`.
     - name: Report the process limits (macOS)
       if: runner.os == 'macOS'
       shell: bash
@@ -163,20 +163,12 @@ runs:
         ASH_REQUIRE_CDK_EXTRA: "1"
         PYTEST_DEBUG_TEMPROOT: ${{ runner.temp }}
         ASH_TEST_SHARD: ${{ inputs.shard }}
-      # The hosted macOS runners refuse to start new processes once the runner user reaches
-      # its per-user limit, and with `-n auto` every worker holds an `ash mcp` server child
-      # plus its own children, so the MCP server tests fail with "Resource temporarily
-      # unavailable". Four workers keep the process population under that limit. The figure
-      # is a first value, to be re-read against the limits that "Report the process limits
-      # (macOS)" prints. xdist takes the last `-n` it is given, so this overrides pytest.ini.
       run: |
-        extra=""
-        if [ "${RUNNER_OS}" = "macOS" ]; then extra="-n 4"; fi
         uv run pytest \
           --cov=automated_security_helper \
           --cov-config=.coveragerc \
           --cov-report= \
-          --junit-xml=test-results/pytest-shard.junit.xml ${extra}
+          --junit-xml=test-results/pytest-shard.junit.xml
 
     # The shard's coverage data, where the artifact upload below carries it to the
     # unit-coverage job. It runs after a failed test run too, since that run's data is
