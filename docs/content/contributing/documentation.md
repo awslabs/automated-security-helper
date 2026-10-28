@@ -23,7 +23,7 @@ There are three layers:
 All three jobs are in the Unified CI workflow and run on every pull request and merge
 queue entry. The `required-checks` gate depends on each of them, so a failure in any
 layer blocks the merge. The "Docs Deploy" workflow, `ash-repo-docs.yml`, only publishes
-the site, after a push to `main` and for each release tag.
+the site, after a push to `main` and when someone runs it by hand on a release tag.
 
 ## How blocks are classified
 
@@ -752,7 +752,7 @@ branch lists them for the version selector in the site header.
   it writes `{{RELEASE}}`, which stays the current release number. The static checks
   report `{{RELEASE}}` written as the ref of an install command anywhere but a table
   row or a `text` block, so the `main` version cannot install a release.
-- Every release tag `vX.Y.Z` publishes the version `X.Y.Z` (see
+- Running the docs workflow by hand on a release tag `vX.Y.Z` publishes the version `X.Y.Z` (see
   [Releases and versions](releases.md#the-documentation-site)). The newest release also
   gets the `latest` alias. `latest/` is a full copy of it rather than a redirect, and
   every version names its `latest/` page as the canonical one for search engines. A
@@ -960,7 +960,7 @@ to resolve in: save the block inside one with `save-as=<package>/<module>.py`.
 | must be 'warn', does not pass --strict, hooks does not list | `mkdocs.yml` or the `build-docs` job lost a strict-build setting; restore it |
 | the versioned site needs, the mike plugin is not listed | `mkdocs.yml` lost a setting the [versioned site](#versioned-docs) depends on; restore it |
 | replaces the whole gh-pages branch | a workflow runs `mkdocs gh-deploy`; publish with `scripts/docs_versions.py deploy` instead |
-| scripts/docs_versions.py deploy (or check) is not run, does not start | the docs workflow lost the step that publishes the versions, the `build-docs` job lost the step that checks them, or the tag workflow no longer starts the docs deploy for a release |
+| scripts/docs_versions.py deploy (or check) is not run, does not start | the docs workflow lost the step that publishes the versions, or the `build-docs` job lost the step that checks them |
 | the workflow that builds the docs does not exist, the docs workflow does not exist | `ash-unified-ci.yml` or `ash-repo-docs.yml` was renamed or removed; the checks read the build from the first and the deploy from the second |
 
 ### `templates`
