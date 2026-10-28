@@ -34,6 +34,7 @@ from automated_security_helper.config.path_trust import (
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.utils.uv_tool_runner import UVToolRunner
+from tests.utils.helpers import mark_git_checkout
 
 PLUGIN = "example-plugin"
 PLUGIN_KEY = f"scanners.{PLUGIN}.options.rules_file"
@@ -72,7 +73,7 @@ class Layout:
         self.ops = root / "ops"
         self.outside = root / "etc"
         for checkout in (self.scanned, self.ops):
-            (checkout / ".git").mkdir(parents=True)
+            mark_git_checkout(checkout)
         self.outside.mkdir()
         (self.scanned / "app.py").write_text("x = 1\n", encoding="utf-8")
         self.ops_file = self.ops / "rules.yaml"
@@ -178,7 +179,7 @@ def test_a_config_outside_every_checkout_extending_one_in_a_checkout(layout):
     the selected file's own paths are the operator's. The base sits in a checkout
     below the selected file's directory, where its ``extends`` may reach."""
     shared = layout.outside / "shared"
-    (shared / ".git").mkdir(parents=True)
+    mark_git_checkout(shared)
     layout.config_naming(shared, layout.ops_file)
     config = layout.outside / "ash.yaml"
     config.write_text("extends: shared/ash.yaml\nproject_name: p\n", encoding="utf-8")

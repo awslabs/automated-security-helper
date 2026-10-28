@@ -24,6 +24,7 @@ from automated_security_helper.cli.main import app
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.models.workspace import WorkspaceExitCode
 from automated_security_helper.workspace.resolver import resolve_workspace
+from tests.utils.helpers import mark_git_checkout
 
 _NOT_THE_OPERATORS = "must be the operator's"
 
@@ -102,7 +103,7 @@ def test_an_operator_config_inside_the_checkout_around_the_workspace_is_refused(
     every other config check, so a file beside the workspace in that checkout is
     the repository's, not the operator's."""
     checkout = tmp_path / "checkout"
-    (checkout / ".git").mkdir(parents=True)
+    mark_git_checkout(checkout)
     workspace = _workspace(checkout / "work", {"api": {"fail_on_findings": True}})
     beside = _write(checkout / "ops" / "ash.yaml", {"fail_on_findings": False})
 
@@ -115,7 +116,7 @@ def test_an_operator_config_inside_the_checkout_around_the_workspace_is_refused(
 
 def test_a_file_reached_through_a_link_in_the_checkout_says_so(tmp_path):
     checkout = tmp_path / "checkout"
-    (checkout / ".git").mkdir(parents=True)
+    mark_git_checkout(checkout)
     workspace = _workspace(checkout / "work", {"api": {"fail_on_findings": True}})
     outside = _write(tmp_path / "ops" / "ash.yaml", {"fail_on_findings": False})
     link = checkout / "ash.yaml"
