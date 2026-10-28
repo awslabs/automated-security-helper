@@ -1324,12 +1324,12 @@ def test_an_override_turns_it_off_whatever_the_repositorys_config_says(tmp_path)
         "      findings_scope: someone-elses-repo\n",
         encoding="utf-8",
     )
-    # The control: without the override the repository's enabled: true applies,
-    # so it is the override that turns the reporter off below. (On this branch
-    # alone. The repository-config trust rules may stop an in-tree file from
-    # enabling it at all, and then this control changes with them.)
+    # The control: the repository's own enabled: true does not apply either
+    # (_confine_enabled in config/reporter_trust.py holds an off-host reporter's
+    # enabled to the trusted base's), so the reporter is off with or without
+    # the override, and the override below is the operator's word on top.
     control = resolve_config(source_dir=checkout)
-    assert _reporter_from(control, tmp_path).config.enabled is True
+    assert _reporter_from(control, tmp_path).config.enabled is False
 
     config = resolve_config(
         source_dir=checkout,
