@@ -450,7 +450,7 @@ for finding in findings:
     }
   },
   "ash_config": { /* Configuration used for scan */ },
-  "scanner_results": { /* Detailed findings by scanner */ },
+  "scanner_results": { /* One status record per scanner; the findings are in sarif */ },
   "converter_results": { /* File conversion results */ },
   "additional_reports": { /* External reports included */ },
   "validation_checkpoints": [ /* Scan validation data */ ]
@@ -469,29 +469,55 @@ for finding in findings:
 - `duration`: Scan duration in seconds
 
 #### scanner_results
-Contains findings organized by scanner name:
+Contains one status record per scanner, keyed by scanner name. A record says how the scanner ended and how many findings it produced. It does not hold the findings themselves; those are in `sarif`, below.
 
-<!-- doctest: config kind=other reason="a simplified sketch of findings grouped by scanner, not the exact layout of the file" -->
+<!-- doctest: config kind=other reason="a trimmed sketch of one scanner's status record, not the whole file" -->
 ```json
 {
   "scanner_results": {
     "bandit": {
-      "findings": [
-        {
-          "rule_id": "B201",
-          "severity": "HIGH",
-          "message": "Flask app appears to be run with debug=True",
-          "file_path": "app.py",
-          "line_start": 42,
-          "line_end": 42,
-          "suppressed": false,
-          "suppression_reason": null
-        }
-      ]
+      "status": "FAILED",
+      "dependencies_satisfied": true,
+      "excluded": false,
+      "severity_counts": {
+        "suppressed": 0,
+        "critical": 0,
+        "high": 1,
+        "medium": 0,
+        "low": 1,
+        "info": 0
+      },
+      "finding_count": 2,
+      "actionable_finding_count": 1,
+      "suppressed_finding_count": 0,
+      "exit_code": 0,
+      "duration": 1.25,
+      "missing_reason": null,
+      "skipped_reason": null
     }
   }
 }
 ```
+
+- `status`: `PASSED`, `FAILED` (at least one actionable finding), `ERROR`, `MISSING` (the tool was not found) or `SKIPPED`
+- `severity_counts`, `finding_count`, `actionable_finding_count`, `suppressed_finding_count`: the scanner's findings by severity, in total, actionable, and suppressed
+- `duration`: seconds the scanner ran
+- `exit_code`: the scanner tool's exit code, or `null` when no tool ran
+- `missing_reason`, `skipped_reason`: why the scanner did not run, set on a `MISSING` and a `SKIPPED` record respectively and `null` otherwise
+
+#### sarif
+The findings are in `sarif`, a SARIF 2.1.0 report. Each finding is one entry of `sarif.runs[].results[]`. A file ASH writes has one run that holds every scanner's findings, so loop over all `runs` rather than reading only the first, and use `properties.scanner_name` to tell the scanners apart. The fields to read:
+
+- `ruleId`: the scanner's rule identifier
+- `message.text`: what the scanner found
+- `locations[0].physicalLocation.artifactLocation.uri`: the file path
+- `locations[0].physicalLocation.region.startLine`: the first line (`endLine` is the last)
+- `level`: the SARIF level, `error`, `warning`, `note` or `none`
+- `properties.scanner_name`: the scanner that reported the finding, the same name as the key in `scanner_results`
+- `properties.issue_severity`: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW` or `INFO`; when a result has none, ASH grades it from its rule's score or its `level`
+- `suppressions`: `null` or empty for an active finding, and one or more entries for a suppressed one
+
+For one record per finding with flat field names, read `reports/ash.flat.json` instead.
 
 ### Efficient Querying
 
@@ -504,24 +530,29 @@ Contains findings organized by scanner name:
 jq '.metadata.summary_stats.actionable' ash_aggregated_results.json
 ```
 
-**Get all critical/high findings**:
+**Get all critical/high findings** (suppressed ones included; the findings are in `sarif`):
 ```bash
-jq '.scanner_results | to_entries[] | .value.findings[] | select(.severity == "CRITICAL" or .severity == "HIGH")' ash_aggregated_results.json
+jq '.sarif.runs[].results[] | select(.properties.issue_severity == "CRITICAL" or .properties.issue_severity == "HIGH") | {scanner: .properties.scanner_name, rule: .ruleId, severity: .properties.issue_severity, file: .locations[0].physicalLocation.artifactLocation.uri, line: .locations[0].physicalLocation.region.startLine, message: .message.text}' ash_aggregated_results.json
 ```
 
 **Get findings by scanner**:
 ```bash
-jq '.scanner_results.bandit.findings' ash_aggregated_results.json
+jq '[.sarif.runs[].results[] | select(.properties.scanner_name == "bandit")]' ash_aggregated_results.json
+```
+
+**Get a scanner's status and finding counts**:
+```bash
+jq '.scanner_results.bandit' ash_aggregated_results.json
 ```
 
 **Get non-suppressed findings**:
 ```bash
-jq '.scanner_results | to_entries[] | .value.findings[] | select(.suppressed == false)' ash_aggregated_results.json
+jq '.sarif.runs[].results[] | select((.suppressions // []) | length == 0)' ash_aggregated_results.json
 ```
 
 **Count findings by severity**:
 ```bash
-jq '[.scanner_results | to_entries[] | .value.findings[] | .severity] | group_by(.) | map({severity: .[0], count: length})' ash_aggregated_results.json
+jq '[.sarif.runs[].results[] | .properties.issue_severity] | group_by(.) | map({severity: .[0], count: length})' ash_aggregated_results.json
 ```
 
 #### Fallback: Using Python (If jq is unavailable)
@@ -538,12 +569,16 @@ import json
 with open("ash_aggregated_results.json") as f:
     data = json.load(f)
 
-for scanner, results in data["scanner_results"].items():
-    for finding in results.get("findings", []):
-        if finding["severity"] in ["CRITICAL", "HIGH"]:
-            print(
-                f"{scanner}: {finding['file_path']}:{finding['line_start']} - {finding['message']}"
-            )
+for run in data["sarif"]["runs"]:
+    for result in run["results"]:
+        properties = result.get("properties") or {}
+        if properties.get("issue_severity") in ["CRITICAL", "HIGH"]:
+            locations = result.get("locations") or [{}]
+            location = locations[0].get("physicalLocation", {})
+            uri = location.get("artifactLocation", {}).get("uri")
+            line = location.get("region", {}).get("startLine")
+            message = result.get("message", {}).get("text")
+            print(f"{properties.get('scanner_name')}: {uri}:{line} - {message}")
 ```
 
 **Get findings by scanner**:
@@ -553,7 +588,12 @@ import json
 with open("ash_aggregated_results.json") as f:
     data = json.load(f)
 
-bandit_findings = data["scanner_results"]["bandit"]["findings"]
+bandit_findings = [
+    result
+    for run in data["sarif"]["runs"]
+    for result in run["results"]
+    if (result.get("properties") or {}).get("scanner_name") == "bandit"
+]
 print(json.dumps(bandit_findings, indent=2))
 ```
 
@@ -566,9 +606,9 @@ with open("ash_aggregated_results.json") as f:
     data = json.load(f)
 
 severities = []
-for scanner, results in data["scanner_results"].items():
-    for finding in results.get("findings", []):
-        severities.append(finding["severity"])
+for run in data["sarif"]["runs"]:
+    for result in run["results"]:
+        severities.append((result.get("properties") or {}).get("issue_severity"))
 
 counts = Counter(severities)
 for severity, count in counts.items():
@@ -584,12 +624,12 @@ grep -o '"actionable": [0-9]*' ash_aggregated_results.json | head -1 | grep -o '
 
 **Check for critical findings**:
 ```bash
-grep -c '"severity": "CRITICAL"' ash_aggregated_results.json
+grep -c '"issue_severity": "CRITICAL"' ash_aggregated_results.json
 ```
 
 **List all severity levels found**:
 ```bash
-grep -o '"severity": "[A-Z]*"' ash_aggregated_results.json | sort -u
+grep -o '"issue_severity": "[A-Z]*"' ash_aggregated_results.json | sort -u
 ```
 
 #### Recommended Approach for GenAI Tools
@@ -1028,7 +1068,7 @@ suppressions:
 **Solution**:
 ```bash
 # Check exact path and rule_id from results
-jq '.scanner_results | to_entries[] | .value.findings[] | select(.suppressed == false) | {file_path, rule_id, line_start}' ash_aggregated_results.json
+jq '.sarif.runs[].results[] | select((.suppressions // []) | length == 0) | {file: .locations[0].physicalLocation.artifactLocation.uri, rule: .ruleId, line: .locations[0].physicalLocation.region.startLine}' ash_aggregated_results.json
 
 # Verify suppression in config matches exactly
 ```
@@ -1124,17 +1164,22 @@ with open(".ash/ash_output/ash_aggregated_results.json") as f:
 
 # Get all actionable high/critical findings
 actionable_findings = []
-for scanner, data in results["scanner_results"].items():
-    for finding in data.get("findings", []):
-        if not finding["suppressed"] and finding["severity"] in ["HIGH", "CRITICAL"]:
+for run in results["sarif"]["runs"]:
+    for finding in run["results"]:
+        properties = finding.get("properties") or {}
+        if finding.get("suppressions"):
+            continue
+        if properties.get("issue_severity") in ["HIGH", "CRITICAL"]:
+            locations = finding.get("locations") or [{}]
+            location = locations[0].get("physicalLocation", {})
             actionable_findings.append(
                 {
-                    "scanner": scanner,
-                    "rule_id": finding["rule_id"],
-                    "severity": finding["severity"],
-                    "file": finding["file_path"],
-                    "line": finding["line_start"],
-                    "message": finding["message"],
+                    "scanner": properties.get("scanner_name"),
+                    "rule_id": finding.get("ruleId"),
+                    "severity": properties["issue_severity"],
+                    "file": location.get("artifactLocation", {}).get("uri"),
+                    "line": location.get("region", {}).get("startLine"),
+                    "message": finding.get("message", {}).get("text"),
                 }
             )
 
@@ -1654,7 +1699,7 @@ there are no errors.
 
 ```bash
 # Check exact finding details
-jq '.scanner_results | to_entries[] | .value.findings[] | select(.suppressed == false) | {file_path, rule_id, line_start, line_end}' .ash/ash_output/ash_aggregated_results.json
+jq '.sarif.runs[].results[] | select((.suppressions // []) | length == 0) | {file: .locations[0].physicalLocation.artifactLocation.uri, rule: .ruleId, line: .locations[0].physicalLocation.region.startLine, end_line: .locations[0].physicalLocation.region.endLine}' .ash/ash_output/ash_aggregated_results.json
 
 # Verify suppression syntax
 ash config validate
