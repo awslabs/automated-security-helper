@@ -1624,14 +1624,15 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         # went through _process_command_response like any subprocess. It is not an
         # audit, so the exit code starts again here.
         self.exit_code = None
-        if not validated:
-            self._post_scan(
-                target=target,
-                target_type=target_type,
-            )
-            return False
-
-        if not self.dependencies_satisfied:
+        if not validated or not self.dependencies_satisfied:
+            if self._scanner_offline():
+                # The dependency check refused offline (validate_plugin_dependencies).
+                # The lockfiles it would have audited are still recorded as not
+                # scanned, with the reason and the warning, so the results and the
+                # summaries name them; False is what records the row MISSING.
+                self._skip_offline(
+                    self._package_manifests(target_type), target, target_type
+                )
             self._post_scan(
                 target=target,
                 target_type=target_type,
