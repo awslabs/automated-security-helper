@@ -56,6 +56,13 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner
 )
 from tests.utils import undecodable_names as names
 
+# Every test here plants a file whose name is not UTF-8.
+if os.name == "nt":
+    pytest.skip(
+        "a file name that is not UTF-8 cannot exist on NTFS (names are UTF-16)",
+        allow_module_level=True,
+    )
+
 _TEMPLATE = (
     b'AWSTemplateFormatVersion: "2010-09-09"\n'
     b"Resources:\n"

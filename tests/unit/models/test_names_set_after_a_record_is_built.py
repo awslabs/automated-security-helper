@@ -20,6 +20,8 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugin_modules.ash_builtin.scanners import (
     cfn_nag_scanner,
@@ -37,6 +39,13 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Tool,
     ToolComponent,
 )
+
+# The constant below is a file name that is not UTF-8.
+if os.name == "nt":
+    pytest.skip(
+        "a file name that is not UTF-8 cannot exist on NTFS (names are UTF-16)",
+        allow_module_level=True,
+    )
 
 ODD = os.fsdecode(b"templ\xe9.yaml")
 RECORDED = "templ\\udce9.yaml"

@@ -27,6 +27,7 @@ in. Only some filesystems can hold the names; elsewhere the tests skip, with the
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Dict, List
 
@@ -34,6 +35,13 @@ import pytest
 
 from tests.utils import undecodable_names as names
 from tests.utils.undecodable_names import ABSENT, KEEP, REPORTED, SUPPRESSED
+
+# Every test here plants a file whose name is not UTF-8.
+if os.name == "nt":
+    pytest.skip(
+        "a file name that is not UTF-8 cannot exist on NTFS (names are UTF-16)",
+        allow_module_level=True,
+    )
 
 #: The file named with the byte, and the line its finding is on.
 BYTE_NAME = b"a\xe9.py"

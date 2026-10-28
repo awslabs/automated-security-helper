@@ -440,7 +440,10 @@ class TestGitWarningsAreNotADirtyListing:
     if the dirty test read stderr too, the script would fault on every run in such an
     environment and name paths that are not dirty as the cause."""
 
-    @pytest.mark.skipif(os.geteuid() == 0, reason="root can read a chmod-0 file")
+    @pytest.mark.skipif(
+        getattr(os, "geteuid", lambda: -1)() == 0,
+        reason="root can read a chmod-0 file",
+    )
     def test_a_git_stderr_warning_with_a_clean_tree_is_not_a_fault(self, tmp_path):
         tree = _build_tree(tmp_path)
         unreadable = tmp_path / "excludes"

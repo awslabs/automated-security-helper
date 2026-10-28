@@ -820,7 +820,8 @@ class TestAConfigInAnotherCheckoutIsMarkedAsSuch:
         assert _flag_values(inner, ELSEWHERE_FLAG) == ["/ash-config/ash.yaml"]
 
     @pytest.mark.skipif(
-        os.geteuid() == 0, reason="root searches a directory whatever its mode says"
+        getattr(os, "geteuid", lambda: -1)() == 0,
+        reason="root searches a directory whatever its mode says",
     )
     def test_a_git_directory_that_cannot_be_searched_counts_and_says_so(
         self, fake_runner, scanned, ops

@@ -20,6 +20,7 @@ without letting it masquerade as a pass.
 
 import json
 import logging
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -620,7 +621,22 @@ def test_invocation_replaces_the_placeholder_and_records_the_exit_code(
 
 @pytest.mark.parametrize(
     "exit_code, successful",
-    [(0, True), (1, True), (2, True), (137, True), (127, False), (-9, False)],
+    [
+        (0, True),
+        (1, True),
+        (2, True),
+        (137, True),
+        (127, False),
+        pytest.param(
+            -9,
+            False,
+            marks=pytest.mark.skipif(
+                os.name == "nt",
+                reason="Windows has no signal deaths: signal_ending reads a negative "
+                "code as a signal on POSIX only",
+            ),
+        ),
+    ],
 )
 def test_execution_successful_treats_zero_and_one_as_success(
     scanner, deps_available, subprocess_double, exit_code, successful

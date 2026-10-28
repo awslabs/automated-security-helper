@@ -41,9 +41,10 @@ WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 UNIFIED_CI = WORKFLOWS / "ash-unified-ci.yml"
 IAC_DRIFT = WORKFLOWS / "ash-iac-drift.yml"
 
-#: The unit-test legs each publish one `PyTest - ...` check run from inside the job
-#: (mikepenz/action-junit-report), which is not a job of its own.
-JUNIT_JOB = "unit-test"
+#: The unit-test matrix is three jobs, one per runner pool, so each pool has its own
+#: max-parallel cap. The workflow's comments count the three as one family, "unit-test",
+#: which is also what every one of their check names starts with.
+UNIT_TEST_JOB_IDS = ("unit-test-linux", "unit-test-macos", "unit-test-windows")
 
 
 def _jobs(path: Path) -> dict[str, Any]:
@@ -118,6 +119,16 @@ def _one(pattern: str, text: str) -> re.Match:
 
 JOBS = _jobs(UNIFIED_CI)
 LEGS = {name: _legs(job) for name, job in JOBS.items()}
+#: The legs of the whole unit-test family, which the old single job counted by itself.
+#: Each leg publishes one `PyTest - ...` check run from inside the job
+#: (mikepenz/action-junit-report), which is not a job of its own, so this is also the
+#: number of those check runs.
+UNIT_TEST_LEGS = sum(LEGS[name] for name in UNIT_TEST_JOB_IDS)
+#: LEGS as the workflow's comments list it: the three unit-test jobs under one name.
+COMMENT_LEGS = {
+    **{name: n for name, n in LEGS.items() if name not in UNIT_TEST_JOB_IDS},
+    "unit-test": UNIT_TEST_LEGS,
+}
 ON_PUSH = sum(LEGS.values())
 ON_PULL_REQUEST = sum(n for name, n in LEGS.items() if not _push_only(JOBS[name]))
 COMMENTS = _comment_text(UNIFIED_CI)
@@ -131,18 +142,23 @@ class TestTheExpansion:
 
     def test_an_axis_product_less_its_excludes(self):
         # 25 OS and Python combinations, each split into 8 shards (tests/unit/test_unit_test_shards.py
-        # holds the shard axis itself to one list of eight).
-        assert LEGS["unit-test"] == 25 * 8
+        # holds the shard axis itself to one list of eight), cut into three jobs by OS:
+        # 2 Linux and 2 macOS images and 1 Windows image, each on 5 Python versions.
+        assert LEGS["unit-test-linux"] == 2 * 5 * 8
+        assert LEGS["unit-test-macos"] == 2 * 5 * 8
+        assert LEGS["unit-test-windows"] == 1 * 5 * 8
+        assert UNIT_TEST_LEGS == 25 * 8
 
     def test_no_matrix_is_past_githubs_limit_of_256_jobs(self):
         """GitHub rejects the workflow, not just the leg, past 256 jobs from one matrix.
 
-        unit-test is the closest: 25 OS and Python combinations times 8 shards is 200, and
-        one more Python version (240) fits where one more OS as well (288) does not.
+        The limit applies to each matrix, and the unit-test matrix is three of them. As
+        one job it was the closest, at 200 legs; its largest part is now 80, and the
+        family as a whole is still 200.
         """
         too_big = {name: legs for name, legs in LEGS.items() if legs > 256}
         assert not too_big, too_big
-        assert LEGS["unit-test"] <= 256
+        assert max(LEGS[name] for name in UNIT_TEST_JOB_IDS) <= 256
 
     def test_an_include_that_merges_adds_no_cell(self):
         job = {
@@ -171,7 +187,8 @@ class TestTheCommentsMatchTheWorkflow:
             for name, count in re.findall(r"([a-z][a-z0-9-]*) (\d+)", match.group(2))
         }
 
-        assert listed == LEGS
+        # The comment names the three unit-test jobs as the one family they split.
+        assert listed == COMMENT_LEGS
         assert int(match.group(1)) == ON_PUSH
 
     def test_the_cost_note_prices_both_runs_of_a_queued_merge(self):
@@ -197,7 +214,7 @@ class TestTheCommentsMatchTheWorkflow:
         )
         check_runs, jobs, junit = map(int, match.groups())
 
-        assert (jobs, junit) == (ON_PULL_REQUEST, LEGS[JUNIT_JOB])
+        assert (jobs, junit) == (ON_PULL_REQUEST, UNIT_TEST_LEGS)
         assert check_runs == jobs + junit
         assert re.search(
             rf"this workflow contributes {check_runs} check runs to a pull request",
