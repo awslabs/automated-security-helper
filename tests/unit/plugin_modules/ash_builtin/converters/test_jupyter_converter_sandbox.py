@@ -697,7 +697,7 @@ class TestAFailedSandboxedConversionIsLostCoverage:
 
         assert tools.conversions() == []
         listed = self._incomplete(results)
-        assert [name for name, _ in listed] == ["jupyter"], listed
+        assert [row.name for row in listed] == ["jupyter"], listed
         dumped = json.dumps(
             results.converter_results["jupyter"].model_dump(mode="json")
         )
@@ -721,7 +721,7 @@ class TestAFailedSandboxedConversionIsLostCoverage:
         results = _run_convert_phase(_context(tree, "bwrap"))
 
         listed = self._incomplete(results)
-        assert [name for name, _ in listed] == ["jupyter"], listed
+        assert [row.name for row in listed] == ["jupyter"], listed
         assert "analysis.ipynb" in listed[0][1], listed
         # The reason is kept on the row's failed input, and says the sandbox was on.
         assert _failed(results) == [
@@ -751,7 +751,7 @@ class TestAFailedSandboxedConversionIsLostCoverage:
         results = _run_convert_phase(_context(tree, "bwrap"))
 
         listed = self._incomplete(results)
-        assert [name for name, _ in listed] == ["jupyter"], listed
+        assert [row.name for row in listed] == ["jupyter"], listed
         assert _failed(results) == [
             (
                 "analysis.ipynb",
@@ -800,7 +800,7 @@ class TestAFailedConversionIsLostCoverageInEitherMode:
         results = _run_convert_phase(_context(tree, mode))
 
         listed = self._incomplete(results)
-        assert [name for name, _ in listed] == ["jupyter"], listed
+        assert [row.name for row in listed] == ["jupyter"], listed
         assert "broken.ipynb" in listed[0][1], listed
         assert "analysis.ipynb" not in listed[0][1], "the good notebook converted"
 
@@ -814,7 +814,7 @@ class TestAFailedConversionIsLostCoverageInEitherMode:
         results = _run_convert_phase(_context(tree, mode))
 
         listed = self._incomplete(results)
-        assert [name for name, _ in listed] == ["jupyter"], listed
+        assert [row.name for row in listed] == ["jupyter"], listed
         assert _failed(results) == [
             ("analysis.ipynb", f"nbconvert exited 0 but wrote no output{_where(mode)}")
         ]
@@ -833,7 +833,7 @@ class TestAFailedConversionIsLostCoverageInEitherMode:
         results = _run_convert_phase(_context(tree, mode))
 
         listed = self._incomplete(results)
-        assert [name for name, _ in listed] == ["jupyter"], listed
+        assert [row.name for row in listed] == ["jupyter"], listed
         # The type only: an error's message can quote the notebook.
         assert _failed(results) == [
             ("analysis.ipynb", f"conversion raised FileNotFoundError{_where(mode)}")
