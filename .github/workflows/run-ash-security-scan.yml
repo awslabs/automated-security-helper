@@ -2228,14 +2228,22 @@ jobs:
           uvx --from "${ASH_UVX_SOURCE}" ash \
             --output-dir "${ASH_OUTPUT_DIR}" report ${ASH_CONFIG:+--config "${ASH_CONFIG}"}
 
+      # The listing holds names the scanned repository chose: an extracted archive
+      # member keeps the name it had in the archive. The runner reads a line as a
+      # workflow command when it holds `##[` anywhere or starts with `::`, and tree
+      # prints both unchanged, so each line of the listing goes through one_line.
       - name: Update step summary
         if: (success() || failure()) && steps.inputs.outcome == 'success'
         shell: bash
         env:
           ASH_OUTPUT_DIR: ${{ steps.inputs.outputs.output_dir }}
         run: |-
+          . "${RUNNER_TEMP}/ash-one-line.sh"
           cat "${ASH_OUTPUT_DIR}/reports/ash.summary.md" >> "${GITHUB_STEP_SUMMARY}"
-          tree "${ASH_OUTPUT_DIR}"
+          tree "${ASH_OUTPUT_DIR}" | while IFS= read -r line || [ -n "${line}" ]; do
+            one_line "${line}"
+            printf '\n'
+          done
 
       # Only reports/ and the aggregated results, which are all the reporting job and
       # a SARIF upload read, plus their per-project copies when `ash-args` makes this a
