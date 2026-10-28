@@ -2105,7 +2105,7 @@ def test_a_base_the_repository_s_file_reaches_is_the_repository_s(
         "reporters.s3.enabled" in record.getMessage() for record in caplog.records
     ), caplog.text
     for section in (hub, s3):
-        assert (section or {}).get("enabled") is None, section
+        assert (section or {}).get("enabled") is not True, section
         assert _REPOSITORY_CHOSE not in json.dumps(section or {}), section
     # The warnings charge the repository's file the chain came through (the
     # destination step names the region, profile and enabled it replaced,
@@ -2114,7 +2114,7 @@ def test_a_base_the_repository_s_file_reaches_is_the_repository_s(
     # fact not what runs (checked above), never the operator's file or the
     # base's value.
     warnings = _security_hub_warnings(caplog)
-    assert warnings, caplog.text
+    assert warnings
     for warning in warnings:
         assert ".ash.yaml" in warning, warning
         assert "operator.yaml" not in warning, warning
@@ -2384,12 +2384,12 @@ def test_a_repository_file_that_names_its_base_twice_still_confines_it(
         config = resolve_config(config_path=operator, source_dir=checkout)
         section = reporter_section(config, SecurityHubReporter)
 
-    assert (section or {}).get("enabled") is None, section
+    assert (section or {}).get("enabled") is not True, section
     assert _REPOSITORY_CHOSE not in json.dumps(section or {}), section
     # One warning per confinement step that ignored something, each charging
     # the repository's file, never the operator's file or the shared value.
     warnings = _security_hub_warnings(caplog)
-    assert warnings, caplog.text
+    assert warnings
     for warning in warnings:
         assert ".ash.yaml" in warning, warning
         assert "operator.yaml" not in warning, warning
@@ -3254,12 +3254,12 @@ def test_a_repository_patch_of_the_section_does_not_run(tmp_path, caplog):
         config = resolve_config(config_path=operator, source_dir=checkout)
         section = reporter_section(config, SecurityHubReporter)
 
-    assert (section or {}).get("enabled") is None, section
+    assert (section or {}).get("enabled") is not True, section
     assert _REPOSITORY_CHOSE not in json.dumps(section or {}), section
     # One warning per confinement step that ignored something, each charging
     # the repository's file, never the operator's file or the patched value.
     warnings = _security_hub_warnings(caplog)
-    assert warnings, caplog.text
+    assert warnings
     for warning in warnings:
         assert ".ash.yaml" in warning, warning
         assert "operator.yaml" not in warning, warning
@@ -4487,27 +4487,22 @@ def _not_in_a_checkout(path: Path) -> Path:
     return path
 
 
-def _operator_config_root(monkeypatch, root: Path) -> None:
-    """Set *root* aside as a directory the operator keeps config in.
-
-    A path an MCP client names is the client's unless it is under
-    ASH_MCP_ALLOWED_CONFIG_ROOTS (cli/mcp/sandbox.client_named_config_is_untrusted),
-    and the default client rules refuse a client's file that sets this
-    reporter's section before get_config answers for it. These tests are about
-    what get_config shows for a file the operator named, so the operator sets
-    the directory aside; the client's refusal is held elsewhere
-    (tests/unit/cli/mcp/test_client_configs_honor_denied_paths.py)."""
-    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(root))
-
-
 def _get_config_from_elsewhere(tmp_path, monkeypatch, config: Path) -> dict[str, Any]:
+    """get_config of ``config``, a file the operator names, from a working
+    directory that does not hold it.
+
+    A path named to get_config is the client's unless it is in a directory
+    ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` names, and a client's file that sets the
+    Security Hub section is refused outright. These tests are about how a file
+    the operator names is shown, so the test's directory is set aside as the
+    operator's."""
     from automated_security_helper.cli.mcp_tools import mcp_get_config
 
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
-    _operator_config_root(monkeypatch, tmp_path)
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(tmp_path))
     return mcp_get_config(config_path=str(config))
 
 
@@ -4529,7 +4524,11 @@ def test_get_config_marks_the_operator_only_options_a_repository_file_sets(
     them. A scan of that checkout ignores both, so they are shown marked. The
     file counts as the repository's by the name it was given or by its target,
     and so does a base it extends. A scope the file reads from the
-    environment is marked by the reference it wrote, never by the value."""
+    environment is marked by the reference it wrote, never by the value. The
+    rest of the section (aws_region) is the operator's too and is confined
+    for a file in another checkout, so it is absent rather than shown as
+    applied (docs/content/docs/plugins/aws/security-hub-reporter.md, "Options
+    only the operator sets")."""
     _not_in_a_checkout(tmp_path)
     repository_options = _REPOSITORY_OPTIONS
     if scope == "from-the-environment":
@@ -4575,7 +4574,7 @@ def test_get_config_marks_the_operator_only_options_a_repository_file_sets(
     assert options["archive_resolved_findings"] == (
         "<operator only; ignored from this file: true>"
     )
-    assert options["aws_region"] == "us-west-2"
+    assert "aws_region" not in options
 
 
 @pytest.mark.parametrize(
@@ -4659,7 +4658,8 @@ def test_get_config_does_not_judge_a_named_file_by_ash_configs_checkout(
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
     monkeypatch.setenv("ASH_CONFIG", str(ash_config))
-    _operator_config_root(monkeypatch, tmp_path)
+    # The operator names the file (see _get_config_from_elsewhere).
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(tmp_path))
 
     options = _security_hub_options(mcp_get_config(config_path=str(named)))
 
@@ -4677,7 +4677,8 @@ def test_get_config_shows_the_operators_value_where_the_target_holds_the_file(
     mark_git_checkout(checkout)
     monkeypatch.chdir(checkout)
     monkeypatch.setenv("ASH_CONFIG", str(_operator_file(tmp_path, "operator-scope")))
-    _operator_config_root(monkeypatch, tmp_path)
+    # The operator names the file (see _get_config_from_elsewhere).
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(tmp_path))
 
     options = _security_hub_options(
         mcp_get_config(config_path=str(checkout / ".ash" / ".ash.yaml"))

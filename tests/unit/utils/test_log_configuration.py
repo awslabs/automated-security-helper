@@ -648,9 +648,18 @@ def test_get_logger_installs_exactly_one_windows_safe_filter(closed_logger):
     assert sum(isinstance(f, WindowsSafeFilter) for f in logger.filters) == 1
 
 
-def test_get_logger_selects_the_windows_color_system_on_windows(
+def test_get_logger_lets_rich_detect_the_color_system_on_windows(
     closed_logger, monkeypatch
 ):
+    """On Windows the console is built to detect its color system, not told one.
+
+    A color system named outright ("windows") is bound whatever file the console
+    writes to, so a child ash whose output a test captured wrote escapes around
+    every level name and highlighted number, on Windows alone. With "auto" Rich
+    reads the file: a console keeps its color, a pipe gets plain text. The
+    legacy_windows setting is what tells Rich which escapes an old Windows
+    console takes, so that half of the Windows branch stays.
+    """
     console_cls = create_autospec(Console)
     monkeypatch.setattr(log_module, "ash_console", console_cls)
     monkeypatch.setattr(log_module.platform, "system", lambda: "Windows")
@@ -661,7 +670,7 @@ def test_get_logger_selects_the_windows_color_system_on_windows(
     get_logger(name=closed_logger("win_color"), show_progress=False, use_color=True)
 
     kwargs = console_cls.call_args.kwargs
-    assert kwargs["color_system"] == "windows"
+    assert kwargs["color_system"] == "auto"
     assert kwargs["legacy_windows"] is True
 
 

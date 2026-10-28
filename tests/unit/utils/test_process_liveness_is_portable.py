@@ -53,6 +53,9 @@ def test_a_running_process_is_running(where, sleeper, no_proc):
     assert process_running(sleeper.pid, **kwargs)
 
 
+@pytest.mark.skipif(
+    not hasattr(os, "waitid"), reason="this build of Python has no os.waitid"
+)
 @pytest.mark.parametrize("where", ["proc", "no-proc"])
 def test_a_zombie_is_not_running(where, sleeper, no_proc):
     kwargs = {"proc_root": no_proc} if where == "no-proc" else {}

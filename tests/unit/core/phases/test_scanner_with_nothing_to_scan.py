@@ -1120,22 +1120,33 @@ DATE_LIKE_VALUES = ["2024-13-01", "2024-02-30"]
 
 
 def _cfn_nag_answers_with_a_finding_for(marker: str):
-    """cfn_nag_scan's answer: one finding for a template whose name holds *marker*.
+    """cfn_nag_scan's answer: one finding, located on the staged copy it was given,
+    for a template whose results directory's name holds *marker*.
 
-    The tool reads a copy of the template under a fixed name, in a directory named
-    for the template's path (``_stage_cfn_nag_input``), so the finding names the
-    template by that directory: ``..__merged__yaml`` is ``merged.yaml``."""
+    The copy has a fixed name (``template`` plus the template's extension) and sits
+    in a directory named after the template, so the marker is read off that
+    directory's name. The finding's URI is the copy's path, as cfn_nag writes it;
+    the scanner points it back at the template, which is what the tests read.
+    """
 
     def answer(command=None, **_kwargs):
-        staged = next((str(a) for a in command or [] if marker in str(a)), None)
+        command = [str(a) for a in command or []]
+        staged = command[command.index("--input-path") + 1]
         results = []
-        if staged is not None:
-            stem, extension = Path(staged).parent.parent.name.rsplit("__", 2)[-2:]
+        if marker in Path(staged).parent.parent.name:
             results = [
                 {
                     "ruleId": "W51",
                     "level": "warning",
-                    "message": {"text": f"finding in {stem}.{extension}"},
+                    "message": {"text": "finding"},
+                    "locations": [
+                        {
+                            "physicalLocation": {
+                                "artifactLocation": {"uri": staged},
+                                "region": {"startLine": 1},
+                            }
+                        }
+                    ],
                 }
             ]
         return {
@@ -1172,9 +1183,12 @@ def test_cfn_nag_with_its_tool_scans_a_template_holding_date_like_values(context
     assert (scanner.targets_attempted, scanner.targets_failed) == (3, 0), scanner.errors
     assert spawn.call_count == 3
     found = sorted(
-        result.message.root.text for run in report.runs for result in run.results or []
+        location.physicalLocation.root.artifactLocation.uri
+        for run in report.runs
+        for result in run.results or []
+        for location in result.locations or []
     )
-    assert found == [f"finding in dated-{i}.yaml" for i in range(2)], found
+    assert found == [f"dated-{i}.yaml" for i in range(2)], found
 
 
 def test_cdk_nag_with_its_tool_evaluates_a_template_holding_date_like_values(
@@ -1719,9 +1733,12 @@ def test_cfn_nag_with_its_tool_scans_a_template_with_a_merge_key(context):
 
     assert (scanner.targets_attempted, scanner.targets_failed) == (2, 0), scanner.errors
     found = [
-        result.message.root.text for run in report.runs for result in run.results or []
+        location.physicalLocation.root.artifactLocation.uri
+        for run in report.runs
+        for result in run.results or []
+        for location in result.locations or []
     ]
-    assert found == ["finding in merged.yaml"], found
+    assert found == ["merged.yaml"], found
 
 
 def test_cdk_nag_with_its_tool_evaluates_a_template_with_a_merge_key(

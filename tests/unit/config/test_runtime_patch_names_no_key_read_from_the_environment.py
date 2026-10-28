@@ -13,6 +13,10 @@ one text, whether or not its key is the value. Where the mapping has built-in
 keys (a plugin section), every op on the profile is refused first, with one
 text (test_runtime_patch_refuses_a_profile_whose_key_can_name_a_built_in.py).
 Elsewhere a key the profile writes as text is patched like any other.
+
+The variable is ``ASH_KEY_NAME``, not ``ASH_KEY``: a name ending in ``_KEY`` is
+secret-shaped (core/constants.py, ``ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES``), so the
+loader never reads it and a reference to it stays a literal key.
 """
 
 from __future__ import annotations
@@ -38,7 +42,7 @@ OTHER = "ash-canary-0000-9876543210"
 def _base(tmp_path: Path, monkeypatch, text: str):
     from automated_security_helper.config.resolve_config import load_config_file_for_run
 
-    monkeypatch.setenv("ASH_SECTION", CANARY)
+    monkeypatch.setenv("ASH_KEY_NAME", CANARY)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     path = tmp_path / ".ash.yaml"
     path.write_text(text, encoding="utf-8")
@@ -49,9 +53,9 @@ def _base(tmp_path: Path, monkeypatch, text: str):
 
 
 SECTIONS = {
-    "reporters": "reporters:\n  ${ASH_SECTION}:\n    enabled: false\n  sarif:\n    enabled: true\n",
-    "scanners": "scanners:\n  ${ASH_SECTION}:\n    enabled: false\n  bandit:\n    enabled: true\n",
-    "converters": "converters:\n  ${ASH_SECTION}:\n    enabled: false\n  jupyter:\n    enabled: true\n",
+    "reporters": "reporters:\n  ${ASH_KEY_NAME}:\n    enabled: false\n  sarif:\n    enabled: true\n",
+    "scanners": "scanners:\n  ${ASH_KEY_NAME}:\n    enabled: false\n  bandit:\n    enabled: true\n",
+    "converters": "converters:\n  ${ASH_KEY_NAME}:\n    enabled: false\n  jupyter:\n    enabled: true\n",
 }
 ALLOW_ALL = RuntimeOverridesConfig(
     enabled=True,
@@ -105,7 +109,7 @@ def test_an_extra_plugin_s_option_key_read_from_the_environment(tmp_path, monkey
     base = _base(
         tmp_path,
         monkeypatch,
-        "scanners:\n  customx:\n    enabled: true\n    options:\n      ${ASH_SECTION}: x\n",
+        "scanners:\n  customx:\n    enabled: true\n    options:\n      ${ASH_KEY_NAME}: x\n",
     )
     rules = [
         _refusal(
@@ -148,7 +152,7 @@ def test_a_plugin_section_s_known_key_is_refused_with_the_profile(
 
 OPTIONS = (
     "scanners:\n  customx:\n    enabled: true\n    options:\n"
-    "      ${ASH_SECTION}: x\n      known: y\n"
+    "      ${ASH_KEY_NAME}: x\n      known: y\n"
 )
 
 
@@ -187,7 +191,7 @@ def test_an_op_at_a_default_key_answers_the_same_whatever_the_variable_holds(
     tmp_path, monkeypatch, segment, default
 ):
     """``replace /reporters/markdown/enabled`` where the profile's section named
-    ${ASH_SECTION} is that default's name, or another: the profile is refused
+    ${ASH_KEY_NAME} is that default's name, or another: the profile is refused
     either way, so the op's answer does not tell which."""
     op = {"op": "replace", "path": f"/{segment}/{default}/enabled", "value": False}
     answers = []
@@ -201,10 +205,10 @@ def test_an_op_at_a_default_key_answers_the_same_whatever_the_variable_holds(
 
 
 def _base_reading(tmp_path: Path, monkeypatch, text: str, value: str):
-    """``_base`` with ASH_SECTION holding ``value``."""
+    """``_base`` with ASH_KEY_NAME holding ``value``."""
     from automated_security_helper.config.resolve_config import load_config_file_for_run
 
-    monkeypatch.setenv("ASH_SECTION", value)
+    monkeypatch.setenv("ASH_KEY_NAME", value)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     path = tmp_path / f"{value}.ash.yaml"
     path.write_text(text, encoding="utf-8")
@@ -267,11 +271,11 @@ def test_select_profile_answers_a_right_guess_as_a_wrong_one(tmp_path, monkeypat
     monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path))
     monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
-    monkeypatch.setenv("ASH_SECTION", CANARY)
+    monkeypatch.setenv("ASH_KEY_NAME", CANARY)
     profile = tmp_path / "operator.ash.yaml"
     profile.write_text(
         "reporters:\n"
-        "  ${ASH_SECTION}:\n"
+        "  ${ASH_KEY_NAME}:\n"
         "    enabled: false\n"
         "global_settings:\n"
         "  mcp:\n"
@@ -313,7 +317,7 @@ def test_select_profile_answers_a_right_guess_as_a_wrong_one(tmp_path, monkeypat
 
 def test_an_override_that_leaves_the_section_out_names_no_key(tmp_path, monkeypatch):
     """select_profile's override_yaml: an override without the profile's
-    section named ${ASH_SECTION} becomes a remove op through that key. It is
+    section named ${ASH_KEY_NAME} becomes a remove op through that key. It is
     refused with the one text, which names neither the op nor the key."""
     from automated_security_helper.cli.mcp import profile_registry
     from automated_security_helper.cli.mcp_tools import mcp_select_profile
@@ -323,7 +327,7 @@ def test_an_override_that_leaves_the_section_out_names_no_key(tmp_path, monkeypa
     monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path))
     monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
-    monkeypatch.setenv("ASH_SECTION", CANARY)
+    monkeypatch.setenv("ASH_KEY_NAME", CANARY)
     policy = (
         "global_settings:\n"
         "  mcp:\n"
@@ -337,7 +341,7 @@ def test_an_override_that_leaves_the_section_out_names_no_key(tmp_path, monkeypa
     profile.write_text(
         "project_name: demo\n"
         + policy
-        + "reporters:\n  ${ASH_SECTION}:\n    enabled: false\n",
+        + "reporters:\n  ${ASH_KEY_NAME}:\n    enabled: false\n",
         encoding="utf-8",
     )
     profile_registry.clear_profile_registry()
@@ -362,14 +366,14 @@ def test_an_override_that_leaves_the_section_out_names_no_key(tmp_path, monkeypa
 
 
 def _outcome_reading(tmp_path: Path, monkeypatch, text: str, value, op) -> str:
-    """``_outcome`` of ``op`` on the profile ``text``, loaded with ASH_SECTION
+    """``_outcome`` of ``op`` on the profile ``text``, loaded with ASH_KEY_NAME
     holding ``value`` (None: unset)."""
     from automated_security_helper.config.resolve_config import load_config_file_for_run
 
     if value is None:
-        monkeypatch.delenv("ASH_SECTION", raising=False)
+        monkeypatch.delenv("ASH_KEY_NAME", raising=False)
     else:
-        monkeypatch.setenv("ASH_SECTION", value)
+        monkeypatch.setenv("ASH_KEY_NAME", value)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     path = tmp_path / f"{value}.ash.yaml"
     path.write_text(text, encoding="utf-8")
@@ -380,13 +384,13 @@ def _outcome_reading(tmp_path: Path, monkeypatch, text: str, value, op) -> str:
 def test_an_option_key_written_as_a_reference_whatever_the_variable_holds(
     tmp_path, monkeypatch
 ):
-    """``${ASH_SECTION:opt}`` in an extra plugin's options: the key is the default
+    """``${ASH_KEY_NAME:opt}`` in an extra plugin's options: the key is the default
     the file wrote when the variable is unset, and the variable's value when it
     is set. An op through it answers the same either way, from the file as
     written."""
     text = (
         "scanners:\n  customx:\n    enabled: true\n    options:\n"
-        "      ${ASH_SECTION:opt}: x\n"
+        "      ${ASH_KEY_NAME:opt}: x\n"
     )
     op = {"op": "replace", "path": "/scanners/customx/options/opt", "value": "y"}
     answers = [
@@ -401,7 +405,7 @@ def test_an_option_key_written_as_a_reference_whatever_the_variable_holds(
 
 NESTED_OPTIONS = (
     "scanners:\n  customx:\n    enabled: true\n    options:\n"
-    "      known:\n        a: 1\n      ${ASH_SECTION}:\n        b: 2\n"
+    "      known:\n        a: 1\n      ${ASH_KEY_NAME}:\n        b: 2\n"
 )
 
 

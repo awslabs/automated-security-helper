@@ -56,10 +56,14 @@ from tests.utils.env_assertions import (
 )
 from tests.utils.helpers import get_ash_temp_path
 
-# The hook that runs one shard of the suite under ASH_TEST_SHARD (a no-op without it).
-# Imported by name so pytest registers it as this conftest's own hook.
+# The hooks that run one shard of the suite under ASH_TEST_SHARD (no-ops without it).
+# Imported by name so pytest registers them as this conftest's own hooks;
+# pytest_configure_node is the one that hands the setting to xdist workers.
 from tests.utils import sharding
-from tests.utils.sharding import pytest_ignore_collect  # noqa: F401
+from tests.utils.sharding import (  # noqa: F401
+    pytest_configure_node,
+    pytest_ignore_collect,
+)
 
 # A failure that prints os.environ (a frame's argument, or the receiver of
 # os.environ.get in an explanation) shows its names, not their values.
@@ -537,7 +541,9 @@ def pytest_configure(config):
     up earlier, when pytest imports this module; see "Set up when pytest imports this
     module" below.
     """
-    sharding.check_environment()
+    # Reads ASH_TEST_SHARD once and removes it from os.environ, so no child pytest a
+    # test starts inherits it; see tests/utils/sharding.py.
+    sharding.configure(config)
     # Register custom markers
     config.addinivalue_line(
         "markers", "unit: Unit tests that test individual components in isolation"

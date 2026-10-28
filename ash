@@ -226,14 +226,25 @@ resolve_new_dir() {
 # nothing above U+10FFFF, which is what Python decodes as UTF-8. iconv is not the
 # judge: glibc's accepts 4-byte forms above U+10FFFF and 5-byte forms (measured
 # with glibc 2.34).
-UTF8_CHARACTER=$'^([\x01-\x7f]|[\xc2-\xdf][\x80-\xbf]|\xe0[\xa0-\xbf][\x80-\xbf]|[\xe1-\xec\xee\xef][\x80-\xbf][\x80-\xbf]|\xed[\x80-\x9f][\x80-\xbf]|\xf0[\x90-\xbf][\x80-\xbf][\x80-\xbf]|[\xf1-\xf3][\x80-\xbf][\x80-\xbf][\x80-\xbf]|\xf4[\x80-\x8f][\x80-\xbf][\x80-\xbf])'
-
-# Whether $1 is UTF-8, one character at a time, whatever the locale.
+# Whether $1 is UTF-8, one character at a time, whatever the locale. The eight
+# forms are matched with bash's own pattern matcher, not =~: that hands the
+# pattern to the platform's regex library, and macOS's refuses a bracket
+# expression of raw bytes above 0x7f, so every path read as not UTF-8 there.
 is_utf8() {
-  local LC_ALL=C rest="$1"
+  local LC_ALL=C rest="$1" c
   while [[ -n "${rest}" ]]; do
-    [[ "${rest}" =~ ${UTF8_CHARACTER} ]] || return 1
-    rest="${rest:${#BASH_REMATCH[1]}}"
+    case "${rest}" in
+      [$'\x01'-$'\x7f']*) c=1 ;;
+      [$'\xc2'-$'\xdf'][$'\x80'-$'\xbf']*) c=2 ;;
+      $'\xe0'[$'\xa0'-$'\xbf'][$'\x80'-$'\xbf']*) c=3 ;;
+      [$'\xe1'-$'\xec'$'\xee'$'\xef'][$'\x80'-$'\xbf'][$'\x80'-$'\xbf']*) c=3 ;;
+      $'\xed'[$'\x80'-$'\x9f'][$'\x80'-$'\xbf']*) c=3 ;;
+      $'\xf0'[$'\x90'-$'\xbf'][$'\x80'-$'\xbf'][$'\x80'-$'\xbf']*) c=4 ;;
+      [$'\xf1'-$'\xf3'][$'\x80'-$'\xbf'][$'\x80'-$'\xbf'][$'\x80'-$'\xbf']*) c=4 ;;
+      $'\xf4'[$'\x80'-$'\x8f'][$'\x80'-$'\xbf'][$'\x80'-$'\xbf']*) c=4 ;;
+      *) return 1 ;;
+    esac
+    rest="${rest:${c}}"
   done
 }
 

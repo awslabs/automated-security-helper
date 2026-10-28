@@ -32,13 +32,18 @@ import pytest
 from automated_security_helper.core.enums import ExecutionPhase, ExportFormat
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.models.asharp_model import AshAggregatedResults
-from tests.utils.helpers import results_of_a_scan
+
+#: One scanner's entry, which is what a scan phase records for every scanner it
+#: considered. A saved set with no scanner results and no findings holds no scan,
+#: and --use-existing refuses it (utils/inner_run_outcome.py,
+#: existing_results_problem); these tests are about the metadata it carries.
+_SCANNED = {"bandit": {"source": {"scanner_name": "bandit", "status": "PASSED"}}}
 
 
 def _report_over_saved(tmp_path, saved_marker, this_run_marker):
     source = tmp_path / "src"
     source.mkdir()
-    saved = results_of_a_scan()
+    saved = AshAggregatedResults(scanner_results=_SCANNED)
     if saved_marker is not None:
         setattr(saved.metadata, "changed_files_only", saved_marker)
     saved_path = tmp_path / "saved.json"
@@ -97,7 +102,7 @@ def test_a_report_over_saved_filtered_results_through_run_ash_scan_keeps_true(
 
     source = tmp_path / "src"
     source.mkdir()
-    saved = results_of_a_scan()
+    saved = AshAggregatedResults(scanner_results=_SCANNED)
     setattr(saved.metadata, "changed_files_only", True)
     saved_path = tmp_path / "saved.json"
     saved_path.write_text(saved.model_dump_json(by_alias=True), encoding="utf-8")

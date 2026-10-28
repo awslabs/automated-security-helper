@@ -139,13 +139,17 @@ def deferred_tool_version_probes() -> Iterator[None]:
 
     The scan phase constructs every registered scanner, because a scanner's
     selectable name is only known on an instance, and bandit, checkov and semgrep
-    probe their version while constructed, with ``uv tool run --from <spec> <tool>
-    --version``. uv resolves that spec against the package index when the
-    environment is not cached, so a scan of one scanner reached the index for
-    scanners it would never run. Constructed inside this block, a scanner keeps
-    its probe for ``resolve_deferred_tool_version``, which the scan phase calls
-    only for a scanner that was selected. A scanner constructed anywhere else
-    (``ash dependencies``, the MCP server, a test) probes at once, as before.
+    used to probe their version while constructed, with ``uv tool run --from
+    <spec> <tool> --version``. uv resolves that spec against the package index
+    when the environment is not cached, so a scan of one scanner reached the
+    index for scanners it would never run. Construction starts nothing, whoever
+    constructs the scanner: the built-in scanners record the probe themselves
+    (``_deferred_tool_version_probe``), and ``resolve_deferred_tool_version`` runs
+    it once, from the dependency check, the SARIF step or the inventory. A
+    scanner constructed outside a scan (``ash dependencies``, the MCP server, a
+    test) therefore probes only when that is called. This block covers a plugin
+    that still calls ``_get_uv_tool_version`` while constructed: inside it the
+    call is recorded the same way; outside it the call probes at once.
     """
     token = _DEFER_VERSION_PROBES.set(True)
     try:
@@ -257,8 +261,6 @@ class UVToolMixin:
         Returns:
             Version string if detected, None if version cannot be determined or UV is not available
         """
-        if package_name is None:
-            package_name = self._uv_from_spec()
         if not self.use_uv_tool:
             self._plugin_log(
                 f"UV tool execution is disabled for {tool_name}",
@@ -266,9 +268,14 @@ class UVToolMixin:
             )
             return None
         if _DEFER_VERSION_PROBES.get():
-            # Kept for resolve_deferred_tool_version; see deferred_tool_version_probes.
+            # Kept for resolve_deferred_tool_version with the spec as given: a
+            # None is resolved when the probe runs, so the probe reads the
+            # requirement the dependency check reads then, not the one the
+            # plugin was built with. See deferred_tool_version_probes.
             self._deferred_tool_version_probe = (tool_name, package_name)
             return None
+        if package_name is None:
+            package_name = self._uv_from_spec()
 
         try:
             from automated_security_helper.utils.uv_tool_runner import (

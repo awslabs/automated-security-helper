@@ -264,41 +264,6 @@ def target_counts(
     return attempted, failed
 
 
-def target_exit_code(
-    asharp_model: AshAggregatedResults, scanner_name: str
-) -> int | None:
-    """The exit code for the scanner's consolidated row, from its per-target reports.
-
-    The row stands for every target, so it takes the code that explains it: the largest
-    code among targets whose status is ERROR, else the largest code of any target. An
-    ERROR target's code comes first because the largest code overall can be an accepted
-    one (grype's 2 for a match at ``--fail-on``) that would hide another target's error
-    exit (grype's 1).
-
-    Returns None when no target report carries an integer code; ``bool`` is rejected for
-    the reason ``target_counts`` gives.
-    """
-    reports = asharp_model.additional_reports.get(scanner_name)
-    if not isinstance(reports, dict):
-        return None
-
-    codes: list[int] = []
-    error_codes: list[int] = []
-    for target_report in reports.values():
-        if not isinstance(target_report, dict):
-            continue
-        code = target_report.get("exit_code")
-        if not isinstance(code, int) or isinstance(code, bool):
-            continue
-        codes.append(code)
-        # Equal for the enum and for the plain string a report read back from JSON has.
-        if target_report.get("status") == ScannerStatus.ERROR:
-            error_codes.append(code)
-    if error_codes:
-        return max(error_codes)
-    return max(codes) if codes else None
-
-
 #: The ``missing_reason`` of a MISSING row whose scanner recorded none. The exit-1
 #: message tells it apart from a recorded reason and gives the generic advice instead.
 NO_MISSING_REASON_RECORDED = (
@@ -464,28 +429,41 @@ def dependencies_recorded_satisfied(
 
 
 def tool_exit_code(asharp_model: AshAggregatedResults, scanner_name: str) -> int | None:
-    """The highest exit code the scanner's tool returned over its targets, or None.
+    """The exit code of the scanner's tool for its consolidated row, or None.
 
     Read from the per-target reports, which the executor writes the plugin's exit
-    code into for every target it ran. A target that did not run carries none, so a
-    scanner that never ran its tool -- MISSING, or left out of the run -- has None
-    rather than a 0 that reads as a clean exit. A missing report
-    (``ScannerStatisticsCalculator.target_report_is_missing``) is skipped whatever
-    exit code it claims, because the tool did not run on that target; a scanner
-    missing on one tree keeps the code its tool returned on the other.
+    code into for every target it ran. The row stands for every target, so it takes
+    the code that explains it: the largest code among targets whose status is ERROR,
+    else the largest code of any target. An ERROR target's code comes first because
+    the largest code overall can be an accepted one (grype's 2 for a match at
+    ``--fail-on``) that would hide another target's error exit (grype's 1).
+
+    A target that did not run carries none, so a scanner that never ran its tool --
+    MISSING, or left out of the run -- has None rather than a 0 that reads as a
+    clean exit. A missing report (``ScannerStatisticsCalculator.target_report_is_missing``)
+    is skipped whatever exit code it claims, because the tool did not run on that
+    target; a scanner missing on one tree keeps the code its tool returned on the
+    other. ``bool`` is rejected for the reason ``target_counts`` gives.
     """
     reports = (asharp_model.additional_reports or {}).get(scanner_name)
     if not isinstance(reports, dict):
         return None
     codes: list[int] = []
+    error_codes: list[int] = []
     for report in reports.values():
         if not isinstance(
             report, dict
         ) or ScannerStatisticsCalculator.target_report_is_missing(report):
             continue
         code = report.get("exit_code")
-        if isinstance(code, int) and not isinstance(code, bool):
-            codes.append(code)
+        if not isinstance(code, int) or isinstance(code, bool):
+            continue
+        codes.append(code)
+        # Equal for the enum and for the plain string a report read back from JSON has.
+        if report.get("status") == ScannerStatus.ERROR:
+            error_codes.append(code)
+    if error_codes:
+        return max(error_codes)
     return max(codes) if codes else None
 
 
@@ -1110,11 +1088,6 @@ def _populate_scanner_results_from_unified_metrics(
             fields["dependencies_satisfied"] = False
         if metrics.excluded:
             fields["excluded"] = True
-        # Only when a target report says what its tool exited with; otherwise the
-        # field keeps its default and stays unset.
-        exit_code = target_exit_code(aggregated_results, scanner_name)
-        if exit_code is not None:
-            fields["exit_code"] = exit_code
         consolidated_target_info = ScannerTargetStatusInfo(**fields)
 
         # Update scanner_results with consolidated information.

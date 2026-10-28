@@ -184,6 +184,34 @@ def test_config_get_on_an_empty_path_says_the_path_is_empty(tmp_path):
     assert "pathisempty" in _flat(result.output)
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["config", "get", "--config", ""],
+        ["config", "validate-plugin-dependencies", ""],
+        ["config", "validate-plugin-dependencies", "--config", ""],
+        ["config", "validate", "--config", ""],
+    ],
+    ids=["get---config", "vpd-positional", "vpd---config", "validate---config"],
+)
+def test_an_empty_path_is_refused_however_it_is_given(tmp_path, monkeypatch, command):
+    """A blank path is never discovered around: ``--config ""`` and the other
+    commands' positional ``""`` are refused as ``get ""`` is, even with a config
+    in the working directory that discovery would otherwise answer with. The
+    planted project name is a token no product text carries, so its absence
+    from the output proves the file was not read (an English word would be
+    found in the refusal's own wording)."""
+    monkeypatch.chdir(tmp_path)
+    planted = "zz8f3c1e9ad0b7"
+    (tmp_path / ".ash.yaml").write_text(f"project_name: {planted}\n", encoding="utf-8")
+
+    result = CliRunner().invoke(app, command)
+
+    assert result.exit_code == 3, result.output
+    assert "pathisempty" in _flat(result.output)
+    assert planted not in result.output
+
+
 class TestConfigGetConfigOption:
     """``ash config get`` takes ``--config``/``-c`` and ``ASH_CONFIG`` as ``ash scan`` does.
 

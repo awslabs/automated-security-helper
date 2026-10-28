@@ -1816,18 +1816,20 @@ def read_config_file_and_references(
 def toml_text_of(path: Path, data: bytes) -> str:
     """The text of the TOML config file ``path`` whose bytes are ``data``, as
     ``read_config_file`` decodes it: a leading UTF-8 byte order mark is dropped
-    (tomllib rejects it), and bytes that are not UTF-8 are refused in the words
-    ``read_config_file`` uses. Nothing is read: the answer is made of ``data``
-    alone, so a caller that already holds the bytes of the file it checked (the
-    raw ``get_config`` answer) decodes and judges them without a second read.
+    (tomllib rejects it), and bytes that are not UTF-8 are refused as every
+    unparsed config is (``unparsed_config_reason``: the byte's offset, never
+    its value). Nothing is read: the answer is made of ``data`` alone, so a
+    caller that already holds the bytes of the file it checked (the raw
+    ``get_config`` answer) decodes and judges them without a second read.
     """
+    undecoded: Optional[str] = None
     try:
         return data.removeprefix(b"\xef\xbb\xbf").decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise ASHConfigSourceError(
-            f"{describe_config_path(path)} is not valid UTF-8, which TOML "
-            f"requires: {exc}"
-        ) from exc
+        undecoded = unparsed_config_reason(path, exc)
+    # Outside the handler (unparsed_config_reason): the decoder's message,
+    # which names the byte, is neither the cause nor the context of this one.
+    raise ASHConfigUnparsedError(undecoded)
 
 
 def toml_config_text(path: Path, expect: Optional[FileIdentity] = None) -> str:
@@ -1846,16 +1848,21 @@ def toml_config_table(path: Path, text: str) -> Any:
     any ``${VAR}`` value is resolved: the file's top level, or a
     ``pyproject.toml``'s ``[tool.ash]`` table.
 
-    Text that is not TOML, a ``pyproject.toml`` with no such table and one whose
-    ``tool.ash`` is not a table are refused in the words ``read_config_file``
-    uses. Nothing is read: the answer is made of ``text`` alone.
+    Text that is not TOML is refused as every unparsed config is
+    (``unparsed_config_reason``: the error's type and where the parser stopped,
+    nothing the parser said, which can name a table of the file); a
+    ``pyproject.toml`` with no such table and one whose ``tool.ash`` is not a
+    table are refused in the words ``read_config_file`` uses. Nothing is read:
+    the answer is made of ``text`` alone.
     """
+    unparsed: Optional[str] = None
     try:
         document = _parse_toml(text)
     except _TOMLDecodeError as exc:
-        raise ASHConfigSourceError(
-            f"{describe_config_path(path)} is not valid TOML: {exc}"
-        ) from exc
+        unparsed = unparsed_config_reason(path, exc)
+    if unparsed is not None:
+        # Outside the handler (unparsed_config_reason).
+        raise ASHConfigUnparsedError(unparsed)
     if is_pyproject(path):
         tool = document.get("tool")
         table = tool.get("ash") if isinstance(tool, dict) else None

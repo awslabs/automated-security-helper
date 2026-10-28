@@ -6,7 +6,8 @@ else on the row was dropped. A scanner the operator excluded (``--exclude-scanne
 ``--scanners``, a disabled config) is recorded by ``ScanPhase`` with ``excluded: true``,
 and after consolidation its row said ``excluded: false`` in
 ``ash_aggregated_results.json`` -- the same value as a scanner that ran and found
-nothing to scan. ``exit_code`` and any extra field went the same way.
+nothing to scan. Any extra field went the same way. (``exit_code`` is one of the
+fields the metrics compute, from the per-target reports, so it is replaced.)
 
 The row is now built from the original, with only the fields the metrics compute
 replaced.
@@ -63,12 +64,11 @@ def test_fields_the_metrics_do_not_compute_are_kept():
     model = AshAggregatedResults()
     model.additional_reports["bandit"] = _ran("bandit")
     model.scanner_results["bandit"] = ScannerTargetStatusInfo(
-        status=ScannerStatus.PASSED, exit_code=3, note="kept"
+        status=ScannerStatus.PASSED, note="kept"
     )
 
     row = _consolidate(model).scanner_results["bandit"]
 
-    assert row.exit_code == 3
     assert getattr(row, "note", None) == "kept"
 
 

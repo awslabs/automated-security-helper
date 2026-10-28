@@ -650,13 +650,13 @@ def test_a_repository_trivy_input_outside_both_trees_keeps_todays_answer(
     assert passed == elsewhere.resolve().as_posix(), passed
 
 
-def _bandit_args(layout: dict, scanner_config=None) -> list:
+def _bandit_scanner(layout: dict, scanner_config=None):
     from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
         BanditScanner,
     )
 
     config = resolve_config(source_dir=layout["source"])
-    scanner = BanditScanner(
+    return BanditScanner(
         config=scanner_config
         if scanner_config is not None
         else config.get_plugin_config("scanner", "bandit"),
@@ -667,7 +667,47 @@ def _bandit_args(layout: dict, scanner_config=None) -> list:
             config=config,
         ),
     )
+
+
+def _construction_args(scanner) -> list:
     return [(a.key, a.value) for a in scanner.args.extra_args]
+
+
+def _bandit_args(layout: dict, scanner_config=None) -> list:
+    return _construction_args(_bandit_scanner(layout, scanner_config))
+
+
+def _bandit_scan_argv(scanner, layout: dict) -> list:
+    """The argv bandit would run with for a scan of the source directory.
+
+    bandit's empty ``--ini`` is not among the construction-time arguments: the
+    scan writes it (``_execute_scan``), in a directory made for that run.
+    """
+    final_args, _, _ = scanner._execute_scan(layout["source"], "source", [])
+    return [str(arg) for arg in final_args]
+
+
+def _only_per_run_empty_ini(argv: list, layout: dict) -> str:
+    """The one ``--ini`` a scan passes: the file ASH writes for that run.
+
+    It is named ``bandit-empty.ini``, sits in a directory made for the scanner
+    run (``ash-tool-config-*``), outside the output directory and the scanned
+    tree, and sets nothing.
+    """
+    from automated_security_helper.utils.tool_config_dir import (
+        TOOL_CONFIG_DIR_PREFIX,
+    )
+
+    values = [argv[i + 1] for i, arg in enumerate(argv[:-1]) if arg == "--ini"]
+    assert len(values) == 1, argv
+    passed = Path(values[0])
+    assert passed.name == "bandit-empty.ini", values
+    assert passed.parent.name.startswith(TOOL_CONFIG_DIR_PREFIX), values
+    parents = passed.resolve().parents
+    assert layout["output"].resolve() not in parents, values
+    assert layout["source"].resolve() not in parents, values
+    assert passed.read_text(encoding="utf-8") == "[bandit]\n", values
+    return values[0]
 
 
 def _only_neutral_value(args: list, key: str, layout: dict, name: str) -> str:
@@ -702,14 +742,20 @@ def test_a_repository_config_naming_a_work_product_runs_bandit_with_an_empty_ini
     )
     log_path = tmp_path / "emitted.log"
     with _emitted_warnings(log_path):
-        args = _bandit_args(layout)
+        scanner = _bandit_scanner(layout)
+    args = _construction_args(scanner)
     lines = log_path.read_text(encoding="utf-8").splitlines()
     assert not any(layout["product"].as_posix() in str(value) for _, value in args), (
         args
     )
     assert not any(honest.as_posix() in str(value) for _, value in args), args
     assert not any(key == "--configfile" for key, _ in args), args
-    _only_neutral_value(args, "--ini", layout, "bandit-empty.ini")
+    assert not any(key == "--ini" for key, _ in args), args
+    argv = _bandit_scan_argv(scanner, layout)
+    assert not any(layout["product"].as_posix() in value for value in argv), argv
+    assert not any(honest.as_posix() in value for value in argv), argv
+    assert "--configfile" not in argv, argv
+    _only_per_run_empty_ini(argv, layout)
     assert any(
         "will run with an empty ini file" in line and "in its place" in line
         for line in lines
@@ -730,15 +776,22 @@ def test_a_missing_bandit_config_takes_no_discovered_replacement(tmp_path):
     absent = tmp_path / "gone" / "bandit.yaml"
     log_path = tmp_path / "emitted.log"
     with _emitted_warnings(log_path):
-        args = _bandit_args(
+        scanner = _bandit_scanner(
             layout,
             scanner_config=BanditScannerConfig(
                 options={"config_file": absent.as_posix()}
             ),
         )
+    args = _construction_args(scanner)
     lines = log_path.read_text(encoding="utf-8").splitlines()
     assert not any(key == "--configfile" for key, _ in args), args
-    _only_neutral_value(args, "--ini", layout, "bandit-empty.ini")
+    assert not any(key == "--ini" for key, _ in args), args
+    argv = _bandit_scan_argv(scanner, layout)
+    assert "--configfile" not in argv, argv
+    assert not any(
+        (layout["source"] / "bandit.yaml").as_posix() in value for value in argv
+    ), argv
+    _only_per_run_empty_ini(argv, layout)
     assert any("does not exist" in line and "in its place" in line for line in lines), (
         lines
     )
@@ -1406,7 +1459,9 @@ def test_the_neutral_files_are_written_when_arguments_resolve_not_when_built(
     """Building a scanner whose configured file is missing writes nothing into
     the output directory; resolving its arguments writes the empty file the
     argument names, and the file sets nothing: an empty mapping for syft and
-    grype, an ini file with an empty ``[bandit]`` section for bandit."""
+    grype. Bandit's empty ``[bandit]`` ini file is written per scan, in a
+    directory made for that run, so building adds no ``--ini`` and the scan's
+    argument list carries the one file."""
     from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
         BanditScanner,
         BanditScannerConfig,
@@ -1438,14 +1493,6 @@ def test_the_neutral_files_are_written_when_arguments_resolve_not_when_built(
             "--config",
             "{}\n",
         ),
-        (
-            BanditScanner(
-                config=BanditScannerConfig(options={"config_file": absent}),
-                context=context,
-            ),
-            "--ini",
-            "[bandit]\n",
-        ),
     ]
     for scanner, key, content in cases:
         named = [a.value for a in scanner.args.extra_args if a.key == key]
@@ -1456,6 +1503,26 @@ def test_the_neutral_files_are_written_when_arguments_resolve_not_when_built(
         scanner._resolve_arguments(target=layout["source"])
 
         assert neutral.read_text(encoding="utf-8") == content, neutral
+
+    # bandit's empty ini is not an argument of the built scanner at all: the
+    # scan writes it, in a directory made for that run, when it resolves the
+    # argument list (bandit_scanner._execute_scan).
+    bandit = BanditScanner(
+        config=BanditScannerConfig(options={"config_file": absent}),
+        context=context,
+    )
+    assert not [a for a in bandit.args.extra_args if a.key == "--ini"], (
+        bandit.args.extra_args
+    )
+    assert not list(layout["output"].rglob("bandit-empty.ini"))
+
+    argv = _bandit_scan_argv(bandit, layout)
+
+    _only_per_run_empty_ini(argv, layout)
+    assert not list(layout["output"].rglob("bandit-empty.ini"))
+    assert not [a for a in bandit.args.extra_args if a.key == "--ini"], (
+        bandit.args.extra_args
+    )
 
 
 @contextlib.contextmanager

@@ -407,7 +407,7 @@ def test_dot_bandit_config_file_is_passed_as_ini(plugin_context, tmp_path):
 def test_other_config_filenames_are_passed_as_configfile(
     plugin_context, tmp_path, filename
 ):
-    """Anything not named .bandit goes through --configfile."""
+    """Anything not named .bandit goes through --configfile, beside the empty --ini."""
     config_file = tmp_path / filename
     config_file.write_text("skips: []\n", encoding="utf-8")
 
@@ -419,7 +419,11 @@ def test_other_config_filenames_are_passed_as_configfile(
     )
 
     assert extra_arg_values(scanner, "--configfile") == [config_file.as_posix()]
-    assert extra_arg_values(scanner, "--ini") == []
+    # Beside it, the one --ini is ASH's empty file, which ends bandit's own
+    # .bandit search (bandit_scanner.BanditScannerConfigOptions.config_file).
+    argv = _scan_argv(scanner, plugin_context)
+    (ini,) = _value_after(argv, "--ini")
+    assert Path(ini).read_text(encoding="utf-8") == "[bandit]\n"
 
 
 @pytest.mark.parametrize(
@@ -457,21 +461,28 @@ def test_a_config_file_in_the_source_directory_is_not_used(
     assert Path(ini).read_text(encoding="utf-8") == "[bandit]\n"
 
 
-def test_no_config_file_anywhere_adds_no_config_flag(scanner, plugin_context):
-    """An empty source dir means bandit runs on its own defaults."""
-    keys = [a.key for a in scanner.args.extra_args]
-    assert "--ini" not in keys
-    assert "--configfile" not in keys
+def test_no_config_file_anywhere_passes_only_the_empty_ini(scanner, plugin_context):
+    """With nothing configured bandit gets no --configfile and ASH's empty --ini,
+    so it runs on its defaults and does not look for a .bandit itself."""
+    argv = _scan_argv(scanner, plugin_context)
+    assert "--configfile" not in argv
+    (ini,) = _value_after(argv, "--ini")
+    assert Path(ini).read_text(encoding="utf-8") == "[bandit]\n"
 
 
 def test_a_directory_named_like_a_config_file_is_not_used(plugin_context):
-    """Discovery requires a file; a directory of the same name is ignored."""
+    """A directory named .bandit in the tree chooses nothing: no --configfile,
+    and the one --ini is ASH's empty file, not the decoy."""
     decoy = plugin_context.source_dir / ".bandit"
     decoy.mkdir()
 
     scanner = BanditScanner(context=plugin_context, config=BanditScannerConfig())
 
-    assert extra_arg_values(scanner, "--ini") == []
+    argv = _scan_argv(scanner, plugin_context)
+    assert decoy.as_posix() not in " ".join(argv)
+    assert "--configfile" not in argv
+    (ini,) = _value_after(argv, "--ini")
+    assert Path(ini).read_text(encoding="utf-8") == "[bandit]\n"
 
 
 # ---------------------------------------------------------------------------
@@ -588,8 +599,9 @@ def test_execute_scan_writes_converted_results_to_their_own_directory(scanner):
 def test_global_ignore_paths_reach_the_exclude_argument(scanner):
     """Globally ignored paths are excluded from the bandit invocation.
 
-    The entry is the glob over the ignored directory, anchored at the target as
-    bandit's walk spells it (``bandit_exclude_globs``).
+    Translated to the bandit glob that skips exactly the ignored directory's
+    files (``bandit_exclude_globs``: ``generated/**`` becomes
+    ``<target>/generated/*``), anchored at the target as bandit's walk spells it.
     """
     source = scanner.context.source_dir
     (source / "generated").mkdir()

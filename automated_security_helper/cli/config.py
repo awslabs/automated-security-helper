@@ -156,8 +156,11 @@ def _config_path_or_discovered(config: str | None, source_dir: Path) -> Path | N
     """The --config path, or the source a scan of source_dir would use, or None.
 
     A discovery that fails (a pyproject.toml that declares [tool.ash] and is not
-    valid TOML) exits 3, as the scan does.
+    valid TOML) exits 3, as the scan does. A path given as "" is refused, not
+    discovered around (_refuse_blank_config_path).
     """
+    if config is not None and not config.strip():
+        _refuse_blank_config_path()
     if config:
         return Path(config)
     try:
@@ -461,9 +464,7 @@ def _named_config(
     on the command line wins over ASH_CONFIG, as `ash scan --config` does;
     two different paths on the command line are a usage error.
     """
-    if positional is None:
-        return option
-    if option is not None:
+    if positional is not None and option is not None:
         # Compared by name: typer builds the context from its own copy of
         # click, whose ParameterSource is not click's.
         source = getattr(ctx.get_parameter_source("config"), "name", "")
@@ -475,7 +476,26 @@ def _named_config(
                 f"names two config files, {positional} and {option}; pass one",
                 param_hint="'--config'",
             )
-    return positional
+    chosen = option if positional is None else positional
+    if chosen is not None and not chosen.strip():
+        _refuse_blank_config_path()
+    return chosen
+
+
+def _refuse_blank_config_path() -> NoReturn:
+    """Exit 3, an unusable configuration, for a config path given as "".
+
+    A blank path names no file; discovering one in its place would answer for a
+    configuration the caller did not name. It can only come from the command
+    line, a positional ``""`` or ``--config ""``: click reads an empty
+    ASH_CONFIG as unset.
+    """
+    secho(
+        "❌ Invalid configuration: the config file path is empty. Name a "
+        "config file, or omit the path to use the one found in the directory.",
+        fg=typer.colors.RED,
+    )
+    raise typer.Exit(INVALID_CONFIG_EXIT_CODE)
 
 
 def _describe_load_error(error: Exception, config_path: Path) -> str:
@@ -708,16 +728,6 @@ def get(
         show_progress=False,
         use_color=color,
     )
-    if config_path is not None and not config_path.strip():
-        # A blank path argument names no file; discovering one in its place
-        # would print a configuration the caller did not name. (An empty
-        # --config or ASH_CONFIG is unset, as click treats it.)
-        secho(
-            "❌ Invalid configuration: the config file path is empty. Name a "
-            "config file, or omit the path to use the one found in the directory.",
-            fg=typer.colors.RED,
-        )
-        raise typer.Exit(INVALID_CONFIG_EXIT_CODE)
     config_path = _named_config(ctx, config_path, config)
     if config_path is not None and not Path(config_path).exists():
         _refuse_missing_config(config_path)

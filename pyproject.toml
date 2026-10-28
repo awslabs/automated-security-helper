@@ -1618,6 +1618,13 @@ disable_error_code = [
 ]
 
 [tool.uv]
+exclude-newer = "7 days"
+# Dependency cooldown: uv resolves nothing published inside the window, so a newly
+# published (possibly malicious or unstable) release waits a week before it can
+# enter uv.lock. Under the uv CI installs (0.11.4) this setting changes no existing
+# lock and `uv sync` reads uv.lock as written; a future `uv lock` that re-resolves
+# records the cutoff in the lock's [options] table. Keep this key first in the table:
+# a dependency-cooldown scanner rule reads the table only up to its first array.
 # filelock 4.1.1 and later require Python 3.11, and every release from 3.20.4
 # through 4.2.0 is affected by GHSA-v4x8-3wr5-3wq8. Python 3.10 therefore has no
 # patched filelock. 4.1.0 is affected by three more advisories that 4.0.x is not,

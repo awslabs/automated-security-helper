@@ -56,6 +56,7 @@ import itertools
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Optional
 
@@ -67,6 +68,18 @@ from tests.utils.workflow_one_line import write_helper
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCAN_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "run-ash-security-scan.yml"
 INSTALL_STEP = "Install actionlint, cfn-guard, gitleaks and trivy"
+
+#: The tests that run the install step's script spawn ``bash`` by its bare name.
+#: On a GitHub Windows runner that name resolves to C:\Windows\System32\bash.exe,
+#: the WSL launcher, which prints "Windows Subsystem for Linux has no installed
+#: distributions" and exits 1 before the step runs; the step is a POSIX shell step
+#: and the Linux job is its venue. The tests that only read the workflow run
+#: everywhere.
+runs_the_step_script = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="the step script is a POSIX shell step; Windows resolves a bare bash "
+    "to the WSL launcher",
+)
 
 
 def _workflow() -> dict[str, Any]:
@@ -512,6 +525,7 @@ _FOUR = ("actionlint", "cfn_guard", "gitleaks", "trivy")
 _COMBINATIONS = list(itertools.product((False, True), repeat=len(_FOUR)))
 
 
+@runs_the_step_script
 @pytest.mark.parametrize("event_name", EVENTS)
 @pytest.mark.parametrize(
     "combination",
@@ -544,6 +558,7 @@ def test_the_install_step_installs_exactly_the_tools_switched_on(
         assert call["ash_config"] == "<unset>", call
 
 
+@runs_the_step_script
 @pytest.mark.parametrize("event_name", EVENTS)
 @pytest.mark.parametrize("tool", ["grype", "syft"])
 @pytest.mark.parametrize("enabled", [True, False])
@@ -589,6 +604,7 @@ def test_every_install_input_gates_a_step_that_can_run(
     )
 
 
+@runs_the_step_script
 @pytest.mark.parametrize("event_name", EVENTS)
 @pytest.mark.parametrize("enabled", [True, False])
 def test_the_rules_dir_is_where_the_install_step_writes_it(
