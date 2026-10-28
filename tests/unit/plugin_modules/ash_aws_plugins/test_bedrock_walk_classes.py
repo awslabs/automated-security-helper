@@ -142,7 +142,10 @@ def test_the_model_specific_codes_are_these_eight():
 
 @pytest.mark.parametrize("code", MODEL_SPECIFIC_CODES)
 def test_a_model_specific_code_walks_to_the_next_model(context, monkeypatch, code):  # noqa: F811
-    reporter = _walk_setup(context, monkeypatch)
+    # No retries: the two throttle codes are also RETRYABLE_EXCEPTIONS, so
+    # with retries the configured model is repeated before the walk (the
+    # retried shape is test_a_failure_after_connecting_walks_to_the_next_model's).
+    reporter = _walk_setup(context, monkeypatch, max_retries=0)
     runtime = _Runtime({PRIMARY_MODEL: _client_error(code, "it failed")})
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
     assert (out, runtime.models) == (
