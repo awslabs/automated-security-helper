@@ -30,12 +30,27 @@ rule. So ASH builds a staging tree per package root holding only the files ASH
 would scan -- the scan set (``.gitignore``, ``.ignore``), less
 ``KNOWN_IGNORE_PATHS``, ``global_settings.ignore_paths``,
 ``options.excluded_paths``, ASH's output directory and any nested package root of
-the same ecosystem (scanned on its own). Files are copied, never hard-linked:
-the staging tree lives in the scanner's results directory, so that a sandboxed
-GuardDog can read it, and that directory is writable inside the sandbox, where
-a hard link would let a write reach the source file. Symlinks are never staged,
-which keeps GuardDog from reading anything outside the target. The staging tree
-is removed after the scan.
+the same ecosystem (scanned on its own). Files are copied, never hard-linked: a
+hard link shares its inode with the source file, and the temporary directory is
+often on another filesystem. Symlinks are never staged, which keeps GuardDog from
+reading anything outside the target. The staging tree is removed after the scan.
+
+Where the staging tree lives
+----------------------------
+Outside the scanned directory and outside ASH's output directory, in a new
+directory under the system temporary directory. ASH writes its output inside the
+scanned tree by default (``.ash/ash_output``), and trivy-repo walks that tree
+while GuardDog runs: a staging tree under the output directory was walked too,
+and when the scan finished and removed it, a file trivy had listed was gone and
+trivy exited on the walk error (``unable to filter filesystem: walk error ... no
+such file or directory``), which the scan reported as trivy-repo ERROR.
+
+A sandboxed GuardDog cannot read the system temporary directory, so under an
+active sandbox scope the staging tree is granted as the scope's scan target, which
+is read-only and nothing else (snyk-code grants its copy the same way). When the
+temporary directory is itself inside the scanned or the output directory, the
+staging tree goes in the scanner's results directory, where a sandboxed GuardDog
+can read it, and that is logged.
 
 Why the result is converted from JSON rather than read as SARIF
 ---------------------------------------------------------------
@@ -77,6 +92,7 @@ once for every file in the package.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -85,7 +101,7 @@ import platform
 import re
 import shutil
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import (
     Annotated,
@@ -136,7 +152,11 @@ from automated_security_helper.utils.pre_installed_tool import (
 )
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
-from automated_security_helper.utils.sandbox.scope import active_scope
+from automated_security_helper.utils.sandbox.scope import (
+    SandboxScope,
+    active_scope,
+    sandbox_scope,
+)
 from automated_security_helper.utils.uv_tool_runner import (
     UVToolRunnerError,
     checked_requirement,
@@ -1102,14 +1122,43 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         verify_targets.sort(key=lambda t: (t.ecosystem, t.label))
         return owned, verify_targets
 
+    def _staging_parent(self, results_dir: Path) -> Tuple[Path, bool]:
+        """A new directory to stage the package roots in, and whether it is outside
+        the scanned directory and ASH's output directory.
+
+        Under the system temporary directory, so that no scanner that walks the
+        scanned tree (trivy-repo does, while GuardDog runs) lists the staging tree
+        and then finds its files gone (see the module docstring). When the
+        temporary directory is inside the scanned or the output directory, a new
+        directory under ``results_dir`` instead, which is inside the output
+        directory and may be walked: logged, and the second value is False.
+        """
+        temp_root = Path(os.path.realpath(tempfile.gettempdir()))
+        for name, tree in (
+            ("scanned directory", self._ctx.source_dir),
+            ("output directory", self._ctx.output_dir),
+        ):
+            real = Path(os.path.realpath(tree))
+            if temp_root == real or real in temp_root.parents:
+                self._plugin_log(
+                    f"The temporary directory {temp_root} is inside the {name}, so "
+                    f"GuardDog's staged copy of the package files goes in "
+                    f"{results_dir}, where a scanner that walks that tree can read "
+                    "it while it exists. Set TMPDIR to a directory outside both.",
+                    level=logging.WARNING,
+                )
+                return Path(tempfile.mkdtemp(prefix="staging-", dir=results_dir)), False
+        return Path(tempfile.mkdtemp(prefix="staging-")), True
+
     @staticmethod
     def _stage(root: Path, files: List[Path], staging_dir: Path) -> None:
         """Copy ``files`` under ``staging_dir``, keeping paths relative to ``root``.
 
-        Copies, never hard links. The staging tree is in the results directory,
-        which a sandboxed scanner may write, and a hard link shares its inode with
-        the file in the scanned tree: a write through it would change the source
-        the sandbox mounts read-only. Measured on a 2,035-file, 41.8 MB tree on
+        Copies, never hard links. A hard link shares its inode with the file in the
+        scanned tree, so a write through the staging tree (it is writable when it is
+        in the results directory, which a sandboxed scanner may write) would change
+        the source the sandbox mounts read-only, and the temporary directory is
+        often on another filesystem. Measured on a 2,035-file, 41.8 MB tree on
         tmpfs: 0.32 s to copy against 0.09 s to link, small beside a GuardDog run.
         """
         for source in files:
@@ -1586,13 +1635,20 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
                 return True
             return False
 
-        # Inside this scanner's results directory, not the system temp directory:
-        # under --sandbox that directory is the one place GuardDog can read that
-        # ASH can also write, and a staging tree under $TMPDIR is invisible to it
-        # (GuardDog then takes the missing path for a package name to download).
+        # Outside the scanned and output directories (see _staging_parent): a staging
+        # tree inside the output directory was walked by trivy-repo and removed
+        # under it. Under --sandbox $TMPDIR is invisible to GuardDog (it took the
+        # missing path for a package name and tried to download it), so the
+        # staging tree is made the scope's scan target, which the sandbox lets it read.
         results_dir.mkdir(parents=True, exist_ok=True)
-        staging_parent = Path(tempfile.mkdtemp(prefix="staging-", dir=results_dir))
-        try:
+        staging_parent, outside_the_trees = self._staging_parent(results_dir)
+        with contextlib.ExitStack() as cleanup:
+            cleanup.callback(shutil.rmtree, staging_parent, ignore_errors=True)
+            scope = active_scope()
+            if outside_the_trees and isinstance(scope, SandboxScope):
+                cleanup.enter_context(
+                    sandbox_scope(replace(scope, scan_target=staging_parent))
+                )
             for index, ((ecosystem, root), root_files) in enumerate(
                 sorted(owned.items(), key=lambda kv: (kv[0][0], kv[0][1].as_posix()))
             ):
@@ -1620,8 +1676,6 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
                 if reason is not None:
                     self.targets_failed += 1
                     failures.append(f"{ecosystem} scan of {label or '.'}: {reason}")
-        finally:
-            shutil.rmtree(staging_parent, ignore_errors=True)
 
         offline = self._is_offline_mode()
         for index, vtarget in enumerate(verify_targets):

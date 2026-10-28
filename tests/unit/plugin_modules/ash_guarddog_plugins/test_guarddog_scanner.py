@@ -37,6 +37,7 @@ import platform
 import shutil
 import subprocess  # nosec B404 - runs this interpreter with fixed arguments in a probe
 import sys
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List, Literal
@@ -54,6 +55,12 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.config_trust import record_provenance
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+from automated_security_helper.utils.sandbox.scope import (
+    SandboxScope,
+    active_scope,
+    sandbox_scope,
+)
 from automated_security_helper.plugin_modules.ash_guarddog_plugins import (
     guarddog_scanner as guarddog_module,
 )
@@ -1792,23 +1799,108 @@ def test_windows_is_an_unsupported_platform_with_no_install_command(
     assert scanner.unsupported_platform_reason() is None
 
 
-def test_staging_is_inside_the_results_directory(tmp_path, fake):
-    """Under --sandbox GuardDog can read the results directory but not $TMPDIR.
+def _scanner_with_output_in_the_source(repo: Path, **options) -> GuardDogScanner:
+    """A scanner whose output directory is ASH's default one, inside the source."""
+    output = repo / ".ash" / "ash_output"
+    output.mkdir(parents=True, exist_ok=True)
+    context = PluginContext(
+        source_dir=repo,
+        output_dir=output,
+        work_dir=output / "converted",
+        config=AshConfig(),
+    )
+    return GuardDogScanner(
+        context=context,
+        config=GuardDogScannerConfig(
+            enabled=True, options=GuardDogScannerConfigOptions(**options)
+        ),
+    )
 
-    Staged under the system temp directory, the sandboxed GuardDog was handed a path
-    that did not exist for it, took it for a package name and tried to download it,
-    so the sandbox parity run reported GuardDog ERROR (bwrap) or PASSED with no
-    findings (landlock) where the unsandboxed run reported 9 findings.
+
+def test_staging_is_outside_the_directories_other_scanners_walk(
+    tmp_path, fake, monkeypatch
+):
+    """The staging tree is in neither the scanned tree nor ASH's output directory.
+
+    ASH's output directory is inside the scanned tree by default, and trivy-repo
+    walks that tree while GuardDog runs. Staged under the output directory, the
+    staging tree was listed by trivy and removed under it when GuardDog finished,
+    and trivy exited on `walk error ... no such file or directory`.
     """
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
     repo = _repo(tmp_path)
-    scanner = _scanner(repo, tmp_path, ecosystems=["go", "npm"])
+    scanner = _scanner_with_output_in_the_source(repo, ecosystems=["go", "npm"])
 
     scanner.scan(target=repo, target_type="source")
+
+    assert fake.staged_dirs
+    for staged in fake.staged_dirs:
+        assert not staged.resolve().is_relative_to(repo.resolve()), staged
+        assert staged.resolve().parent.parent == scratch.resolve(), staged
+
+
+def test_a_temporary_directory_inside_the_scanned_tree_stages_in_the_results_dir(
+    tmp_path, fake, monkeypatch, caplog
+):
+    """With nowhere outside the trees to stage, the old place is used, and said."""
+    repo = _repo(tmp_path)
+    scanner = _scanner_with_output_in_the_source(repo, ecosystems=["go", "npm"])
+    temp = Path(scanner.context.output_dir) / "tmp"
+    temp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        scanner.scan(target=repo, target_type="source")
 
     results_dir = Path(scanner.results_dir).resolve()
     assert fake.staged_dirs
     for staged in fake.staged_dirs:
         assert staged.resolve().is_relative_to(results_dir), staged
+    assert "is inside the scanned directory" in caplog.text
+
+
+def test_under_a_sandbox_the_staging_tree_is_the_scans_read_grant(
+    tmp_path, fake, monkeypatch
+):
+    """GuardDog cannot read $TMPDIR under --sandbox, so the sandbox is told where.
+
+    Staged under the system temp directory with no grant, the sandboxed GuardDog was
+    handed a path that did not exist for it, took it for a package name and tried
+    to download it, so the sandbox parity run reported GuardDog ERROR (bwrap) or
+    PASSED with no findings (landlock) where the unsandboxed run reported 9 findings.
+    The staging tree is the scope's scan target for each invocation, and only then.
+    """
+    repo = _repo(tmp_path)
+    scanner = _scanner(repo, tmp_path, ecosystems=["npm"])
+    outer = SandboxScope(
+        backend=SimpleNamespace(name="bwrap"),
+        scanner_name="guarddog",
+        requirements=SandboxRequirements(),
+        source_dir=repo,
+        output_dir=tmp_path / "out",
+        results_dir=tmp_path / "out" / "scanners" / "guarddog",
+        scan_target=None,
+        offline=False,
+    )
+    seen = []
+
+    def spy(self, **kw):
+        scope = active_scope()
+        seen.append((scope is outer, scope.scan_target))
+        return fake(self, **kw)
+
+    monkeypatch.setattr(GuardDogScanner, "_run_subprocess", spy)
+
+    with sandbox_scope(outer):
+        scanner.scan(target=repo, target_type="source")
+        assert active_scope() is outer
+
+    assert fake.staged_dirs
+    assert [target for _, target in seen] == [d.parent for d in fake.staged_dirs]
+    assert not any(same for same, _ in seen)
+    assert outer.scan_target is None
 
 
 def test_a_write_to_a_staged_file_does_not_reach_the_source(tmp_path):
