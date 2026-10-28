@@ -33,7 +33,7 @@ def _render(model: AshAggregatedResults) -> str:
         return console
 
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(metrics_table, "Console", recording_console)
+        patch.setattr(metrics_table, "ash_console", recording_console)
         patch.setattr(
             metrics_table,
             "generate_metrics_table_from_unified_data",

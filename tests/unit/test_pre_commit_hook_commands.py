@@ -68,6 +68,34 @@ def test_no_hook_runs_the_project_on_an_interpreter_of_its_own():
     )
 
 
+def test_hooks_that_run_the_project_use_the_lock_as_written():
+    """A `uv run` hook inside the project must not rewrite uv.lock on the committer's uv.
+
+    Without ``--frozen`` (or ``--locked``), ``uv run`` re-resolves when the committer's
+    uv disagrees with the lock and rewrites uv.lock as part of the commit; one such
+    commit moved two pins down and added an ``[options]`` table nobody asked for.
+    ``--frozen`` reads the lock as committed and fails instead. A ``--no-project`` hook
+    installs nothing and writes no lock, so it is exempt.
+    """
+    uv_hooks = {
+        hook["id"]: shlex.split(hook["entry"])
+        for hook in _local_hooks()
+        if shlex.split(hook["entry"])[:2] == ["uv", "run"]
+    }
+    assert "generate-schemas" in uv_hooks, f"read the wrong hooks: {uv_hooks}"
+    # The must-not-flag control: a hook that runs outside the project needs no flag.
+    assert "--no-project" in uv_hooks["sync-cdk-extra-fallback"], uv_hooks
+    offenders = [
+        hook_id
+        for hook_id, argv in uv_hooks.items()
+        if "--no-project" not in argv and not {"--frozen", "--locked"} & set(argv)
+    ]
+    assert not offenders, (
+        f"{offenders} run `uv run` inside the project without --frozen or --locked, so "
+        "a committer's uv can rewrite uv.lock in the commit. Add --frozen."
+    )
+
+
 def test_the_sync_hook_runs_its_script_on_python_3_13_with_fix():
     (hook,) = [h for h in _local_hooks() if h["id"] == "sync-cdk-extra-fallback"]
     argv = shlex.split(hook["entry"])

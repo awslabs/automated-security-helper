@@ -21,6 +21,7 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
     TrivyRepoScanner,
     TrivyRepoScannerConfig,
 )
+from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.error_text import error_text
 
 PluginContext.model_rebuild()
@@ -42,8 +43,12 @@ def _scanner(tmp_path: Path, options=None) -> TrivyRepoScanner:
     source.mkdir(exist_ok=True)
     output = tmp_path / "out"
     output.mkdir(exist_ok=True)
+    # Built from no config file in the tree: the options are the operator's
+    # (utils/config_trust.set_by_operator refuses a config with no provenance).
+    config = AshConfig()
+    record_provenance(config, in_tree=[])
     return TrivyRepoScanner(
-        context=PluginContext(source_dir=source, output_dir=output, config=AshConfig()),
+        context=PluginContext(source_dir=source, output_dir=output, config=config),
         config=TrivyRepoScannerConfig(options=options or {}),
     )
 

@@ -47,6 +47,7 @@ from automated_security_helper.interactions import run_ash_container as rac
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 from tests.utils.host_file_names import skip_unless_the_host_can_name
+from tests.utils.windows_file_names import created_on_disk
 
 CONFIG_ROOT = rac.CONTAINER_CONFIG_ROOT
 POLICY_ROOT = rac.CONTAINER_WORKSPACE_CONFIG_ROOT
@@ -56,7 +57,7 @@ POLICY_ROOT = rac.CONTAINER_WORKSPACE_CONFIG_ROOT
 #: test_container_mount_paths_must_be_representable.py). Windows cannot hold three of
 #: them (glob, backslash and tab: tests/utils/host_file_names.py), so the tests that
 #: make a directory under a name skip those there.
-UNUSUAL_NAMES = [
+_NAMES_LEGAL_ON_POSIX = [
     pytest.param("plain", id="plain"),
     pytest.param("with space", id="space"),
     pytest.param("dollar$HOME", id="dollar"),

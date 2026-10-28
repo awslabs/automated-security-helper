@@ -19,8 +19,9 @@ In both the text shows as given: not dropped, not styled, and not escaped twice
 as a logging error.
 
 Out of scope: lines that put in only ASH's own names and counts (a scanner's
-configured name, a target type, a sandbox backend, counts), and the progress
-display's descriptions, which escape the error already.
+configured name, a target type, a sandbox backend, counts, the config line's
+setting names), and the progress display's descriptions, which escape the error
+already.
 """
 
 from __future__ import annotations
@@ -125,12 +126,6 @@ class _Config(ScannerPluginConfigBase):
     name: str = "stub"
 
 
-class _ConfigWithPatterns(_Config):
-    """A config holding file patterns, which the executor logs with the config."""
-
-    exclude: List[str] = [_GIVEN]
-
-
 class _Moment(datetime):
     """A time that cannot be subtracted, so the duration's own handler logs."""
 
@@ -226,12 +221,6 @@ def _scan_one(behavior: str) -> Callable[..., None]:
         )
 
     return drive
-
-
-def _the_config_holds_file_patterns(tmp_path, monkeypatch) -> None:
-    context = _context(tmp_path)
-    scanner = _Stub(config=_ConfigWithPatterns(), context=context)
-    _executor(context)._execute_scanner("stub", scanner, _targets(context))
 
 
 def _a_target_that_does_not_exist(tmp_path, monkeypatch) -> None:
@@ -341,11 +330,6 @@ CALLS = [
     ),
     pytest.param(
         "Failed to notify event", _a_subscriber_raises, id="a-subscriber-raised"
-    ),
-    pytest.param(
-        "scanner_plugin.config:",
-        _the_config_holds_file_patterns,
-        id="the-config-with-its-file-patterns",
     ),
     pytest.param(
         "does not exist", _a_target_that_does_not_exist, id="a-missing-target-skipped"

@@ -21,6 +21,7 @@ every OS.
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -40,6 +41,27 @@ from tests.snapshot.support.cli import (
 
 PINNED_PYTHON = "python3"
 REAL_PYTHON = sys.executable
+
+#: The snapshots are POSIX text by construction: the commands they record name POSIX
+#: paths.
+_POSIX_TEXT = pytest.mark.skipif(
+    os.name == "nt",
+    reason="the recorded install output is POSIX by construction: its commands name POSIX paths",
+)
+
+
+def _hosts(*left_unmarked: str) -> list:
+    """ALL_HOSTS as parameters, skipped on Windows except the hosts named.
+
+    The hosts left unmarked are ones whose Windows ids fail in some other way than
+    by reading differently from the recorded POSIX text.
+    """
+    return [
+        pytest.param(
+            host, id=host.id, marks=() if host.id in left_unmarked else _POSIX_TEXT
+        )
+        for host in ALL_HOSTS
+    ]
 
 
 @dataclass
@@ -177,7 +199,7 @@ class _FakeUvRunner(UVToolRunner):
         return super().__getattribute__(name)
 
 
-@pytest.mark.parametrize("host", ALL_HOSTS, ids=lambda h: h.id)
+@pytest.mark.parametrize("host", _hosts("freebsd-riscv64"))
 @pytest.mark.parametrize(
     "scenario_name, exit_code",
     [
@@ -230,7 +252,7 @@ def test_dependencies_install_bad_selection(
     assert text_snapshot("txt") == run.document
 
 
-@pytest.mark.parametrize("host", ALL_HOSTS, ids=lambda h: h.id)
+@pytest.mark.parametrize("host", _hosts("freebsd-riscv64", "windows-arm64"))
 def test_dependencies_install_selected_tool(
     host, project_dir, monkeypatch, text_snapshot
 ):

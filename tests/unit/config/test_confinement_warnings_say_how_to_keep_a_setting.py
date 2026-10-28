@@ -28,6 +28,7 @@ import pytest
 
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.utils.log import ASH_LOGGER
+from tests.utils.helpers import mark_git_checkout
 
 REMEDY = (
     "move the file outside every git checkout, or pass the setting with "
@@ -70,11 +71,11 @@ def _config(tmp_path: Path, where: str, settings: dict) -> tuple:
     """(config file, scanned directory): the file in the scanned checkout, or in
     a checkout of its own beside it."""
     repo = tmp_path / "repo"
-    (repo / ".git").mkdir(parents=True)
+    mark_git_checkout(repo)
     if where == "the-scanned-checkout":
         path = repo / "ci" / "ash.yaml"
     else:
-        (tmp_path / "ops" / ".git").mkdir(parents=True)
+        mark_git_checkout(tmp_path / "ops")
         path = tmp_path / "ops" / "ash.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"project_name": "p", **settings}), encoding="utf-8")
@@ -247,7 +248,7 @@ def test_a_refused_workspace_operator_config_of_the_repository_says_how(
     from automated_security_helper.core.exceptions import ASHConfigValidationError
 
     repo = tmp_path / "repo"
-    (repo / ".git").mkdir(parents=True)
+    mark_git_checkout(repo)
     workspace = repo / "ws"
     workspace.mkdir()
     place = workspace if where == "the-workspace" else repo / "ops"

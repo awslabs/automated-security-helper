@@ -117,7 +117,7 @@ def test_cloudwatch_publish_line(tmp_path, logged, monkeypatch):
 
     reporter.report(AshAggregatedResults())
 
-    _no_value(logged, "Publishing event to CloudWatch Logs log group", group)
+    _no_value(logged, "Publishing event to CloudWatch Logs, to the log group", group)
 
 
 def test_cloudwatch_stream_already_exists(tmp_path, logged, monkeypatch):
@@ -145,7 +145,11 @@ def test_cloudwatch_stream_already_exists(tmp_path, logged, monkeypatch):
 
     reporter._create_log_stream_with_retry(client)
 
-    _no_value(logged, "Log stream already exists", stream)
+    _no_value(
+        logged,
+        "The log stream the log_stream_name option names already exists",
+        stream,
+    )
 
 
 def test_security_hub_validated_region(tmp_path, logged, monkeypatch):
@@ -166,7 +170,7 @@ def test_security_hub_validated_region(tmp_path, logged, monkeypatch):
     logged.clear()
 
     assert reporter.validate_plugin_dependencies() is True
-    _no_value(logged, "Security Hub reporter validated for region", region)
+    _no_value(logged, "Security Hub reporter validated for the region", region)
 
 
 def test_security_hub_import_line(tmp_path, logged, monkeypatch):
@@ -648,4 +652,4 @@ def test_a_default_log_group_is_redacted_from_the_publish_line(
 
     reporter.report(AshAggregatedResults())
 
-    _no_value(logged, "Publishing event to CloudWatch Logs log group", group)
+    _no_value(logged, "Publishing event to CloudWatch Logs, to the log group", group)

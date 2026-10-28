@@ -385,6 +385,11 @@ def test_an_overlap_base_keeps_the_ignored_marker(tmp_path, monkeypatch):
     work = tmp_path / "work"
     work.mkdir()
     monkeypatch.chdir(work)
+    # A path named to get_config is the client's unless it is in a directory
+    # ASH_MCP_ALLOWED_CONFIG_ROOTS names, and a client's chain writing the
+    # limit is refused outright; this test is about the operator's selected
+    # chain, so the test's directory is set aside as the operator's.
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(tmp_path))
 
     # Control: without the overlap, the checkout base's operator-only option
     # is shown as ignored.

@@ -36,6 +36,12 @@ from tests.unit.interactions import (
     test_a_name_that_is_not_utf8_keeps_the_results_file as base,
 )
 
+# Every test here plants the file whose name is not UTF-8.
+pytestmark = pytest.mark.skipif(
+    os.name == "nt",
+    reason="NTFS names are UTF-16; a name that is not UTF-8 bytes cannot exist",
+)
+
 #: The file whose name is not UTF-8, and the control.
 ODD = base._ODD
 PLAIN = base._PLAIN

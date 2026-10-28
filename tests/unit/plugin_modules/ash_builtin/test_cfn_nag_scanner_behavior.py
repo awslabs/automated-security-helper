@@ -35,6 +35,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scann
     CfnNagScannerConfig,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.subprocess_utils import exit_status
 
 CFN_TEMPLATE = """Resources:
   MyRole:
@@ -630,7 +631,10 @@ def test_execution_successful_treats_zero_and_one_as_success(
     {0, 1} set; both runs here rendered results and evaluated their target,
     so the count is findings, not failure -- 137 included, because through
     ``_run_subprocess`` a signal death arrives as a NEGATIVE code, never as
-    128+N. ASH's spawn-failure marker 127 and a negative code are no counts.
+    128+N. ASH's spawn-failure marker 127 and a negative code are no counts: the
+    plugin keeps a signal death as the run's cause, which is read before any
+    count, and records its code as the shell reports it (``exit_status``,
+    128+N), so the recorded 137 of a SIGKILL is never a count either.
 
     The code arrives the way the real ``_run_subprocess`` delivers it, through
     ``_process_command_response``: scan() starts each target with no exit code, so
@@ -650,7 +654,9 @@ def test_execution_successful_treats_zero_and_one_as_success(
 
     invocation = report.runs[0].invocations[0]
     assert invocation.executionSuccessful is successful
-    assert invocation.exitCode == exit_code
+    # A signal death is recorded as the shell reports it; every other code as given.
+    recorded = exit_status(exit_code) if exit_code < 0 else exit_code
+    assert invocation.exitCode == recorded
 
 
 # ---------------------------------------------------------------------------

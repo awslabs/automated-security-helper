@@ -235,7 +235,9 @@ class TestMcpRuntimeOverrides:
     def test_a_runtime_patch_cannot_set_the_switch(self, op, path):
         with pytest.raises(RuntimePatchDeniedError):
             check_runtime_ops(
-                [{"op": op, "path": path, "value": False}], allowlist=_OPEN_ALLOWLIST
+                [{"op": op, "path": path, "value": False}],
+                allowlist=_OPEN_ALLOWLIST,
+                config=None,
             )
 
     def test_a_client_config_override_cannot_set_the_switch(self, tmp_path):
@@ -249,12 +251,14 @@ class TestMcpRuntimeOverrides:
             check_runtime_ops(
                 [{"op": "replace", "path": "/fail_on_findings", "value": False}],
                 allowlist=_OPEN_ALLOWLIST,
+                config=None,
             )
 
     def test_control_an_allowed_key_is_accepted(self, tmp_path):
         check_runtime_ops(
             [{"op": "replace", "path": "/project_name", "value": "renamed"}],
             allowlist=_OPEN_ALLOWLIST,
+            config=None,
         )
         _gate(["project_name=renamed"], tmp_path)
 

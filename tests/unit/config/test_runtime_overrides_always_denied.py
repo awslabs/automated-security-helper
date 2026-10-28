@@ -132,7 +132,9 @@ def test_a_profile_that_drops_an_off_host_reporter_still_denies_it(reporter):
     ):
         with pytest.raises(RuntimePatchDeniedError):
             check_runtime_ops(
-                [{"op": "add", "path": path, "value": value}], allowlist=policy
+                [{"op": "add", "path": path, "value": value}],
+                allowlist=policy,
+                config=None,
             )
 
 
@@ -144,6 +146,7 @@ def test_control_another_reporter_option_still_passes():
     check_runtime_ops(
         [{"op": "add", "path": "/reporters/markdown/options/top_n", "value": 5}],
         allowlist=policy,
+        config=None,
     )
 
 

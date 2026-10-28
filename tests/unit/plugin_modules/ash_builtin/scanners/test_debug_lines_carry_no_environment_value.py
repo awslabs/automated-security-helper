@@ -396,14 +396,13 @@ def test_detect_secrets_scan_config_dumps_show_a_refused_baseline_as_written(
 ):
     """scan()'s config dumps show a refused baseline option as it was written.
 
-    The scanned repository's own config names a baseline under the scan's work
-    directory, so the scanner refuses it (it is derived from the scanned
-    repository and the option is not the operator's own). The refusal is decided
-    where the baseline is used; the config model keeps the option, so the dumps
-    do not show ``None`` in its place. The option is a literal: the refusal
-    applies to a value the repository's config wrote, and a ``${...}`` reference
-    would only add the environment to the cell. The file name carries no digit,
-    so the environment-value redaction of the surrounding text cannot touch it.
+    The configured baseline sits under the scan's work directory and is not the
+    operator's own, so the scanner refuses it (it is derived from the scanned
+    repository). The refusal is decided where the baseline is used; the config
+    model keeps the option, so the dumps do not show ``None`` in its place. The
+    option is a literal: a ``${...}`` reference would only add the environment to
+    the test case. The file name carries no digit, so the environment-value
+    redaction of the surrounding text cannot touch it.
     """
     from automated_security_helper.config.resolve_config import resolve_config
     from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
@@ -419,21 +418,23 @@ def test_detect_secrets_scan_config_dumps_show_a_refused_baseline_as_written(
     work.mkdir(parents=True)
     derived = work / "derived.baseline"
     derived.write_text('{"version": "1.5.0", "results": {}}', encoding="utf-8")
-    (source / ".ash" / ".ash.yaml").write_text(
-        "project_name: scanned\n"
-        "scanners:\n"
-        "  detect-secrets:\n"
-        "    options:\n"
-        f"      baseline_file: {derived.as_posix()}\n",
-        encoding="utf-8",
-    )
     monkeypatch.chdir(tmp_path)
+    # A baseline_file a repository config writes is left out at load
+    # (config/tool_config_trust.py), so the value is handed over directly and
+    # declared the context's, which the scanner refuses as a derived product
+    # that is not the operator's own.
     ash_config = resolve_config(source_dir=source)
     ctx = PluginContext(
         source_dir=source, output_dir=output, work_dir=work, config=ash_config
     )
-    config = ash_config.get_plugin_config("scanner", "detect-secrets")
-    scanner = module.DetectSecretsScanner(context=ctx, config=config)
+    config = module.DetectSecretsScannerConfig(
+        options=module.DetectSecretsScannerConfigOptions(
+            baseline_file=derived.as_posix()
+        )
+    )
+    scanner = module.DetectSecretsScanner(
+        context=ctx, config=config, config_from_context=True
+    )
     scanner.dependencies_satisfied = True
     # The control: the scanner refused the option, so the scan reads no baseline.
     assert not scanner._baseline_in_use()
@@ -463,13 +464,14 @@ def test_detect_secrets_scan_config_dumps_show_a_refused_env_baseline_as_written
 ):
     """The refused baseline written as an environment reference shows as written.
 
-    The scanned repository's own config names its baseline as a ``${...}``
-    reference that resolves to a file under the scan's work directory, so the
-    scanner refuses it (derived from the scanned repository, and not the
-    operator's own). The refusal is decided where the baseline is used; the
-    dumps show the reference the file wrote, never the resolved path and never
-    ``None`` in its place. The names carry no digit, so the environment-value
-    redaction of the surrounding text cannot touch them.
+    The operator's config file, outside the scanned tree, names its baseline as
+    a ``${...}`` reference that resolves to a file under the scan's work
+    directory, and the value is judged as not the operator's own, so the
+    scanner refuses it (derived from the scanned repository). The refusal is
+    decided where the baseline is used; the dumps show the reference the file
+    wrote, never the resolved path and never ``None`` in its place. The names
+    carry no digit, so the environment-value redaction of the surrounding text
+    cannot touch them.
     """
     from automated_security_helper.config.resolve_config import resolve_config
     from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
@@ -486,7 +488,12 @@ def test_detect_secrets_scan_config_dumps_show_a_refused_env_baseline_as_written
     derived = work / "derived.baseline"
     derived.write_text('{"version": "1.5.0", "results": {}}', encoding="utf-8")
     monkeypatch.setenv("ASH_PROBE_DERIVED", derived.as_posix())
-    (source / ".ash" / ".ash.yaml").write_text(
+    # The reference is written by a config outside the scanned tree, so the
+    # load keeps it (a repository config's baseline_file is left out,
+    # config/tool_config_trust.py) and records the reference the dumps render.
+    operator_config = tmp_path / "operator" / "ash.yaml"
+    operator_config.parent.mkdir()
+    operator_config.write_text(
         "project_name: scanned\n"
         "scanners:\n"
         "  detect-secrets:\n"
@@ -495,13 +502,20 @@ def test_detect_secrets_scan_config_dumps_show_a_refused_env_baseline_as_written
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
-    ash_config = resolve_config(source_dir=source)
+    ash_config = resolve_config(operator_config, source_dir=source)
     ctx = PluginContext(
         source_dir=source, output_dir=output, work_dir=work, config=ash_config
     )
     config = ash_config.get_plugin_config("scanner", "detect-secrets")
     # The control: the load read the reference as the path.
     assert config["options"]["baseline_file"] == derived.as_posix()
+    # The refusal under test is the scanner's: the value is judged as not the
+    # operator's own, so the derived product is refused where it is used.
+    from automated_security_helper.config import operator_only_options
+
+    monkeypatch.setattr(
+        operator_only_options, "operator_wrote_value", lambda *_a, **_k: False
+    )
     scanner = module.DetectSecretsScanner(context=ctx, config=config)
     scanner.dependencies_satisfied = True
     monkeypatch.setattr(scanner, "validate_plugin_dependencies", lambda: True)
@@ -1051,7 +1065,10 @@ def test_pre_scan_dump_shows_an_env_written_option_as_written(
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
-    ash_config = resolve_config(config_file)
+    # The config file is the operator's: outside the scanned tree, which is
+    # named here (a baseline_file a file inside the tree writes is the
+    # operator's choice and is left out, config/tool_config_trust.py).
+    ash_config = resolve_config(config_file, source_dir=tmp_path / "source")
     scanner_config = ash_config.scanners.detect_secrets
     assert scanner_config.options.baseline_file == value, (
         "the control: the run reads the environment's value"

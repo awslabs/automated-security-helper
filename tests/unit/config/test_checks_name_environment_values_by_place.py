@@ -1423,6 +1423,7 @@ def test_an_invalid_policy_regex_checked_without_its_config_gives_the_position_o
     from automated_security_helper.config.runtime_patch import (
         RuntimePatchDeniedError,
         _check_value_pattern,
+        known_plugin_keys,
     )
 
     policy = RuntimeOverridesConfig(
@@ -1433,7 +1434,10 @@ def test_an_invalid_policy_regex_checked_without_its_config_gives_the_position_o
     op = {"op": "replace", "path": "/project_name", "value": "x"}
 
     with pytest.raises(RuntimePatchDeniedError) as raised:
-        _check_value_pattern(op, allowlist=policy, names=None)
+        # The plugin keys check_runtime_ops computes for a caller with no config.
+        _check_value_pattern(
+            op, allowlist=policy, plugin_keys=known_plugin_keys(None), names=None
+        )
 
     refusal = str(raised.value)
     assert "re.error at position" in refusal, refusal
@@ -1449,6 +1453,7 @@ def test_a_match_refusal_without_its_config_names_no_part_of_the_policy() -> Non
     from automated_security_helper.config.runtime_patch import (
         RuntimePatchDeniedError,
         _check_value_pattern,
+        known_plugin_keys,
     )
 
     policy = RuntimeOverridesConfig(
@@ -1459,7 +1464,10 @@ def test_a_match_refusal_without_its_config_names_no_part_of_the_policy() -> Non
     op = {"op": "replace", "path": "/project_name", "value": "probecanaryzq7"}
 
     with pytest.raises(RuntimePatchDeniedError) as raised:
-        _check_value_pattern(op, allowlist=policy, names=None)
+        # The plugin keys check_runtime_ops computes for a caller with no config.
+        _check_value_pattern(
+            op, allowlist=policy, plugin_keys=known_plugin_keys(None), names=None
+        )
 
     refusal = str(raised.value)
     assert "probecanaryzq" not in refusal, refusal
@@ -1476,6 +1484,7 @@ def test_a_denied_path_refusal_without_its_config_names_no_entry() -> None:
     from automated_security_helper.config.runtime_patch import (
         RuntimePatchDeniedError,
         _check_op_paths,
+        known_plugin_keys,
     )
 
     policy = RuntimeOverridesConfig(
@@ -1486,7 +1495,14 @@ def test_a_denied_path_refusal_without_its_config_names_no_entry() -> None:
     op = {"op": "replace", "path": "/probecanarysection", "value": "x"}
 
     with pytest.raises(RuntimePatchDeniedError) as raised:
-        _check_op_paths(op, allowlist=policy, config=None, names=None)
+        # The plugin keys check_runtime_ops computes for config=None.
+        _check_op_paths(
+            op,
+            allowlist=policy,
+            plugin_keys=known_plugin_keys(None),
+            config=None,
+            names=None,
+        )
 
     refusal = str(raised.value)
     assert "probecanary*" not in refusal, refusal
