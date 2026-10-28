@@ -3498,6 +3498,11 @@ def test_the_uv_dispatch_sets_the_record_context_around_the_run(tmp_path):
         _plugin_log=lambda *a, **k: None,
         _uv_run_failure=None,
         _uv_response=lambda result, results_dir: result,
+        # The dispatch also reads the interpreter request (empty when unset)
+        # and, in its error arms, the after-the-start response (None when the
+        # launch started no child).
+        _uv_python_kwargs=dict,
+        _uv_failure_after_the_start=lambda *a, **k: None,
     )
 
     with mock_patch(
