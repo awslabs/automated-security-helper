@@ -75,7 +75,10 @@ name: Docs CI Runners
 # A failure message from pytest, or a line install_tools.py or image_allowlist.py prints,
 # can quote a pipeline's output or a downloaded file's name. Each such command runs
 # between `::stop-commands::` with a new random token and the token on a line of its own,
-# as the docs' own workflow steps do, so the runner reads that text as text. Nothing the
+# as the docs' own workflow steps do, so the runner reads that text as text. The three
+# long steps, the install, the runs and the controls, run through with_commands_stopped,
+# which also ends the command's process group and closes the section when the step's
+# timeout fires; the short checks print the token themselves. Nothing the
 # workflow relies on, such as an ::error:: line, is printed inside a stopped section. Each
 # runner's log goes to a file under the leg's output directory, which the last step
 # uploads; a failing test prints the last lines of its runner's log, inside the stopped
@@ -328,28 +331,160 @@ jobs:
             --format '{{json .}}' > "${out}/docker-events.jsonl" 2> "${out}/docker-events.err" &
           echo "$!" > "${out}/docker-events.pid"
 
+      # The same helper run-ash-security-scan.yml writes, byte for byte (a test holds
+      # the copies equal). The install, the runs and the controls run through its
+      # with_commands_stopped, which puts the command in a process group of its own. When
+      # a step's timeout fires, the helper ends that group and closes the section that
+      # keeps the command's output from being read as workflow commands, so a command
+      # that hangs cannot keep running into the next step, and the logs the upload reads
+      # are not still being written.
+      - name: Write the one_line helper
+        if: ${{ !env.ACT && (github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) }}
+        shell: bash
+        run: |
+          cat > "${RUNNER_TEMP}/ash-one-line.sh" <<'EOF'
+          one_line() {
+            local LC_ALL=C
+            local text="${1//[[:cntrl:]]/ }"
+            text="${text//$'\xc2'[$'\x80'-$'\x9f']/ }"
+            text="${text//$'\xe2\x80'[$'\xa8\xa9']/ }"
+            while [[ "${text}" == *::* ]]; do text="${text//::/: :}"; done
+            while [[ "${text}" == *'##['* ]]; do text="${text//'##['/# #[}"; done
+            printf '%s' "${text}"
+          }
+          __wcs_clock() {
+            __wcs_now="${EPOCHREALTIME:-}"
+            __wcs_now="${__wcs_now//[!0-9]/}"
+            if [ -z "${__wcs_now}" ]; then
+              __wcs_now=$((SECONDS * 1000000))
+            fi
+          }
+          __wcs_last_bg() {
+            case "$-" in
+              *u*) set +u; printf '%s' "$!"; set -u ;;
+              *) printf '%s' "$!" ;;
+            esac
+          }
+          __wcs_end_group() {
+            local __wcs_now="" __wcs_until=""
+            if [ -z "${__wcs_pid}" ]; then
+              return 0
+            fi
+            __wcs_clock
+            __wcs_until=$((__wcs_now + $1 * 100000))
+            while kill -0 -- "-${__wcs_pid}" 2>/dev/null && [ "${__wcs_now}" -lt "${__wcs_until}" ]; do
+              sleep 0.1
+              __wcs_clock
+            done
+            if ! kill -0 -- "-${__wcs_pid}" 2>/dev/null; then
+              return 0
+            fi
+            kill -s KILL -- "-${__wcs_pid}" 2>/dev/null || true
+            __wcs_until=$((__wcs_now + 500000))
+            while kill -0 -- "-${__wcs_pid}" 2>/dev/null && [ "${__wcs_now}" -lt "${__wcs_until}" ]; do
+              sleep 0.1
+              __wcs_clock
+            done
+            return 1
+          }
+          __wcs_on_signal() {
+            if [ -z "${__wcs_pid}" ] && [ "$(__wcs_last_bg)" != "${__wcs_before}" ]; then
+              __wcs_pid="$(__wcs_last_bg)"
+            fi
+            if [ -n "${__wcs_pid}" ]; then
+              kill -s "$1" -- "-${__wcs_pid}" 2>/dev/null || kill -s "$1" "${__wcs_pid}" 2>/dev/null || true
+            fi
+            if [ "$1" = TERM ]; then
+              __wcs_end_group 10 || __wcs_left=1
+              if [ -n "${__wcs_open}" ]; then
+                printf '\n::%s::\n' "${__wcs_token}"
+              fi
+              if [ -n "${__wcs_left}" ]; then
+                printf '%s\n' "::error::processes the command started did not end in time, so they were sent SIGKILL and the step fails"
+              fi
+              exit 143
+            fi
+            __wcs_interrupted="$2"
+          }
+          __wcs_exec() {
+            if command -v setsid >/dev/null 2>&1; then
+              exec setsid -w "$@"
+            fi
+            exec perl -MPOSIX -e 'my $s = POSIX::setsid(); exit 127 unless defined $s && $s >= 0; exec { $ARGV[0] } @ARGV; exit 127' -- "$@"
+          }
+          with_commands_stopped() {
+            if [ "${BASH_SUBSHELL:-0}" -gt 0 ]; then
+              printf '%s\n' "::error::with_commands_stopped must run in the step's own shell, the one process the runner signals on a cancel, not in a subshell, a pipeline, a command substitution or a background job. For ( cd DIR && ... ), use env -C DIR, or cd at the top level" >&2
+              kill -s TERM "$$" 2>/dev/null || true
+              return 1
+            fi
+            local __wcs_out="" __wcs_var="" __wcs_file="" __wcs_token __wcs_status=0
+            local __wcs_pid="" __wcs_interrupted="" __wcs_open="" __wcs_left="" __wcs_before="$(__wcs_last_bg)"
+            case "${1:-}" in
+              --stdout) __wcs_out="$2"; shift 2 ;;
+              --capture) __wcs_var="$2"; shift 2 ;;
+            esac
+            __wcs_token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+            if [ "${#__wcs_token}" -ne 32 ]; then
+              printf '%s\n' "::error::no random token could be read for stop-commands, so the command did not run"
+              return 1
+            fi
+            if [ -n "${__wcs_var}" ]; then
+              __wcs_file="$(mktemp "${RUNNER_TEMP:-/tmp}/ash-wcs.XXXXXX")" || return 1
+              __wcs_out="${__wcs_file}"
+            fi
+            trap '__wcs_on_signal INT 130' INT
+            trap '__wcs_on_signal QUIT 131' QUIT
+            trap '__wcs_on_signal TERM 143' TERM
+            __wcs_open=1
+            printf '::stop-commands::%s\n' "${__wcs_token}"
+            if [ -z "${__wcs_interrupted}" ]; then
+              if [ -n "${__wcs_out}" ]; then
+                (trap - INT QUIT TERM; __wcs_exec "$@") 2>&1 > "${__wcs_out}" <&0 &
+              else
+                (trap - INT QUIT TERM; __wcs_exec "$@") 2>&1 <&0 &
+              fi
+              __wcs_pid=$!
+              wait "${__wcs_pid}" || __wcs_status=$?
+            fi
+            if [ -n "${__wcs_interrupted}" ] && [ -n "${__wcs_pid}" ]; then
+              wait "${__wcs_pid}" 2>/dev/null || true
+            fi
+            __wcs_end_group 50 || __wcs_left=1
+            printf '\n::%s::\n' "${__wcs_token}"
+            __wcs_open=""
+            trap - INT QUIT TERM
+            if [ -n "${__wcs_left}" ]; then
+              printf '%s\n' "::error::processes the command started did not end in time, so they were sent SIGKILL and the step fails"
+              if [ "${__wcs_status}" -eq 0 ]; then
+                __wcs_status=1
+              fi
+            fi
+            if [ -n "${__wcs_interrupted}" ]; then
+              exit "${__wcs_interrupted}"
+            fi
+            if [ -n "${__wcs_file}" ]; then
+              printf -v "${__wcs_var}" '%s' "$(cat "${__wcs_file}")"
+              rm -f -- "${__wcs_file}"
+            fi
+            return "${__wcs_status}"
+          }
+          EOF
+
       - name: Install the leg's runner, tools and images
         id: install
         if: ${{ !env.ACT && (github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) }}
         timeout-minutes: ${{ matrix.install_timeout }}
         run: |
-          token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
-          if [ "${#token}" -ne 32 ]; then
-            echo "::error::no random token could be read for stop-commands, so the command did not run"
-            exit 1
-          fi
+          . "${RUNNER_TEMP}/ash-one-line.sh"
           out="${RUNNER_TEMP:?}/ci-runner-out"
           jenkins_args=()
           case "${LEG}" in
             jenkinsfile-runner-*) jenkins_args=(--jenkins-dir "${RUNNER_TEMP:?}/ci-runner-jenkins") ;;
           esac
-          printf '::stop-commands::%s\n' "${token}"
-          status=0
-          python3 -I tests/integration/docs/ci_runners/install_tools.py --runner "${LEG}" \
+          with_commands_stopped python3 -I tests/integration/docs/ci_runners/install_tools.py --runner "${LEG}" \
             --bin-dir "${RUNNER_TEMP:?}/ci-runner-bin" --pull-log "${out}/pulls.log" \
-            "${jenkins_args[@]}" 2>&1 || status=$?
-          printf '\n::%s::\n' "${token}"
-          exit "${status}"
+            "${jenkins_args[@]}"
 
       - name: Show disk use after the CodeBuild pulls
         if: ${{ !cancelled() && !env.ACT && (github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) && matrix.runner == 'codebuild-agent' && (steps.install.outcome == 'success' || steps.install.outcome == 'failure') }}
@@ -383,17 +518,11 @@ jobs:
           WHEEL: ${{ steps.wheel.outputs.path }}
         timeout-minutes: ${{ matrix.runs_timeout }}
         run: |
-          token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
-          if [ "${#token}" -ne 32 ]; then
-            echo "::error::no random token could be read for stop-commands, so the command did not run"
-            exit 1
-          fi
+          . "${RUNNER_TEMP}/ash-one-line.sh"
           out="${RUNNER_TEMP:?}/ci-runner-out"
           work="${RUNNER_TEMP:?}/ci-runner-work"
           mkdir -p "${work}"
-          printf '::stop-commands::%s\n' "${token}"
-          status=0
-          env -u PYTEST_ADDOPTS uv run --frozen pytest -o addopts= -o log_cli=false \
+          with_commands_stopped env -u PYTEST_ADDOPTS uv run --frozen pytest -o addopts= -o log_cli=false \
             -p no:cacheprovider -n 0 --durations=0 --durations-min=0 \
             --basetemp="${work}/runs" \
             tests/integration/docs/test_docs_ci_runners.py \
@@ -401,9 +530,7 @@ jobs:
             --ci-runner-bin="${RUNNER_TEMP:?}/ci-runner-bin" \
             --ci-runner-jenkins-dir="${RUNNER_TEMP:?}/ci-runner-jenkins" \
             --ci-runner-wheel="${WHEEL}" --ci-runner-launch-timeout="${LAUNCH_TIMEOUT}" \
-            --ci-runner-out="${out}/runs" --junit-xml="${out}/junit-runs.xml" 2>&1 || status=$?
-          printf '\n::%s::\n' "${token}"
-          exit "${status}"
+            --ci-runner-out="${out}/runs" --junit-xml="${out}/junit-runs.xml"
 
       # One control per install mechanism: a pipeline given a wheel that does not exist,
       # or a head commit that does not exist, has to fail without ASH's verdict line.
@@ -415,17 +542,11 @@ jobs:
           WHEEL: ${{ steps.wheel.outputs.path }}
         timeout-minutes: ${{ matrix.controls_timeout }}
         run: |
-          token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
-          if [ "${#token}" -ne 32 ]; then
-            echo "::error::no random token could be read for stop-commands, so the command did not run"
-            exit 1
-          fi
+          . "${RUNNER_TEMP}/ash-one-line.sh"
           out="${RUNNER_TEMP:?}/ci-runner-out"
           work="${RUNNER_TEMP:?}/ci-runner-work"
           mkdir -p "${work}"
-          printf '::stop-commands::%s\n' "${token}"
-          status=0
-          env -u PYTEST_ADDOPTS uv run --frozen pytest -o addopts= -o log_cli=false \
+          with_commands_stopped env -u PYTEST_ADDOPTS uv run --frozen pytest -o addopts= -o log_cli=false \
             -p no:cacheprovider -n 0 --durations=0 --durations-min=0 \
             --basetemp="${work}/controls" \
             tests/integration/docs/test_docs_ci_runners_can_fail.py \
@@ -433,10 +554,7 @@ jobs:
             --ci-runner-bin="${RUNNER_TEMP:?}/ci-runner-bin" \
             --ci-runner-jenkins-dir="${RUNNER_TEMP:?}/ci-runner-jenkins" \
             --ci-runner-wheel="${WHEEL}" --ci-runner-launch-timeout="${LAUNCH_TIMEOUT}" \
-            --ci-runner-out="${out}/controls" --junit-xml="${out}/junit-controls.xml" \
-            2>&1 || status=$?
-          printf '\n::%s::\n' "${token}"
-          exit "${status}"
+            --ci-runner-out="${out}/controls" --junit-xml="${out}/junit-controls.xml"
 
       - name: Stop recording image pulls
         if: ${{ !cancelled() && !env.ACT && (github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) && steps.events.outcome == 'success' }}
