@@ -174,6 +174,10 @@ PLANTED_TOOL_VERSION = "99.9.9"
 #: The two runs' hash seeds and homes: an empty directory (None here), then a home
 #: whose path occurs inside words on the pages.
 PLANTED_RUNS = (("1", None), ("2", "/d"))
+#: Seconds one generator run may take. A generator that does not return fails the
+#: test that ran it, naming the script, rather than holding the shard until the
+#: job's own limit.
+GENERATOR_TIMEOUT_S = 300
 
 
 def _run_generator(
@@ -181,13 +185,20 @@ def _run_generator(
 ) -> subprocess.CompletedProcess:
     if env is None:
         env = {**os.environ, **PLANTED_ENVIRONMENT}
-    return subprocess.run(
-        [sys.executable, str(SCRIPTS / script), *args],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
+    try:
+        return subprocess.run(
+            [sys.executable, str(SCRIPTS / script), *args],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=GENERATOR_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(
+            f"scripts/{script} did not finish within {GENERATOR_TIMEOUT_S} s"
+            f" (arguments: {' '.join(args) or 'none'}); it was killed"
+        )
 
 
 def _planted_tools(directory: Path) -> Path:
