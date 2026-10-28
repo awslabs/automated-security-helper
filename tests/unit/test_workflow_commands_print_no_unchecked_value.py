@@ -255,25 +255,9 @@ ALLOWED: dict[tuple[str, str, str], dict[str, str]] = {
         # `for tool in git node npm ruby gem cc make` list.
         "missing[*]": LITERAL,
     },
-    # Each step below that runs a command with workflow commands paused prints the
-    # pausing line with `token`: `od -An -N16 -tx1` writes the 16 random bytes as
-    # hex digit pairs, the step removes the spaces and the line feed, and it exits
-    # before that line unless 32 characters are left.
-    (
-        ".github/workflows/ash-docs-ci-runners.yml",
-        "legs",
-        "Install the leg's runner, tools and images",
-    ): {"token": FIXED_FORM},
-    (
-        ".github/workflows/ash-docs-ci-runners.yml",
-        "legs",
-        "Run the pages' pipelines",
-    ): {"token": FIXED_FORM},
-    (
-        ".github/workflows/ash-docs-ci-runners.yml",
-        "legs",
-        "Check that the pipelines can fail",
-    ): {"token": FIXED_FORM},
+    # The install, the runs and the controls of the same workflow run their command
+    # through with_commands_stopped, which prints the pausing line itself, so those
+    # steps print nothing and have no entry.
     (
         ".github/workflows/ash-docs-ci-runners.yml",
         "legs",
@@ -286,6 +270,10 @@ ALLOWED: dict[tuple[str, str, str], dict[str, str]] = {
         # messages that print it exits unless it is non-empty and all digits.
         "pid": CHECKED_DIGITS,
     },
+    # Each step below that runs a command with workflow commands paused prints the
+    # pausing line with `token`: `od -An -N16 -tx1` writes the 16 random bytes as
+    # hex digit pairs, the step removes the spaces and the line feed, and it exits
+    # before that line unless 32 characters are left.
     (
         ".github/workflows/ash-docs-ci-runners.yml",
         "legs",

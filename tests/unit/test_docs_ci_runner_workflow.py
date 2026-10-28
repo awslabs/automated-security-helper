@@ -476,11 +476,15 @@ JOB_KEYS = {
     "steps",
 }
 STEP_KEYS = {"name", "id", "if", "uses", "with", "env", "run", "timeout-minutes"}
+#: The step that writes the one_line and with_commands_stopped helper, as the other
+#: workflows name it. Like theirs, it names the default shell outright.
+HELPER_DEFINER = "Write the one_line helper"
 
 
 def test_every_script_runs_in_bash_and_nothing_sets_a_key_these_tests_do_not_read():
     """GitHub runs a bash step as `bash --noprofile --norc -eo pipefail`, which the
-    scripts' status handling is written for."""
+    scripts' status handling is written for. Only the helper's definer sets `shell`,
+    and only to bash, the workflow's own default."""
     workflow = _workflow()
     assert set(workflow) == WORKFLOW_KEYS, f"workflow keys: {sorted(workflow)}"
     assert workflow.get("defaults") == {"run": {"shell": "bash"}}
@@ -491,10 +495,14 @@ def test_every_script_runs_in_bash_and_nothing_sets_a_key_these_tests_do_not_rea
         )
         for index, step in enumerate(_steps(job)):
             where = f"job {job_id} step {index} ({step.get('name')})"
-            assert "shell" not in step, f"{where} sets its own shell"
-            assert set(step) <= STEP_KEYS, (
-                f"{where} sets {sorted(set(step) - STEP_KEYS)}"
-            )
+            if step.get("name") == HELPER_DEFINER:
+                assert step.get("shell") == "bash", (
+                    f"{where} sets shell {step.get('shell')!r}, not the default bash"
+                )
+            else:
+                assert "shell" not in step, f"{where} sets its own shell"
+            unread = set(step) - {"shell"} - STEP_KEYS
+            assert not unread, f"{where} sets {sorted(unread)}"
 
 
 # ---------------------------------------------------------------------------
@@ -1136,6 +1144,11 @@ TOKEN = re.compile(
 STOP = "printf '::stop-commands::%s\\n' \"${token}\""
 RESUME = "printf '\\n::%s::\\n' \"${token}\""
 REFUSAL = "no random token could be read for stop-commands, so the command did not run"
+#: How a step loads the helper its definer wrote, and how it runs a command through
+#: it: with_commands_stopped prints the token pair itself, runs the command in a
+#: process group of its own, and closes the section when the step's timeout fires.
+HELPER_SOURCE = '. "${RUNNER_TEMP}/ash-one-line.sh"'
+HELPER_CALL = "with_commands_stopped "
 
 
 def _code(script: str) -> str:
@@ -1160,11 +1173,30 @@ def _quoting_positions(code: str) -> list[int]:
 def test_commands_that_can_quote_a_pipeline_run_with_workflow_commands_stopped():
     wrapped = 0
     for job_id, index, step in _all_steps():
+        if step.get("name") == HELPER_DEFINER:
+            # The helper's own text, which the other workflows' copies hold equal
+            # (test_every_definer_writes_the_same_helper), is not a command that
+            # can quote a pipeline.
+            continue
         code = _code(str(step.get("run", "")))
         positions = _quoting_positions(code)
         if not positions:
             continue
         where = f"job {job_id} step {index} ({step.get('name')})"
+        if HELPER_SOURCE in code:
+            call = code.rindex(HELPER_CALL)
+            assert code.count(HELPER_CALL) == 1 and code.index(HELPER_SOURCE) < call, (
+                f"{where}: one with_commands_stopped call, after the helper is loaded"
+            )
+            assert _logical_lines(code)[-1].startswith(HELPER_CALL), (
+                f"{where}: the call is the last command, so its status is the step's"
+            )
+            assert all(call < position for position in positions), (
+                f"{where}: every command that can quote a pipeline runs through "
+                "with_commands_stopped"
+            )
+            wrapped += 1
+            continue
         assert TOKEN.search(code), f"{where}: the token is not read from /dev/urandom"
         assert code.count(STOP) == 1 and code.count(RESUME) == 1, (
             f"{where}: one stop-commands line and one resume line"
@@ -1409,9 +1441,17 @@ CHECK_JUNIT = (
     "uv run --frozen python tests/integration/docs/ci_runners/check_junit.py "
     '--junit "${out}/junit-%s.xml" --runner "${LEG}" --page "${PAGE}"'
 )
-#: Each wrapped step's lines before the stop-commands line (after the token lines),
-#: and its one command. The command's exit status is the step's: `2>&1 || status=$?`
-#: is the only thing after it, and nothing else assigns the status.
+#: Each wrapped step's lines before its command, and its one command. The three long
+#: steps (THROUGH_THE_HELPER) load the helper first and run the command through
+#: with_commands_stopped, whose return is the step's status. The short checks print the
+#: token themselves: their lines before the stop-commands line come after the token
+#: lines, and `2>&1 || status=$?` is the only thing after the command, and nothing else
+#: assigns the status.
+THROUGH_THE_HELPER = {
+    "Install the leg's runner, tools and images",
+    "Run the pages' pipelines",
+    "Check that the pipelines can fail",
+}
 WRAPPED = {
     "Install the leg's runner, tools and images": (
         (
@@ -1464,15 +1504,18 @@ def test_each_check_runs_exactly_its_command_and_its_status_is_the_step_s():
     for name, (before, command) in WRAPPED.items():
         assert name in steps, f"no step named {name!r}"
         lines = _logical_lines(str(steps[name].get("run", "")))
-        expected = [
-            *TOKEN_LINES,
-            *before,
-            STOP,
-            "status=0",
-            f"{command} 2>&1 || status=$?",
-            RESUME,
-            'exit "${status}"',
-        ]
+        if name in THROUGH_THE_HELPER:
+            expected = [HELPER_SOURCE, *before, f"{HELPER_CALL}{command}"]
+        else:
+            expected = [
+                *TOKEN_LINES,
+                *before,
+                STOP,
+                "status=0",
+                f"{command} 2>&1 || status=$?",
+                RESUME,
+                'exit "${status}"',
+            ]
         assert lines == expected, f"step {name!r} runs something else: {lines}"
     pytest_env = {"WHEEL": "${{ steps.wheel.outputs.path }}"}
     for name in ("Run the pages' pipelines", "Check that the pipelines can fail"):
@@ -1727,7 +1770,9 @@ def _pytest_command_tokens(step: dict) -> list[str]:
         if "uv run --frozen pytest " in line
     ]
     assert len(lines) == 1, f"step {step.get('name')!r} runs pytest once: {lines}"
-    return shlex.split(lines[0].removesuffix(" 2>&1 || status=$?"))
+    tokens = shlex.split(lines[0])
+    # The command runs through the helper, which is not one of pytest's arguments.
+    return tokens[1:] if tokens[:1] == [HELPER_CALL.strip()] else tokens
 
 
 def _has_run(tokens: list[str], run: tuple[str, ...]) -> bool:
