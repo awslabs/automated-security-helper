@@ -223,8 +223,13 @@ def test_an_environment_ignore_file_inside_the_tree_is_refused_without_its_path(
 def _scanner(tmp_path: Path, source: Path, options=None) -> TrivyRepoScanner:
     output = tmp_path / "out"
     output.mkdir(exist_ok=True)
+    # Built from no config file in the tree, as _argv does: the options are the
+    # operator's, so an option naming no file is refused rather than ignored
+    # (utils/config_trust.set_by_operator refuses a config with no provenance).
+    config = AshConfig()
+    record_provenance(config, in_tree=[])
     return TrivyRepoScanner(
-        context=PluginContext(source_dir=source, output_dir=output, config=AshConfig()),
+        context=PluginContext(source_dir=source, output_dir=output, config=config),
         config=TrivyRepoScannerConfig(options=options or {}),
     )
 
