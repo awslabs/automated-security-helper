@@ -24,7 +24,7 @@ import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator, TextIO, cast
+from typing import Iterator, Optional, TextIO, cast
 
 # Windows refuses to replace a file another process or thread has open, and a progress
 # poll holds the aggregated file open for the length of one JSON parse. Retrying for a
@@ -44,7 +44,9 @@ def _staging_path(path: Path) -> Path:
     return path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(16)}.tmp")
 
 
-def write_text_atomically(path: Path, content: str, encoding: str = "utf-8") -> None:
+def write_text_atomically(
+    path: Path, content: str, encoding: str = "utf-8", *, root: Optional[Path] = None
+) -> None:
     """Write ``content`` to ``path`` so that readers see the old file or the new one.
 
     fs_guard.open_for_atomic_write does the writing: a staging file created
@@ -54,16 +56,19 @@ def write_text_atomically(path: Path, content: str, encoding: str = "utf-8") -> 
     write would: ``mkstemp`` creates 0600, which would stop a host user reading
     results a container wrote.
 
-    Below a registered output directory (``fs_guard``), the directory is opened
-    without following a link at any component, and the staging file is created and
-    renamed relative to that descriptor: a link on the way to ``path``, or at
-    ``path`` itself, raises ``OutputLinkRefused``, and a file at ``path`` that
-    another name refers to raises ``OutputHardLinkRefused``.
+    Below a registered output directory (``fs_guard``), or below ``root`` when the
+    caller names the directory it writes in, the directory is opened without
+    following a link at any component, and the staging file is created and renamed
+    relative to that descriptor: a link on the way to ``path``, or at ``path``
+    itself, raises ``OutputLinkRefused``, and a file at ``path`` that another name
+    refers to raises ``OutputHardLinkRefused``. ``root`` is for a writer that knows
+    its output directory but may run where nothing registered it (the scan-set
+    lists); it guards this write only and registers nothing.
     """
     # Not at the top: fs_guard imports the sandbox package. Do not hoist.
     from automated_security_helper.utils.sandbox.fs_guard import open_for_atomic_write
 
-    with open_for_atomic_write(path, encoding=encoding) as handle:
+    with open_for_atomic_write(path, encoding=encoding, root=root) as handle:
         handle.write(content)
 
 
@@ -95,7 +100,9 @@ def open_atomically(path: Path, encoding: str = "utf-8") -> Iterator[TextIO]:
         raise
 
 
-def write_bytes_atomically(path: Path, data: bytes) -> None:
+def write_bytes_atomically(
+    path: Path, data: bytes, *, root: Optional[Path] = None
+) -> None:
     """Write ``data`` to ``path`` as :func:`write_text_atomically` writes text.
 
     The bytes reach the file as given: nothing is encoded and no newline is
@@ -103,21 +110,20 @@ def write_bytes_atomically(path: Path, data: bytes) -> None:
     ``data`` rather than read the file back, which another writer may have replaced
     by then.
 
-    The staging file is created as :func:`open_atomically` creates it: through
-    ``fs_guard.open_for_write``, exclusively and in binary.
+    Guarded as :func:`write_text_atomically` is, through
+    ``fs_guard.open_for_atomic_write`` in binary: below a registered output
+    directory, or below ``root``, a link at ``path`` or on the way to it is refused
+    with ``OutputLinkRefused`` before the staging file is created, and the rename is
+    made relative to the directory's descriptor rather than by name. Staging the
+    write through ``open_for_write`` alone guarded only the staging file's own
+    name, so outside a registered root a link at ``path`` was replaced by the
+    rename, never refused.
     """
     # Not at the top: fs_guard imports the sandbox package. Do not hoist.
-    from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+    from automated_security_helper.utils.sandbox.fs_guard import open_for_atomic_write
 
-    path = Path(path)
-    staging = _staging_path(path)
-    try:
-        with open_for_write(staging, binary=True, exclusive=True) as handle:
-            handle.write(data)
-        _replace(staging, path)
-    except BaseException:
-        staging.unlink(missing_ok=True)
-        raise
+    with open_for_atomic_write(Path(path), binary=True, root=root) as handle:
+        handle.write(data)
 
 
 def read_text_of_replaced_file(path: Path, encoding: str = "utf-8") -> str:
