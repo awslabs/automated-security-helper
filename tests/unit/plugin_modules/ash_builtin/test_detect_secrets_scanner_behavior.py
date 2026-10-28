@@ -572,21 +572,23 @@ def test_processing_options_again_forgets_an_earlier_baseline_decision(
     if first_pass == "missing":
         first_baseline = tmp_path / "gone" / "absent.baseline"
     else:
-        # A work product derived from the scanned repository, named by the
-        # repository's own configuration, is refused.
+        # A work product derived from the scanned repository, named by a value
+        # that is not the operator's own, is refused.
         first_baseline = work / "derived.baseline"
         first_baseline.write_text(baseline_document_with_marker, encoding="utf-8")
-    (source / ".ash" / ".ash.yaml").write_text(
-        "project_name: scanned\n"
-        "scanners:\n"
-        "  detect-secrets:\n"
-        "    options:\n"
-        f"      baseline_file: {first_baseline.as_posix()}\n",
-        encoding="utf-8",
-    )
+    # A baseline_file a repository config writes is the operator's choice and
+    # is left out at load (config/tool_config_trust.py), so the configured
+    # value is handed over directly and declared the context's: the scanner
+    # then judges it as a value the repository wrote, which a derived product
+    # is refused as, and a missing file is recorded as missing.
     config = resolve_config(source_dir=source)
     scanner = DetectSecretsScanner(
-        config=config.get_plugin_config("scanner", "detect-secrets"),
+        config=DetectSecretsScannerConfig(
+            options=DetectSecretsScannerConfigOptions(
+                baseline_file=first_baseline.as_posix()
+            )
+        ),
+        config_from_context=True,
         context=PluginContext(
             source_dir=source, output_dir=output, work_dir=work, config=config
         ),
