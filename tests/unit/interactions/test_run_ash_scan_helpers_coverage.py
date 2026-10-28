@@ -1047,7 +1047,9 @@ class TestChangedFilesSarifRewriteIsNotWrittenThroughALink:
         monkeypatch.setattr(
             get_scan_set, "get_changed_files", lambda base_ref, cwd: ["changed.py"]
         )
-        monkeypatch.setattr(get_scan_set, "git_repository_root", lambda path: tmp_path)
+        monkeypatch.setattr(
+            get_scan_set, "git_repository_root", lambda path, **kwargs: tmp_path
+        )
         output_dir = tmp_path / "out"
         reports = output_dir / "reports"
         reports.mkdir(parents=True)
@@ -1085,7 +1087,9 @@ class TestChangedFilesRewriteLeavesAnEarlierRunsSarif:
         monkeypatch.setattr(
             get_scan_set, "get_changed_files", lambda base_ref, cwd: ["changed.py"]
         )
-        monkeypatch.setattr(get_scan_set, "git_repository_root", lambda path: tmp_path)
+        monkeypatch.setattr(
+            get_scan_set, "git_repository_root", lambda path, **kwargs: tmp_path
+        )
         output_dir = tmp_path / "out"
         (output_dir / "reports").mkdir(parents=True)
         sarif = output_dir / "reports" / "ash.sarif"
@@ -1112,7 +1116,9 @@ class TestChangedFilesRewriteLeavesAnEarlierRunsSarif:
         monkeypatch.setattr(
             get_scan_set, "get_changed_files", lambda base_ref, cwd: ["changed.py"]
         )
-        monkeypatch.setattr(get_scan_set, "git_repository_root", lambda path: tmp_path)
+        monkeypatch.setattr(
+            get_scan_set, "git_repository_root", lambda path, **kwargs: tmp_path
+        )
         output_dir = tmp_path / "out"
         reports = output_dir / "reports"
         reports.mkdir(parents=True)
@@ -1184,7 +1190,9 @@ class TestChangedFilesSarifRewriteIsNotSkippedSilently:
         monkeypatch.setattr(
             get_scan_set, "get_changed_files", lambda base_ref, cwd: ["changed.py"]
         )
-        monkeypatch.setattr(get_scan_set, "git_repository_root", lambda path: tmp_path)
+        monkeypatch.setattr(
+            get_scan_set, "git_repository_root", lambda path, **kwargs: tmp_path
+        )
         monkeypatch.setattr(
             reporter_plugin, "confined_report_path", lambda report_dir, filename: None
         )
