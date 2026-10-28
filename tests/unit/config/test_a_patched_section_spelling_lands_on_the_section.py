@@ -11,6 +11,16 @@ holds with the same folded name -- the fold the view walk's settle step uses
 the load, and the two walks reach one canonical path. A repository file's
 writes keep their confinement whatever the spelling: landing on the canonical
 section is exactly what lets the confine hook judge them.
+
+``extends`` joins every spelling the plugin lookup reads for one plugin into
+one section, written under the overlay's spelling (config_sources.deep_merge,
+"Spellings" in its module docstring). So after a chain merges, the document
+holds ONE key per plugin section, and the chain's order decides which
+spelling that is: the file extended last gives it. The cases below that put a
+repository file's spelling beside the operator's therefore assert what that
+join produces: one key, the patched value on it and readable through
+``get_plugin_config``, and the typed pointer landing only where it names that
+key (or where the operator's own spelling is the one that survives).
 """
 
 import logging
@@ -87,6 +97,18 @@ def test_a_case_variant_patch_lands_on_the_section(tmp_path, monkeypatch, spelli
 
 def _options_region(config):
     return (_section(config).get("options") or {}).get("aws_region")
+
+
+def _canonical_region(config):
+    """The region the model's plugin lookup reads for the hub reporter, by the
+    name ``get_plugin_config`` is asked under, whatever spelling the document
+    holds the section under."""
+    section = config.get_plugin_config(
+        plugin_type="reporter", plugin_name="aws-security-hub"
+    )
+    if hasattr(section, "model_dump"):
+        section = section.model_dump()
+    return ((section or {}).get("options") or {}).get("aws_region")
 
 
 def test_a_whole_section_add_shows_one_section(tmp_path, monkeypatch):
@@ -326,8 +348,9 @@ def test_a_repository_case_variant_patch_on_its_own_section_stays_out(
 ):
     """The fold taken INSIDE a repository file: it holds the off-host section
     and patches it under two case variants. The patch lands on the held
-    section -- one section in the model, carrying the patched values -- and
-    the reporter still runs without the repository's enable or region. The
+    section -- one section in the model, no second key beside it -- and
+    neither the model's section nor the reporter takes the repository's
+    enable or region, which the confine hook leaves out. The
     committed control above writes an empty ``reporters`` mapping, so its
     pointer has nothing to fold onto; this one proves the confinement with
     the fold actually taken."""
@@ -351,11 +374,14 @@ def test_a_repository_case_variant_patch_on_its_own_section_stays_out(
     config = resolve_config(config_path=operator, source_dir=checkout)
 
     held = _model_hub_sections(config)
-    # Premise: the fold landed both ops on the held section.
+    # Premise: the fold landed both ops on the held section, so no second
+    # key stands beside it; the confine hook then leaves the off-host
+    # options the repository's ops set out of the model's section too.
     assert list(held) == ["aws-security-hub"], held
-    assert ((held["aws-security-hub"].get("options") or {}).get("aws_region")) == (
+    assert ((held["aws-security-hub"].get("options") or {}).get("aws_region")) != (
         "repo-region"
     ), held
+    assert held["aws-security-hub"].get("enabled") is not True, held
     ran = _section(config)
     assert ran.get("enabled") is not True, ran
     assert (ran.get("options") or {}).get("aws_region") != "repo-region", ran
@@ -445,23 +471,36 @@ def test_a_repository_twin_neither_blocks_nor_captures_the_operators_patch(
 ):
     """The repository's file holds a case-variant twin of the section the
     operator's own file writes, and the operator's root patches it under a
-    third spelling. The pointer fold resolves against the keys the operator's
-    own files wrote -- the ownership the reporter view reads the chain by --
-    so the twin never joins the exactly-one match: the deep ops load instead
-    of refusing as ambiguous, the whole add lands on the operator's section
-    instead of standing beside it as a new key, and the model shows what the
-    off-host reporter runs, in either chain order. The twin captures nothing:
-    its own section keeps the repository's region, confined as ever."""
+    third spelling. ``extends`` joins the two into one section under the
+    spelling of the file extended last.
+
+    Extended repository-first, that is the operator's spelling: the pointer
+    folds onto it, every op lands, one key stands, and the model shows what
+    the off-host reporter runs. Extended own-first it is the repository's
+    spelling, which the operator's files never wrote, so the ownership the
+    pointer fold resolves against cannot find it: a deep op typed in a third
+    spelling is refused as not fitting the document, and the whole-section
+    add lands under the typed key, where the model and the reporter view
+    still agree."""
+    from automated_security_helper.core.exceptions import ASHConfigSourceError
+
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     checkout, root = _twin_chain(tmp_path, order, _TWIN_PATCHES[op_name])
+
+    if order == "own-first" and op_name != "add-whole":
+        with pytest.raises(ASHConfigSourceError, match="does not fit the document"):
+            resolve_config(config_path=root, source_dir=checkout)
+        return
 
     config = resolve_config(config_path=root, source_dir=checkout)
 
     shown, ran = _shown_and_ran(config)
     assert shown == ran == ("us-west-2", True), (shown, ran)
-    reporters = config.model_dump().get("reporters") or {}
-    twin = reporters.get("AwsSecurityHub") or {}
-    assert (twin.get("options") or {}).get("aws_region") != "us-west-2", twin
+    assert _canonical_region(config) == "us-west-2", _model_hub_sections(config)
+    if order == "repository-first":
+        assert list(_model_hub_sections(config)) == ["aws-security-hub"], (
+            _model_hub_sections(config)
+        )
 
 
 def _twin_capture_chain(tmp_path, twin_key, operator_key, patch_spelling):
@@ -512,57 +551,61 @@ def _twin_capture_chain(tmp_path, twin_key, operator_key, patch_spelling):
 def test_a_repository_key_matching_the_typed_spelling_does_not_capture(
     tmp_path, monkeypatch, twin_key, operator_key, patch_spelling
 ):
-    """The operator's patch segment matches a key only the repository's file
-    wrote -- exactly, through the "-"/"_" twin rule, or because the
-    repository used the plugin's canonical spelling. The ownership that
-    restricts the fold covers these matches too, so the patch lands on the
-    key the operator's own file wrote, as the view walk lands it, and the
-    repository's section is untouched: landing there showed the operator's
-    section unpatched while the off-host reporter ran the patched values."""
+    """The repository's file writes a spelling of the section that the
+    operator's own file writes another way, and the repository is extended
+    last, so the join leaves the repository's spelling as the section's one
+    key. The operator's patch segment names that key when it is typed exactly
+    as the repository wrote it (the exact twin, or the plugin's canonical
+    spelling): the patch lands there, the model and the reporter view read
+    the patched region, and no second key stands. Typed any other way, even
+    as a "-"/"_" swap or a case variant of it, the pointer folds only onto
+    keys the operator's own files wrote, finds none in the document, and the
+    load is refused as a path that does not fit."""
+    from automated_security_helper.core.exceptions import ASHConfigSourceError
+
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     checkout, root = _twin_capture_chain(
         tmp_path, twin_key, operator_key, patch_spelling
     )
 
+    if patch_spelling != twin_key:
+        with pytest.raises(ASHConfigSourceError, match="does not fit the document"):
+            resolve_config(config_path=root, source_dir=checkout)
+        return
+
     config = resolve_config(config_path=root, source_dir=checkout)
 
-    ran = _section(config)
-    assert (ran.get("options") or {}).get("aws_region") == "us-west-2", ran
-    reporters = config.model_dump().get("reporters") or {}
-    patched = reporters.get(operator_key) or {}
-    assert (patched.get("options") or {}).get("aws_region") == "us-west-2", reporters
-    twin = reporters.get(twin_key) or {}
-    assert (twin.get("options") or {}).get("aws_region") == "repo-r0", reporters
+    assert (_section(config).get("options") or {}).get("aws_region") == "us-west-2"
+    hubs = _model_hub_sections(config)
+    assert list(hubs) == [twin_key], hubs
+    assert (hubs[twin_key].get("options") or {}).get("aws_region") == "us-west-2", hubs
+    assert _canonical_region(config) == "us-west-2", hubs
 
 
 def test_a_mixed_separator_repository_twin_neither_blocks_nor_joins(
     tmp_path, monkeypatch
 ):
     """The operator's key and the repository's twin each mix their
-    separators, differently: neither uniform "-"/"_" swap of the twin is the
-    operator's key, so deep_merge keeps them apart (a uniform spelling that
-    came FIRST would absorb a later mix; a mix that came first stays apart
-    from a later uniform twin too, the shape the apart-swap cells pin). The
-    ownership
-    compare uses deep_merge's own join rule, so the twin is not read as a
-    spelling of the operator's write: treating every "-" as "_" made it one,
-    the fold went ambiguous, and the operator's deep patch refused the
-    load."""
+    separators, differently, and the repository is extended last, so the join
+    leaves the twin's spelling as the one key. A third spelling typed in the
+    operator's patch names neither mixed key, and the pointer folds only onto
+    keys the operator's own files wrote, so the load is refused as a path
+    that does not fit. The fold must not read the twin as a spelling of the
+    operator's write (treating every "-" as "_" did, and made the match
+    ambiguous), so the refusal is the plain one."""
+    from automated_security_helper.core.exceptions import ASHConfigSourceError
+
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     checkout, root = _twin_capture_chain(
         tmp_path, "aws-security_hub", "aws_security-hub", "AWS_SECURITY_HUB"
     )
 
-    config = resolve_config(config_path=root, source_dir=checkout)
+    with pytest.raises(
+        ASHConfigSourceError, match="does not fit the document"
+    ) as refused:
+        resolve_config(config_path=root, source_dir=checkout)
 
-    ran = _section(config)
-    assert ran.get("enabled") is True, ran
-    assert (ran.get("options") or {}).get("aws_region") == "us-west-2", ran
-    reporters = config.model_dump().get("reporters") or {}
-    patched = reporters.get("aws_security-hub") or {}
-    assert (patched.get("options") or {}).get("aws_region") == "us-west-2", reporters
-    twin = reporters.get("aws-security_hub") or {}
-    assert (twin.get("options") or {}).get("aws_region") == "repo-r0", reporters
+    assert "ambiguous" not in str(refused.value), str(refused.value)
 
 
 @pytest.mark.parametrize(
@@ -574,15 +617,10 @@ def test_an_apart_uniform_swap_twin_does_not_capture_the_pointer(
     tmp_path, monkeypatch, twin_key
 ):
     """The operator's own file writes a mixed-separator key first; the
-    repository later writes one of its uniform "-"/"_" swaps. deep_merge
-    joins an incoming key only onto an EXISTING key that is a uniform swap
-    of it, which is the other direction here, so the two stay apart. An
-    exact pointer at the repository's spelling is a swap of the operator's
-    write, but the operator's spelling is itself a key of the document, so
-    the swap carries no owned write: the pointer folds onto the operator's
-    key, where the view walk settles. Counting the swap as owned landed the
-    operator's patch on the repository's section while the reporter ran the
-    view's value."""
+    repository later writes one of its uniform "-"/"_" swaps. The join leaves
+    the repository's spelling as the section's one key, and an exact pointer
+    at that spelling names a key of the document, so the patch lands on it
+    and the model reads the patched region under it."""
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     checkout, root = _twin_capture_chain(
         tmp_path, twin_key, "aws_security-hub", twin_key
@@ -590,11 +628,10 @@ def test_an_apart_uniform_swap_twin_does_not_capture_the_pointer(
 
     config = resolve_config(config_path=root, source_dir=checkout)
 
-    reporters = config.model_dump().get("reporters") or {}
-    patched = reporters.get("aws_security-hub") or {}
-    assert (patched.get("options") or {}).get("aws_region") == "us-west-2", reporters
-    twin = reporters.get(twin_key) or {}
-    assert (twin.get("options") or {}).get("aws_region") == "repo-r0", reporters
+    hubs = _model_hub_sections(config)
+    assert list(hubs) == [twin_key], hubs
+    assert (hubs[twin_key].get("options") or {}).get("aws_region") == "us-west-2", hubs
+    assert _canonical_region(config) == "us-west-2", hubs
 
 
 def test_the_pointer_folds_onto_the_operators_key_beside_its_apart_swap():
@@ -625,9 +662,14 @@ def test_a_twin_reached_through_the_repository_is_not_the_operators(
 ):
     """Ownership stops at a repository file: a base reached THROUGH the
     repository's file is the repository's wherever it sits, exactly as the
-    operator view reads the chain. Counting that base's keys as the
-    operator's own would put the twin it writes in the exactly-one match
-    set and refuse the operator's deep patch as ambiguous."""
+    operator view reads the chain. The twin that base writes is extended
+    last, so the join leaves its spelling as the section's one key; the
+    operator's third spelling folds only onto keys the operator's own files
+    wrote, finds none, and the load is refused as a path that does not fit.
+    Counting that base's keys as the operator's own would have matched the
+    twin and landed the patch on the repository's section."""
+    from automated_security_helper.core.exceptions import ASHConfigSourceError
+
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
@@ -656,13 +698,8 @@ def test_a_twin_reached_through_the_repository_is_not_the_operators(
         encoding="utf-8",
     )
 
-    config = resolve_config(config_path=root, source_dir=checkout)
-
-    shown, ran = _shown_and_ran(config)
-    assert shown == ran == ("us-west-2", True), (shown, ran)
-    reporters = config.model_dump().get("reporters") or {}
-    twin = reporters.get("AwsSecurityHub") or {}
-    assert (twin.get("options") or {}).get("aws_region") == "repo-r0", reporters
+    with pytest.raises(ASHConfigSourceError, match="does not fit the document"):
+        resolve_config(config_path=root, source_dir=checkout)
 
 
 def test_an_environment_reference_follows_the_ownership_folded_patch(
@@ -690,8 +727,10 @@ def test_an_environment_reference_follows_the_ownership_folded_patch(
         encoding="utf-8",
     )
     root = tmp_path / "operator.yaml"
+    # Repository first: the join leaves the operator's spelling as the one
+    # key, which the ownership fold finds for the typed variant.
     root.write_text(
-        f"extends:\n  - {own.as_posix()}\n  - {repository.as_posix()}\n"
+        f"extends:\n  - {repository.as_posix()}\n  - {own.as_posix()}\n"
         "patch:\n"
         "  - op: add\n"
         "    path: /reporters/AWS_Security_Hub/options/zz-extra\n"
@@ -840,15 +879,13 @@ def test_beside_both_swaps_only_the_joined_key_counts_as_the_operators(
     tmp_path, monkeypatch, mixed, order, typed, op_name
 ):
     """ONE repository file writes both uniform swaps of the operator's mixed
-    key. Extended repository-first, the merge joins the operator's write onto
-    the dash-to-underscore swap only (deep_merge resolves that one first), so
-    the owned spelling is absent from the document. A swap then counts as the
-    operator's only when it is the key the merge joined the owned spelling
-    onto: counting both landed the exact pointer at the other swap on a
-    repository-only section, and refused or split a third spelling over two
-    keys that cannot both be the operator's. Whatever the typed spelling,
-    the patch lands only on the key carrying the operator's write, and the
-    other swap keeps the repository's values."""
+    key. The join puts all three spellings in one section under the spelling
+    of the file extended last: the operator's mixed key when the repository
+    is extended first, the repository's last-written swap when it is
+    extended last. Whatever the typed spelling and the op, the patch loads
+    and lands on that one key: the document holds no second key for it to be
+    split over or to land beside, the model reads the patched region under
+    the plugin's own name, and the reporter view agrees."""
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     joined, apart = _BOTH_SWAPS
     spelling = {
@@ -882,28 +919,17 @@ def test_beside_both_swaps_only_the_joined_key_counts_as_the_operators(
         "patch:\n" + _BOTH_SWAP_OPS[op_name].format(spelling=spelling),
         encoding="utf-8",
     )
-    # Which key carries the operator's write is deep_merge's own join rule:
-    # repository-first, the mixed key joins onto its dash-to-underscore swap;
-    # operator-first, each incoming swap that resolves onto the mixed key
-    # joins there and the mixed key stays the carrier.
-    carrier = joined if order == "repository-first" else mixed
+    # The key that survives the join is the overlay's: the mixed key when the
+    # operator's file is extended last, otherwise the last swap the
+    # repository's file wrote.
+    survivor = mixed if order == "repository-first" else apart
 
     config = resolve_config(config_path=root, source_dir=checkout)
 
-    reporters = config.model_dump().get("reporters") or {}
-    hubs = {
-        key: value
-        for key, value in reporters.items()
-        if "security" in key.lower().replace("-", "_") and value
-    }
-    patched = hubs.get(carrier) or {}
-    assert (patched.get("options") or {}).get("aws_region") == "us-west-2", hubs
-    for key, value in hubs.items():
-        if key != carrier:
-            assert (value.get("options") or {}).get("aws_region") == "repo-r0", (
-                key,
-                hubs,
-            )
+    hubs = _model_hub_sections(config)
+    assert list(hubs) == [survivor], hubs
+    assert (hubs[survivor].get("options") or {}).get("aws_region") == "us-west-2", hubs
+    assert _canonical_region(config) == "us-west-2", hubs
     assert _options_region(config) == "us-west-2", _section(config)
 
 
@@ -962,11 +988,17 @@ def test_a_test_op_checks_the_key_its_write_under_the_same_pointer_lands_on(
 ):
     """The operator guards its write with a test op under the same pointer.
     A test op's pointer resolves with the same ownership as the write's, so
-    the guard and the write aim at one key, the operator's own: the guard
-    holds exactly when the operator's key holds the tested value. Resolving
-    the test without the ownership aimed the two ops of one guard at
-    different keys beside a repository twin, and the twin's value then
-    decided whether the operator's guarded write applied."""
+    the guard and the write aim at one key. The join leaves ONE key for the
+    section, under the spelling of the file extended last, and that key holds
+    the merged values: the operator's region when the operator's file is
+    extended last, the repository's when the repository's is. Extended
+    repository-first, any typed spelling folds onto the operator's key and
+    the guard holds exactly when it tests the operator's value. Extended
+    own-first, the surviving key is the repository's spelling, which the
+    operator's files never wrote, so only a pointer typed exactly as that
+    spelling finds it (and then tests the repository's value); any other
+    spelling finds no key, and the guard, which cannot hold, refuses the
+    load. Either way the write applies only when its guard held."""
     from automated_security_helper.core.exceptions import ASHConfigSourceError
 
     monkeypatch.delenv("ASH_CONFIG", raising=False)
@@ -975,27 +1007,29 @@ def test_a_test_op_checks_the_key_its_write_under_the_same_pointer_lands_on(
     checkout, root = _guarded_write_chain(
         tmp_path, own_key, twin_key, spelling, order, tested
     )
+    operator_last = order == "repository-first"
+    survivor = own_key if operator_last else twin_key
+    held = "us-east-1" if operator_last else "repo-r0"
+    guard_holds = (operator_last or spelling == twin_key) and tested == held
 
-    if expected == "operator-value":
+    if guard_holds:
         config = resolve_config(config_path=root, source_dir=checkout)
-        reporters = config.model_dump().get("reporters") or {}
-        patched = reporters.get(own_key) or {}
-        assert (patched.get("options") or {}).get("aws_region") == "us-west-2", (
-            reporters
-        )
-        twin = reporters.get(twin_key) or {}
-        assert (twin.get("options") or {}).get("aws_region") == "repo-r0", reporters
+        hubs = _model_hub_sections(config)
+        assert list(hubs) == [survivor], hubs
+        assert (hubs[survivor].get("options") or {}).get("aws_region") == "us-west-2"
+        assert _canonical_region(config) == "us-west-2", hubs
     else:
         with pytest.raises(ASHConfigSourceError):
             resolve_config(config_path=root, source_dir=checkout)
 
 
 def test_a_failed_test_op_names_the_respelled_path_it_checked(tmp_path, monkeypatch):
-    """Typed at the repository twin's exact spelling, the test op checks the
-    key the file's own writes land on, so the value it failed against sits
-    at the operator's spelling: the refusal names that path, the one it
-    checked, not the typed one, which would point a reader at a key holding
-    exactly the value the message says was not found."""
+    """Typed at the repository twin's exact spelling, with the operator's file
+    extended last, the join leaves the operator's spelling as the one key and
+    the test op checks it, so the value it failed against sits at the
+    operator's spelling: the refusal names that path, the one it checked, not
+    the typed one, which would point a reader at a key holding exactly the
+    value the message says was not found."""
     from automated_security_helper.core.exceptions import ASHConfigSourceError
 
     monkeypatch.delenv("ASH_CONFIG", raising=False)
@@ -1004,7 +1038,7 @@ def test_a_failed_test_op_names_the_respelled_path_it_checked(tmp_path, monkeypa
         "aws-security-hub",
         "AwsSecurityHub",
         "AwsSecurityHub",
-        "own-first",
+        "repository-first",
         "repo-r0",
     )
 
@@ -1064,9 +1098,10 @@ def test_a_repository_root_folding_onto_its_outside_base_s_section_stays_out(
 
     held = _model_hub_sections(config)
     assert list(held) == ["aws-security-hub"], held
-    assert ((held["aws-security-hub"].get("options") or {}).get("aws_region")) == (
+    assert ((held["aws-security-hub"].get("options") or {}).get("aws_region")) != (
         "repo-region"
     ), held
+    assert held["aws-security-hub"].get("enabled") is not True, held
     ran = _section(config)
     assert ran.get("enabled") is not True, ran
     assert (ran.get("options") or {}).get("aws_region") != "repo-region", ran
