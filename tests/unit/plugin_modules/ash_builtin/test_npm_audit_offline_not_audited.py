@@ -182,7 +182,7 @@ def test_a_second_target_reports_only_its_own_inputs(offline, spawns, tmp_path):
     scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert scanner.inputs_not_scanned == []
-    assert scanner.targets_attempted is None
+    assert scanner.targets_attempted == 0  # reset, and no lockfile: SKIPPED (line 152)
 
 
 def test_the_executor_gives_each_target_container_its_own_inputs(

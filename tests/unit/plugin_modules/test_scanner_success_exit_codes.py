@@ -138,8 +138,20 @@ def _rejected(name: str) -> list[int]:
 LOST_COVERAGE = {"ferret-scan": {3}}
 
 
+#: Accepted codes the scanner refuses beside an EMPTY results file: snyk exits 1
+#: only for issues found, so exit 1 with no SARIF result is a contradiction it
+#: reports as an error (snyk_code_scanner.py, the "holds no results" check), not
+#: a clean scan. Left out of the empty-results controls; the finding-bearing exit 1
+#: is test_snyk_code_exit_1_with_a_finding_is_a_finding_not_an_error.
+NEEDS_FINDINGS = {"snyk-code": {1}}
+
+
 def _accepted_and_complete(name: str) -> list[int]:
-    return sorted(EXIT_CODE_TABLE[name][1] - LOST_COVERAGE.get(name, set()))
+    return sorted(
+        EXIT_CODE_TABLE[name][1]
+        - LOST_COVERAGE.get(name, set())
+        - NEEDS_FINDINGS.get(name, set())
+    )
 
 
 EMPTY_SARIF = json.dumps(
@@ -672,7 +684,7 @@ def test_a_rejected_exit_code_after_an_accepted_one_is_an_error_row(
     For grype that is 2 and then 1, and the largest code across both runs, 2, is one
     grype accepts.
     """
-    accepted = max(EXIT_CODE_TABLE[name][1])
+    accepted = max(EXIT_CODE_TABLE[name][1] - NEEDS_FINDINGS.get(name, set()))
     content = _empty_results(name)
 
     rows = _rows(
@@ -787,14 +799,19 @@ def test_a_target_the_sandbox_refused_does_not_report_the_previous_exit_code(
     plugin_context, monkeypatch
 ):
     """The sandbox refuses the converted target, so nothing runs on it."""
+    from automated_security_helper.core.enums import SandboxMode
     from automated_security_helper.core.phases import scanner_executor
-    from automated_security_helper.utils.sandbox import SandboxUnavailable
+    from automated_security_helper.utils.sandbox.scope import SandboxBackendUnavailable
 
     original_scope = scanner_executor.scanner_sandbox_scope
 
     def scope(plugin, context, target):
         if Path(target) == plugin_context.work_dir:
-            raise SandboxUnavailable("no backend for this target")
+            # No working backend under auto: the one refusal the executor grades
+            # MISSING (sandbox_refusal_grades_missing); any other is ERROR.
+            raise SandboxBackendUnavailable(
+                "no backend for this target", mode=SandboxMode.auto.value
+            )
         return original_scope(plugin, context, target)
 
     monkeypatch.setattr(scanner_executor, "scanner_sandbox_scope", scope)
@@ -808,7 +825,9 @@ def test_a_target_the_sandbox_refused_does_not_report_the_previous_exit_code(
 
     assert rows["source"].exit_code == 2
     assert rows["converted"].status == ScannerStatus.MISSING
-    assert rows["converted"].exit_code == 0, (
+    # scan() was never called on the refused target, so the row's exit code is
+    # unset (None), not the source run's 2 (scanner_executor: `scan_called`).
+    assert rows["converted"].exit_code is None, (
         "nothing ran on the refused target, and its row reports exit code "
         f"{rows['converted'].exit_code}, the source run's"
     )
@@ -961,7 +980,23 @@ NPM_AUDIT_WITH_ONE_ADVISORY = {
         }
     },
 }
-NPM_AUDIT_WITH_NONE = {"auditReportVersion": 2, "vulnerabilities": {}}
+#: npm's real clean report carries the counting metadata block; a bare report key
+#: is what a truncated tool prints and is refused (npm_audit_scanner._audit_failure).
+NPM_AUDIT_WITH_NONE = {
+    "auditReportVersion": 2,
+    "vulnerabilities": {},
+    "metadata": {
+        "vulnerabilities": {
+            "info": 0,
+            "low": 0,
+            "moderate": 0,
+            "high": 0,
+            "critical": 0,
+            "total": 0,
+        },
+        "dependencies": {"prod": 1, "dev": 0, "total": 1},
+    },
+}
 
 
 def test_npm_audit_grades_the_converted_target_on_its_own_runs(
@@ -1020,8 +1055,11 @@ def test_an_exit_code_held_from_an_earlier_target_is_not_reported_for_an_empty_o
     )
 
     row = rows["converted"]
-    assert row.exit_code == 0, (
+    # None: the row claims no exit code for a target on which no tool ran
+    # (scanner_executor, the carry-over guard before container.exit_code); 0 is
+    # a scanner that resets to 0 and tracks no target (detect-secrets).
+    assert row.exit_code in (None, 0), (
         f"{name} ran nothing on the empty tree, and its row reports exit code "
-        f"{row.exit_code}"
+        f"{row.exit_code}, the earlier target's"
     )
     assert row.status != ScannerStatus.ERROR, row.errors
