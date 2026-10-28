@@ -51,6 +51,18 @@ def _setting(limit: "int | str", key: str = "detect-secrets") -> str:
 _OTHER_OPTION = "scanners:\n  detect-secrets:\n    options:\n      skip_generated_lockfiles: false\n"
 
 
+def _operator_names_files_under(tmp_path: Path, monkeypatch) -> None:
+    """Set the test's directory aside as the operator's.
+
+    A path named to MCP get_config is the client's unless it is in a directory
+    ASH_MCP_ALLOWED_CONFIG_ROOTS names (sandbox.client_named_config_is_untrusted),
+    and a client's named file is refused instead of shown. The tests that call
+    get_config with a named file are about how a file the operator names is
+    shown, so they set their directory aside first.
+    """
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(tmp_path))
+
+
 def _limit(config) -> int:
     return config.scanners.detect_secrets.options.max_worker_output_mib
 
@@ -533,8 +545,8 @@ def test_the_limit_ash_config_s_file_wrote_is_settled_from_the_read_the_scan_use
     real = config_sources.read_config_text
     changed: List[Path] = []
 
-    def read_then_change(path):
-        text = real(path)
+    def read_then_change(path, expect=None):
+        text = real(path, expect=expect)
         if not changed and Path(path).resolve() == in_tree.resolve():
             changed.append(Path(path))
             in_tree.write_text(_OTHER_OPTION, encoding="utf-8")
@@ -1040,6 +1052,7 @@ def test_get_config_does_not_mark_what_the_operator_s_own_chain_file_keeps(
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
+    _operator_names_files_under(tmp_path, monkeypatch)
 
     result = mcp_get_config(config_path=str(operator))
 
@@ -1143,6 +1156,7 @@ def test_get_config_shows_an_environment_read_option_by_its_reference(
         elsewhere.mkdir()
         monkeypatch.chdir(elsewhere)
         monkeypatch.delenv("ASH_CONFIG", raising=False)
+        _operator_names_files_under(tmp_path, monkeypatch)
         result = mcp_get_config(config_path=str(checkout / ".ash" / ".ash.yaml"))
     else:
         checkout = _tree_with_ash_config_limit(tmp_path, monkeypatch, body)
@@ -1196,6 +1210,7 @@ def test_get_config_never_answers_with_an_in_tree_file_s_read_scope(
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
+    _operator_names_files_under(tmp_path, monkeypatch)
 
     if route.startswith("named"):
         result = mcp_get_config(config_path=str(named), search_dir=str(checkout))
@@ -1256,6 +1271,7 @@ def test_get_config_shows_a_literal_scope_as_written_beside_a_read_value(
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
+    _operator_names_files_under(tmp_path, monkeypatch)
 
     result = mcp_get_config(config_path=str(checkout / ".ash" / ".ash.yaml"))
 
@@ -1296,6 +1312,7 @@ def test_get_config_shows_a_literal_written_over_a_read_value_as_the_literal(
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
+    _operator_names_files_under(tmp_path, monkeypatch)
 
     result = mcp_get_config(config_path=str(checkout / ".ash" / ".ash.yaml"))
 
@@ -1349,6 +1366,7 @@ def test_a_chain_file_swapped_for_a_link_after_the_resolve_still_answers(
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
+    _operator_names_files_under(tmp_path, monkeypatch)
 
     result = mcp_get_config(config_path=str(checkout / ".ash" / ".ash.yaml"))
 
@@ -1387,6 +1405,7 @@ def test_get_config_shows_an_aliased_environment_value_by_its_reference(
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
+    _operator_names_files_under(tmp_path, monkeypatch)
 
     result = mcp_get_config(config_path=str(checkout / ".ash" / ".ash.yaml"))
 
