@@ -3429,9 +3429,9 @@ request whose title starts with <code>chore(release):</code>, does the rest:</p>
 <li>It creates the tag <code>v&lt;version&gt;</code> and a GitHub Release at the head of <code>main</code>, with the
   version's changelog entry followed by GitHub's generated notes.</li>
 <li>It moves the floating major tag (see <a href="#tags">Tags</a>).</li>
-<li>It starts the docs workflow on the new tag, which publishes the release's docs
-  version (see <a href="#the-documentation-site">The documentation site</a>).</li>
 </ul>
+<p>It does not start the docs workflow. See <a href="#the-documentation-site">The documentation site</a>
+for how a release's docs version is published.</p>
 <h3 id="the-release-app">The release App<a class="headerlink" href="#the-release-app" title="Permanent link">&para;</a></h3>
 <p>A pull request opened with the workflow's <code>GITHUB_TOKEN</code> does not start its own required checks
 ("ash / SAST, SCA, and IaC Scan", <code>Validate PR title</code>, <code>required-checks</code>):
@@ -3473,20 +3473,22 @@ branch from that version's tag, outside the workflow: 3.7.1, for example, is bui
 release is the newest one, <code>v3</code> points at it, so <code>v3</code> can name a commit that is not on
 <code>main</code>, and the version that <code>main</code> reports can be lower than the newest tag.</p>
 <h2 id="the-documentation-site">The documentation site<a class="headerlink" href="#the-documentation-site" title="Permanent link">&para;</a></h2>
-<p>The site is versioned. Each push to <code>main</code> publishes the version <code>main</code>, and each
-release tag publishes a version named after the release: <code>v3.8.0</code> publishes <code>3.8.0</code>.
+<p>The site is versioned. Each push to <code>main</code> publishes the version <code>main</code>. A release
+tag does not publish anything by itself. The docs workflow, run by hand on a release
+tag, publishes a version named after the release: <code>v3.8.0</code> publishes <code>3.8.0</code>.
 The newest release also moves the <code>latest</code> alias, which is where the site root and
 search engines send readers, so a release changes what most readers see. A patch
 release for an older line, built outside the workflow as described under
-<a href="#tags">Tags</a>, publishes its version when its tag is pushed and leaves <code>latest</code> where
-it is. The floating major tag publishes nothing. How the versions are built and
-checked is in <a href="../documentation/#versioned-docs">Testing the documentation</a>.</p>
+<a href="#tags">Tags</a>, publishes its version when the docs workflow is run on its tag and
+leaves <code>latest</code> where it is. The floating major tag publishes nothing. How the
+versions are built and checked is in
+<a href="../documentation/#versioned-docs">Testing the documentation</a>.</p>
 <p>A tag that the tag workflow creates is created with <code>GITHUB_TOKEN</code>, and a push made with
-that token starts no workflow, so the docs workflow would never see it. The tag workflow
-therefore starts the docs workflow on the tag itself, with <code>workflow_dispatch</code>. If a
-release's docs version is missing (because that run failed, say), publish it again
-from <strong>Actions &gt; Docs Deploy &gt; Run workflow</strong>, choosing the release tag as the
-ref. Running it on <code>main</code> publishes <code>main</code> again.</p>
+that token starts no workflow, so the docs workflow never runs on it, and the tag
+workflow does not start it. To publish a release's docs version, or to publish it again
+if the version is missing, run the docs workflow from <strong>Actions &gt; Docs Deploy &gt; Run
+workflow</strong>, choosing the release tag as the ref. Running it on <code>main</code> publishes <code>main</code>
+again.</p>
 <p>A tag pushed by hand runs the docs workflow as it is at the tagged commit. For a tag on
 a commit from before the site was versioned, that is the old workflow, whose
 <code>mkdocs gh-deploy --force</code> force-pushes a single unversioned build as a commit with no

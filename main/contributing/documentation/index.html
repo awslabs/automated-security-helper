@@ -3899,7 +3899,7 @@ the usual way, how to run the checks yourself, and what each failure means.</p>
 <p>All three jobs are in the Unified CI workflow and run on every pull request and merge
 queue entry. The <code>required-checks</code> gate depends on each of them, so a failure in any
 layer blocks the merge. The "Docs Deploy" workflow, <code>ash-repo-docs.yml</code>, only publishes
-the site, after a push to <code>main</code> and for each release tag.</p>
+the site, after a push to <code>main</code> and when someone runs it by hand on a release tag.</p>
 <h2 id="how-blocks-are-classified">How blocks are classified<a class="headerlink" href="#how-blocks-are-classified" title="Permanent link">&para;</a></h2>
 <p>A fenced code block is checked according to its language. A fence with no language is
 an error, because a command in it would escape every check. Use <code>text</code> for output
@@ -4790,7 +4790,7 @@ branch lists them for the version selector in the site header.</p>
   it writes <code>{{RELEASE}}</code>, which stays the current release number. The static checks
   report <code>{{RELEASE}}</code> written as the ref of an install command anywhere but a table
   row or a <code>text</code> block, so the <code>main</code> version cannot install a release.</li>
-<li>Every release tag <code>vX.Y.Z</code> publishes the version <code>X.Y.Z</code> (see
+<li>Running the docs workflow by hand on a release tag <code>vX.Y.Z</code> publishes the version <code>X.Y.Z</code> (see
   <a href="../releases/#the-documentation-site">Releases and versions</a>). The newest release also
   gets the <code>latest</code> alias. <code>latest/</code> is a full copy of it rather than a redirect, and
   every version names its <code>latest/</code> page as the canonical one for search engines. A
@@ -5239,7 +5239,7 @@ to resolve in: save the block inside one with <code>save-as=&lt;package&gt;/&lt;
 </tr>
 <tr>
 <td>scripts/docs_versions.py deploy (or check) is not run, does not start</td>
-<td>the docs workflow lost the step that publishes the versions, the <code>build-docs</code> job lost the step that checks them, or the tag workflow no longer starts the docs deploy for a release</td>
+<td>the docs workflow lost the step that publishes the versions, or the <code>build-docs</code> job lost the step that checks them</td>
 </tr>
 <tr>
 <td>the workflow that builds the docs does not exist, the docs workflow does not exist</td>

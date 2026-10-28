@@ -3939,7 +3939,7 @@ SOFTWARE.
 <td></td>
 <td></td>
 <td><code>automated_security_helper/utils/process_env.py</code> (<code>hold_environ</code>, <code>release_environ</code>)</td>
-<td>semgrep's own switch for its version check: the variable its <code>--enable-version-check/--disable-version-check</code> option reads. "0" is off. (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/semgrep_scanner.py</code>)</td>
+<td>semgrep's own switch for its version check: the variable its <code>semgrep --enable-version-check</code> / <code>semgrep --disable-version-check</code> option reads. "0" is off. (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/semgrep_scanner.py</code>)</td>
 </tr>
 <tr>
 <td><code>SEMGREP_RULES_CACHE_DIR</code></td>
@@ -4079,7 +4079,7 @@ SOFTWARE.
 <td></td>
 <td></td>
 <td><code>automated_security_helper/utils/python_child.py</code> (<code>uv_child_overrides</code>)</td>
-<td>- <code>UV_NO_PROJECT=1</code>, unless it names a <code>--project</code> itself; - <code>UV_PYTHON</code> set to ASH's interpreter, unless it names one (<code>--python</code>, <code>-p</code>, <code>--system</code>) or the operator set <code>UV_PYTHON</code> or <code>UV_SYSTEM_PYTHON</code>. (<code>automated_security_helper/utils/python_child.py</code>, <code>uv_child_overrides</code>)</td>
+<td>- <code>UV_NO_PROJECT=1</code>, unless it names a <code>uv --project</code> itself; - <code>UV_PYTHON</code> set to ASH's interpreter, unless it names one (<code>uv --python</code>, <code>uv -p</code>, <code>uv --system</code>) or the operator set <code>UV_PYTHON</code> or <code>UV_SYSTEM_PYTHON</code>. (<code>automated_security_helper/utils/python_child.py</code>, <code>uv_child_overrides</code>)</td>
 </tr>
 <tr>
 <td><code>UV_PYTHON_INSTALL_DIR</code></td>
@@ -4093,7 +4093,7 @@ SOFTWARE.
 <td></td>
 <td></td>
 <td><code>automated_security_helper/utils/python_child.py</code> (<code>uv_child_overrides</code>)</td>
-<td>- <code>UV_NO_PROJECT=1</code>, unless it names a <code>--project</code> itself; - <code>UV_PYTHON</code> set to ASH's interpreter, unless it names one (<code>--python</code>, <code>-p</code>, <code>--system</code>) or the operator set <code>UV_PYTHON</code> or <code>UV_SYSTEM_PYTHON</code>. (<code>automated_security_helper/utils/python_child.py</code>, <code>uv_child_overrides</code>)</td>
+<td>- <code>UV_NO_PROJECT=1</code>, unless it names a <code>uv --project</code> itself; - <code>UV_PYTHON</code> set to ASH's interpreter, unless it names one (<code>uv --python</code>, <code>uv -p</code>, <code>uv --system</code>) or the operator set <code>UV_PYTHON</code> or <code>UV_SYSTEM_PYTHON</code>. (<code>automated_security_helper/utils/python_child.py</code>, <code>uv_child_overrides</code>)</td>
 </tr>
 <tr>
 <td><code>UV_TOOL_DIR</code></td>
