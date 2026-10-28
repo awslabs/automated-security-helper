@@ -324,6 +324,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                 source_dir=Path(self.context.source_dir),
                 key="TRIVY_CONFIG",
                 config=getattr(self.context, "config", None),
+                env_named=True,
             )
             if path is not None:
                 return "TRIVY_CONFIG", variable, path
@@ -427,6 +428,9 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                 source_dir=source_dir,
                 key=env,
                 config=getattr(self.context, "config", None),
+                # The value is the environment's: the refusal names the variable
+                # and shows the path as <value> (path_trust._named).
+                env_named=True,
             )
             if path is not None:
                 return _existing_file(env, from_env, path)
