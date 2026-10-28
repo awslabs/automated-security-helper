@@ -184,6 +184,10 @@ def resolve_session_id(
         headers: Request headers carried by the call, or ``None`` when it has
             none (stdio, an in-process caller). ``Context.headers`` supplies
             this.
+        refuse_reserved: Accepted so a caller can state that it wants reserved
+            ids refused, as :func:`resolve_caller_session_id` does. It does not
+            change the result: a header naming a reserved id is refused whether
+            or not it is set.
 
     Returns:
         The ``Mcp-Session-Id`` header value when the headers carry a usable one;
@@ -198,9 +202,8 @@ def resolve_session_id(
             single directory, per :func:`validate_path_component` -- it contains a path
             separator, is a relative-path component, carries a control character
             or a character with path meaning such as a drive-specifying ``:``,
-            or exceeds ``session_paths.MAX_COMPONENT_LEN``; or, with
-            ``refuse_reserved``, if it names a directory ASH owns. Refused
-            rather than sanitized: see the module docstring.
+            or exceeds ``session_paths.MAX_COMPONENT_LEN``. Refused rather than
+            sanitized: see the module docstring.
 
     No headers at all (``None``, or a mapping with no entries) has no request
     behind it, so it is the default session with local trust, matching the
