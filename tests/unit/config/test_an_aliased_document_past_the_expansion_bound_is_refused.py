@@ -21,10 +21,17 @@ every alias is refused wherever the config chain reads YAML, is pinned by
 ``test_a_yaml_alias_never_makes_a_config_unloadable.py``.
 """
 
+import sys
+from pathlib import Path
+
 import pytest
 
+from automated_security_helper.config.config_sources import _unaliased
 from automated_security_helper.config.resolve_config import resolve_config
-from automated_security_helper.core.exceptions import ASHConfigSourceError
+from automated_security_helper.core.exceptions import (
+    ASHConfigSourceError,
+    ASHConfigUnparsedError,
+)
 from tests.utils.helpers import mark_git_checkout
 
 
@@ -54,3 +61,43 @@ def test_a_document_past_the_expansion_bound_is_refused(tmp_path, monkeypatch):
     # and place, with no text of the file (not an anchor's name, not a value).
     assert "could not be parsed (ComposerError at line " in said, said
     assert "*a" not in said and "leaf" not in said, said
+
+
+def _nested_lists(depth: int) -> list:
+    """A list nested ``depth`` levels deep, built without recursion."""
+    document: list = []
+    innermost = document
+    for _ in range(depth):
+        deeper: list = []
+        innermost.append(deeper)
+        innermost = deeper
+    return document
+
+
+def test_a_parsed_document_nested_past_the_recursion_limit_is_refused():
+    """The rebuild of a parsed document runs out of recursion on a deep one.
+
+    Whether a parser itself recurses out on a deep file depends on the
+    interpreter and its parser, so the rebuild that follows a successful parse
+    is pinned directly, with a document built in memory: it is refused as an
+    unparsed config in the shared words, never raised as a RecursionError.
+    """
+    depth = sys.getrecursionlimit() + 100
+    # Under the expansion bound, so the refusal can only be the recursion's.
+    assert depth < 100_000
+
+    with pytest.raises(ASHConfigUnparsedError) as refused:
+        _unaliased(_nested_lists(depth), Path("planted/deep.yaml"))
+
+    said = str(refused.value)
+    assert said == "planted/deep.yaml could not be parsed (RecursionError)", said
+
+
+def test_a_shallow_parsed_document_is_rebuilt_unchanged():
+    document = {"project_name": "shallow", "items": [1, [2, {"k": "v"}]]}
+
+    rebuilt = _unaliased(document, Path("planted/shallow.yaml"))
+
+    assert rebuilt == document
+    assert rebuilt is not document
+    assert rebuilt["items"] is not document["items"]
