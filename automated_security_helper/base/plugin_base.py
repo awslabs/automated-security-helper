@@ -65,6 +65,7 @@ from automated_security_helper.utils.subprocess_utils import (
     RESPONSE_FLAGS,
     WAS_KILLED_ENDING,
     could_not_stop_default,
+    exit_status,
     flagged_returncode,
     is_exit_code,
     response_could_not_stop,
@@ -675,14 +676,17 @@ def worse_exit_code(current: int | None, new: int) -> int:
     """The worse of two runs' exit codes, for a plugin's accumulated ``exit_code``.
 
     A negative code is a signal death, which no exit code describes and no
-    accepted set admits: it outranks every exit code and is kept as it is, never
-    folded into a positive one that an accepted set could admit. Otherwise the
-    larger code.
+    accepted set admits. It is recorded as the shell reports it, ``128 + N``
+    (``exit_status``), the form ``_record_target_exit_code`` records for the run
+    that scanned one target, so the two readers agree on one number; its
+    absolute value is never used, because that would put SIGHUP's 1 inside a
+    ``{0, 1}`` set. A signal death outranks every code a tool returned before
+    it. Otherwise the larger code.
     """
-    if current is not None and current < 0:
-        return current
     if new < 0:
-        return new
+        return exit_status(new)
+    if current is not None and current < 0:
+        return exit_status(current)
     return max(current if current is not None else 0, new)
 
 
