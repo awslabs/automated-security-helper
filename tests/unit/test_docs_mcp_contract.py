@@ -811,6 +811,278 @@ def test_a_helper_reached_other_than_by_a_call_keeps_its_type_unread(
     assert "loose_failed" not in loose.error_types
 
 
+PLANTED_EDGE_SERVER = """
+from automated_security_helper.cli.tools import (
+    _ren_step as _again,
+    mcp_default,
+    mcp_foreign,
+    mcp_lambda,
+    mcp_positional,
+    mcp_renamed,
+    mcp_reraise_only,
+    mcp_suffixed,
+)
+
+mcp = object()
+
+
+@mcp.tool()
+def positional(url):
+    return mcp_positional(url)
+
+
+@mcp.tool()
+def default(url):
+    return mcp_default(url)
+
+
+@mcp.tool()
+def renamed(url):
+    _again(url, "ren_via_alias")
+    return mcp_renamed(url)
+
+
+@mcp.tool()
+def lambda_built(url):
+    return mcp_lambda(url)
+
+
+@mcp.tool()
+def foreign(url):
+    return mcp_foreign(url)
+
+
+@mcp.tool()
+def suffixed(url):
+    return mcp_suffixed(url)
+
+
+@mcp.tool()
+def reraise_only(url):
+    return mcp_reraise_only(url)
+"""
+
+PLANTED_EDGE_TOOLS = """
+POS_FAILED = "pos_failed"
+DFLT_FAILED = "dflt_failed"
+
+
+class Typed(RuntimeError):
+    def __init__(self, message, error_type):
+        super().__init__(message)
+        self.error_type = error_type
+
+
+class PosErr(Typed):
+    pass
+
+
+class DfltErr(Typed):
+    pass
+
+
+class RenErr(Typed):
+    pass
+
+
+class LamErr(Typed):
+    pass
+
+
+class FamErr(Typed):
+    pass
+
+
+class OnlyRe(Typed):
+    pass
+
+
+class OtherErr(RuntimeError):
+    error_type = "other_x"
+
+
+class Suffixed(RuntimeError):
+    def __init__(self, message, error_type):
+        super().__init__(message)
+        self.error_type = error_type
+        self.error_type += "_x"
+
+
+def _pos_step(url, error_type):
+    raise PosErr("pos", error_type)
+
+
+def mcp_positional(url):
+    try:
+        _pos_step(url, POS_FAILED)
+    except PosErr as e:
+        return {"success": False, "error_type": e.error_type}
+    return {"success": True}
+
+
+def _dflt_step(url, error_type=DFLT_FAILED):
+    raise DfltErr("dflt", error_type)
+
+
+def mcp_default(url):
+    try:
+        _dflt_step(url)
+        _dflt_step(url, error_type="dflt_other")
+    except DfltErr as e:
+        return {"success": False, "error_type": e.error_type}
+    return {"success": True}
+
+
+def _ren_step(url, error_type):
+    raise RenErr("ren", error_type)
+
+
+def mcp_renamed(url):
+    try:
+        _ren_step(url, "ren_direct")
+    except RenErr as e:
+        return {"success": False, "error_type": e.error_type}
+    return {"success": True}
+
+
+def mcp_lambda(url, error_type="caller_value"):
+    make = lambda error_type: LamErr("lam", error_type)
+    try:
+        raise make("lam_arg")
+    except LamErr as e:
+        return {"success": False, "error_type": e.error_type}
+
+
+def _foreign_step(url):
+    try:
+        raise OtherErr("other")
+    except OtherErr as e:
+        raise FamErr("from other", e.error_type) from e
+
+
+def mcp_foreign(url):
+    try:
+        _foreign_step(url)
+        raise FamErr("fam", "fam_a")
+    except FamErr as e:
+        return {"success": False, "error_type": e.error_type}
+
+
+def _suffixed_again(url):
+    try:
+        raise Suffixed("first", "fetch")
+    except Suffixed as e:
+        raise Suffixed("again", e.error_type) from e
+
+
+def mcp_suffixed(url):
+    try:
+        _suffixed_again(url)
+    except Suffixed as e:
+        return {"success": False, "error_type": e.error_type}
+
+
+_make = OnlyRe
+
+
+def _only_again(url):
+    try:
+        raise _make("first", "only_failed")
+    except OnlyRe as e:
+        raise OnlyRe("again", e.error_type) from e
+
+
+def mcp_reraise_only(url):
+    try:
+        _only_again(url)
+    except OnlyRe as e:
+        return {"success": False, "error_type": e.error_type}
+"""
+
+
+@pytest.fixture
+def planted_edge_contracts(tmp_path: Path):
+    package = _plant_server(tmp_path, PLANTED_EDGE_SERVER)
+    (package / "cli" / "tools.py").write_text(
+        textwrap.dedent(PLANTED_EDGE_TOOLS).lstrip("\n"), encoding="utf-8"
+    )
+    return _reader().tool_contracts(package)
+
+
+def _edge_line(text: str) -> str:
+    """The reader's site for the planted tools' line that holds ``text``."""
+    lines = textwrap.dedent(PLANTED_EDGE_TOOLS).lstrip("\n").splitlines()
+    number = next(i for i, line in enumerate(lines, 1) if text in line)
+    return f"automated_security_helper/cli/tools.py:{number}"
+
+
+def test_a_helper_called_by_position_or_by_default_gives_its_types(
+    planted_edge_contracts,
+):
+    """A call that passes the type by position, and one that leaves it to the
+    parameter's default, are read like one that names it."""
+    assert planted_edge_contracts["positional"].error_types == ("pos_failed",)
+    assert planted_edge_contracts["positional"].error_types_unread == ()
+    default = planted_edge_contracts["default"]
+    assert default.error_types == ("dflt_failed", "dflt_other")
+    assert default.error_types_unread == ()
+
+
+def test_a_helper_imported_under_another_name_keeps_its_type_unread(
+    planted_edge_contracts,
+):
+    """The server calls ``_ren_step`` as ``_again``: a caller by another name, so
+    the type given at the one call the reader sees is not the whole list."""
+    renamed = planted_edge_contracts["renamed"]
+    assert renamed.error_types_unread != ()
+    assert renamed.error_types == ()
+
+
+def test_a_construction_in_a_lambda_does_not_read_the_functions_parameter(
+    planted_edge_contracts,
+):
+    """The lambda's own ``error_type`` shadows the function's parameter."""
+    built = planted_edge_contracts["lambda_built"]
+    assert built.error_types_unread != ()
+    assert not {"caller_value", "lam_arg"} & set(built.error_types)
+
+
+def test_a_type_raised_again_from_another_class_stays_unread(
+    planted_edge_contracts,
+):
+    """``except OtherErr as e: raise FamErr(m, e.error_type)``: OtherErr is not in
+    FamErr's family, so what it carries is not among FamErr's own types."""
+    foreign = planted_edge_contracts["foreign"]
+    assert foreign.error_types == ("fam_a",)
+    assert foreign.error_types_unread == (
+        _edge_line('raise FamErr("from other", e.error_type)'),
+    )
+
+
+def test_a_type_the_init_transforms_is_not_raised_again_as_it_was(
+    planted_edge_contracts,
+):
+    """``self.error_type = error_type`` then ``self.error_type += "_x"``: the
+    object raised again carries ``fetch_x_x``, a type no construction passes. The
+    reader does not model the ``+=``, so the re-raise's argument is unread
+    rather than taken to be a type already listed."""
+    suffixed = planted_edge_contracts["suffixed"]
+    assert _edge_line('raise Suffixed("again", e.error_type)') in (
+        suffixed.error_types_unread
+    )
+
+
+def test_a_class_built_only_by_raising_again_is_not_a_complete_empty_list(
+    planted_edge_contracts,
+):
+    """The one visible construction raises a caught object again, and the real
+    one goes through an alias the reader does not follow: nothing is known, which
+    is unread, not an empty list read to the end."""
+    only = planted_edge_contracts["reraise_only"]
+    assert only.error_types == ()
+    assert only.error_types_unread != ()
+
+
 PLANTED_EXECUTOR_SERVER = """
 import asyncio
 import functools
