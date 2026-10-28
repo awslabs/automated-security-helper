@@ -42,20 +42,21 @@ AshAggregatedResults.model_rebuild()
 
 #: What each shipped scanner needs. Python-only: a Python package ASH installs with
 #: uv (bandit, cfn-lint, checkov, semgrep, zizmor) or imports (detect-secrets).
+#: zizmor's wheel carries its native binary, as semgrep's carries semgrep-core.
 PYTHON_ONLY = {"bandit", "cfn-lint", "checkov", "detect-secrets", "semgrep", "zizmor"}
 NOT_PYTHON_ONLY = {
-    "actionlint",  # a Go binary
+    "actionlint",  # a native binary, from its pinned release asset
     "cdk-nag",  # Node.js, through jsii
-    "cfn-guard",  # a Rust binary
+    "cfn-guard",  # a native binary, from its pinned release asset
     "cfn-nag",  # a Ruby gem
     "ferret-scan",  # a Go binary
-    "gitleaks",  # a Go binary
+    "gitleaks",  # a native binary, from its pinned release asset
     "grype",
     "npm-audit",  # npm, yarn or pnpm
     "opengrep",
     "snyk-code",  # the Snyk CLI
     "syft",
-    "trivy",  # a Go binary
+    "trivy",  # a native binary, from its pinned release asset
     "trivy-repo",
 }
 

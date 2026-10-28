@@ -7080,6 +7080,12 @@ def run_ash_scan(
         if refusal is not None:
             _printed_config_refusal(3, refusal)
         if opts.mode == RunMode.container:
+            # The output directory's link rule first, as OutputDirRefusedExit:
+            # the inputs check below applies the same rule with the other inputs
+            # and exits with a bare 3, so a link it found first would reach an
+            # in-process caller without the link's name. Same code, same message,
+            # raised earlier; the check below runs it again for every mode.
+            _refuse_symlinked_output_dir(opts)
             # Each path the run would mount and the config the scan inside is
             # handed, before ash.log is opened: a refused scan creates no output
             # directory, writes no log and leaves the previous run's output as it

@@ -53,6 +53,7 @@ from automated_security_helper.core.committed_output import (
     report_over_existing_results_writes,
 )
 from automated_security_helper.core.exceptions import (
+    ASHConfigValidationError,
     ASHValidationError,
     OrchestratorAlreadyUsedError,
 )
@@ -136,6 +137,59 @@ def resolve_scan_config(
         client_config_policy=client_config_policy,
         remote_client=remote_client,
     )
+
+
+def _refuse_a_named_config_that_is_not_a_file(
+    config_path: Optional[str | Path],
+) -> None:
+    """Raise the refusal for a named ``config_path`` that is not a regular file.
+
+    A scan given a config file that does not exist must not run with the
+    defaults in its place: the file is there to configure the run, and the
+    defaults would scan with its suppressions, ignore paths and settings
+    switched off and report success. ``resolve_config`` keeps its documented
+    fallback to the default config for a missing named path, so the scan
+    refuses the path here, before resolution and before the engine is built,
+    in the words the single-directory CLI uses for the same path
+    (run_ash_scan._refuse_a_named_config_that_is_not_a_file). One stat
+    classifies the path (utils/path_stat.py): a symbolic link loop and a denied
+    stat are not a missing file, and a path that exists and is not a regular
+    file (a directory, a FIFO) is named for what it is. None means discovery.
+    An empty or blank path is left to ``resolve_config``, as before this check.
+    """
+    if config_path is None:
+        return
+    if isinstance(config_path, str) and not config_path.strip():
+        return
+    from automated_security_helper.config.config_sources import (
+        not_a_regular_file_refusal,
+    )
+    from automated_security_helper.utils.path_stat import (
+        LOOP,
+        UNREADABLE,
+        StatProblem,
+        is_regular_file,
+        stat_named_path,
+    )
+
+    named_config = stat_named_path(config_path)
+    if is_regular_file(named_config):
+        return
+    path = Path(config_path)
+    if isinstance(named_config, StatProblem):
+        if named_config.kind == LOOP:
+            raise ASHConfigValidationError(
+                f"Config file is a symbolic link loop: {path.as_posix()}"
+            ) from named_config.cause()
+        if named_config.kind == UNREADABLE:
+            raise ASHConfigValidationError(
+                f"Config file cannot be read ({named_config.code}): {path.as_posix()}"
+            ) from named_config.cause()
+        # MISSING, the one kind left.
+        raise ASHConfigValidationError(
+            f"Configuration file not found: {path.as_posix()}"
+        )
+    raise not_a_regular_file_refusal(path)
 
 
 class ASHScanOrchestrator(BaseModel):
@@ -530,6 +584,9 @@ class ASHScanOrchestrator(BaseModel):
             )
             config = self.resolved_config
         else:
+            # Before resolution: resolve_config answers a missing named file
+            # with the default config, and this scan must not run on it.
+            _refuse_a_named_config_that_is_not_a_file(self.config_path)
             config = resolve_scan_config(
                 config_path=self.config_path,
                 source_dir=self.source_dir,

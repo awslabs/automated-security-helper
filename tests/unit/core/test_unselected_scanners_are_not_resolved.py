@@ -4,16 +4,17 @@
 """A scanner the run did not select is not resolved: no ``uv tool run`` for it.
 
 The scan phase constructs every registered scanner, because a scanner's selectable
-name is only known on an instance. bandit, checkov and semgrep probe their version
-while they are constructed, with ``uv tool run --from <spec> <tool> --version``,
-and uv resolves that spec against the package index whenever the environment is
-not already cached. So ``ash scan --scanners detect-secrets`` online reached the
-index for three scanners it was never going to run (one run was measured at 23
-connections), and so did a scanner the operator excluded.
+name is only known on an instance. bandit, checkov and semgrep used to probe their
+version while they were constructed, with ``uv tool run --from <spec> <tool>
+--version``, and uv resolves that spec against the package index whenever the
+environment is not already cached. So ``ash scan --scanners detect-secrets`` online
+reached the index for three scanners it was never going to run (one run was
+measured at 23 connections), and so did a scanner the operator excluded.
 
-Construction in the scan phase now defers those probes, and the scan phase
-resolves one only for a scanner that was selected, before its dependency check,
-so a selected scanner's version is still in its report.
+Construction now only records those probes. The scan phase resolves one only for a
+scanner that was selected, before its dependency check, so a selected scanner's
+version is still in its report; a scanner built outside a scan probes when its
+version is first resolved.
 """
 
 from __future__ import annotations
@@ -125,20 +126,22 @@ def test_control_a_selected_scanner_is_still_probed_and_reports_its_version(
     assert seen == {"version": "9.9.9"}
 
 
-def test_a_scanner_constructed_outside_a_scan_defers_its_probe(
+def test_a_scanner_constructed_outside_a_scan_probes_when_its_version_is_resolved(
     probes, test_plugin_context
 ):
-    """`ash dependencies`, the MCP server and tests build scanners directly;
-    construction names the tool (defer_tool_version_probe) and runs nothing,
-    and the first resolve runs the probe once."""
+    """The dependencies command, the MCP server and tests build scanners directly.
+
+    Construction records the probe; the first reader of the version (the
+    dependency check, the inventory's resolve_deferred_tool_version) runs it once.
+    """
     from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
         BanditScanner,
     )
 
     scanner = BanditScanner(context=test_plugin_context)
 
-    assert scanner.tool_version is None
     assert _probed(probes) == []
+    assert scanner.tool_version is None
 
     scanner.resolve_deferred_tool_version()
 

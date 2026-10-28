@@ -442,7 +442,18 @@ def test_validate_config_checks_a_config_in_another_checkout(_server) -> None:
 def test_a_config_named_in_another_checkout_resolves_no_env(
     _server, monkeypatch, raw
 ) -> None:
-    """The environment !ENV would read is the server's, and the client reads the result."""
+    """The environment !ENV would read is the server's, and the client reads the result.
+
+    The two modes answer differently for the same file, and neither shows the
+    server's value. The resolved read would read the server's environment for a
+    file a client named in another checkout, so it refuses that file with
+    ``config_env_not_resolved``. The raw read resolves no reference: it shows the
+    document as written, and each value the loader would take from the
+    environment comes back as the reference the file writes, marked with the
+    ``!ENV `` prefix. It judges no file for reading the environment and
+    refuses none for it, so the answer holds the client's own text and nothing
+    of the server's.
+    """
     from automated_security_helper.cli.mcp_tools import mcp_get_config
 
     monkeypatch.setenv("ASH_TEST_SERVER_VALUE", "server-only-value")
@@ -452,9 +463,17 @@ def test_a_config_named_in_another_checkout_resolves_no_env(
         "project_name: !ENV ${ASH_TEST_SERVER_VALUE:unset}\n", encoding="utf-8"
     )
 
-    refused = mcp_get_config(config_path=str(other), raw=raw, session_id=SESSION)
-    assert refused.get("error_type") == "config_env_not_resolved", refused
-    assert "server-only-value" not in json.dumps(refused)
+    answer = mcp_get_config(config_path=str(other), raw=raw, session_id=SESSION)
+    if raw:
+        # The document as written: a success, the reference marked, no refusal.
+        assert answer.get("error_type") is None, answer
+        assert answer.get("success") is not False, answer
+        assert answer.get("project_name") == "!ENV ${ASH_TEST_SERVER_VALUE:unset}", (
+            answer
+        )
+    else:
+        assert answer.get("error_type") == "config_env_not_resolved", answer
+    assert "server-only-value" not in json.dumps(answer)
 
     # Positive control: in a directory the operator set aside, the file is the
     # operator's and resolves !ENV as before. get_config shows the value it read

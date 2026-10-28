@@ -6,11 +6,10 @@
 The orchestrator writes the scan set under the run's ID before any plugin runs,
 and a plugin that calls ``scan_set`` with ``run_id=context.run_id`` reads that list
 back instead of walking the tree again (``get_scan_set``). Nine places call it for
-the plugins: the archive and Jupyter converters, actionlint's and zizmor's input
-listings, detect-secrets, npm-audit, snyk-code's copy of the tree,
-``utils/cfn_template_model``, which picks the candidate templates for cdk-nag and
-cfn-nag, and ``utils/cfn_template_discovery``, which restates that selection for
-cfn-lint and cfn-guard.
+the plugins: the archive and Jupyter converters, detect-secrets, npm-audit,
+actionlint, zizmor, snyk-code's copy of the tree, ``utils/cfn_template_model``,
+which picks the candidate templates for cdk-nag and cfn-nag, and
+``utils/cfn_template_discovery``, which does the same for cfn-lint and cfn-guard.
 
 What pinned those calls was an AST test that each passes a ``run_id=`` keyword,
 which a call passing ``getattr(self.context, "runid", None)`` satisfies, and which
@@ -80,41 +79,6 @@ def _jupyter(context: PluginContext) -> Callable[[], object]:
     return converter._notebooks_in_scan_set
 
 
-def _actionlint(context: PluginContext) -> Callable[[], object]:
-    """actionlint's listing of the workflows in the source tree; starts nothing."""
-    from automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner import (
-        ActionlintScanner,
-        ActionlintScannerConfig,
-    )
-
-    scanner = ActionlintScanner(context=context, config=ActionlintScannerConfig())
-    return lambda: scanner._workflow_files(
-        context.source_dir, "source", [], report=False
-    )
-
-
-def _zizmor(context: PluginContext) -> Callable[[], object]:
-    """zizmor's listing of the workflows and actions in the source tree; starts nothing."""
-    from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
-        ZizmorScanner,
-        ZizmorScannerConfig,
-    )
-
-    scanner = ZizmorScanner(context=context, config=ZizmorScannerConfig())
-    return lambda: scanner._collect_inputs(
-        context.source_dir, "source", [], report=False
-    )
-
-
-def _cfn_template_discovery(context: PluginContext) -> Callable[[], object]:
-    """The candidate templates cfn-lint and cfn-guard are given; starts nothing."""
-    from automated_security_helper.utils.cfn_template_discovery import (
-        candidate_files,
-    )
-
-    return lambda: candidate_files(context, "source")
-
-
 def _scanner_step(scanner_class, config_class, context: PluginContext):
     """Run *scanner_class*'s scan of the source with its tool taken as present."""
     scanner = scanner_class(context=context, config=config_class())
@@ -179,6 +143,36 @@ def _snyk_code(context: PluginContext) -> Callable[[], object]:
             return scanner._stage_source(context.source_dir, [], cleanup)
 
     return _stage
+
+
+def _actionlint(context: PluginContext) -> Callable[[], object]:
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner import (
+        ActionlintScanner,
+        ActionlintScannerConfig,
+    )
+
+    scanner = ActionlintScanner(context=context, config=ActionlintScannerConfig())
+    return lambda: scanner._workflow_files(
+        context.source_dir, "source", [], report=False
+    )
+
+
+def _zizmor(context: PluginContext) -> Callable[[], object]:
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
+        ZizmorScanner,
+        ZizmorScannerConfig,
+    )
+
+    scanner = ZizmorScanner(context=context, config=ZizmorScannerConfig())
+    return lambda: scanner._collect_inputs(
+        context.source_dir, "source", [], report=False
+    )
+
+
+def _cfn_template_discovery(context: PluginContext) -> Callable[[], object]:
+    from automated_security_helper.utils.cfn_template_discovery import candidate_files
+
+    return lambda: candidate_files(context, "source")
 
 
 #: Each place that calls scan_set for a plugin, by the module the call is in,

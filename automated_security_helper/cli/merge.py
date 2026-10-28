@@ -707,6 +707,21 @@ def _invalid_config_text(error: Exception) -> Text:
     )
 
 
+def _invalid_config_lines(error: Exception) -> Text:
+    """A configuration refusal of the merge itself, printed on its own lines.
+
+    For the refusals raised after the operator's file is loaded: the shards'
+    recorded configurations disagreeing on an exit-code setting
+    (verify_verdict_settings_agree) is written as a header, one line per
+    setting and the advice, so its line breaks are kept. As _refusal_text: the
+    values are already shown where the message is built, _shown_lines writes
+    only a raw control as its escape and breaks CI command forms, and the Text
+    reads no markup. _invalid_config_text is for the one-line refusal of the
+    --config load, whose newline can only be the path's.
+    """
+    return Text(f"Invalid configuration: {_shown_lines(str(error))}", style="red")
+
+
 @functools.lru_cache(maxsize=1)
 def _results_schema_names() -> frozenset[str]:
     """Every field name, alias and model name reachable from AshAggregatedResults.
@@ -2055,16 +2070,18 @@ def resolve_operator_config(config_path: Optional[str]) -> AshConfig:
         return resolve_config(config_path=None)
     path = Path(config_path)
     try:
-        is_a_file = path.is_file()
-    except (OSError, ValueError) as exc:
-        # Before Python 3.14, is_file raises for an error other than "not found"
-        # (a directory above the path that cannot be searched); that is a refusal
-        # of this path, not a traceback.
+        is_file = path.is_file()
+    except OSError as exc:
+        # Path.is_file answers False for ENOENT, ENOTDIR, EBADF and ELOOP and
+        # re-raises every other stat error: a parent this user cannot search
+        # (EACCES), a name over the limit (ENAMETOOLONG). Such a file cannot be
+        # used, so it is refused with exit 3 in the read arm's words below,
+        # never a traceback.
         raise ASHConfigSourceError(
             f"--config {describe_config_path(path)} could not be read: "
             f"{escape_controls_in(exc, path_spellings(path))}"
         ) from exc
-    if not is_a_file:
+    if not is_file:
         raise ASHConfigSourceError(
             f"--config {describe_config_path(path)} does not exist or is not a file."
         )
@@ -2836,7 +2853,9 @@ def merge_command(
             merged.ash_config, trusted_config, overrides, _base_results_file(loaded)
         )
     except ASHConfigValidationError as exc:
-        print(_invalid_config_text(exc))
+        # On its lines: the shard-disagreement refusal is deliberately
+        # multi-line, and the one-line form wrote its breaks as \x0a.
+        print(_invalid_config_lines(exc))
         raise typer.Exit(3)
     except ResultsPathError as exc:
         # As Text: the message quotes the operator's path, which can read as

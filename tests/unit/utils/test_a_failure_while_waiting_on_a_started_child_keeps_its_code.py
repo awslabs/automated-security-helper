@@ -2543,13 +2543,18 @@ def test_a_response_with_no_code_grades_by_its_flag_without_raising():
     of None raised there ('<' between None and int), and the TypeError took the
     place of the error the run had. The None never reaches the comparison:
     judging reads the flag's own conventional code instead (125 for a
-    post-run failure), and the stderr line is still recorded."""
+    post-run failure), and the stderr line is still recorded. The stub carries
+    the kept-cause attribute the response seam reads before the exit-code fold."""
     import types
 
     from automated_security_helper.base.plugin_base import PluginBase
 
     scanner = types.SimpleNamespace(
-        output=[], errors=[], exit_code=None, _values_to_redact=lambda: ()
+        output=[],
+        errors=[],
+        exit_code=None,
+        _scan_kept_flag=None,
+        _values_to_redact=lambda: (),
     )
 
     PluginBase._process_command_response(

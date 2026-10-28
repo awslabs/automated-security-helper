@@ -574,10 +574,17 @@ class TestAnUnconfinableNotebookIsRefused:
         assert row is not None, (
             f"no jupyter row; rows: {sorted(results.converter_results)}"
         )
-        dumped = json.dumps(row.model_dump(mode="json"), default=str)
-        assert "analysis.ipynb" in dumped, (
-            f"the jupyter row does not record the refused notebook: {dumped}"
+        # The sandbox refuses the dependency check itself (plugin_probe_scope
+        # gives a refusing scope), so the converter is unavailable before
+        # convert() runs: the row says so, with the notebook counted as a
+        # candidate, and the completeness gate lists the converter.
+        from automated_security_helper.interactions.run_ash_scan import (
+            incomplete_converters,
         )
+
+        assert row.dependencies_satisfied is False, row
+        assert row.candidate_inputs == 1, row
+        assert [r.name for r in incomplete_converters(results)] == ["jupyter"]
 
 
 class TestAnUnconfinableNotebookFailsTheScan:

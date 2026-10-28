@@ -37,12 +37,13 @@ from __future__ import annotations
 import configparser
 import importlib.util
 import os
+import re
 import shlex
 import subprocess
 import sys
 import textwrap
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -210,8 +211,10 @@ class TestTheShardFilter:
 
     def test_the_root_conftest_registers_the_hook(self):
         text = ROOT_CONFTEST.read_text(encoding="utf-8")
-        assert "from tests.utils.sharding import pytest_ignore_collect" in text
-        assert "sharding.check_environment()" in text
+        assert "from tests.utils.sharding import (" in text
+        assert "    pytest_ignore_collect,\n" in text
+        assert "    pytest_configure_node,\n" in text
+        assert "sharding.configure(config)" in text
 
 
 class TestTheFilterInARealCollection:
@@ -304,6 +307,176 @@ class TestTheFilterInARealCollection:
         self._plant(tmp_path)
         code, _ = self._collect(tmp_path, "9of8")
         assert code != 0
+
+
+class TestTheSettingStaysInTheRunThatWasGivenIt:
+    """ASH_TEST_SHARD is read once and removed, so no child pytest inherits it.
+
+    A child that loaded tests/conftest.py and collected a directory would otherwise drop
+    the modules other shards own, and pass or fail by which shard its parent ran in.
+    """
+
+    COUNT = 3
+    SPAWNER = textwrap.dedent(
+        """\
+        import os
+        import pathlib
+        import subprocess
+        import sys
+
+
+        def test_a_child_pytest_sees_no_shard_and_every_module():
+            assert "ASH_TEST_SHARD" not in os.environ
+            done = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pytest",
+                    "--collect-only",
+                    "-q",
+                    "-p",
+                    "tests.utils.sharding",
+                    "-p",
+                    "no:cacheprovider",
+                    "-p",
+                    "no:randomly",
+                    str(pathlib.Path(__file__).parent / "pkg"),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            ids = [line for line in done.stdout.splitlines() if "::" in line]
+            assert len(ids) == 6, done.stdout + done.stderr
+        """
+    )
+    SPAWNER_PATH = "suite/test_spawn.py"
+    MODULES = [f"suite/test_{name}.py" for name in "abcdef"] + [
+        f"suite/pkg/test_p{i}.py" for i in range(1, 7)
+    ]
+
+    @staticmethod
+    def _config(**attributes: Any) -> SimpleNamespace:
+        return SimpleNamespace(stash=pytest.Stash(), **attributes)
+
+    def test_configure_takes_the_setting_and_removes_it_from_the_environment(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv(sharding.ENV_VAR, "2of3")
+        config = self._config()
+        sharding.configure(config)
+        assert sharding.ENV_VAR not in os.environ
+        assert config.stash[sharding._SHARD_KEY] == (2, 3)
+
+    def test_configure_twice_keeps_the_setting(self, monkeypatch):
+        monkeypatch.setenv(sharding.ENV_VAR, "2of3")
+        config = self._config()
+        sharding.configure(config)
+        sharding.configure(config)
+        assert config.stash[sharding._SHARD_KEY] == (2, 3)
+
+    def test_the_hook_reads_the_config_not_the_environment(self, monkeypatch):
+        """Set after configure, in a child's environment, the variable changes nothing."""
+        monkeypatch.delenv(sharding.ENV_VAR, raising=False)
+        config = self._config(
+            rootpath=Path("/rootdir"), getini=lambda name: ["test_*.py"]
+        )
+        sharding.configure(config)
+        monkeypatch.setenv(sharding.ENV_VAR, "1of2")
+        for name in ("test_a.py", "test_b.py", "test_c.py", "test_d.py"):
+            path = Path("/rootdir") / "suite" / name
+            assert sharding.pytest_ignore_collect(path, config) is None, name
+
+    def test_a_worker_takes_the_setting_from_its_workerinput(self, monkeypatch):
+        monkeypatch.delenv(sharding.ENV_VAR, raising=False)
+        controller = self._config()
+        controller.stash[sharding._SHARD_KEY] = (2, 3)
+        controller.stash[sharding._TEXT_KEY] = "2of3"
+        node = SimpleNamespace(config=controller, workerinput={})
+        sharding.pytest_configure_node(node)
+        assert node.workerinput[sharding.WORKERINPUT_KEY] == "2of3"
+
+        worker = self._config(workerinput=dict(node.workerinput))
+        sharding.configure(worker)
+        assert worker.stash[sharding._SHARD_KEY] == (2, 3)
+        assert sharding.ENV_VAR not in os.environ
+
+    def test_a_malformed_setting_is_a_usage_error(self, monkeypatch):
+        monkeypatch.setenv(sharding.ENV_VAR, "9of8")
+        with pytest.raises(pytest.UsageError):
+            sharding.configure(self._config())
+
+    def _plant(self, root: Path) -> None:
+        (root / "pytest.ini").write_text(
+            "[pytest]\ntestpaths = suite\npython_files = test_*.py\n", encoding="utf-8"
+        )
+        for relative in [self.SPAWNER_PATH, *self.MODULES]:
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if relative == self.SPAWNER_PATH:
+                path.write_text(self.SPAWNER, encoding="utf-8")
+            else:
+                test_name = "test_" + path.stem.split("_")[-1]
+                path.write_text(f"def {test_name}():\n    pass\n", encoding="utf-8")
+
+    def _run(self, root: Path, shard: str, *extra: str) -> tuple[int, int]:
+        done = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "-c",
+                str(root / "pytest.ini"),
+                "--rootdir",
+                str(root),
+                "--confcutdir",
+                str(root),
+                "-p",
+                "tests.utils.sharding",
+                "-p",
+                "no:cacheprovider",
+                "-p",
+                "no:randomly",
+                *extra,
+            ],
+            cwd=root,
+            env=_clean_env(PYTHONPATH=str(REPO_ROOT), **{sharding.ENV_VAR: shard}),
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        found = re.search(r"(\d+) passed", done.stdout)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert found, done.stdout
+        return done.returncode, int(found.group(1))
+
+    def _owned(self, index: int) -> int:
+        return sum(
+            1
+            for module in [self.SPAWNER_PATH, *self.MODULES]
+            if sharding.owner(module, self.COUNT) == index
+        )
+
+    def test_a_child_pytest_of_a_shard_sees_no_shard_and_collects_every_module(
+        self, tmp_path
+    ):
+        self._plant(tmp_path)
+        index = sharding.owner(self.SPAWNER_PATH, self.COUNT)
+        _, passed = self._run(tmp_path, f"{index}of{self.COUNT}")
+        assert passed == self._owned(index)
+
+    def test_the_same_holds_under_xdist_where_workers_get_the_setting_from_workerinput(
+        self, tmp_path
+    ):
+        import xdist  # noqa: F401 - the run below needs the plugin
+
+        self._plant(tmp_path)
+        index = sharding.owner(self.SPAWNER_PATH, self.COUNT)
+        _, passed = self._run(tmp_path, f"{index}of{self.COUNT}", "-n", "2")
+        assert passed == self._owned(index), (
+            "a worker that did not get the setting would run every module"
+        )
 
 
 class TestTheActionRunsAShard:

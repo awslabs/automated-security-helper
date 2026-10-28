@@ -57,7 +57,6 @@ _MENTIONS_OFFLINE = re.compile(r"AshOfflineMode|ash_offline_mode", re.IGNORECASE
 
 def _readme_passages() -> Iterator[Tuple[str, str]]:
     """Paragraphs and table rows of every deploy README that mention offline mode."""
-
     # Pruned as it walks: deploy/cdk/node_modules is installed per run.
     for path in sorted(
         p

@@ -883,6 +883,9 @@ def _trivy_scanner(context, monkeypatch):
     update, its skip flags, the cache directory and the scan cache's backend there.
     """
     from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+    from automated_security_helper.plugin_modules.ash_trivy_plugins import (
+        trivy_repo_scanner,
+    )
     from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
         TrivyRepoScanner,
         TrivyRepoScannerConfig,
@@ -891,6 +894,20 @@ def _trivy_scanner(context, monkeypatch):
     scanner = TrivyRepoScanner(context=context, config=TrivyRepoScannerConfig())
     scanner._process_config_options()
     monkeypatch.setattr(scanner, "validate_plugin_dependencies", lambda: True)
+    # Offline, the scan reads trivy's default misconfiguration scanners from
+    # `trivy repository --help` (TrivyScannerBase._offline_misconfig_args), a
+    # start made through run_command, not through the replaced _run_subprocess,
+    # so it would reach the tool guard's stand-in trivy and be recorded as a
+    # started tool at teardown. This module keeps its real probes
+    # (PROBE_SUBJECT_MODULES), so the list is answered here as on a host without
+    # trivy: unknown, the fail-closed side, through the binding trivy-repo's own
+    # module took at import (its _default_misconfig_scanners reads that name).
+    # The memo itself is keyed on the resolved trivy path, so it is not pre-seeded.
+    monkeypatch.setattr(
+        trivy_repo_scanner,
+        "trivy_default_misconfig_scanners",
+        lambda *args, **kwargs: None,
+    )
     commands = []
     monkeypatch.setattr(
         ScannerPluginBase,

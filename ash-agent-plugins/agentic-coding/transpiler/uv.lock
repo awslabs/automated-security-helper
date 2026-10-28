@@ -2,7 +2,10 @@ version = 1
 revision = 5
 requires-python = ">=3.11"
 resolution-markers = [
-    "python_full_version >= '3.14'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version == '3.14.*' and sys_platform != 'emscripten'",
+    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
     "python_full_version < '3.14'",
 ]
 
@@ -150,7 +153,7 @@ wheels = [
 
 [[package]]
 name = "datamodel-code-generator"
-version = "0.84.0"
+version = "0.86.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "argcomplete" },
@@ -163,9 +166,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b5/64/4235e7e4e6ac6a6c76516f09cbb6a86269d7dc3891f2701a19478ea76693/datamodel_code_generator-0.84.0.tar.gz", hash = "sha256:bb3d44d8e4d89f2fc17c5af3f5b64eb662f46bdb10e4f126e62bd44e67d0d4bc", size = 5629988, upload-time = "2026-10-15T16:23:38.379Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/70/69/56726c1ffd4790f90dc47630f96baed1a29a8f25375982510fce3b3e61af/datamodel_code_generator-0.86.0.tar.gz", hash = "sha256:1834ba0e84307dfed625eeacfbb07d790ede01a3adf5414a1c9947c5b9139078", size = 6255349, upload-time = "2026-10-18T15:43:30.016Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ed/b0/7af5ffc79e3dcd0925f1865b9902e5c0751383e73fe48435420e889c7cf3/datamodel_code_generator-0.84.0-py3-none-any.whl", hash = "sha256:b887be83ad9c810fbaca642622724eb02d0a4f0c857e0fc57829dbec53460adf", size = 1490627, upload-time = "2026-10-15T16:23:35.725Z" },
+    { url = "https://files.pythonhosted.org/packages/a3/5b/f76dac052451e88fc0b622c3d996fa48637da9fa1e3c2b9ca2b84aead28a/datamodel_code_generator-0.86.0-py3-none-any.whl", hash = "sha256:1a3d6f0a14a33e334b4251d04e67b0b6ef05c96d4625fb99bd09d716e30ea084", size = 1605265, upload-time = "2026-10-18T15:43:27.808Z" },
 ]
 
 [[package]]

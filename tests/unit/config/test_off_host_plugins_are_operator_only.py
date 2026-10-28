@@ -255,7 +255,7 @@ def test_no_profile_lets_a_client_configure_an_off_host_plugin(plugin):
     for path, value in writes:
         ops = [{"op": "add", "path": path, "value": value}]
         with pytest.raises(RuntimePatchDeniedError):
-            check_runtime_ops(ops, allowlist=policy)
+            check_runtime_ops(ops, allowlist=policy, config=None)
 
 
 def test_control_a_local_plugin_stays_tunable():
@@ -270,7 +270,7 @@ def test_control_a_local_plugin_stays_tunable():
             "value": "HIGH",
         }
     ]
-    check_runtime_ops(ops, allowlist=policy)
+    check_runtime_ops(ops, allowlist=policy, config=None)
 
 
 # ---------------------------------------------------------------------------

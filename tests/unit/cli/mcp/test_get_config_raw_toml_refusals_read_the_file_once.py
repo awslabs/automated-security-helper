@@ -99,7 +99,7 @@ def test_a_file_that_does_not_parse_is_refused_even_if_rewritten_after_the_read(
     with pytest.raises(ASHConfigSourceError) as raised:
         _config_as_written(target)
 
-    assert "is not valid TOML" in str(raised.value), raised.value
+    assert "could not be parsed (" in str(raised.value), raised.value
     assert PROBE_VALUE not in str(raised.value), raised.value
     assert len(reads) == 1, reads
 
@@ -140,13 +140,16 @@ def test_control_a_file_that_is_not_utf8_is_refused_in_the_loaders_words(
     target = tmp_path / "config.toml"
     target.write_bytes(b'project_name = "caf\xe9"\n')
     # The bytes are read and the file is rewritten; the decode of the bytes that
-    # were read is what refuses, in the loader's words, and nothing reads again.
+    # were read is what refuses, in the loader's words (the byte's offset, never
+    # its value), and nothing reads again.
     reads = file_reads(rewrite_to=A_REFERENCE)
 
     with pytest.raises(ASHConfigSourceError) as raised:
         _config_as_written(target)
 
-    assert "is not valid UTF-8" in str(raised.value), raised.value
+    assert "could not be parsed (not UTF-8 at byte offset" in str(raised.value), (
+        raised.value
+    )
     assert PROBE_VALUE not in str(raised.value), raised.value
     assert len(reads) == 1, reads
 
@@ -154,7 +157,7 @@ def test_control_a_file_that_is_not_utf8_is_refused_in_the_loaders_words(
 @pytest.mark.parametrize(
     ("name", "text", "fragment"),
     [
-        ("config.toml", "project_name = [unclosed\n", "is not valid TOML"),
+        ("config.toml", "project_name = [unclosed\n", "could not be parsed ("),
         ("pyproject.toml", '[tool.other]\nname = "x"\n', "has no [tool.ash] table"),
         ("pyproject.toml", "[tool]\nash = 3\n", "must be a table"),
     ],

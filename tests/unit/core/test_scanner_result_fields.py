@@ -1533,9 +1533,10 @@ class _PlainPlugin:
 def test_the_config_line_of_a_plain_plugin_is_redacted_with_its_own_values(
     context,
 ):
-    """The executor's DEBUG line quotes the scanner's config. For a plugin that
-    is not a PluginBase, with a plain config, the plugin's own values are the
-    only redaction the line has: the run's config holds none of them."""
+    """The executor's DEBUG line names the scanner's settings, never their
+    values. For a plugin that is not a PluginBase, with a plain config that is
+    no mapping, the line names only the config's type, so the plugin's own value
+    never reaches it: the run's config holds none of them to redact."""
     phase = ScanPhase(
         plugin_context=context,
         plugins=[],
@@ -1548,7 +1549,8 @@ def test_the_config_line_of_a_plain_plugin_is_redacted_with_its_own_values(
 
     # The control: the executor logged the plugin's config line.
     assert any(
-        text.startswith("scanner_plugin.config: PlainConfig(") for text in texts
+        text.startswith("scanner_plugin.config setting: a _PlainConfig")
+        for text in texts
     ), texts
     for text in texts:
         assert "ENVCANARY-plainown" not in text, text

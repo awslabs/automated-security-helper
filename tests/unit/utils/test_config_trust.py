@@ -27,6 +27,7 @@ from automated_security_helper.utils.config_trust import (
     scan_root,
     set_by_operator,
 )
+from tests.utils.helpers import mark_git_checkout
 
 KEY = "scanners.actionlint.options.shellcheck"
 
@@ -45,7 +46,7 @@ def _config_text(shellcheck: str = "sh", **extra) -> str:
 def repo(tmp_path) -> Path:
     """A checkout: the scanned tree is the directory holding ``.git``."""
     root = tmp_path / "repo"
-    (root / ".git").mkdir(parents=True)
+    mark_git_checkout(root)
     return root
 
 
@@ -79,7 +80,7 @@ def test_a_config_file_in_another_git_checkout_is_not_the_operators(repo, tmp_pa
     counts too; the operator passes such a value with --config-overrides.
     """
     ops = tmp_path / "ops"
-    (ops / ".git").mkdir(parents=True)
+    mark_git_checkout(ops)
     operator = ops / "ash.yaml"
     operator.write_text(_config_text())
 
@@ -425,7 +426,7 @@ def _operator_path_case(tmp_path, *, operator: bool):
     from automated_security_helper.utils.config_trust import record_provenance
 
     repo = tmp_path / "repo"
-    (repo / ".git").mkdir(parents=True)
+    mark_git_checkout(repo)
     config = AshConfig()
     record_provenance(
         config,
@@ -517,7 +518,7 @@ def test_operator_paths_decides_provenance_for_the_list_and_checks_each_entry(
 def _tree_and_outside(tmp_path):
     """A checkout, and a file outside it."""
     repo = tmp_path / "repo"
-    (repo / ".git").mkdir(parents=True)
+    mark_git_checkout(repo)
     outside = tmp_path / "outside"
     outside.mkdir()
     (outside / "creds").write_text("x\n", encoding="utf-8")

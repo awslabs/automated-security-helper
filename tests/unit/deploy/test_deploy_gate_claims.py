@@ -52,7 +52,6 @@ _COMMENT_LEADERS = {"*", "#", "#:", "//"}
 
 def _texts() -> Iterator[Tuple[str, str]]:
     """Every deploy README and variable file, plus the two gate scripts."""
-
     # Pruned as it walks: deploy/cdk/node_modules is installed per run.
     paths = sorted(
         p

@@ -911,6 +911,11 @@ def test_get_config_marks_the_limit_only_where_a_checkout_s_file_writes_it(
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
+    # A path named to get_config is the client's unless it is in a directory
+    # ASH_MCP_ALLOWED_CONFIG_ROOTS names, and a client's file that writes the
+    # limit is refused outright; this test is about how a file the operator
+    # names is shown, so the test's directory is set aside as the operator's.
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(tmp_path))
 
     result = mcp_get_config(config_path=str(checkout / ".ash" / ".ash.yaml"))
 
@@ -1797,6 +1802,10 @@ def test_a_deleted_cwd_answers_the_default_where_ash_config_in_a_checkout_sets_i
     _named_checkout, named = _checkouts_either_side(
         tmp_path, monkeypatch, 2048, "project_name: named\n" + _setting(1024)
     )
+    # The operator names the file (see test_get_config_marks_the_limit_only_
+    # where_a_checkout_s_file_writes_it); a client-named file writing the limit
+    # would be refused outright instead of settled.
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(tmp_path))
     _delete_working_directory(tmp_path, monkeypatch)
 
     result = mcp_tools.mcp_get_config(config_path=str(named))
@@ -1818,6 +1827,8 @@ def test_a_live_cwd_in_the_named_checkout_answers_the_ash_config_value(
     named_checkout, named = _checkouts_either_side(
         tmp_path, monkeypatch, 2048, "project_name: named\n" + _setting(1024)
     )
+    # The operator names the file, as in the deleted-cwd test above.
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(tmp_path))
     monkeypatch.chdir(named_checkout)
 
     result = mcp_tools.mcp_get_config(config_path=str(named))

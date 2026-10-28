@@ -1551,7 +1551,7 @@ class TestTheFallbackWalkContract:
         """When the walk resumed after the run's model ends with nothing that
         answers, the message keeps the configured model's error and the run
         model's own, and counts both as called."""
-        reporter = make_reporter(context, enable_caching=False)
+        reporter = make_reporter(context, enable_caching=False, max_retries=0)
         runtime = self._run_model_then_fails(monkeypatch, second_fallback_answers=False)
 
         reporter._run_simple_report(runtime, sarif_model([]), [], [])

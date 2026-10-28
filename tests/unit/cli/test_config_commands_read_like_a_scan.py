@@ -201,3 +201,23 @@ class TestAConfigThatCannotBeLoadedExits3:
         path.write_text("project_name: x\n", encoding="utf-8")
 
         assert _invoke("validate", "--config", str(path)).exit_code == 0
+
+    def test_control_validates_own_failure_is_exit_1(self, tmp_path, monkeypatch):
+        """Exit 1 is validate's own failure, an error in the check itself: not a
+        file that cannot be loaded (3) and not one a scan refuses (3)."""
+        from automated_security_helper.config.config_validator import ConfigValidator
+
+        path = tmp_path / ".ash.yaml"
+        path.write_text("project_name: x\n", encoding="utf-8")
+
+        def broken_check(*args, **kwargs):
+            raise RuntimeError("the check itself broke")
+
+        monkeypatch.setattr(
+            ConfigValidator, "check_config_file", staticmethod(broken_check)
+        )
+
+        result = _invoke("validate", "--config", str(path))
+
+        assert result.exit_code == 1, result.output
+        assert "Error validating config" in result.output
