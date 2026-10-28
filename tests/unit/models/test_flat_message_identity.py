@@ -27,8 +27,13 @@ def _flats(
     driver=None,
     extensions=None,
     props=None,
+    source_unchanged=True,
 ):
-    """The flattened findings of one run that holds one result per message."""
+    """The flattened findings of one run that holds one result per message.
+
+    Flattening leaves the report alone, except that a secret rule's message text
+    is masked in the report itself, so a test of such a rule turns the check off.
+    """
     results = []
     for message in messages:
         result = {"message": message, "properties": props or {}}
@@ -53,7 +58,8 @@ def _flats(
     )
     before = report.model_dump(mode="json")
     flats = AshAggregatedResults(sarif=report).to_flat_vulnerabilities()
-    assert report.model_dump(mode="json") == before
+    if source_unchanged:
+        assert report.model_dump(mode="json") == before
     for flat, result in zip(flats, report.runs[0].results):
         assert (
             json.loads(flat.raw_data)["message"]
@@ -182,6 +188,7 @@ def test_message_arguments_never_reach_the_identity_hash_input(monkeypatch):
         },
         rule_id=None,
         reference={"id": "B105"},
+        source_unchanged=False,
     )
     assert captured
     assert all("synthetic-" not in seed for seed in captured)
