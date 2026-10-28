@@ -27,6 +27,13 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.schemas.sarif_schema_model import PropertyBag
 from tests.unit.cli import test_merge
 
+# The constant below is a file name that is not UTF-8.
+if os.name == "nt":
+    pytest.skip(
+        "a file name that is not UTF-8 cannot exist on NTFS (names are UTF-16)",
+        allow_module_level=True,
+    )
+
 #: A latin-1 file name as Python lists it, and as a record writes it.
 ODD = os.fsdecode(b"secr\xe9t.py")
 RECORDED = "secr\\udce9t.py"

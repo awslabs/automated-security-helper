@@ -44,6 +44,13 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.suppression_matcher import should_suppress_finding
 
+# The constants below are file names that are not UTF-8.
+if os.name == "nt":
+    pytest.skip(
+        "a file name that is not UTF-8 cannot exist on NTFS (names are UTF-16)",
+        allow_module_level=True,
+    )
+
 ODD = os.fsdecode(b"secr\xe9t.py")
 RECORDED = "secr\\udce9t.py"
 #: Files a suppression for ODD must not reach: the escape's backslash read as a

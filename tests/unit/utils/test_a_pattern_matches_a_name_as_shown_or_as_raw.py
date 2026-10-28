@@ -20,6 +20,13 @@ import pytest
 
 from automated_security_helper.utils.suppression_matcher import ignore_path_matches
 
+# The constant below is a file name that is not UTF-8.
+if os.name == "nt":
+    pytest.skip(
+        "a file name that is not UTF-8 cannot exist on NTFS (names are UTF-16)",
+        allow_module_level=True,
+    )
+
 #: The name as the scan lists it: one lone surrogate for the byte.
 LISTED = os.fsdecode(b"secr\xe9t.py")
 #: The name as a result records it: the surrogate as six characters.
