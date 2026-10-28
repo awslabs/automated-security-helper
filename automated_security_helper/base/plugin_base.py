@@ -65,6 +65,7 @@ from automated_security_helper.utils.subprocess_utils import (
     RESPONSE_FLAGS,
     WAS_KILLED_ENDING,
     could_not_stop_default,
+    exit_status,
     flagged_returncode,
     is_exit_code,
     response_could_not_stop,
@@ -674,16 +675,13 @@ _UNFINISHED_RUN_FLAGS = ("timed_out", "cancelled", "result_rejected", "signaled"
 def worse_exit_code(current: int | None, new: int) -> int:
     """The worse of two runs' exit codes, for a plugin's accumulated ``exit_code``.
 
-    A negative code is a signal death, which no exit code describes and no
-    accepted set admits: it outranks every exit code and is kept as it is, never
-    folded into a positive one that an accepted set could admit. Otherwise the
-    larger code.
+    A negative code is a signal death. It is recorded as a shell reports it,
+    ``128 + N`` (``subprocess_utils.exit_status``), which no accepted set admits
+    and which the documentation names, not as the ``-N`` ``subprocess`` gives:
+    that was neither swallowed by ``max(0, -1)`` nor read as a small accepted
+    code. Otherwise the larger code.
     """
-    if current is not None and current < 0:
-        return current
-    if new < 0:
-        return new
-    return max(current if current is not None else 0, new)
+    return max(current if current is not None else 0, exit_status(new))
 
 
 def _response_text(response: Dict, keys: Tuple[str, ...], default: str) -> str:
