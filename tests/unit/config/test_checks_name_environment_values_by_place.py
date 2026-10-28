@@ -769,7 +769,12 @@ def test_the_in_tree_module_warning_names_a_module_read_from_the_environment_by_
 #: file: a denied path, a short regex, and the path a regex is bound to.
 DENIED = "/global_settings/probecanarydenied"
 REGEX = "q[7]"
-PATTERN_PATH = "/scanners/probecanarypatternpath"
+#: The path a regex is bound to. A client's op writes its parent
+#: (``/scanners/probesection``), which carries the bound child. It is not
+#: ``/scanners``: a write there contains the shipped denied_paths entries for the
+#: scanners that send data off the host (``ash_config.ALWAYS_DENIED_PATHS``), and
+#: those refuse it before any value pattern is read.
+PATTERN_PATH = "/scanners/probesection/probecanarypatternpath"
 
 
 @pytest.mark.parametrize(
@@ -788,7 +793,11 @@ PATTERN_PATH = "/scanners/probecanarypatternpath"
             id="regex-read",
         ),
         pytest.param(
-            {"op": "replace", "path": "/scanners", "value": {"x": "literalprobematch"}},
+            {
+                "op": "replace",
+                "path": "/scanners/probesection",
+                "value": {"x": "literalprobematch"},
+            },
             "matches denied_value_patterns regex 'literalprobematch' bound to "
             f"'{ENVIRONMENT_VALUE_SHOWN}'",
             id="pattern-path-read",
@@ -871,7 +880,7 @@ def test_the_runtime_policy_refusal_names_a_policy_entry_read_from_the_environme
     "override, expected",
     [
         pytest.param(
-            "global_settings={}",
+            "probesection={}",
             "writes a subtree that contains denied_paths entry "
             f"'{ENVIRONMENT_VALUE_SHOWN}'",
             id="denied-path-read",
@@ -883,7 +892,7 @@ def test_the_runtime_policy_refusal_names_a_policy_entry_read_from_the_environme
             id="regex-read",
         ),
         pytest.param(
-            "scanners={x: literalprobematch}",
+            "probepatterns={x: literalprobematch}",
             "matches denied_value_patterns regex 'literalprobematch' bound to "
             f"'{ENVIRONMENT_VALUE_SHOWN}'",
             id="pattern-path-read",
@@ -912,13 +921,32 @@ def test_a_workspace_scans_override_refusal_names_a_policy_entry_read_from_the_e
     by the session config's runtime policy (cli/mcp/workspace._gate_client_overrides),
     whose refusal goes to the client as select_profile's does. The policy entry
     that refused one is named by place: <value> for one the session config read
-    from the environment, as written for one it wrote."""
+    from the environment, as written for one it wrote.
+
+    The policy is the registered profile's, as the operator loaded it at
+    startup (``profile_registry.session_profile_entry``), so the profile is
+    registered and named in the call; the session file only gives the config the
+    override applies to. With no profile the policy is the default one, which is
+    off (the test after this one).
+
+    That policy is the profile's own list added after the shipped defaults
+    (``client_config_policy.effective_policy``), so a shipped entry that an op
+    reaches refuses it first. The entries this test reads from the environment
+    therefore sit under sections no shipped entry reaches: ``/probesection`` for
+    the denied path, ``/probepatterns`` for the bound path (the profile of the
+    direct policy test above can use ``/global_settings`` and ``/scanners``)."""
+    from automated_security_helper.cli.mcp.profile_registry import (
+        register_profiles,
+        set_profile_registry,
+    )
     from automated_security_helper.cli.mcp.workspace import _gate_client_overrides
     from automated_security_helper.config.runtime_patch import RuntimePatchDeniedError
 
-    monkeypatch.setenv("ASH_PROBE_CANARY_DENIED", DENIED)
+    monkeypatch.setenv("ASH_PROBE_CANARY_DENIED", "/probesection/probecanarydenied")
     monkeypatch.setenv("ASH_PROBE_CANARY_REGEX", REGEX)
-    monkeypatch.setenv("ASH_PROBE_CANARY_PATTERN_PATH", PATTERN_PATH)
+    monkeypatch.setenv(
+        "ASH_PROBE_CANARY_PATTERN_PATH", "/probepatterns/probecanarypatternpath"
+    )
     session = tmp_path / "session.yaml"
     session.write_text(
         "project_name: probe\n"
@@ -937,13 +965,47 @@ def test_a_workspace_scans_override_refusal_names_a_policy_entry_read_from_the_e
         encoding="utf-8",
     )
 
+    set_profile_registry(register_profiles([f"probe={session}"]))
+
     with pytest.raises(RuntimePatchDeniedError) as raised:
-        _gate_client_overrides([override], str(session))
+        _gate_client_overrides([override], str(session), profile="probe")
     refusal = str(raised.value)
     assert "probecanarydenied" not in refusal, refusal
     assert "probecanarypatternpath" not in refusal, refusal
     assert REGEX not in refusal, refusal
     assert expected in refusal, refusal
+
+
+def test_a_workspace_scans_override_is_refused_when_no_profile_enables_overrides(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A call that names no profile, and a session that bound none, is checked
+    against the default policy, which has runtime overrides off: the refusal
+    says so, and holds nothing of the session file's own policy, which is not
+    the policy in force."""
+    from automated_security_helper.cli.mcp.workspace import _gate_client_overrides
+    from automated_security_helper.config.runtime_patch import RuntimePatchDeniedError
+
+    monkeypatch.setenv("ASH_PROBE_CANARY_DENIED", DENIED)
+    session = tmp_path / "session.yaml"
+    session.write_text(
+        "project_name: probe\n"
+        "global_settings:\n"
+        "  mcp:\n"
+        "    runtime_overrides:\n"
+        "      enabled: true\n"
+        "      allowed_paths: ['/**']\n"
+        "      denied_paths:\n"
+        "        - ${ASH_PROBE_CANARY_DENIED}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimePatchDeniedError) as raised:
+        _gate_client_overrides(["project_name=q7"], str(session))
+
+    refusal = str(raised.value)
+    assert "runtime overrides disabled (allowlist.enabled is False)" in refusal, refusal
+    assert "probecanarydenied" not in refusal, refusal
 
 
 @pytest.mark.parametrize(
