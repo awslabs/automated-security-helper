@@ -6,8 +6,9 @@
 The hook says why a scanner has nothing to scan in this run, or None when it
 cannot tell. A reason is given only from the selection the scanner's own scan()
 makes, over every tree the scan hands it, and only when that selection is empty.
-Nothing in ASH calls the hook yet; test_nothing_to_scan_hooks_have_no_caller.py
-pins that.
+The scan phase and the scanner executor ask it
+(core/phases/scan_phase.py, core/phases/scanner_executor.py), so its answers
+decide scanner statuses.
 
 Each selection-based hook is held to its scan() by an agreement test: on the same
 tree, scan() with the tool standing in attempts a target exactly when the hook
