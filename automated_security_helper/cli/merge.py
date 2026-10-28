@@ -2054,7 +2054,17 @@ def resolve_operator_config(config_path: Optional[str]) -> AshConfig:
     if config_path is None:
         return resolve_config(config_path=None)
     path = Path(config_path)
-    if not path.is_file():
+    try:
+        is_a_file = path.is_file()
+    except (OSError, ValueError) as exc:
+        # Before Python 3.14, is_file raises for an error other than "not found"
+        # (a directory above the path that cannot be searched); that is a refusal
+        # of this path, not a traceback.
+        raise ASHConfigSourceError(
+            f"--config {describe_config_path(path)} could not be read: "
+            f"{escape_controls_in(exc, path_spellings(path))}"
+        ) from exc
+    if not is_a_file:
         raise ASHConfigSourceError(
             f"--config {describe_config_path(path)} does not exist or is not a file."
         )
