@@ -304,7 +304,7 @@ version = "3.7.0"
 # test/ash-scan-step.test.ts; under deploy/terraform, the ash_version line of
 # each module's examples/basic/main.tf (agentcore, ash-image-pipeline,
 # codecommit-gate, codepipeline-executor and fargate); and under
-# examples/AWSCodeBuild, the ASH_VERSION of buildspec.yml and README.md. The
+# examples/AWSCodeBuild, the RELEASE_TAG of buildspec.yml and README.md. The
 # synthesized CDK templates and the generated cdk-constructs buildspecs are
 # listed with their sources because a bump commit is checked by the IaC drift
 # gates: rewriting only the TypeScript would leave the committed output one
