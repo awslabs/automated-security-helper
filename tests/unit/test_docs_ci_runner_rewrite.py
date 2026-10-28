@@ -760,7 +760,7 @@ def test_act_runs_the_pages_artifact_steps_on_the_pinned_v4_actions():
     body, result = _scale_rewrite()
     # The page keeps naming the current releases for the people who use GitHub.
     assert "actions/upload-artifact@043fb46d" in body
-    assert "actions/download-artifact@3e5f45b2" in body
+    assert "actions/download-artifact@9000827c" in body
     assert result.original == body
     steps = [s for job in _load(result.text)["jobs"].values() for s in job["steps"]]
     upload = [s for s in steps if str(s.get("uses", "")).startswith("actions/upload-")]

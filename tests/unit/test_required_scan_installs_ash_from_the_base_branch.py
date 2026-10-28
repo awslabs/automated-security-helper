@@ -311,7 +311,12 @@ def _required_checks_from_the_release_docs() -> list[str]:
         "docs/content/contributing/releases.md no longer lists the release PR's "
         "required checks in the 'required checks (...)' sentence this test reads"
     )
-    names = re.findall(r"`([^`]+)`", match.group(1))
+    # The page backticks a code name and double-quotes the check whose name is a
+    # sentence, "ash / SAST, SCA, and IaC Scan", so a name is either form.
+    names = [
+        quoted or code
+        for code, quoted in re.findall(r"`([^`]+)`|\"([^\"]+)\"", match.group(1))
+    ]
     assert REQUIRED_SCAN_CHECK in names, names
     return names
 
