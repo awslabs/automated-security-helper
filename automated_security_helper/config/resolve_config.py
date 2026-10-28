@@ -1020,6 +1020,19 @@ def load_config_file(
     try:
         return document, build_config(data, config_overrides)
     except ValidationError as e:
+        if _has_a_client_file(document):
+            # A chain that holds a file an MCP client supplied, by any name on
+            # the way (a link inside a delivered tree included), is refused in
+            # the words a client's file gets everywhere else
+            # (_client_validation_error, the form validate_config_document
+            # gives it): each problem's location, with a key the schema does
+            # not name as <key>, and its kind; no value and no key of the file.
+            raise ConfigFileRefused(
+                str(_client_validation_error(config_path, e)),
+                document=document,
+                validation_error=e,
+                after_overrides=False,
+            ) from None
         # Without pydantic's own text, which quotes every input: an input can
         # be a value the file read from the environment. And without the
         # values and keys the chain read from the environment: a key is
