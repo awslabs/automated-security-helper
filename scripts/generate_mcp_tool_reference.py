@@ -441,22 +441,33 @@ TOOL_NOTES: dict[str, dict] = {
     },
     "cancel_scan": {
         "intro": (
-            "Stop a running scan. The scanner running at the time is stopped, no further "
-            "scanner starts, and no reports or results file are written after the cancel."
+            "Stops a running scan. The scanner tool running at the time is stopped with "
+            "every process it started (SIGTERM, then SIGKILL after 10 seconds). The "
+            "scan halts at its next cancel check, and no further scanner, phase, or "
+            "reporter starts, so a scan canceled before its report phase writes no "
+            "reports. Work that is not waiting on a child process, such as a scanner "
+            "parsing its tool's output, can still finish and write under `scanners/` "
+            "or `converted/`, but `ash_aggregated_results.json` is not written after "
+            "the cancel. When the output directory held a previous scan's results, "
+            "they are put back in place of every result the canceled scan wrote; its "
+            "log, `ash.log`, stays, and an `ash.log.jsonl` already there is left as it "
+            "was. With no previous results, what the scan wrote before it stopped "
+            "stays, except that a cancel during the report phase removes the reports "
+            "that phase wrote. `reports/ash.unused-suppressions.md`, which its "
+            "reporter writes on its own, stays even then."
         ),
-        "params": {"scan_id": {"notes": "The scan to stop"}},
+        "params": {"scan_id": {"notes": "The scan to cancel"}},
         "caveats": [
             (
-                "Returns `success: true` and `status: cancelled`. A scan that already "
-                "finished cannot be cancelled: `success` is `false` and `status` is the "
-                "status it finished with."
-            ),
-            (
-                "The status is `cancelled` at once, while the scan takes up to about 10 "
-                "seconds to stop and put the previous results back. Until then a new "
-                "`run_ash_scan` of the same directory is refused as still stopping, with "
-                "`error_type: MCPResourceError` and `error_category: resource_exhausted` "
-                "(see `run_ash_scan`); retry after a few seconds."
+                "Returns `success`, `status`, and `message`. The status is `cancelled` "
+                "at once. A running scan stops within about 10 seconds; one still "
+                "waiting for another scan of its session stops when that scan ends. "
+                "Until it has stopped, `run_ash_scan` refuses another scan of the same "
+                "directory as still stopping, and the scan counts against "
+                "`max_concurrent_scans`. A scan that has already ended is not changed, "
+                "and the response has `success: false` and the scan's status. For a "
+                "`run_ash_workspace_scan`, `cancel_scan` takes one project's scan id and "
+                "stops that project, which ends `failed`; the other projects carry on."
             ),
         ],
     },
