@@ -319,11 +319,17 @@ def test_a_relative_configured_baseline_is_taken_from_the_source_directory(
     plugin_context, tmp_path, monkeypatch
 ):
     monkeypatch.chdir(tmp_path)
+    # A same-named decoy in the working directory, telling the two apart by
+    # the one plugin each names.
     (tmp_path / "custom.baseline").write_text(
-        json.dumps(baseline_document()), encoding="utf-8"
+        json.dumps(baseline_document(plugins=[{"name": "DecoyMarker"}])),
+        encoding="utf-8",
     )
     in_source = plugin_context.source_dir / "custom.baseline"
-    in_source.write_text(json.dumps(baseline_document()), encoding="utf-8")
+    in_source.write_text(
+        json.dumps(baseline_document(plugins=[{"name": "SourceMarker"}])),
+        encoding="utf-8",
+    )
 
     scanner = DetectSecretsScanner(
         context=plugin_context,
@@ -332,7 +338,15 @@ def test_a_relative_configured_baseline_is_taken_from_the_source_directory(
         ),
     )
 
-    assert Path(scanner.config.options.baseline_file) == in_source
+    # The scanned tree's file is the one read; the option keeps the value as
+    # written (detect_secrets_scanner._baseline_in_use), and the path the scan
+    # reads is resolved from the source directory, not the working directory.
+    assert scanner._baseline_in_use()
+    assert scanner._baseline_file_path() == in_source.resolve()
+    assert str(scanner.config.options.baseline_file) == "custom.baseline"
+    assert [p.name for p in scanner.config.options.scan_settings.plugins_used] == [
+        "SourceMarker"
+    ]
 
 
 def test_explicitly_configured_baseline_wins_over_the_defaults(
