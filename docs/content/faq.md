@@ -107,7 +107,33 @@ ash --mode precommit
 
 ## A scanner hangs. What can I do?
 
-# Configure ignore paths in your ASH config file (.ashrc.yaml in a new project)
+ASH stops a scanner's tool after its `scan_timeout`, 1800 seconds by default. Set a lower
+value under that scanner's options, `scanners.<name>.options.scan_timeout`, and see
+[A scanner hangs](how-to/troubleshoot.md#a-scanner-hangs) for common causes.
+
+## How do I suppress a finding?
+
+Add a suppression with the finding's rule ID, its path, and your reason:
+
+```yaml
+global_settings:
+  suppressions:
+    - rule_id: B602
+      path: src/build.py
+      reason: The command is a constant string; no user input reaches it.
+```
+
+`ash report` shows each finding's rule ID. You can add `expiration` with a date in quotes,
+such as `"2027-06-30"`; from that date the suppression stops applying, and
+`ash config lint` reports it as expired. ASH also honors inline `ash-ignore` comments, and
+scanners honor their own, such as bandit's `# nosec`. See
+[Suppress findings](how-to/suppress-findings.md).
+
+## How do I keep files or directories out of the results?
+
+Add them to `global_settings.ignore_paths`, each with a reason:
+
+```yaml
 global_settings:
   ignore_paths:
     - path: tests/fixtures/**
@@ -128,6 +154,24 @@ ASH leaves its own output out of the scan, whether or not `.gitignore` lists it:
 Pass `--no-honor-ignore-files`, or set `honor_ignore_files: false` in a config file outside the scanned tree. A config file inside the repository being scanned cannot change this setting. See [Ignore files and the scan set](docs/configuration-guide.md#ignore-files-and-the-scan-set).
 
 ## How do I fail only on high-severity findings, or never fail on findings?
+
+Set the threshold under `global_settings`, and `fail_on_findings` at the top level of the
+file, not under `global_settings`:
+
+```yaml
+fail_on_findings: true
+global_settings:
+  severity_threshold: HIGH
+```
+
+With `fail_on_findings: false`, or `--no-fail-on-findings` on the command line, findings
+never fail the scan. An incomplete scan, or one with a vulnerability database or offline
+ruleset past its age bound, still exits 1. See [Set the gate](how-to/set-the-gate.md).
+
+### How do I run specific scanners?
+```bash
+# Run only specific scanners
+ash --scanners bandit,semgrep
 
 # Exclude specific scanners
 ash --exclude-scanners cfn-nag,cdk-nag
