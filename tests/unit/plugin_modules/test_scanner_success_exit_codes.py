@@ -980,7 +980,23 @@ NPM_AUDIT_WITH_ONE_ADVISORY = {
         }
     },
 }
-NPM_AUDIT_WITH_NONE = {"auditReportVersion": 2, "vulnerabilities": {}}
+#: npm's real clean report carries the counting metadata block; a bare report key
+#: is what a truncated tool prints and is refused (npm_audit_scanner._audit_failure).
+NPM_AUDIT_WITH_NONE = {
+    "auditReportVersion": 2,
+    "vulnerabilities": {},
+    "metadata": {
+        "vulnerabilities": {
+            "info": 0,
+            "low": 0,
+            "moderate": 0,
+            "high": 0,
+            "critical": 0,
+            "total": 0,
+        },
+        "dependencies": {"prod": 1, "dev": 0, "total": 1},
+    },
+}
 
 
 def test_npm_audit_grades_the_converted_target_on_its_own_runs(
