@@ -112,7 +112,7 @@ from __future__ import annotations
 import errno
 import os
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any, Callable, List, Optional, Tuple
 
 from automated_security_helper.core.resource_management.error_handling import (
@@ -789,8 +789,9 @@ def _refusal(
     sets on the ``mcp_tools`` side.
     """
 
+    shown = path.as_posix() if isinstance(path, PurePath) else path
     return MCPResourceError(
-        f"{what} is outside the permitted roots: {path}. {remedy}",
+        f"{what} is outside the permitted roots: {shown}. {remedy}",
         context={
             "cwd": str(Path.cwd()),
             "directory_path": str(path),

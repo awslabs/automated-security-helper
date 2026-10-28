@@ -1204,7 +1204,14 @@ class PluginBase(UVToolMixin, BaseModel):
         # this seam that hands over a bare negative code gets the same
         # judgment. Worded without an attribution: the response may have
         # withheld the flag because ASH itself may have ended the tool.
-        if self._scan_kept_flag is None:
+        # A response that carries ``post_run_error`` is left out: the runner
+        # keeps the tool's own negative code there and leaves ``signaled`` out
+        # on purpose when ASH's own stop may have sent the signal (SIGKILL or
+        # SIGTERM after a failed wait while the server is stopping), so the
+        # code names no sender. The post-run error grades that run, and
+        # ``_run_subprocess``'s handler, which folds the same code without a
+        # cause, then agrees with this seam.
+        if self._scan_kept_flag is None and response.get("post_run_error") is not True:
             ending = signal_ending(
                 new_code, str(getattr(self, "command", "") or "tool")
             )
@@ -1366,6 +1373,13 @@ class PluginBase(UVToolMixin, BaseModel):
         cancelled, result_rejected or signaled. Each says the tool's output is
         not the whole scan, so ``ScannerExecutor`` reports the scan as ERROR from
         this, whatever ``scan()`` made of the run.
+
+        ``_process_command_response`` also sets ``signaled`` for a response that
+        hands over a bare negative return code with no flag, worded without an
+        attribution. It does not when the response carries ``post_run_error``:
+        the runner leaves ``signaled`` out there when ASH's own stop may have
+        sent the signal, so no cause is named for that ending and
+        ``scan_post_run_error`` grades the scan instead.
         """
         return self._scan_kept_flag
 
