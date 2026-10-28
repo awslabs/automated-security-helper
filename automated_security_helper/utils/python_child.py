@@ -157,9 +157,9 @@ def uv_child_overrides(argv: Sequence[str]) -> Dict[str, str]:
     the scanned tree, and the installer's empty start directory keeps uv out of it
     only while the system's temporary directory is outside it, so a uv command gets:
 
-    - ``UV_NO_PROJECT=1``, unless it names a ``--project`` itself;
-    - ``UV_PYTHON`` set to ASH's interpreter, unless it names one (``--python``,
-      ``-p``, ``--system``) or the operator set ``UV_PYTHON`` or
+    - ``UV_NO_PROJECT=1``, unless it names a ``uv --project`` itself;
+    - ``UV_PYTHON`` set to ASH's interpreter, unless it names one (``uv --python``,
+      ``uv -p``, ``uv --system``) or the operator set ``UV_PYTHON`` or
       ``UV_SYSTEM_PYTHON``.
 
     ``uv tool`` commands and ``uvx`` get nothing: they read neither, and an
