@@ -93,7 +93,7 @@ from typing import (
 
 from pydantic import BaseModel
 
-from automated_security_helper.config.config_sources import describe_config_path
+from automated_security_helper.config.sandbox_grants import described
 from automated_security_helper.config.untrusted_source import (
     IN_TREE_OR_DELIVERED,
     UntrustedSource,
@@ -271,6 +271,7 @@ def confine_reporter_destinations(
     *,
     from_overrides: bool = False,
     in_tree_keys: Sequence[str] = (),
+    environment_paths: Collection[Path] = (),
 ) -> None:
     """Replace the destination options an in-tree file set with the trusted base's.
 
@@ -302,6 +303,9 @@ def confine_reporter_destinations(
             before this call (``config._in_tree_reporter_keys``). They are used
             along with the ones parsed from *in_tree_documents* while the
             warning is built, so a section is quoted as the file wrote it.
+        environment_paths: Those of *in_tree* the environment chose (a base an
+            ``extends`` entry named with a value read from the environment, and
+            every base below it), which the warning names ``<value>``.
     """
     from automated_security_helper.config.resolve_config import (
         apply_config_overrides,
@@ -337,6 +341,7 @@ def confine_reporter_destinations(
         source,
         # The four built-in reporters all send findings off the host.
         off_host=tuple(REPORTER_ENABLED_DEFAULTS),
+        environment_paths=environment_paths,
     )
 
 
@@ -648,6 +653,7 @@ def _confine(
     source: UntrustedSource = IN_TREE_OR_DELIVERED,
     whole_sections: Sequence[str] = (),
     off_host: Collection[str] = (),
+    environment_paths: Collection[Path] = (),
 ) -> None:
     """Set each reporter's ``destinations`` options, and the ``enabled`` of each
     reporter of ``enabled_defaults``, to the trusted base's, with one warning.
@@ -694,7 +700,13 @@ def _confine(
         ignored.extend(key for key in found if key not in named)
     if not ignored:
         return
-    files = ", ".join(describe_config_path(path) for path in in_tree)
+    # A file reached through a value read from the environment is named
+    # ``<value>``, as the other confinement warnings name it: the path holds the
+    # value. The paths recorded on ``config`` after this step ran
+    # (record_operator_reporters) count too, for a later call of this function.
+    files = described(
+        in_tree, {*environment_paths, *config._repository_config_environment_paths}
+    )
     ASH_LOGGER.warning(
         f"Ignoring {', '.join(ignored)} from {files}: {source.reason}, and these "
         "options choose whether findings are sent, where they are sent or written, "

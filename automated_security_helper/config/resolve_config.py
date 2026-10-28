@@ -2426,6 +2426,7 @@ def resolve_config(
         list(in_tree),
         source=reporter_source,
         in_tree_documents=tier_two_documents,
+        environment_paths=environment_paths,
     )
     confine_scanner_config_files(
         config, trusted, tier_two_overrides, list(in_tree), source=tier_two_source
