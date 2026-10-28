@@ -15004,6 +15004,36 @@ def test_a_refused_profile_leaves_no_file_holding_the_environment_value(
     assert _files_holding(tmp_path, _ENV_PROBE_VALUE) == []
 
 
+def test_a_workspace_scan_refuses_a_value_inside_a_path_under_the_select_profile_error_type(
+    tmp_path: Path,
+) -> None:
+    """mcp-server.md (Config profiles).
+
+    The page names one refusal for ``select_profile`` and a workspace scan's
+    ``profile``, so a client that branches on ``error_type`` reads one spelling
+    from either tool: ``environment_value_in_longer_string``, not the name of the
+    exception class. The reply still must not hold the value.
+    """
+    assert_on_page(MCP_SERVER, _A_VALUE_INSIDE_A_LONGER_STRING_IS_REFUSED)
+    profile = _profile_anchoring_a_value(tmp_path / "operator")
+    env = {**_mcp_child_env(tmp_path), _ENV_PROBE: _ENV_PROBE_VALUE}
+    command = [*_ASH_MODULE, "mcp", "--quiet"]
+    command += ["--profile", f"{_PROFILE_NAME}={profile}"]
+    server = _McpStdioClient(command, tmp_path, env)
+    try:
+        answer = server.tool(
+            "run_ash_workspace_scan",
+            workspace_file=str(_a_workspace_of_one_project(tmp_path)),
+            profile=_PROFILE_NAME,
+        )
+    finally:
+        server.close()
+
+    assert answer.get("success") is False, answer
+    assert answer["error_type"] == "environment_value_in_longer_string", answer
+    assert _ENV_PROBE_VALUE not in json.dumps(answer), answer
+
+
 # --------------------------------------------------------------------------- #
 # A value read from the environment in a message
 # --------------------------------------------------------------------------- #
