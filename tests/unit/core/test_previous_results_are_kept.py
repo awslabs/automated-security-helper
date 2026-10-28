@@ -75,13 +75,16 @@ def _with_previous_results(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def _contents(output: Path) -> Dict[str, str]:
-    """Every file under the output directory except the logs and the marker."""
+    """Every file under the output directory except the logs, the marker and the
+    ``.gitignore`` ASH writes at the top of an output directory inside the tree
+    (orchestrator.py, ``ensure_directories``), which no earlier run left."""
     return {
         p.relative_to(output).as_posix(): p.read_text(encoding="utf-8")
         for p in sorted(output.rglob("*"))
         if p.is_file()
         and not p.name.startswith("ash.log")
         and p.name != RESTORED_MARKER_NAME
+        and p.relative_to(output).as_posix() != ".gitignore"
     }
 
 
