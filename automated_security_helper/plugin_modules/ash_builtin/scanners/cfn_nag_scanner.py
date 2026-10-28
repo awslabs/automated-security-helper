@@ -489,9 +489,6 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         Raises:
             ScannerError: If the scan fails or results cannot be parsed
         """
-        if global_ignore_paths is None:
-            global_ignore_paths = []
-
         # Top of the method, above all five early returns, for the reason the same pair
         # carries in cdk_nag_scanner: an initialization placed further down is inherited by
         # whichever return sits above it, and the executor then reads stale attributes from
@@ -575,7 +572,9 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             # nothing_to_scan_reason, which answers from this same selection. The
             # selection drops the files the global ignore paths ignore and honors
             # the repository's ignore files as the scan set does.
-            scannable = cloudformation_candidate_files(self.context, target_type)
+            scannable = cloudformation_candidate_files(
+                self.context, target_type, global_ignore_paths
+            )
             joined_files = "\n- ".join(scannable)
             ASH_LOGGER.debug(
                 f"Found {len(scannable)} JSON/YAML files:\n- {joined_files}"
