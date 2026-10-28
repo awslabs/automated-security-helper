@@ -95,6 +95,12 @@ MAX_CALL_DEPTH = 24
 #: Past this many alternatives a value's dicts are merged into one, so that a
 #: chain of spreads cannot grow without bound. Narrowing is then less precise.
 MAX_VARIANTS = 64
+#: How many expressions one :class:`Evaluator` evaluates before it stops with
+#: :class:`ContractWorkBudgetExceeded`. MAX_CALL_DEPTH bounds the depth of a walk,
+#: not its width, so a call chain that is read again for every caller grows without
+#: bound; a generous cap turns that into an error naming where it was reading,
+#: where a run would otherwise never return.
+MAX_EVALUATIONS = 20_000_000
 #: Package functions that run their first argument, a callable, with the keyword
 #: arguments that follow it and return what it returns: ``await _run_clone(f,
 #: **kw)`` is ``f(**kw)`` on a thread pool. They reach ``f`` through
@@ -111,6 +117,10 @@ BUILTIN_EXCEPTIONS = frozenset(
     if isinstance(getattr(builtins, name), type)
     and issubclass(getattr(builtins, name), BaseException)
 )
+
+
+class ContractWorkBudgetExceeded(RuntimeError):
+    """The evaluator read more expressions than ``MAX_EVALUATIONS`` allows."""
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +191,15 @@ class Shape:
     """What an expression can evaluate to: each alternative the source gives."""
 
     variants: tuple[Variant, ...] = ()
+
+    def __hash__(self) -> int:
+        # The call memo keys on shapes, which nest; hashing one at every call
+        # would walk it every time, so the hash is kept on the instance.
+        cached = self.__dict__.get("_hash")
+        if cached is None:
+            cached = hash(self.variants)
+            object.__setattr__(self, "_hash", cached)
+        return cached
 
     def dicts(self) -> list[DictV]:
         return [v for v in self.variants if isinstance(v, DictV)]
@@ -729,6 +748,8 @@ class _Scope:
     poisoned: dict[str, str] = field(default_factory=dict)
     #: A scope a test made: its bindings narrow the function's own names.
     conditioned: bool = False
+    #: Where the call that made this function scope sits on the evaluator's stack.
+    frame: int = -1
 
     def site(self, node: ast.AST) -> str:
         return f"{self.module.rel}:{getattr(node, 'lineno', 0)}"
@@ -744,6 +765,10 @@ class _Scope:
         return None
 
 
+#: ``Evaluator._guard_floor`` when no guard has answered.
+_NO_GUARD = 1 << 30
+
+
 def _str_constant(node: ast.AST) -> Optional[str]:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
@@ -753,11 +778,21 @@ def _str_constant(node: ast.AST) -> Optional[str]:
 class Evaluator:
     """Evaluates expressions of the package's source to a :class:`Shape`."""
 
-    def __init__(self, source: Source):
+    def __init__(self, source: Source, max_evaluations: int = MAX_EVALUATIONS):
         self.source = source
+        self.max_evaluations = max_evaluations
+        self._evaluations = 0
         self._returns: dict[int, Shape] = {}
+        #: Calls that carry bindings or a parent scope, by what :meth:`_call_key`
+        #: makes of them; only results that no recursion guard shaped are kept.
+        self._bound_returns: dict[tuple, Shape] = {}
+        #: The lowest stack position a recursion or depth guard answered for since
+        #: the call being read began; see :meth:`_note_guard`.
+        self._guard_floor = _NO_GUARD
         self._locals: dict[int, _Locals] = {}
         self._stack: list[int] = []
+        #: The ``path:line`` of each function on ``_stack``, for the budget error.
+        self._sites: list[str] = []
         self._names_in_progress: set[tuple[int, str]] = set()
         self._calls_by_name: Optional[dict[str, list[tuple[_Module, ast.Call]]]] = None
         self._caught_memo: dict[int, Shape] = {}
@@ -842,6 +877,12 @@ class Evaluator:
             return scope.bindings[name]
         key = (id(scope) if scope.func is not None else id(scope.module), name)
         if key in self._names_in_progress:
+            # The partial value stands for a read that is already under way, which
+            # only the function that owns the name (or no function: a module name)
+            # can tell from the outside.
+            self._guard_floor = min(
+                self._guard_floor, scope.frame if scope.func is not None else -1
+            )
             return scope.bindings.get(name, NOTHING)
         self._names_in_progress.add(key)
         try:
@@ -1002,6 +1043,15 @@ class Evaluator:
     def evaluate(self, node: Optional[ast.AST], scope: _Scope) -> Shape:
         if node is None:
             return NOTHING
+        self._evaluations += 1
+        if self._evaluations > self.max_evaluations:
+            raise ContractWorkBudgetExceeded(
+                f"scripts/_mcp_contract.py: Evaluator.evaluate read more than"
+                f" {self.max_evaluations} expressions without finishing, while"
+                f" reading {' -> '.join(self._sites[-6:]) or 'the module level'}"
+                f" (innermost last); the walk over the server's return statements"
+                f" is not converging"
+            )
         method = getattr(self, f"_eval_{type(node).__name__}", None)
         if method is None:
             return unread(scope.site(node))
@@ -2019,14 +2069,32 @@ class Evaluator:
         parent: Optional[_Scope] = None,
         bindings: Optional[dict[str, Shape]] = None,
     ) -> Shape:
-        """The union of everything ``func`` can return."""
+        """The union of everything ``func`` can return.
+
+        A call with no bindings and no parent scope is read once for all callers.
+        One that carries either is read once per distinct (function, bindings,
+        parent scope). Read afresh for every caller, and again for every name an
+        unpacking binds from it, the work grows with the number of call paths to
+        it, which is exponential in the depth of a chain of such calls. Its result
+        is kept only when no recursion or depth guard shaped it from outside the
+        call (:meth:`_note_guard`), so a kept result is the one a fresh read gives.
+        """
         site = f"{module.rel}:{getattr(func, 'lineno', 0)}"
         if id(func) in self._stack or len(self._stack) >= MAX_CALL_DEPTH:
+            self._note_guard(id(func))
             return unread(f"{site} (recursive or too deep)")
         memo = not bindings and parent is None
         if memo and id(func) in self._returns:
             return self._returns[id(func)]
+        key = None
+        if not memo:
+            key = self._call_key(func, owner, owner_module, parent, bindings)
+        if key is not None and key in self._bound_returns:
+            return self._bound_returns[key]
+        position = len(self._stack)
+        outer_floor, self._guard_floor = self._guard_floor, _NO_GUARD
         self._stack.append(id(func))
+        self._sites.append(site)
         try:
             local = self._locals_for(func, module)
             scope = _Scope(
@@ -2037,6 +2105,7 @@ class Evaluator:
                 parent=parent,
                 bindings=dict(bindings or {}),
                 locals=local,
+                frame=position,
             )
             if local.yields:
                 result = unread(f"{site} (a generator)")
@@ -2060,9 +2129,53 @@ class Evaluator:
                 )
         finally:
             self._stack.pop()
+            self._sites.pop()
+            floor = self._guard_floor
+            self._guard_floor = min(outer_floor, floor)
         if memo:
             self._returns[id(func)] = result
+        elif key is not None and floor >= position:
+            self._bound_returns[key] = result
         return result
+
+    def _note_guard(self, func_id: int) -> None:
+        """Record that a guard answered "recursive or too deep" for ``func_id``.
+
+        What a read returns then depends on what is on the stack above it. A guard
+        for a function on the stack answers for the call at that position, so only
+        calls above it depend on the stack; the depth limit answers for the depth
+        of the whole stack, which is position -1 here, so no call is kept.
+        """
+        position = self._stack.index(func_id) if func_id in self._stack else -1
+        self._guard_floor = min(self._guard_floor, position)
+
+    def _call_key(
+        self,
+        func: ast.AST,
+        owner: Optional[ast.ClassDef],
+        owner_module: Optional[_Module],
+        parent: Optional[_Scope],
+        bindings: Optional[dict[str, Shape]],
+    ) -> Optional[tuple]:
+        """What a call's result depends on, as a key; None when it cannot be one.
+
+        Shapes are frozen dataclasses of tuples, strings and constants, so they
+        hash. One that did not would make the call uncached, read afresh each time,
+        rather than be keyed on its ``repr`` or ``id``. A parent scope is keyed by
+        identity: it is the scope of one read of the function around the nested one.
+        """
+        key = (
+            id(func),
+            id(owner),
+            id(owner_module),
+            parent,
+            tuple(sorted((bindings or {}).items(), key=lambda item: item[0])),
+        )
+        try:
+            hash(key)
+        except TypeError:
+            return None
+        return key
 
     def _reachable(
         self, guards: tuple[tuple[ast.expr, bool], ...], scope: _Scope
