@@ -128,6 +128,15 @@ if name == "uv":
         sys.exit(0)
     if args[:2] == ["tool", "install"]:
         sys.exit(1)
+    if args[:2] == ["pip", "install"] and "--dry-run" in args:
+        # verify_pre_installed_tool asks whether the environment that provides
+        # jupyter-nbconvert already satisfies the requirement; uv answers this
+        # line and exits 0 when it does.
+        if INSTALLED.exists():
+            print("Would make no changes")
+            sys.exit(0)
+        print("error: No solution found when resolving dependencies", file=sys.stderr)
+        sys.exit(1)
     if args[:2] == ["tool", "run"]:
         rest = args[2:]
         while rest and rest[0].startswith("-"):
@@ -247,6 +256,9 @@ def backend(monkeypatch):
 def _isolate_tool_lookup(monkeypatch, tools: _Tools, home: Path, *, online: bool):
     monkeypatch.setenv("PATH", str(tools.bin))
     monkeypatch.setenv("ASH_BIN_PATH", str(tools.bin))
+    # The uv beside this interpreter is preferred over PATH's; the stand-in is
+    # the uv every check here must reach.
+    monkeypatch.setattr(uv_tool_runner, "bundled_uv_executable", lambda: None)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv(TOKEN_VARIABLE, "token-value")
     if online:
@@ -562,10 +574,17 @@ class TestAnUnconfinableNotebookIsRefused:
         assert row is not None, (
             f"no jupyter row; rows: {sorted(results.converter_results)}"
         )
-        dumped = json.dumps(row.model_dump(mode="json"), default=str)
-        assert "analysis.ipynb" in dumped, (
-            f"the jupyter row does not record the refused notebook: {dumped}"
+        # The sandbox refuses the dependency check itself (plugin_probe_scope
+        # gives a refusing scope), so the converter is unavailable before
+        # convert() runs: the row says so, with the notebook counted as a
+        # candidate, and the completeness gate lists the converter.
+        from automated_security_helper.interactions.run_ash_scan import (
+            incomplete_converters,
         )
+
+        assert row.dependencies_satisfied is False, row
+        assert row.candidate_inputs == 1, row
+        assert [r.name for r in incomplete_converters(results)] == ["jupyter"]
 
 
 class TestAnUnconfinableNotebookFailsTheScan:
