@@ -18,8 +18,9 @@ a ``--config`` that does not exist. So are ``ash scan``'s refusal of a config
 file that does not exist, named by ``--config`` or by ASH_CONFIG, and of an
 ASH_CONFIG file that does not parse, refused in the shared formatter's one
 line ("<path> could not be parsed (...)"). The load never falls back to the
-defaults for a file that does not parse: it refuses, exit 3, and the file is
-replaced by the defaults only when there is no config file at all.
+defaults for a file that does not parse or does not exist: it refuses, exit 3,
+and the file is replaced by the defaults only when there is no config file at
+all.
 
 So are a scan's and a workspace scan's refusals of an unexpected error, whose
 text can name a path (an OSError names its files as given), and of a scanner
@@ -542,19 +543,39 @@ def test_scan_names_an_ash_config_that_does_not_parse_on_one_line(
     assert "could not be parsed (" in result.output, result.output
 
 
-def test_the_load_s_warning_names_a_missing_config_on_one_line(
-    tmp_path, monkeypatch, _logged
+def test_the_load_s_refusal_of_a_missing_config_is_shown_on_one_line(
+    tmp_path, monkeypatch, capsys
 ):
-    """resolve_config's warning for a config path that does not exist, when its
-    caller lets it fall back to the defaults."""
+    """resolve_config refuses a config path that does not exist, even when its
+    caller allows the defaults as a fallback, and the scan's printer shows that
+    refusal on one line. The exception holds the path as the caller wrote it;
+    the printer (run_ash_scan._printed_config_refusal) writes the path's newline
+    as ``\\x0a``."""
     from automated_security_helper.config.resolve_config import resolve_config
+    from automated_security_helper.core.exceptions import ASHConfigFileNotFoundError
+    from automated_security_helper.interactions.run_ash_scan import (
+        ScanRefusedExit,
+        _printed_config_refusal,
+    )
 
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     missing = tmp_path / "a\nmissing.yaml"
 
-    resolve_config(config_path=missing, source_dir=tmp_path, fallback_to_default=True)
+    with pytest.raises(ASHConfigFileNotFoundError) as refused:
+        resolve_config(
+            config_path=missing, source_dir=tmp_path, fallback_to_default=True
+        )
 
-    _assert_logged_on_one_line(_logged, "Configuration file not found:", "missing.yaml")
+    text = str(refused.value)
+    assert text.startswith("Configuration file not found: "), text
+    assert missing.as_posix() in text, text
+
+    with pytest.raises(ScanRefusedExit):
+        _printed_config_refusal(3, refused.value)
+
+    output = capsys.readouterr().out
+    assert "Configuration file not found: " in output, output
+    _assert_one_line(output, "missing.yaml")
 
 
 def _unreadable(path) -> None:
