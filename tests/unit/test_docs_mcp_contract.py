@@ -707,6 +707,110 @@ def test_error_types_carried_by_a_caught_exception(planted_contracts):
     assert clone.error_types_unread == ()
 
 
+PLANTED_STEP_SERVER = """
+from automated_security_helper.cli.tools import mcp_fetch, mcp_loose
+
+mcp = object()
+
+
+@mcp.tool()
+def fetch(url):
+    return mcp_fetch(url)
+
+
+@mcp.tool()
+def loose(url):
+    return mcp_loose(url)
+"""
+
+PLANTED_STEP_TOOLS = """
+FETCH_FAILED = "fetch_failed"
+PARSE_FAILED = "parse_failed"
+LOOSE_FAILED = "loose_failed"
+
+
+class StepError(RuntimeError):
+    def __init__(self, message, error_type, *, retried=False):
+        super().__init__(message)
+        self.error_type = error_type
+        self.retried = retried
+
+
+def _step(url, *, what, error_type):
+    try:
+        return len(url)
+    except (OSError, ValueError) as e:
+        raise StepError(f"{what} failed ({e})", error_type) from e
+
+
+def _fetch(url):
+    try:
+        _step(url, what="fetch", error_type=FETCH_FAILED)
+        _step(url, what="parse", error_type=PARSE_FAILED)
+    except StepError as e:
+        raise StepError(f"retry: {e}", e.error_type, retried=True) from e
+
+
+def mcp_fetch(url):
+    try:
+        _fetch(url)
+    except StepError as e:
+        return {"success": False, "error": str(e), "error_type": e.error_type}
+    return {"success": True}
+
+
+class LooseError(RuntimeError):
+    def __init__(self, message, error_type):
+        super().__init__(message)
+        self.error_type = error_type
+
+
+def _loose_step(url, error_type):
+    raise LooseError("loose", error_type)
+
+
+def mcp_loose(url):
+    # The helper is also reached through a name, which this reader does not follow.
+    step = _loose_step
+    try:
+        _loose_step(url, LOOSE_FAILED)
+        step(url, url)
+    except LooseError as e:
+        return {"success": False, "error_type": e.error_type}
+    return {"success": True}
+"""
+
+
+@pytest.fixture
+def planted_step_contracts(tmp_path: Path):
+    package = _plant_server(tmp_path, PLANTED_STEP_SERVER)
+    (package / "cli" / "tools.py").write_text(
+        textwrap.dedent(PLANTED_STEP_TOOLS).lstrip("\n"), encoding="utf-8"
+    )
+    return _reader().tool_contracts(package)
+
+
+def test_a_type_passed_to_a_helper_and_a_type_raised_again_are_read(
+    planted_step_contracts,
+):
+    """``raise StepError(msg, error_type)`` in a helper reads as what every call of
+    the helper passes, and ``raise StepError(msg, e.error_type)`` in the handler
+    of ``except StepError as e`` adds nothing of its own."""
+    fetch = planted_step_contracts["fetch"]
+    assert fetch.error_types == ("fetch_failed", "parse_failed")
+    assert fetch.error_types_unread == ()
+
+
+def test_a_helper_reached_other_than_by_a_call_keeps_its_type_unread(
+    planted_step_contracts,
+):
+    """With ``step = _loose_step`` the helper has a caller the reader does not
+    place, so the type it is given stays unread rather than guessed."""
+    loose = planted_step_contracts["loose"]
+    assert loose.error_types_unread != ()
+    assert "loose_failed" not in loose.error_types
+
+
 PLANTED_EXECUTOR_SERVER = """
 import asyncio
 import functools
