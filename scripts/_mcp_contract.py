@@ -26,6 +26,15 @@ Each tool function's ``return`` values are evaluated over the AST, through:
   to their parameters, nested functions, methods on ``self``, and methods on a
   variable whose class follows from a constructor or a return annotation;
 * attributes of an object built in the package (``_Result(error={...})``);
+* ``except K as e`` ... ``e.error_type``: the argument of every construction of
+  ``K`` and its package subclasses, read in the construction's module, plus two
+  forms that scope cannot place. An undecorated module-level helper's parameter
+  (``raise K(msg, error_type)``) is what every call of the helper passes, when
+  every use of the helper's name in the package is a call this reader resolves
+  (no ``import ... as``, no alias, no spread argument, not in a lambda or
+  comprehension). ``raise K(msg, e.error_type)`` inside ``except K as e`` adds
+  nothing when ``__init__`` stores the parameter as the bare ``self.error_type
+  = error_type``; a class built only that way reads as unread;
 * module string constants, imported ones included, enum members' ``.value``, and
   ``type(e).__name__``, which is recorded as "the class name of an exception";
 * a guard on a ``return``: under ``if r.get("error_type") in (A, B):`` the
@@ -495,6 +504,16 @@ class _Locals:
     yields: bool = False
 
 
+def _is_self_attribute(node: ast.AST, attr: str) -> bool:
+    """Whether ``node`` is ``self.<attr>``."""
+    return (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "self"
+        and node.attr == attr
+    )
+
+
 def _own_nodes(func: ast.AST) -> Iterator[ast.AST]:
     """Every node of a function's body, without the bodies of functions inside it."""
     stack = list(reversed(getattr(func, "body", [])))
@@ -813,6 +832,9 @@ class Evaluator:
         self._name_uses: Optional[dict[str, int]] = None
         self._renamed_imports: frozenset[str] = frozenset()
         self._passed_memo: dict[tuple[int, str], Optional[Shape]] = {}
+        #: (call node, caught class node) of the constructions that raise a caught
+        #: exception again with its own attribute; see :meth:`_caught`.
+        self._reraise_calls: set[tuple[int, int]] = set()
         self._rebound_memo: dict[int, frozenset[str]] = {}
         self._rebindable_memo: dict[int, frozenset[str]] = {}
         self._flags_memo: dict[int, frozenset[str]] = {}
@@ -1816,11 +1838,13 @@ class Evaluator:
           raises it with the type its caller names): what every call of that
           function passes for it, see :meth:`_passed_through`.
         * ``e.<param>`` in a handler of ``except K as e`` where ``K`` is the
-          exception being collected or one of its package subclasses, and
-          ``__init__`` stores ``<param>`` only as ``self.<param>``: the exception
-          is raised again with the type the caught one carries. That type is
-          one of the types some construction in the family passes, and those
-          are all in the result already, so this argument adds nothing.
+          exception being collected or one of its package subclasses, ``e`` is
+          bound only by handlers, and ``__init__`` stores ``<param>`` only as the
+          bare ``self.<param> = <param>``: the exception is raised again with the
+          type the caught one carries. That type is one of the types some other
+          construction in the family passes, and those are in the result already,
+          so this argument adds nothing. :meth:`_caught` reads a family with no
+          such other construction as unread.
         """
         func, handlers = self._construction_site(module, call)
         if func is None:
@@ -1835,6 +1859,7 @@ class Evaluator:
                 value.value.id, param, func, handlers, module, init, family
             )
         ):
+            self._reraise_calls.add((id(call), id(family[0])))
             return NOTHING
         return None
 
@@ -1883,13 +1908,24 @@ class Evaluator:
             a.arg for a in [*args.posonlyargs, *args.args, *args.kwonlyargs]
         }:
             return False
+        return not self._rebinds(func, module, name)
+
+    def _rebinds(
+        self, func: ast.AST, module: _Module, name: str, caught_ok: bool = False
+    ) -> bool:
+        """Whether ``func`` can bind ``name`` by anything this reader does not
+        follow to one value: an assignment, a key set or mutating call, a loop,
+        ``with`` or ``match`` target, a local import or ``def``, a ``global`` or
+        ``nonlocal``, and (unless ``caught_ok``) an ``except ... as name``."""
         local = self._locals_for(func, module)
-        return not (
+        return bool(
             local.assigns.get(name)
             or local.key_sets.get(name)
             or local.calls.get(name)
             or name in local.unread
-            or name in local.caught
+            or name in local.imports
+            or name in local.defs
+            or (name in local.caught and not caught_ok)
             or self._func_rebindable(func, name)
         )
 
@@ -2007,13 +2043,8 @@ class Evaluator:
         if caught is None:
             return False
         if isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            local = self._locals_for(func, module)
-            if (
-                name in local.params
-                or local.assigns.get(name)
-                or local.key_sets.get(name)
-                or local.calls.get(name)
-                or name in local.unread
+            if name in self._locals_for(func, module).params or self._rebinds(
+                func, module, name, caught_ok=True
             ):
                 return False
         scope = _Scope(module=module)
@@ -2026,25 +2057,34 @@ class Evaluator:
                 or not any(kind.node is node for node in family)
             ):
                 return False
-        # The caught object's attribute reaches the new one's attribute of the
-        # same name only: ``__init__`` stores the parameter as ``self.<param>``
-        # and nowhere else.
+        # The caught object's attribute must come out the same on the new one:
+        # ``__init__`` stores the parameter as ``self.<param> = <param>``, the
+        # bare name, and uses it nowhere else in a store. A transform
+        # (``f"step_{p}"``, ``CODES[p]``) or another attribute makes the new
+        # object carry a value no construction passes.
         for stmt in _own_nodes(init.node):  # type: ignore[arg-type]
-            if not isinstance(stmt, (ast.Assign, ast.AnnAssign)) or stmt.value is None:
+            if isinstance(stmt, ast.AugAssign):
+                targets, stored = [stmt.target], stmt.value
+            elif isinstance(stmt, (ast.Assign, ast.AnnAssign)) and stmt.value:
+                targets = (
+                    stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+                )
+                stored = stmt.value
+            else:
                 continue
-            if not any(
-                isinstance(n, ast.Name) and n.id == param for n in ast.walk(stmt.value)
-            ):
-                continue
-            targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
-            for target in targets:
-                if not (
-                    isinstance(target, ast.Attribute)
-                    and isinstance(target.value, ast.Name)
-                    and target.value.id == "self"
-                    and target.attr == param
-                ):
+            into_param = any(_is_self_attribute(t, param) for t in targets)
+            mentions = any(
+                isinstance(n, ast.Name) and n.id == param for n in ast.walk(stored)
+            )
+            if isinstance(stmt, ast.AugAssign):
+                if into_param or mentions:
                     return False
+            elif mentions and not (
+                all(_is_self_attribute(t, param) for t in targets)
+                and isinstance(stored, ast.Name)
+                and stored.id == param
+            ):
+                return False
         return True
 
     def _caught(self, type_node: ast.expr, scope: _Scope) -> Shape:
@@ -2052,7 +2092,10 @@ class Evaluator:
 
         Each construction's arguments are read in its module's scope, so a
         module constant passed to the exception is followed and a local
-        variable is unread. The package's subclasses of ``X`` count too, since
+        variable is unread, with two exceptions that
+        :meth:`_construction_argument` states: a parameter of the module-level
+        helper that raises, and a caught exception's attribute raised again. The
+        package's subclasses of ``X`` count too, since
         ``except X`` catches them; each carries the class attributes it sets
         (``error_type = "..."``). Exceptions the package does not define are
         unread.
@@ -2069,16 +2112,24 @@ class Evaluator:
                 kinds = [ref, *self._subclasses(ref)]
                 family = [kind.node for kind in kinds if kind.node is not None]
                 built = [
-                    self._instance(kind, call, _Scope(module=module), family)
+                    (call, self._instance(kind, call, _Scope(module=module), family))
                     for kind in kinds
                     for module, call in self._constructions(kind.node.name)  # type: ignore[union-attr]
                     if self._is_class(call.func, module, kind.node)  # type: ignore[arg-type]
                 ]
+                # A construction that only raises a caught exception again adds
+                # no value of its own. Without one that does, the exceptions
+                # come from somewhere this reader does not see (an alias of the
+                # class, ``cls(...)``, a partial), so nothing is known.
+                grounded = [
+                    c for c, _ in built if (id(c), key) not in self._reraise_calls
+                ]
                 self._caught_memo[key] = (
-                    union(*built)
-                    if built
+                    union(*(shape for _, shape in built))
+                    if grounded
                     else unread(
-                        f"{ref.module.rel}:{getattr(ref.node, 'lineno', 0)} (never built)"
+                        f"{ref.module.rel}:{getattr(ref.node, 'lineno', 0)}"
+                        f" (never built, or only raised again from a caught one)"
                     )
                 )
             parts.append(self._caught_memo[key])
