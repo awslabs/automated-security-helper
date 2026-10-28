@@ -11,7 +11,10 @@ documentation site with ``mkdocs gh-deploy --clean --force``, which needs
 job's ``if:`` admits a push to main or ``startsWith(github.ref, 'refs/tags/')``.
 So pushing any tag at all, on any commit, runs the deploy job: it checks out that
 commit, runs ``uv sync`` and mkdocs over it while holding a token that can write
-to the repository, and publishes the site from it.
+to the repository, and publishes the site from it. The deploy job now runs
+``scripts/docs_versions.py deploy``, which publishes one version with mike, so the
+``gh-deploy`` wording here and below describes the older form, and the finder
+``_deploys_docs`` recognizes all three forms.
 
 Release tags in this repository are ``v<major>.<minor>.<patch>``: the release
 workflow creates ``TAG="v${VERSION}"`` (``ash-tag-on-merge.yml``). A tag of any
@@ -133,7 +136,11 @@ def _can_write_contents(workflow: ga.Workflow, job: dict[str, Any]) -> bool:
 
 def _deploys_docs(job: dict[str, Any]) -> bool:
     runs = " ".join(str(step.get("run") or "") for step in job.get("steps") or [])
-    return "gh-deploy" in runs or "mike deploy" in runs
+    return (
+        "gh-deploy" in runs
+        or "mike deploy" in runs
+        or "docs_versions.py deploy" in runs
+    )
 
 
 def _docs_deploy_jobs():
@@ -144,7 +151,8 @@ def _docs_deploy_jobs():
         if _deploys_docs(job)
     ]
     assert found, (
-        "no job runs `mkdocs gh-deploy` or `mike deploy`; the docs deploy job was "
+        "no job runs `mkdocs gh-deploy`, `mike deploy` or "
+        "`scripts/docs_versions.py deploy`; the docs deploy job was "
         "not found, so the controls below would compare nothing"
     )
     return found

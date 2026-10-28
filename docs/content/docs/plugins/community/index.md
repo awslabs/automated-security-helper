@@ -21,7 +21,7 @@ We encourage the community to develop and share plugins that extend ASH's capabi
 
 To contribute a community plugin:
 
-1. Develop your plugin following the [Plugin Development Guide](../../plugins/development-guide.md)
+1. Develop your plugin following the [Plugin Development Guide](../../../plugins/write-a-scanner.md)
 2. Host your plugin in a public repository
 3. Open a pull request to add your plugin to this documentation
 4. Include the following information in your PR:
@@ -93,9 +93,10 @@ plugins:
 
 ### Example Usage
 
+<!-- doctest: illustrative reason="my_plugin is a placeholder for the module of a plugin you installed" -->
 ```bash
 # Example command line usage
-ash --plugins my-plugin
+ash scan --ash-plugin-modules my_plugin
 ```
 
-> [!CAUTION] > **Community Plugin Security**: Community plugins are third-party packages that you install separately (e.g., via `pip install`). Always verify the source and trustworthiness of these packages before installation. ASH's built-in plugins are included directly in the ASH repository under `automated_security_helper/plugin_modules` and don't require separate package installation.
+> [!CAUTION] > **Community Plugin Security**: The community plugins listed above ship with ASH, in `automated_security_helper/plugin_modules`, and need no separate package. `ash scan` loads one only when its module is listed in `ash_plugin_modules` or passed with `--ash-plugin-modules`. Each runs an external tool: the container image includes trivy, and you install the Snyk CLI and ferret-scan yourself, so check where each tool comes from. A plugin published outside ASH is a third-party package you install separately (for example with `pip install`), and ASH imports it into its own process, so verify its source and trustworthiness before installing it.

@@ -25,6 +25,9 @@ from automated_security_helper.cli.mcp import (
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.core.exceptions import ASHValidationError
 
+# Every all-interfaces host below is the non-loopback bind the opt-out exists
+# for, so the address is the condition under test. The trailing bandit markers
+# say that to B104.
 INITIALIZE = {
     "jsonrpc": "2.0",
     "id": 1,
@@ -107,7 +110,7 @@ def test_the_builders_refuse_the_opt_out_with_an_allowlist(build) -> None:
     [
         {  # nosec B104
             "transport": "streamable-http",
-            "host": "0.0.0.0",
+            "host": "0.0.0.0",  # nosec B104
             "allowed_host": ["ash-mcp.example.com"],
             "trust_upstream_host_check": True,
         },

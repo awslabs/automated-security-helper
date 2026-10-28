@@ -80,11 +80,11 @@ async def _crashed_workspace(tmp_path, monkeypatch, collected):
     environment and whose run crashes quoting it; return every surface."""
     from automated_security_helper.cli.mcp import workspace as workspace_module
 
-    monkeypatch.setenv("ASH_WS_CRASH_TOKEN", SECRET)
+    monkeypatch.setenv("ASH_WS_CRASH_HELD", SECRET)
     workspace_file = _workspace(tmp_path, "api", "web")
     for name in ("api", "web"):
         (workspace_file.parent / name / ".ash.yaml").write_text(
-            "project_name: ${ASH_WS_CRASH_TOKEN:unset}\n", encoding="utf-8"
+            "project_name: ${ASH_WS_CRASH_HELD:unset}\n", encoding="utf-8"
         )
 
     def _execute(plan, settings, **kwargs):
@@ -153,11 +153,11 @@ async def test_a_resource_error_raised_by_the_run_hides_the_value(
         MCPResourceError,
     )
 
-    monkeypatch.setenv("ASH_WS_CRASH_TOKEN", SECRET)
+    monkeypatch.setenv("ASH_WS_CRASH_HELD", SECRET)
     workspace_file = _workspace(tmp_path, "api", "web")
     for name in ("api", "web"):
         (workspace_file.parent / name / ".ash.yaml").write_text(
-            "project_name: ${ASH_WS_CRASH_TOKEN:unset}\n", encoding="utf-8"
+            "project_name: ${ASH_WS_CRASH_HELD:unset}\n", encoding="utf-8"
         )
 
     def _execute(plan, settings, **kwargs):
@@ -194,11 +194,11 @@ async def test_a_non_utf8_path_refusal_raised_in_the_run_hides_the_value(
     from automated_security_helper.cli.mcp import workspace as workspace_module
     from automated_security_helper.core.exceptions import WorkspacePathNotUtf8Error
 
-    monkeypatch.setenv("ASH_WS_CRASH_TOKEN", SECRET)
+    monkeypatch.setenv("ASH_WS_CRASH_HELD", SECRET)
     workspace_file = _workspace(tmp_path, "api", "web")
     for name in ("api", "web"):
         (workspace_file.parent / name / ".ash.yaml").write_text(
-            "project_name: ${ASH_WS_CRASH_TOKEN:unset}\n", encoding="utf-8"
+            "project_name: ${ASH_WS_CRASH_HELD:unset}\n", encoding="utf-8"
         )
 
     def _execute(plan, settings, **kwargs):

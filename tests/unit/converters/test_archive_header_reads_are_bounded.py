@@ -167,6 +167,9 @@ def test_header_reads_past_the_per_member_allowance_are_refused(
 @pytest.mark.parametrize(
     "data_filter",
     [
+        # The converter sets _TAR_HAS_DATA_FILTER from hasattr(tarfile, "data_filter")
+        # (archive_converter.py), so forcing it on where tarfile has no data filter
+        # (before 3.10.12) calls extractall(filter=...) on a tarfile that lacks it.
         pytest.param(
             True,
             id="data-filter",

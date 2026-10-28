@@ -982,8 +982,9 @@ def test_a_client_may_turn_off_a_reporter_the_profile_turns_on(
     tmp_path: Path, reporter: str
 ) -> None:
     """``enabled: false`` asks for nothing beyond the profile, so it is accepted on
-    both routes, and the client's copy holds it. It takes no effect: a scan of
-    that copy runs the reporter as the profile has it."""
+    both routes. It is not applied (runtime_patch.apply_runtime_patch drops it with
+    a warning), so the client's copy keeps the profile's value, and a scan of that
+    copy runs the reporter as the profile has it."""
     document = _profile(allowed_paths=["/**"])
     document["reporters"] = {reporter: {"enabled": True}}
     _install(tmp_path, document)
@@ -997,7 +998,7 @@ def test_a_client_may_turn_off_a_reporter_the_profile_turns_on(
 
     for session, result in (("patch", patched), ("override", overridden)):
         assert result["success"] is True, result
-        assert _bound_reporter_enabled(session, reporter) is False
+        assert _bound_reporter_enabled(session, reporter) is True
         assert _scanned_reporter_enabled(tmp_path, session, reporter) is True
 
 
@@ -1007,7 +1008,8 @@ def test_a_client_may_add_a_section_that_only_turns_a_reporter_off(
     tmp_path: Path, reporter: str
 ) -> None:
     """The profile has no section, so the change adds one holding only ``enabled``.
-    Accepted, and of no effect: a scan runs the reporter as its default has it."""
+    Accepted, and not applied: the client's copy gets no section, and a scan runs
+    the reporter as its default has it."""
     document = _profile(allowed_paths=["/**"])
     _install(tmp_path, document)
 
@@ -1018,7 +1020,7 @@ def test_a_client_may_add_a_section_that_only_turns_a_reporter_off(
 
     for session, result in (("patch", patched), ("override", overridden)):
         assert result["success"] is True, result
-        assert _bound_reporter_enabled(session, reporter) is False
+        assert _bound_reporter_enabled(session, reporter) is None
         assert (
             _scanned_reporter_enabled(tmp_path, session, reporter)
             is REPORTER_ENABLED_DEFAULTS[reporter]

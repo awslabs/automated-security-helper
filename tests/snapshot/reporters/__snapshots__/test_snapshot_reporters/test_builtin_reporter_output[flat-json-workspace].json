@@ -203,6 +203,11 @@
         "partial_coverage_scanners": [],
         "stale_content_databases": [],
         "inputs_not_scanned": [],
+        "incomplete_scanner_details": {
+          "npm-audit": "MISSING"
+        },
+        "partial_coverage_scanners": [],
+        "stale_content_databases": [],
         "no_scanner_ran": false,
         "incomplete_converters": {},
         "scan_incomplete": true,
@@ -236,6 +241,9 @@
         "partial_coverage_scanners": [],
         "stale_content_databases": [],
         "inputs_not_scanned": [],
+        "incomplete_scanner_details": {},
+        "partial_coverage_scanners": [],
+        "stale_content_databases": [],
         "no_scanner_ran": false,
         "incomplete_converters": {},
         "scan_incomplete": false,

@@ -31,6 +31,14 @@ _RUNNING = re.compile(
 )
 
 
+_COLOR = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(line: str) -> str:
+    """The line without color codes, which uvicorn writes on Windows runners."""
+    return _COLOR.sub("", line)
+
+
 def _a_free_port() -> int:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
@@ -88,7 +96,7 @@ def test_a_server_names_the_port_it_listens_on(
             assert server.stderr is not None
             for line in server.stderr:
                 lines.append(line.rstrip("\n"))
-                found = _RUNNING.match(lines[-1])
+                found = _RUNNING.match(_plain(lines[-1]))
                 if found:
                     port = int(found.group(1))
                     break
@@ -110,7 +118,7 @@ def test_a_server_names_the_port_it_listens_on(
             server.wait(timeout=30)
 
     everything = lines + rest.splitlines()
-    named = [line for line in everything if _RUNNING.match(line)]
+    named = [line for line in everything if _RUNNING.match(_plain(line))]
     assert len(named) == 1, everything
 
 

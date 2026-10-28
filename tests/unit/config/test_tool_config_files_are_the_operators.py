@@ -21,6 +21,7 @@ import yaml
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.path_trust import in_scanned_tree
 from automated_security_helper.config.resolve_config import resolve_config
+from tests.utils.helpers import mark_git_checkout
 
 SCANNERS = ["bandit", "grype", "syft"]
 
@@ -29,7 +30,7 @@ def _repo(tmp_path: Path, scanners: Dict[str, Any]) -> Path:
     """A checkout whose own .ash/.ash.yaml sets ``scanners``."""
     repo = tmp_path / "repo"
     (repo / ".ash").mkdir(parents=True)
-    (repo / ".git").mkdir()
+    mark_git_checkout(repo)
     (repo / ".ash" / ".ash.yaml").write_text(
         yaml.safe_dump({"scanners": scanners}), encoding="utf-8"
     )

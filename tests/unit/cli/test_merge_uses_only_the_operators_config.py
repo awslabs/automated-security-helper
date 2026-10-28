@@ -397,6 +397,29 @@ def test_the_refusal_escapes_control_characters_in_the_path(case, tmp_path):
     assert _flat("op\\x1b[31mred\\x0anext") in _flat(output), repr(output[-2000:])
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="a Windows directory mode does not stop a read"
+)
+def test_a_config_under_an_unsearchable_directory_refuses_the_merge(tmp_path):
+    """Exit 3 and no traceback: asking whether the path is a file cannot raise."""
+    child = _Child(tmp_path)
+    shard_paths = child.shards()
+    locked = child.operator / "locked"
+    locked.mkdir()
+    config = locked / "ash.yaml"
+    config.write_text("project_name: operator\n", encoding="utf-8")
+    before = sorted(p.name for p in child.workdir.iterdir())
+    locked.chmod(0o000)
+    try:
+        if _still_readable(config):
+            pytest.skip("the directory mode does not stop this process (root)")
+        result = child.merge(shard_paths, "--config", str(config))
+    finally:
+        locked.chmod(0o755)
+
+    _assert_refused(child, result, before)
+
+
 def test_control_a_usable_operator_config_merges(tmp_path):
     """The same location with a valid file, so a refusal above is about the file."""
     child = _Child(tmp_path)

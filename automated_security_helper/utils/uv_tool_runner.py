@@ -1249,6 +1249,7 @@ class UVToolRunner:
         *,
         refresh: bool = False,
         values: Optional[Iterable[str]] = None,
+        python_request: Optional[str] = None,
     ) -> Optional[str]:
         """Get version of a UV tool.
 
@@ -1297,6 +1298,11 @@ class UVToolRunner:
         included: callers share the ``tool::spec`` key but not their values,
         so a stored redaction would let whoever probed first decide what a
         later caller's SARIF ``scanner_version`` and DEBUG line hide.
+
+        ``python_request`` is passed as ``uv tool run --python``, for a tool whose
+        dependencies publish no wheels for the interpreter uv would otherwise
+        pick (see ``UVToolMixin._get_tool_python_request``). It is part of the
+        memo key because it selects a different environment.
         """
         if not self.is_uv_available():
             return None
@@ -1315,6 +1321,8 @@ class UVToolRunner:
                 return None
 
         cache_key = f"{tool_name}::{package_name or ''}"
+        if python_request:
+            cache_key += f"::python={python_request}"
 
         # One probe asks one executable one question, and an offline probe
         # (--offline) is not an online one's answer. Each memoized answer is
@@ -1376,6 +1384,8 @@ class UVToolRunner:
             raw: Optional[str] = None
             try:
                 command = [executable, "tool", "run"]
+                if python_request:
+                    command.extend(["--python", python_request])
 
                 # Offline, the probe must be offline too, exactly as run_tool is.
                 # It used to be the one uv call that ignored ASH_OFFLINE: under
@@ -1457,13 +1467,19 @@ class UVToolRunner:
         package_name: Optional[str] = None,
         *,
         values: Optional[Iterable[str]] = None,
+        python_request: Optional[str] = None,
     ) -> Optional[str]:
         """Get version of an installed UV tool.
 
-        ``values`` has the meaning it has for ``get_tool_version``.
+        ``values`` and ``python_request`` have the meaning they have for
+        ``get_tool_version``.
         """
         if not self.is_tool_installed(tool_name):
             return None
+        if python_request:
+            return self.get_tool_version(
+                tool_name, package_name, values=values, python_request=python_request
+            )
         return self.get_tool_version(tool_name, package_name, values=values)
 
     def install_tool_with_version(
@@ -1476,6 +1492,7 @@ class UVToolRunner:
         with_dependencies: Optional[List[str]] = None,
         progress_callback: Optional[Callable] = None,
         values: Optional[Iterable[str]] = None,
+        python_request: Optional[str] = None,
     ) -> bool:
         """Install a UV tool with optional version constraint, extras, and retry logic.
 
@@ -1509,6 +1526,10 @@ class UVToolRunner:
                 attempt in flight rather than from the start of the call, and no
                 callback arrives once this function has returned. With a
                 ``retry_config`` in play the message also names the attempt.
+            python_request: Optional interpreter request passed as
+                ``uv tool install --python``. None, the default, leaves the
+                interpreter to uv, which is what every caller did before it
+                existed.
 
         Returns:
             True if installation succeeded, False otherwise
@@ -1610,6 +1631,9 @@ class UVToolRunner:
         offline = os.environ.get("UV_OFFLINE") == "1"
         if offline:
             cmd.append("--offline")
+
+        if python_request:
+            cmd.extend(["--python", python_request])
 
         # Add --with dependencies if provided
         if with_dependencies:
@@ -1934,6 +1958,7 @@ class UVToolRunner:
         env: Optional[Dict[str, str]] = None,
         quiet: bool = False,
         values: Iterable[str] = (),
+        python_request: Optional[str] = None,
     ) -> subprocess.CompletedProcess:
         """Run a UV tool with specified arguments and output handling support.
 
@@ -1961,6 +1986,8 @@ class UVToolRunner:
             values: The scan config's environment values, which the timeout
                 text prints its limit with (and the subprocess layer's own
                 timeout line is redacted of).
+            python_request: Optional interpreter request passed as
+                ``uv tool run --python``; None leaves the choice to uv.
 
         Returns:
             CompletedProcess result with enhanced output handling
@@ -1993,6 +2020,9 @@ class UVToolRunner:
             env = dict(env) if env is not None else snapshot_environ()
             env["UV_OFFLINE"] = "1"
             command.append("--offline")
+
+        if python_request:
+            command.extend(["--python", python_request])
 
         # Build command with --from parameter if extras or version constraint specified
         if package_extras or version_constraint:

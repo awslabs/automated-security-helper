@@ -158,6 +158,7 @@ from automated_security_helper.config.sandbox_grants import (
     working_directory,
 )
 from automated_security_helper.config.config_validator import (
+    _string_leaves,
     describe_validation_error,
     environment_record_of_references,
     environment_record_read,
@@ -560,6 +561,28 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
     # attributes). Without them a run whose overrides were applied here, as to
     # the ASH_CONFIG configuration, printed and recorded those values.
     rebuilt.__pydantic_private__ = copy.deepcopy(config.__pydantic_private__)
+    # Each string an override's value holds joins the values a line that prints
+    # a section of this config hides (AshConfig._override_values). The value is
+    # the operator's, not the environment's, but it can be a credential, and
+    # get_plugin_config's debug line printed each reporter's section whole, an
+    # override's value in it (ash merge --debug, ash report --debug). Strings
+    # only: a bool or a number an override sets is no credential, and a short
+    # word such as "true" would be hidden wherever a line prints it. A second
+    # application (ash merge applies the overrides to each shard's record and
+    # replays them onto the trusted base) keeps the first's.
+    rebuilt._override_values = tuple(
+        dict.fromkeys(
+            (
+                *rebuilt._override_values,
+                *(
+                    leaf
+                    for _, value, _ in applied
+                    for leaf in _string_leaves(value)
+                    if leaf
+                ),
+            )
+        )
+    )
     # A model that already carries references (a second application) can
     # have its module list shortened here: the references it carried then
     # name entries the list no longer has.
@@ -2252,6 +2275,15 @@ def resolve_config(
             trusted=None,
             client_overrides=client_supplied_overrides,
         )
+    # What scanners consult before honoring an option that names code to run
+    # (utils/config_trust.py): the same trusted base, with the overrides replayed
+    # per section when a scanner asks.
+    record_provenance(
+        config,
+        in_tree=in_tree,
+        trusted=trusted.model_copy(deep=True),
+        config_overrides=config_overrides,
+    )
     # Only an override under `sandbox` can change the sandbox section, and replaying
     # the rest onto the defaults could fail where the config file supplied the
     # section they write into. Only the OPERATOR's overrides are replayed: an

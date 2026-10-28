@@ -4,15 +4,17 @@ Run ASH (Automated Security Helper) security scans via MCP — Bandit, Semgrep, 
 
 ---
 
-# ASH MCP — Security Scanning Workflow
+# ASH MCP security scanning workflow
 
-ASH (Automated Security Helper) wraps nine security scanners behind a single MCP interface. The server exposes scans as async tools — start a scan, poll for progress, fetch filtered results.
+ASH (Automated Security Helper) combines code, infrastructure, secrets, and dependency scanners behind one MCP interface. Its MCP server runs a scan in the background: you start it, poll it until it ends, then read the results. This skill assumes the server is connected; the plugin that ships this skill configures it.
 
-This skill assumes the ASH MCP server is configured (the plugin/power that ships this skill provides it).
+The server scans on the machine it runs on, always in local mode, with the scanner tools installed there. The project's ASH config, or the config profile the session selected, chooses the scanners and the severity thresholds. Use `list_scanners` to inspect the installed scanner catalog. No tool argument chooses scanners, and `run_ash_scan`'s `severity_threshold` can only make the config's threshold stricter.
 
-## The mandatory three-step workflow
+## Run a scan
 
-Every scan follows this exact pattern. Skipping the poll step means stale progress visibility — the scan keeps running server-side, but you lose real-time updates.
+1. Call `run_ash_scan` with `source_dir` set to the absolute path of the project. It returns at once with a `scan_id` and `status` `running`. Keep the `scan_id`.
+2. Call `get_scan_progress` with that `scan_id` about every 5 seconds until `is_complete` is true. It is true for every way a scan ends: `status` is then `completed`, `incomplete`, `failed`, or `cancelled`.
+3. When `results_available` is true, read the results from `output_directory`, the absolute path in the progress response. It is `.ash/ash_output` inside `source_dir`.
 
 ### Step 1 — Start the scan
 
@@ -30,39 +32,14 @@ Leave `severity_threshold` unset: the scan then uses the config's `global_settin
 
 Returns a dict with `scan_id`, `status: "running"`, `directory_path` (the resolved absolute scan root), and an `important.next_steps` block. **Always store the `scan_id`** — every subsequent call needs it.
 
-For the output directory, prefer reading `output_directory` from any subsequent `get_scan_progress` response (it pre-computes the path). If you need the output dir before the first poll, derive it from this response's `directory_path` as `<directory_path>/.ash/ash_output/`.
+After `failed` or `cancelled`, `results_available` is false: do not report results for that scan. Once ASH has put the previous scan's results back in the output directory, `output_holds_previous_results` is true.
 
 Poll until `progress['is_complete']` is `true`, as the server's `important.next_steps` block says, and then read `status`; see Step 2.
 
 The MCP server always runs scans in local mode: on the server's own machine, with the scanner tools installed there, and never in a container. For container or precommit modes, use the ASH CLI directly. Scanner selection lives in `.ash/.ash.yaml`, not in tool parameters.
 
-### Step 2 — Poll progress every 5 seconds
+## Read the results
 
-Loop on `get_scan_progress` until the scan is complete. The 5-second cadence is what the ASH MCP server's own docstring requests for reliable progress streaming over long scans.
-
-```
-get_scan_progress(scan_id="<uuid>")
-```
-
-Stop polling when `is_complete` is `true`. It is `true` for every ending: `status` is then one of `completed | incomplete | failed | cancelled`, and `results_available` says whether `get_scan_results` can read the results (`completed` and `incomplete`). Typical scans take 30-120 seconds.
-
-For progress display, use `finished_scanners / total_scanners` (`completed_scanners` counts only scanners that PASSED) — but check `total_scanners > 0` first (it's zero during pre-flight before any scanner registers; show "initializing" in that case). The response also includes `severity_counts` and per-scanner breakdown to surface in user-facing updates.
-
-The scan itself runs server-side regardless of polling cadence — polling is for progress visibility, not for keeping the scan alive.
-
-### Step 3 — Fetch results with the right filter
-
-Once the scan is complete, call `get_scan_results`. Match the filter to the user's intent.
-
-| User goal | Filter combination |
-|-----------|-------------------|
-| "How bad is it?" | `filter_level="summary"` + `actionable_only=True` |
-| "Show me the critical issues" | `filter_level="full"` + `severities="critical,high"` |
-| "Audit Bandit only" | `scanners="bandit"` + `filter_level="full"` |
-| "Generate exec summary" | Use `get_scan_result_paths`, then read `ash.summary.md` |
-
-```
-get_scan_results(
-    output_dir="/absolute/path/to/project/.ash/ash_output",
+Pass `output_directory` as `output_dir` to these tools:
 
 [... see prompt files for details]

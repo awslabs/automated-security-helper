@@ -171,6 +171,11 @@ GEM_PINS = {CFN_NAG_GEM: "CFN_NAG_GEM_VERSION", BUNDLER_GEM: "BUNDLER_VERSION"}
 GITHUB = "github-release"
 PYPI = "pypi"
 RUBYGEMS = "rubygems"
+# A library another pinned distribution bundles (a shared library auditwheel grafted
+# into a wheel). Its version is whatever that wheel carries and cannot be bumped on its
+# own, so it is listed but never looked up: comparing it with its project's latest
+# release would report a bump nobody can make.
+BUNDLED = "bundled"
 
 _GITHUB_PREFIX = "https://github.com/"
 _TIMEOUT_SECONDS = 30
@@ -232,7 +237,7 @@ class Result:
 
     pin: Pin
     latest: str | None
-    status: str  # "current" | "outdated" | "ahead" | "error"
+    status: str  # "current" | "outdated" | "ahead" | "held" | "error"
     detail: str = ""
     note: str = ""
 
@@ -332,11 +337,29 @@ def enumerate_pins(pins: Any) -> list[Pin]:
             project = _github_project(
                 release_urls[tool], f"_RELEASE_BASE_URLS[{tool!r}]"
             )
+            if entry is not None:
+                pinned_in.append("THIRD_PARTY_LICENSES")
+                if entry.version != version:
+                    raise PinEnumerationError(
+                        f"{tool} is {version} in TOOL_VERSIONS and {entry.version} in "
+                        f"THIRD_PARTY_LICENSES; a version bump is half-applied."
+                    )
         elif tool in bundles:
             version = bundles[tool].version
             kind = RULES_BUNDLE
             pinned_in.append("RULES_BUNDLES")
             project = _github_project(bundles[tool].url, f"RULES_BUNDLES[{tool!r}].url")
+        elif getattr(entry, "bundled_in", None):
+            result.append(
+                Pin(
+                    tool=tool,
+                    version=entry.version,
+                    ecosystem=BUNDLED,
+                    project=entry.bundled_in,
+                    pinned_in=("THIRD_PARTY_LICENSES (bundled)",),
+                )
+            )
+            continue
         else:
             # Only a license entry names it, so the version a bump changes is kept
             # somewhere this script does not read, and its steps would leave it out.
@@ -388,7 +411,9 @@ def enumerate_pins(pins: Any) -> list[Pin]:
 # Version comparison
 # ---------------------------------------------------------------------------
 
-_VERSION_RE = re.compile(r"^v?(\d+(?:\.\d+)*)(.*)$")
+# An optional "<project>-" prefix: libssh2 and OpenSSL tag their releases
+# "libssh2-1.11.1" and "openssl-3.3.3", and their license entries record the tag.
+_VERSION_RE = re.compile(r"^(?:[A-Za-z][A-Za-z0-9]*-)?v?(\d+(?:\.\d+)*)(.*)$")
 
 
 def parse_version(text: str) -> tuple[tuple[int, ...], tuple[int, str]]:
@@ -727,6 +752,9 @@ def check(
     results = []
     for pin in pins:
         note = ""
+        if pin.ecosystem == BUNDLED:
+            results.append(Result(pin, None, "held", f"version set by {pin.project}"))
+            continue
         try:
             answer = fetchers[pin.ecosystem](pin.project)
             if pin.ecosystem == RUBYGEMS:

@@ -1,10 +1,18 @@
-# ASH Engine Phases
+# ASH engine phases
 
-This directory contains the implementation of the different phases of the ASH execution engine.
+This directory holds the phases of the ASH scan engine. Each phase is a subclass of
+`EnginePhase` (`automated_security_helper/base/engine_phase.py`):
 
-## Phase Structure
+- `ConvertPhase` (`convert_phase.py`) turns archives and notebooks into files the scanners can read.
+- `ScanPhase` (`scan_phase.py`) runs the selected scanners over the source and the converted files.
+- `ReportPhase` (`report_phase.py`) writes the reports from the aggregated results.
+- `InspectPhase` (`inspect_phase.py`) runs the optional inspection step.
 
-Each phase inherits from the `EnginePhase` base class and implements the specific logic for that phase:
+`ScanExecutionEngine` (`automated_security_helper/core/execution_engine.py`) creates each phase
+with the scan's `PluginContext` and the plugins for that phase, then runs them in order. The phases
+are internal: to run a scan, use `ash scan` or the
+[Python API](https://awslabs.github.io/automated-security-helper/reference/python-api/) rather than
+creating phases yourself.
 
 - `ConvertPhase`: Handles the conversion of files to formats that can be scanned
 - `ScanPhase`: Executes security scanners on the source and converted files
@@ -16,6 +24,7 @@ The phases are designed to be used by the `ScanExecutionEngine` class. Each phas
 
 Example:
 
+<!-- doctest: illustrative reason="a fragment that uses objects the scan engine creates for a run (the plugin context, the plugin classes, the progress display and the results model)" -->
 ```python
 # Every phase takes the run's PluginContext (source, output and work
 # directories, and the config), the plugin classes it runs, a progress display
@@ -68,6 +77,8 @@ To add a new phase:
 Example:
 
 ```python
+from typing import Any
+
 from automated_security_helper.base.engine_phase import EnginePhase
 
 

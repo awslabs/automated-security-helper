@@ -932,6 +932,9 @@ class TestBuildImage:
         """type=gha needs buildx, and buildx needs --load or the image is not kept."""
         monkeypatch.setenv("ACTIONS_RUNTIME_TOKEN", "token")
         monkeypatch.setenv("ACTIONS_CACHE_URL", "https://example.invalid/cache")
+        # ACTIONS_RESULTS_URL selects cache service v2 and adds ``version=2`` to the
+        # cache argument, so a runner that exports it would change the strings below.
+        monkeypatch.delenv("ACTIONS_RESULTS_URL", raising=False)
         monkeypatch.delenv("ASH_DISABLE_GHA_BUILD_CACHE", raising=False)
         # The gate probes the runner for buildx, which would otherwise shell out
         # and make this test depend on the machine running it.

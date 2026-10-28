@@ -207,8 +207,8 @@ _UV_CACHE_REASON = (
 _UV_SPLIT_CACHE_REASON = (
     _UV_CACHE_REASON + " Restored with actions/cache/restore except on a tag push, "
     "and saved from a push to main only, in place of setup-uv's own cache, which "
-    "restored on every event and saved from every ref. The workflows that use it "
-    "run on tag pushes, and a tag run reads no cache entry."
+    "restored on every event and saved from every ref. The workflow that uses it "
+    "runs on tag pushes, and a tag run reads no cache entry."
 )
 _NPM_CACHE_REASON = (
     "npm's download cache, keyed on a committed lockfile. Holds third-party "
@@ -469,6 +469,33 @@ ALLOWLIST: tuple[Entry, ...] = (
         ),
     ),
     Entry(
+        file=".github/workflows/ash-docs-ci-runners.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=docs-ci-runners-${{ matrix.runner }}-${{ strategy.job-index }}"
+            "-attempt-${{ github.run_attempt }} "
+            "path=${{ runner.temp }}/ci-runner-out"
+            "|!${{ runner.temp }}/ci-runner-out/**/[sS][eE][cC][rR][eE][tT].[kK][eE][yY]*"
+            "|!${{ runner.temp }}/ci-runner-out/**/[sS][eE][cC][rR][eE][tT][sS]"
+            "|!${{ runner.temp }}/ci-runner-out/**/[sS][eE][cC][rR][eE][tT][sS]/**"
+            "|!${{ runner.temp }}/ci-runner-out/**/"
+            "[iI][dD][eE][nN][tT][iI][tT][yY].[kK][eE][yY].[eE][nN][cC]"
+            "|!${{ runner.temp }}/ci-runner-out/**/*.[kK][eE][yY]"
+            "|!${{ runner.temp }}/ci-runner-out/**/*.[pP][eE][mM]"
+        ),
+        reason=(
+            "Evidence from the Docs CI Runners legs, which run the CI pages' "
+            "pipelines against the docs fixture: each runner's log, the pipelines "
+            "as run, the rewrite records, the junit files, the pipelines' artifacts "
+            "(ASH's output on the fixture) and the install provenance, kept seven "
+            "days. Logs and reports, not build output: the wheel each leg builds "
+            "stays in the runner's temp directory, outside the uploaded one. "
+            "Hidden files and secret-shaped names are left out, and the job holds "
+            "no secret."
+        ),
+    ),
+    Entry(
         file=".github/workflows/ash-unified-ci.yml",
         kind=KIND_UPLOAD,
         action=_UPLOAD,
@@ -481,6 +508,17 @@ ALLOWLIST: tuple[Entry, ...] = (
         action=_UPLOAD,
         publishes="name=integration-suite-report path=test-results/integration.junit.xml",
         reason="One JUnit XML report from the integration suite.",
+    ),
+    Entry(
+        file=".github/workflows/ash-unified-ci.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes="name=docs-examples-report path=test-results/docs-examples.junit.xml",
+        reason=(
+            "One JUnit XML report from the docs-example runner: page, block line, "
+            "command and output tail of each failing docs example, run in a "
+            "throwaway fixture project with no credentials."
+        ),
     ),
     Entry(
         file=".github/workflows/ash-unified-ci.yml",
@@ -806,33 +844,6 @@ ALLOWLIST: tuple[Entry, ...] = (
             "key=uv-agent-plugins-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ash-agent-plugins/agentic-coding/transpiler/uv.lock') }}"
         ),
         reason=_UV_SPLIT_CACHE_REASON,
-    ),
-    Entry(
-        file=".github/workflows/ash-repo-docs.yml",
-        kind=KIND_CACHE,
-        action="actions/cache/restore",
-        publishes=(
-            "path=~/.cache/uv "
-            "key=uv-docs-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}"
-        ),
-        count=2,
-        reason=_UV_SPLIT_CACHE_REASON
-        + (
-            " Twice: build-docs restores it, and deploy-docs only looks the key up"
-            " (lookup-only: true, nothing downloaded) so its save can skip an entry"
-            " main already wrote. deploy-docs publishes the site and restores nothing."
-        ),
-    ),
-    Entry(
-        file=".github/workflows/ash-repo-docs.yml",
-        kind=KIND_CACHE,
-        action="actions/cache/save",
-        publishes=(
-            "path=~/.cache/uv "
-            "key=uv-docs-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}"
-        ),
-        reason=_UV_SPLIT_CACHE_REASON
-        + " Saved by deploy-docs, the only job here that runs on main.",
     ),
 )
 

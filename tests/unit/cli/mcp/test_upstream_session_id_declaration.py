@@ -26,6 +26,7 @@ from typing import Dict
 import pytest
 import typer
 from starlette.testclient import TestClient
+from types import SimpleNamespace
 
 from automated_security_helper.cli.mcp import build_streamable_http_app, mcp_command
 from automated_security_helper.cli.mcp.session_identity import (
@@ -37,6 +38,7 @@ from tests.utils.mcp_transport_harness import (
     LOOPBACK_PORT,
     STREAMABLE_HEADERS,
     StreamableHttpClient,
+    boundary_of,
     tool_payload,
 )
 
@@ -318,6 +320,246 @@ def test_a_stateful_server_ignores_a_header_it_did_not_issue_on_the_newer_protoc
     result = tool_payload(response.json())
     assert result.get("success") is False, result
     assert result.get("error_type") == "scan_target_not_permitted", result
+    assert boundary_of(app)._issued == set()
+
+
+def test_a_stateful_server_gives_an_issued_id_no_identity_on_the_newer_protocol() -> (
+    None
+):
+    """The id this server issued still names no session on the newer path.
+
+    Requests naming the 2026-07-28 protocol skip the SDK's session check, so
+    the server's record of which ids it issued is not what answers them. The
+    documented rule is that such a request carries no identity.
+    """
+    app = build_streamable_http_app(
+        mount_path="/mcp", host="127.0.0.1", port=LOOPBACK_PORT
+    )
+    body = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "clear_source",
+            "arguments": {},
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities": {},
+            },
+        },
+    }
+    with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
+        issued, _headers = StreamableHttpClient(client).open_session()
+        assert issued, "a stateful server issues an id at initialize"
+        response = client.post(
+            "/mcp",
+            json=body,
+            headers={
+                **STREAMABLE_HEADERS,
+                "Mcp-Protocol-Version": "2026-07-28",
+                "Mcp-Session-Id": issued,
+                "Mcp-Method": "tools/call",
+                "Mcp-Name": "clear_source",
+            },
+        )
+
+    assert response.status_code == 200, response.text[:300]
+    result = tool_payload(response.json())
+    assert result.get("success") is False, result
+    assert result.get("error_type") == SESSION_IDENTITY_REQUIRED, result
+    # The refusal names the cause, a protocol version that is not a handshake
+    # version, so a caller on this server has something it can change.
+    assert "Mcp-Protocol-Version" in result.get("error", ""), result
+    assert "handshake" in result.get("error", ""), result
+    assert "newer protocol version" in result.get("error", ""), result
+
+
+def test_a_stateful_refusal_advises_initialize_not_an_operator_mode_change() -> None:
+    """On a stateful server the refusal tells the caller what works there.
+
+    The caller's remedy on a stateful server is a session: open one with
+    ``initialize`` and send the ``Mcp-Session-Id`` it returns. Advice to run the
+    server "without --stateless-http" is for an operator and already holds, and
+    an id this server never issued gains nothing from a version change, so the
+    refusal must not name the protocol version as the cause either. Reachable
+    only on the newer-protocol path: a handshake-version request without a
+    session is refused by the SDK before any tool runs.
+    """
+    app = build_streamable_http_app(
+        mount_path="/mcp", host="127.0.0.1", port=LOOPBACK_PORT
+    )
+    body = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "clear_source",
+            "arguments": {},
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities": {},
+            },
+        },
+    }
+    with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
+        response = client.post(
+            "/mcp",
+            json=body,
+            headers={
+                **STREAMABLE_HEADERS,
+                "Mcp-Protocol-Version": "2026-07-28",
+                "Mcp-Session-Id": "client-chosen",
+                "Mcp-Method": "tools/call",
+                "Mcp-Name": "clear_source",
+            },
+        )
+
+    assert response.status_code == 200, response.text[:300]
+    result = tool_payload(response.json())
+    assert result.get("success") is False, result
+    assert result.get("error_type") == SESSION_IDENTITY_REQUIRED, result
+    assert "initialize" in result.get("error", ""), result
+    assert "--stateless-http" not in result.get("error", ""), result
+    assert "newer protocol version" not in result.get("error", ""), result
+
+
+def _version_refused_stateful_caller():
+    """The stamp a stateful boundary leaves on an issued id refused for its version."""
+    from automated_security_helper.cli.mcp.http_sessions import (
+        MODE_STATEFUL,
+        STREAMABLE_HTTP,
+        HttpCaller,
+    )
+
+    return HttpCaller(
+        STREAMABLE_HTTP,
+        None,
+        protocol_version_is_cause=True,
+        server_mode=MODE_STATEFUL,
+    )
+
+
+def _ctx_carrying(caller):
+    """A stand-in context whose request carries ``caller``'s scope stamp.
+
+    ``session_identity_refusal`` reads the stamp from the request behind the
+    context it is given, so handing it one request's stamp fixes what the
+    refusal may say about cause and mode; no state outside the request can.
+    """
+    from automated_security_helper.cli.mcp.http_sessions import CALLER_SCOPE_KEY
+
+    request = SimpleNamespace(scope={CALLER_SCOPE_KEY: caller})
+    return SimpleNamespace(request_context=SimpleNamespace(request=request))
+
+
+def test_the_refusal_names_the_protocol_version_as_a_cause() -> None:
+    """An issued id refused for its version alone: the request's own stamp says so."""
+    from automated_security_helper.cli.mcp.session_identity import (
+        UNIDENTIFIED_SESSION_ID,
+        session_identity_refusal,
+    )
+
+    refusal = session_identity_refusal(
+        UNIDENTIFIED_SESSION_ID,
+        "clear_source",
+        _ctx_carrying(_version_refused_stateful_caller()),
+    )
+
+    assert refusal is not None
+    assert "newer protocol version" in refusal["error"], refusal
+    assert "Mcp-Protocol-Version" in refusal["error"], refusal
+    assert "--stateless-http" not in refusal["error"], refusal
+
+
+def test_a_refusal_the_protocol_version_did_not_cause_does_not_name_it() -> None:
+    """A stateless caller changes nothing by changing its protocol version."""
+    app = build_streamable_http_app(
+        mount_path="/mcp", stateless_http=True, host="127.0.0.1", port=LOOPBACK_PORT
+    )
+    with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
+        http = StreamableHttpClient(client)
+        _issued, headers = http.open_session()
+        result = http.call_tool("clear_source", {}, headers)
+
+    assert result.get("error_type") == SESSION_IDENTITY_REQUIRED, result
+    assert "newer protocol version" not in result.get("error", ""), result
+    assert "Mcp-Protocol-Version" not in result.get("error", ""), result
+    assert "--trust-upstream-session-id" in result.get("error", ""), result
+
+
+def test_the_protocol_version_cause_does_not_outlive_the_request_that_set_it() -> None:
+    """Only a refusal handed that request's context names the version."""
+    from automated_security_helper.cli.mcp.session_identity import (
+        UNIDENTIFIED_SESSION_ID,
+        session_identity_refusal,
+    )
+
+    ctx = _ctx_carrying(_version_refused_stateful_caller())
+    with_request = session_identity_refusal(
+        UNIDENTIFIED_SESSION_ID, "clear_source", ctx
+    )
+    without_request = session_identity_refusal(UNIDENTIFIED_SESSION_ID, "clear_source")
+
+    assert with_request is not None and without_request is not None
+    assert "newer protocol version" in with_request["error"], with_request
+    assert "newer protocol version" not in without_request["error"], without_request
+
+
+def test_an_interleaved_resolution_does_not_change_the_refusals_cause() -> None:
+    """The refusal depends on the request it is given, not on call order."""
+    from automated_security_helper.cli.mcp.session_identity import (
+        UNIDENTIFIED_SESSION_ID,
+        resolve_caller_session_id,
+        session_identity_refusal,
+    )
+
+    class _StandIn:
+        headers = {"mcp-session-id": "tenant-a"}
+
+    ctx = _ctx_carrying(_version_refused_stateful_caller())
+    # Another caller's resolution runs between the request and its refusal.
+    assert resolve_caller_session_id(_StandIn()) == "tenant-a"
+    refusal = session_identity_refusal(UNIDENTIFIED_SESSION_ID, "clear_source", ctx)
+
+    assert refusal is not None
+    assert "newer protocol version" in refusal["error"], refusal
+    assert "initialize" in refusal["error"], refusal
+
+
+def test_a_refusal_for_a_passed_down_id_claims_no_cause() -> None:
+    """mcp_scan_directory's shape: an id another tool resolved and passed down.
+
+    No request stamp is in reach here, so the refusal must not claim the
+    protocol version is the cause and must not pick a mode it cannot know.
+    """
+    from automated_security_helper.cli.mcp.session_identity import (
+        UNIDENTIFIED_SESSION_ID,
+        session_identity_refusal,
+    )
+
+    refusal = session_identity_refusal(UNIDENTIFIED_SESSION_ID, "scan_directory")
+
+    assert refusal is not None
+    assert "newer protocol version" not in refusal["error"], refusal
+    assert "Mcp-Protocol-Version" not in refusal["error"], refusal
+    assert "--trust-upstream-session-id" in refusal["error"], refusal
+
+
+def test_a_request_no_ash_app_stamped_gets_the_mode_less_advice() -> None:
+    """A context whose request carries no stamp claims neither cause nor mode."""
+    from automated_security_helper.cli.mcp.session_identity import (
+        UNIDENTIFIED_SESSION_ID,
+        session_identity_refusal,
+    )
+
+    ctx = SimpleNamespace(
+        request_context=SimpleNamespace(request=SimpleNamespace(scope={}))
+    )
+    refusal = session_identity_refusal(UNIDENTIFIED_SESSION_ID, "clear_source", ctx)
+
+    assert refusal is not None
+    assert "newer protocol version" not in refusal["error"], refusal
+    assert "--trust-upstream-session-id" in refusal["error"], refusal
 
 
 def test_the_ash_command_line_forwards_the_declaration(monkeypatch) -> None:

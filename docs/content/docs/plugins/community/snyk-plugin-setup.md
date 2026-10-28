@@ -40,6 +40,7 @@ export SNYK_TOKEN=your-snyk-token-here
 ```
 
 ### Option 2: CLI Authentication
+<!-- doctest: illustrative reason="needs the Snyk CLI, a Snyk account and a browser" -->
 ```bash
 snyk auth
 ```

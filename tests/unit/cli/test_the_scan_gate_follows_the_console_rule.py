@@ -3,7 +3,7 @@
 
 """``ash scan`` sets the last resort's gate by its console rule, never by ASH_LOG_LEVEL.
 
-The plugin guide (docs/content/docs/plugins/development-guide.md, the paragraph on
+The plugin guide (docs/content/plugins/write-a-scanner.md, the paragraph on
 ``ash scan`` in its thread-logging section) says a line no handler takes reaches
 stderr at the scan's console level: its flags first, then ASH_DEBUG or
 ASH_VERBOSE, then INFO, and ERROR for --quiet and --simple unless --verbose or
@@ -34,9 +34,8 @@ _GUIDE = (
     Path(__file__).resolve().parents[3]
     / "docs"
     / "content"
-    / "docs"
     / "plugins"
-    / "development-guide.md"
+    / "write-a-scanner.md"
 )
 
 

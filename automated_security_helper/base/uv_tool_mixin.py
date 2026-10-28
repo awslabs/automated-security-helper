@@ -310,7 +310,10 @@ class UVToolMixin:
                 )
                 return None
             version = runner.get_tool_version(
-                tool_name, package_name, values=probe_values
+                tool_name,
+                package_name,
+                values=probe_values,
+                **self._uv_python_kwargs(),
             )
             if version:
                 self._plugin_log(
@@ -518,6 +521,7 @@ class UVToolMixin:
                     env=env,
                     timeout=timeout,
                     values=values,
+                    **self._uv_python_kwargs(),
                 )
 
         except UVToolRunnerError as e:
@@ -1400,7 +1404,15 @@ class UVToolMixin:
                 )
             return
 
-        install_cmd_str = f"uv tool install {tool_spec}"
+        install_cmd_parts = ["uv", "tool", "install"]
+        python_request = self._get_tool_python_request()
+        if python_request:
+            # One argv element each, and the request must carry no whitespace:
+            # get_installation_commands splits this string on whitespace.
+            install_cmd_parts.extend(["--python", python_request])
+        install_cmd_parts.append(tool_spec)
+
+        install_cmd_str = " ".join(install_cmd_parts)
         self.uv_tool_install_commands = [install_cmd_str]
 
         if values_note is not None:
@@ -1716,6 +1728,7 @@ class UVToolMixin:
                 # hidden from its debug line, so nothing degrades to an empty
                 # value set.
                 values=record_values,
+                **self._uv_python_kwargs(),
             )
 
             install_duration = time.time() - install_start_time
@@ -1742,7 +1755,10 @@ class UVToolMixin:
                 # was worse: the failure was cached under the key
                 # "bandit::['sarif', 'toml']" and served to later callers.
                 post_install_version = runner.get_installed_tool_version(
-                    self.command, self._uv_from_spec(), values=record_values
+                    self.command,
+                    self._uv_from_spec(),
+                    values=record_values,
+                    **self._uv_python_kwargs(),
                 )
 
                 self._plugin_log(
@@ -2004,6 +2020,31 @@ class UVToolMixin:
             List of package extras or None if no extras are needed
         """
         return None
+
+    def _get_tool_python_request(self) -> Optional[str]:
+        """Interpreter request for ``uv tool install/run --python``, or None.
+
+        None, the default, leaves the interpreter to uv, which is how every
+        uv-backed plugin behaved before this hook existed. Override it for a tool
+        whose dependencies publish no wheels for the newest interpreter uv may
+        pick: uv then builds those dependencies from source, which needs a C
+        toolchain and system headers, and the install fails. GuardDog is the
+        case that added this (pygit2 and yara-python have no CPython 3.14 wheels
+        at the pinned version). A version specifier such as ``">=3.10,<3.14"``
+        lets uv choose, or download, any interpreter that satisfies it.
+
+        The value must carry no whitespace; see ``_setup_uv_tool_install_commands``.
+        """
+        return None
+
+    def _uv_python_kwargs(self) -> Dict[str, Any]:
+        """``{"python_request": ...}`` for the runner calls, or ``{}`` when unset.
+
+        Empty rather than ``{"python_request": None}`` when unset, so every
+        existing plugin calls the runner with exactly the arguments it did before.
+        """
+        python_request = self._get_tool_python_request()
+        return {"python_request": python_request} if python_request else {}
 
     def _get_tool_with_dependencies(self) -> Optional[List[str]]:
         """Get additional dependencies to install with the tool using --with flag.

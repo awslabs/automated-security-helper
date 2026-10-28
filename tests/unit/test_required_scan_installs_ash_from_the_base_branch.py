@@ -5,8 +5,9 @@
 
 Why this file exists
 --------------------
-``ash / SAST, SCA, and IaC Scan`` is a required check (DEVELOPMENT.md lists it with
-``Validate PR title`` and ``required-checks``). It is the ``ash`` job of
+``ash / SAST, SCA, and IaC Scan`` is a required check (the release process page,
+docs/content/contributing/releases.md, lists it with ``Validate PR title`` and
+``required-checks``). It is the ``ash`` job of
 ``.github/workflows/ash-repo-scan.yml`` calling the reusable
 ``run-ash-security-scan.yml``, whose job is named ``SAST, SCA, and IaC Scan``.
 
@@ -85,7 +86,9 @@ _REQUIRES_BASH = pytest.mark.skipif(
 REQUIRED_SCAN_CHECK = "ash / SAST, SCA, and IaC Scan"
 SCAN_WORKFLOW = ga.WORKFLOWS_DIR / "run-ash-security-scan.yml"
 UPLOAD_SARIF_WORKFLOW = "./.github/workflows/upload-ash-sarif.yml"
-DEVELOPMENT_MD = ga.REPO_ROOT / "DEVELOPMENT.md"
+#: The page that lists the release PR's required checks. DEVELOPMENT.md used to; the
+#: documentation rewrite moved its contents under docs/content/contributing/.
+REQUIRED_CHECKS_DOC = ga.REPO_ROOT / "docs" / "content" / "contributing" / "releases.md"
 
 BASE_REPO = "awslabs/automated-security-helper"
 FORK_REPO = "contributor/automated-security-helper"
@@ -301,12 +304,12 @@ def _pr_code_scans(context: dict[str, Any]) -> list[ScanJob]:
     ]
 
 
-def _required_checks_from_development_md() -> list[str]:
-    text = DEVELOPMENT_MD.read_text(encoding="utf-8")
-    match = re.search(r"required checks \(([^)]*)\)", text)
+def _required_checks_from_the_release_docs() -> list[str]:
+    text = REQUIRED_CHECKS_DOC.read_text(encoding="utf-8")
+    match = re.search(r"required checks\s+\(([^)]*)\)", text)
     assert match, (
-        "DEVELOPMENT.md no longer lists the release PR's required checks in the "
-        "'required checks (...)' sentence this test reads"
+        "docs/content/contributing/releases.md no longer lists the release PR's "
+        "required checks in the 'required checks (...)' sentence this test reads"
     )
     names = re.findall(r"`([^`]+)`", match.group(1))
     assert REQUIRED_SCAN_CHECK in names, names
@@ -382,7 +385,7 @@ class TestThePullRequestsOwnAshRunsForInformationOnly:
 
     @pytest.mark.parametrize("context", PULL_REQUESTS[:2])
     def test_the_pull_requests_own_ash_runs_under_no_required_check_name(self, context):
-        required = set(_required_checks_from_development_md())
+        required = set(_required_checks_from_the_release_docs())
         scans = _pr_code_scans(context)
         assert scans, "no job installs the pull request's own ASH"
         for scan in scans:

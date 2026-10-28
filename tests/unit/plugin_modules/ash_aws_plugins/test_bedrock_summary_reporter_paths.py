@@ -1532,6 +1532,7 @@ class TestTheFallbackWalkContract:
         """The run's model stands for the run: when it fails in turn, the walk
         goes on from the next model after it, and does not call the configured
         model again, which already failed this run."""
+        # No retries: the run model's throttle would first be repeated on it.
         reporter = make_reporter(context, enable_caching=False, max_retries=0)
         runtime = self._run_model_then_fails(monkeypatch, second_fallback_answers=True)
 

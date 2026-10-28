@@ -1389,14 +1389,20 @@ def confine_sandbox_grants(
     sandbox.env_scanners = list(trusted.env_scanners)
     sandbox.network_limit = list(limit) if limit is not None else None
     if ignored:
-        membership = confinement_membership(
-            checkout_membership=checkout_membership,
-            client_supplied=client_supplied,
-            mixed=mixed_membership,
-            given_root=given_root_membership,
-            undecided=undecided_membership,
-            outside=outside_membership,
-        )
+        if source is not None and not source.located:
+            # A config that is no file in a tree (ash merge's shard record):
+            # the location clause would claim a place it has none of, so the
+            # source's own reason is the head, as the plugin-module step says it.
+            membership = source.reason
+        else:
+            membership = confinement_membership(
+                checkout_membership=checkout_membership,
+                client_supplied=client_supplied,
+                mixed=mixed_membership,
+                given_root=given_root_membership,
+                undecided=undecided_membership,
+                outside=outside_membership,
+            )
         if source is not None and source.scanner_steps_note:
             tail = f"{source.scanner_steps_note}."
         else:

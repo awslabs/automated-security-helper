@@ -571,18 +571,39 @@ def _inside_any(real: PurePath, roots: Sequence[PurePath]) -> bool:
     return any(real == root or root in real.parents for root in roots)
 
 
-def _home_link_targets(homes: Sequence[Path]) -> List[Path]:
+#: Pseudo-filesystems a link must not get hidden or refused by: shared memory that
+#: multiprocessing scanners use, and the runtime directory the system keeps its
+#: sockets in. Neither is a directory of the user's.
+_PSEUDO_FS_ROOTS = (
+    Path("/dev/shm"),  # nosec B108 - compared against, never written
+    Path("/run"),
+)
+
+
+def _home_link_targets(
+    homes: Sequence[Path], *, files: bool = False, ancestors: bool = False
+) -> List[Path]:
     """The real directories that links at the top of a home name outside the homes.
 
     ~/.local can be a link to /persist/me/.local on another disk. The breadth rules
     measure real paths, by which that directory is outside every home, so it was
     mounted with its keyrings. Each such directory counts as directly in its home in
     every home check, next to the checks of the real path. Left out are links to "/",
-    to a home or a directory holding or inside one (measured already), and to, into
-    or above a system read path: ~/u -> /usr names no directory of the user's.
+    to a home or a directory holding or inside one (measured already), to, into
+    or above a system read path (~/u -> /usr names no directory of the user's), and
+    to or into a pseudo-filesystem (``_PSEUDO_FS_ROOTS``). The backends and the
+    breadth rules read this one list, so they agree on which links count.
+
+    ``files`` also returns the files such links name (~/.netrc kept on another
+    disk), which a backend that hides the directories can hide too. ``ancestors``
+    keeps a directory that holds one of ``homes``: the breadth rules leave it out
+    because it holds a real home, but where ``homes`` are not homes at all but
+    directories a link named (policy hiding walks them), its other entries are the
+    user's as well.
     """
     system = [Path(path) for path in SYSTEM_READ_PATHS]
     system += [Path(os.path.realpath(path)) for path in system]
+    pseudo = [Path(os.path.realpath(root)) for root in _PSEUDO_FS_ROOTS]
     targets: List[Path] = []
     for home in homes:
         try:
@@ -593,13 +614,16 @@ def _home_link_targets(homes: Sequence[Path]) -> List[Path]:
             real = Path(os.path.realpath(home / name))
             if (
                 real == Path(real.anchor)
-                or not real.is_dir()
+                or not (real.is_dir() or (files and real.is_file()))
                 or any(
-                    real == other or other in real.parents or real in other.parents
+                    real == other
+                    or other in real.parents
+                    or (not ancestors and real in other.parents)
                     for other in homes
                 )
                 or _inside_any(real, system)
                 or any(real in path.parents for path in system)
+                or _inside_any(real, pseudo)
             ):
                 continue
             if real not in targets:

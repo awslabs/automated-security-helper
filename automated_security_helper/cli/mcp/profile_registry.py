@@ -712,10 +712,13 @@ def session_config_was_patched(config_path: Union[str, Path]) -> bool:
 
     shared = shared_workspace_root()
     if shared is not None:
-        for candidate in (
-            Path(os.path.abspath(config_path)),
-            Path(config_path).resolve(),
-        ):
+        candidates = [Path(os.path.abspath(config_path))]
+        try:
+            candidates.append(Path(config_path).resolve())
+        except (OSError, RuntimeError):
+            # A path that can't be resolved (a symlink loop) is judged as named.
+            pass
+        for candidate in candidates:
             parts = _parts_below(candidate, shared)
             if (
                 parts is not None
@@ -725,7 +728,7 @@ def session_config_was_patched(config_path: Union[str, Path]) -> bool:
                 return True
     try:
         target = Path(config_path).resolve()
-    except OSError:
+    except (OSError, RuntimeError):
         return False
     with _session_lock:
         states = list(_session_state.values())
@@ -735,7 +738,7 @@ def session_config_was_patched(config_path: Union[str, Path]) -> bool:
         try:
             if Path(state.config_path).resolve() != target:
                 continue
-        except OSError:
+        except (OSError, RuntimeError):
             continue
         if state.client_changed:
             return True

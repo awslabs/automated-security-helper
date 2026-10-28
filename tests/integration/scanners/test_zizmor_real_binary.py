@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404 - runs git and the real ash CLI under test
 import sys
 from pathlib import Path
 
@@ -124,7 +124,7 @@ def test_real_zizmor_paths_are_relative_to_a_scanned_subdirectory(tmp_path):
     """zizmor reports URIs from the git root; ASH must report them from source_dir."""
     repository = tmp_path / "repository"
     shutil.copytree(FIXTURE_REPO, repository / "service")
-    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)  # nosec B603 B607 - fixed argv, git init on a tmp_path copy
     _, report = _scan(repository / "service")
     found = {(rule, uri) for rule, uri, _ in _findings(report)}
     assert REQUIRED_FINDINGS <= found, found
@@ -142,8 +142,8 @@ def test_real_zizmor_keeps_a_nested_repository_apart_from_the_outer_one(tmp_path
         FIXTURE_REPO / ".github/workflows/vulnerable.yml",
         nested / ".github" / "workflows" / "ci.yml",
     )
-    subprocess.run(["git", "init", "-q", str(source_dir)], check=True)
-    subprocess.run(["git", "init", "-q", str(nested)], check=True)
+    subprocess.run(["git", "init", "-q", str(source_dir)], check=True)  # nosec B603 B607 - fixed argv, git init on a tmp_path copy
+    subprocess.run(["git", "init", "-q", str(nested)], check=True)  # nosec B603 B607 - fixed argv, git init on a tmp_path copy
     _, report = _scan(source_dir)
     found = {(rule, uri) for rule, uri, _ in _findings(report)}
     assert ("zizmor/template-injection", "vendor/lib/.github/workflows/ci.yml") in found
@@ -170,8 +170,33 @@ def test_real_zizmor_offline(source, monkeypatch):
     assert REQUIRED_FINDINGS <= found
 
 
+def _region(report: SarifReport, rule: str, uri: str) -> tuple[int, int]:
+    """``(startLine, endLine)`` the installed zizmor gives ``rule`` at ``uri``."""
+    for run in report.runs:
+        for result in run.results or []:
+            physical = result.locations[0].physicalLocation.root
+            if result.ruleId == rule and physical.artifactLocation.uri == uri:
+                start = physical.region.startLine
+                return start, physical.region.endLine or start
+    raise AssertionError(f"zizmor reported no {rule} at {uri}")
+
+
 def test_ash_scan_with_zizmor_applies_rule_path_and_line_suppressions(source):
     from automated_security_helper.interactions.run_ash_scan import run_ash_scan
+
+    # Where zizmor puts a dangerous-triggers finding differs between releases of the
+    # supported range: 1.30.1 spans the whole ``on:`` block (lines 2 to 5, pinned in
+    # tests/test_data/scanners/zizmor/zizmor-1.30.1.sarif), a later one can point at
+    # the trigger's own line. The suppression is written from what the installed
+    # binary reports for a copy of the fixture, so the line it names is a line the
+    # finding really occupies; the unpinned-uses entry below stays on a line that
+    # finding is not on.
+    probe = source.parent / "probe"
+    shutil.copytree(FIXTURE_REPO, probe)
+    _, probed = _scan(probe)
+    trigger_start, trigger_end = _region(
+        probed, "zizmor/dangerous-triggers", ".github/workflows/vulnerable.yml"
+    )
 
     config = {
         "project_name": "zizmor-suppressions",
@@ -186,8 +211,8 @@ def test_ash_scan_with_zizmor_applies_rule_path_and_line_suppressions(source):
                 {
                     "rule_id": "zizmor/dangerous-triggers",
                     "path": ".github/workflows/vulnerable.yml",
-                    "line_start": 2,
-                    "line_end": 2,
+                    "line_start": trigger_start,
+                    "line_end": trigger_end,
                     "reason": "rule, path and line",
                 },
                 {
@@ -287,6 +312,12 @@ def test_an_operator_config_file_in_the_tree_that_links_out_is_not_read(
     config_file in the tree linked to a file outside it put that line into
     ash.log, the aggregated results and the console. Now zizmor is not run, the
     scanner is ERROR, and nothing of that file is in the output."""
+    # The child scan runs offline, and every test has a home of its own, so no zizmor
+    # from an earlier test is there to find. Resolve (and if needed install) it
+    # online in this test's home first, as test_real_zizmor_offline does; the child
+    # inherits the home and finds it. Without it the scanner is MISSING before it
+    # reads the config_file, and the refusal below is never reached.
+    assert _scanner(source).validate_plugin_dependencies() is True
     marker = "first-line-of-a-file-outside-the-tree"
     outside = tmp_path / "outside"
     outside.mkdir()

@@ -21,8 +21,7 @@ place a user reads install advice in one pass.
 
 What it checks
 --------------
-Every file git tracks under ``automated_security_helper/``, ``docs/`` (the MCP
-testing guide is ``docs/content/docs/MCP-SERVER-TESTING-GUIDE.md``),
+Every file git tracks under ``automated_security_helper/``, ``docs/``,
 ``ash-agent-plugins/``, ``skills/``, ``.github/``, ``examples/`` and ``deploy/``
 (``node_modules`` never), plus ``README.md``, its template, ``CONTRIBUTING.md``
 and ``DEVELOPMENT.md``. Without a checkout it walks the same roots on disk. In
@@ -53,6 +52,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -66,6 +66,11 @@ from tests.utils.bare_install_names import (
     normalize,
 )
 from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, iter_repo_files
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # pragma: no cover - exercised only on 3.10
+    import tomli as tomllib
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -189,10 +194,13 @@ def test_the_gate_reads_the_files_that_carried_bare_name_hints():
         "automated_security_helper/plugin_modules/ash_builtin/scanners/cdk_nag_scanner.py",
         "automated_security_helper/plugin_modules/ash_builtin/scanners/detect_secrets_scanner.py",
         "automated_security_helper/utils/symbol_spans.py",
-        "docs/content/docs/MCP-SERVER-TESTING-GUIDE.md",
-        "docs/content/docs/building-your-own-image.md",
-        "docs/content/docs/installation-guide.md.template",
-        "docs/content/docs/suppressions.md",
+        # The pages that carried hints before the documentation rewrite, under the
+        # names the rewrite gave them: the MCP page, the container page, the install
+        # page's template and the suppressions page.
+        "docs/content/how-to/mcp-server.md",
+        "docs/content/how-to/run-in-a-container.md",
+        "docs/content/how-to/install.md.template",
+        "docs/content/how-to/suppress-findings.md",
         # The roots added after the gate first shipped: plugin bundles, skills,
         # CI workflows, examples and the deploy packages, and the contributor
         # guides.

@@ -2095,10 +2095,15 @@ def test_a_base_the_repository_s_file_reaches_is_the_repository_s(
         hub = reporter_section(config, SecurityHubReporter)
         s3 = reporter_section(config, S3Reporter)
 
-    # The control: the base was merged, so the resolved config holds its
-    # setup; only the sections the reporters run with must not.
+    # The control: the base was merged, and the destination step then held the
+    # resolved sections to the operator's (_confine_enabled in
+    # config/reporter_trust.py), naming the enabled it replaced; so the base's
+    # setup reached the resolution and was ignored, not missed.
     resolved = config.get_plugin_config(plugin_type="reporter", plugin_name="s3")
-    assert (resolved or {}).get("enabled") is True, resolved
+    assert (resolved or {}).get("enabled") is False, resolved
+    assert any(
+        "reporters.s3.enabled" in record.getMessage() for record in caplog.records
+    ), caplog.text
     for section in (hub, s3):
         assert (section or {}).get("enabled") is not True, section
         assert _REPOSITORY_CHOSE not in json.dumps(section or {}), section
@@ -2344,7 +2349,7 @@ def test_a_repository_file_that_names_its_base_twice_still_confines_it(
 ):
     """The repository's file extends the same shared file twice in one
     ``extends`` list. Every occurrence came through the repository's file, so
-    nothing the shared file wrote runs, and one warning charges the
+    nothing the shared file wrote runs, and the warnings charge the
     repository's file: a repeated entry counts as two subtrees, not one."""
     import os
 
@@ -2381,11 +2386,14 @@ def test_a_repository_file_that_names_its_base_twice_still_confines_it(
 
     assert (section or {}).get("enabled") is not True, section
     assert _REPOSITORY_CHOSE not in json.dumps(section or {}), section
+    # One warning per confinement step that ignored something, each charging
+    # the repository's file, never the operator's file or the shared value.
     warnings = _security_hub_warnings(caplog)
     assert warnings
     for warning in warnings:
         assert ".ash.yaml" in warning, warning
         assert "operator.yaml" not in warning, warning
+        assert _REPOSITORY_CHOSE not in warning, warning
 
 
 @pytest.mark.parametrize(
@@ -3215,7 +3223,7 @@ def test_an_operator_root_patch_sets_an_option_over_its_own_base(tmp_path, caplo
 def test_a_repository_patch_of_the_section_does_not_run(tmp_path, caplog):
     """The repository's file adds the section with its own ``patch`` op. A
     repository file's ops are the repository's choice, so nothing they write
-    reaches the section the reporter runs with, and one warning charges the
+    reaches the section the reporter runs with, and the warnings charge the
     repository's file."""
     from automated_security_helper.config.operator_only_options import (
         reporter_section,
@@ -3248,6 +3256,8 @@ def test_a_repository_patch_of_the_section_does_not_run(tmp_path, caplog):
 
     assert (section or {}).get("enabled") is not True, section
     assert _REPOSITORY_CHOSE not in json.dumps(section or {}), section
+    # One warning per confinement step that ignored something, each charging
+    # the repository's file, never the operator's file or the patched value.
     warnings = _security_hub_warnings(caplog)
     assert warnings
     for warning in warnings:
@@ -4209,6 +4219,7 @@ def test_each_confinement_names_what_it_ignores_from_the_repositorys_section(
         "reporters.aws-security-hub.options.aws_profile" in w for w in warnings
     ), warnings
     assert all(".ash.yaml" in w for w in warnings), warnings
+    assert all("repository-profile" not in w for w in warnings), warnings
     assert "aws_profile" not in section["options"]
 
 
@@ -4253,6 +4264,7 @@ def test_the_destination_step_names_a_profile_only_the_repository_wrote(
         "Ignoring reporters.aws-security-hub.options.aws_profile from"
     ), warning
     assert ".ash.yaml" in warning, warning
+    assert "repository-profile" not in warning, warning
     assert "aws_profile" not in section["options"]
 
 

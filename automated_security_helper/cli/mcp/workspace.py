@@ -243,6 +243,7 @@ from automated_security_helper.utils.output_dir_links import (
     WHY as OUTPUT_LINK_WHY,
 )
 from automated_security_helper.utils.output_dir_links import (
+    OutputDirLinkRefused,
     ignore_output_dir_in_git,
     refuse_linked_output_dir,
 )
@@ -313,6 +314,10 @@ class OutputDirectoryNotUsableError(MCPResourceError):
 _EXIT_CODE_BY_EXCEPTION: Tuple[Tuple[type, WorkspaceExitCode], ...] = (
     (WorkspaceDefinitionError, WorkspaceExitCode.WORKSPACE_ERROR),
     (ASHConfigValidationError, WorkspaceExitCode.INVALID_PROJECT_CONFIG),
+    # An output directory reached through a link: 3, as the CLI exits for every
+    # such refusal (OUTPUT_DIR_REFUSED_EXIT_CODE), and not 4, because the
+    # workspace definition is not what is wrong.
+    (OutputDirLinkRefused, WorkspaceExitCode.INVALID_PROJECT_CONFIG),
     # execute_workspace refuses a --scanners selection no project could run before
     # starting any; the CLI exits with the usage-error code for it.
     (ScannerSelectionError, WorkspaceExitCode.USAGE_ERROR),
@@ -372,8 +377,12 @@ def _error_response(
     from automated_security_helper.cli.mcp_tools import (
         CONFIG_ENV_NOT_RESOLVED,
         CONFIG_INPUT_NOT_PERMITTED,
+        ENV_VALUE_IN_LONGER_STRING,
         OUTPUT_DIR_NOT_USABLE,
         config_load_category,
+    )
+    from automated_security_helper.config.environment_record import (
+        EnvironmentValueInPath,
     )
 
     category: Optional[str] = None
@@ -390,6 +399,10 @@ def _error_response(
     response = create_error_response(error, operation, category=category)
     if isinstance(error, OutputDirectoryNotUsableError):
         response["error_type"] = OUTPUT_DIR_NOT_USABLE
+    if _caused_by(error, EnvironmentValueInPath):
+        # A profile whose environment value sits inside a longer string, under
+        # the error_type select_profile answers the same refusal with.
+        response["error_type"] = ENV_VALUE_IN_LONGER_STRING
     if isinstance(error, WorkspacePathNotUtf8Error):
         # Its message names its paths as they are, and the response is JSON,
         # which cannot hold a lone surrogate: shown once, as a whole, on one

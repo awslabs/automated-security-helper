@@ -76,5 +76,9 @@ def test_the_host_removes_the_files_a_local_scan_removes(tmp_path, monkeypatch):
     )
     _initialize(_orchestrator(local_source, local))
 
-    assert _files(host) == _files(local)
+    # The orchestrator's initialization also writes a .gitignore into an output
+    # directory inside the scanned tree (core/orchestrator.py, ensure_directories,
+    # ignore_output_dir_in_git). That file is new to the run, not left over from the
+    # previous one, so the clearing is compared without it.
+    assert _files(host) == _files(local) - {".gitignore"}
     assert _files(host) == {"ash.log", "projects/api/ash_aggregated_results.json"}

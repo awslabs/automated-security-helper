@@ -327,6 +327,10 @@ from automated_security_helper.utils.display_text import (
     escape_controls_in,
     path_spellings,
 )
+from automated_security_helper.utils.error_text import (
+    config_environment_values,
+    text_without_values,
+)
 from automated_security_helper.utils.inner_run_outcome import without_run_records
 from automated_security_helper.utils.log import (
     ASH_LOGGER,
@@ -2489,12 +2493,18 @@ def warn_on_ignored_operator_verdict_settings(
         flag = ""
         if key in VERDICT_FLAGS and isinstance(value, bool):
             flag = f" or {VERDICT_FLAGS[key][0 if value else 1]}"
-        ASH_LOGGER.warning(
+        # Redacted with what the operator's config read from the environment:
+        # the line quotes the setting's value, which can hold one (an ignore
+        # path's reason read with !ENV, say).
+        message = (
             f"ash merge's --config sets {key} to {_shown_setting(value)}, and the "
             f"shards recorded {_shown_setting(shards.get(key))}. The verdict "
             "follows the shards' own configuration, so their value applies. To "
             "apply yours, pass "
             f"{_override_suggestion(key, value)}{flag}."
+        )
+        ASH_LOGGER.warning(
+            text_without_values(message, config_environment_values(trusted_config))
         )
 
 
@@ -2560,11 +2570,17 @@ def warn_on_unapplied_operator_settings(
                     (f"reporters.{section_key}.options.{option}", options[option])
                 )
         for key, value in unapplied:
-            ASH_LOGGER.warning(
+            # Redacted as the settings line above is: the hint quotes the
+            # option's value, which the operator's config can have read from
+            # the environment.
+            message = (
                 f"ash merge's --config sets {key}, which does not apply: the shards "
                 f"recorded no {section_key} section to take it, and --config supplies "
                 "values for what the shards recorded without adding to it. To apply "
                 f"it, {_apply_hint(key, value)}."
+            )
+            ASH_LOGGER.warning(
+                text_without_values(message, config_environment_values(trusted_config))
             )
 
 

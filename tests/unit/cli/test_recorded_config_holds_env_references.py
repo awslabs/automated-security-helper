@@ -36,6 +36,8 @@ reference is asserted where the value would otherwise be.
 from __future__ import annotations
 
 import json
+import logging
+import os
 from pathlib import Path
 from typing import Dict, List
 
@@ -117,6 +119,44 @@ def _tree(root: Path, config: str) -> Path:
     return root
 
 
+def _logging_is_on() -> List[str]:
+    """Turn ASH's logging back on if something earlier on this worker turned it off.
+
+    ``logging.config.dictConfig`` with its default ``disable_existing_loggers``
+    sets ``disabled`` on every logger that exists, and libraries call it when they
+    are imported (tests/conftest.py, ``_restore_ash_logger_switches``). That
+    fixture restores the switches after each test, but this module's ``runs`` is
+    module scoped, so it runs outside that protection, and a disabled ``ash``
+    logger drops every record before a handler sees it: the scan and the merge
+    still succeed, nothing is printed or logged, and the checks that the canary is
+    in no output pass without reading anything. A run here is only evidence if it
+    could have logged. Returns what it had to turn back on, for the failure
+    message of the check that the debug lines were written.
+    """
+    turned_on = []
+    if logging.root.manager.disable:
+        turned_on.append(f"logging.disable({logging.root.manager.disable})")
+    logging.disable(logging.NOTSET)
+    for name, logger in list(logging.root.manager.loggerDict.items()):
+        if isinstance(logger, logging.Logger) and (
+            name == "ash" or name.startswith(("ash.", "automated_security_helper"))
+        ):
+            if logger.disabled:
+                turned_on.append(name)
+            logger.disabled = False
+    return turned_on
+
+
+class _EnabledRunner(CliRunner):
+    """A CliRunner that makes sure ASH's logging is on before each command."""
+
+    turned_on: List[str]
+
+    def invoke(self, *args, **kwargs):
+        self.turned_on = [*getattr(self, "turned_on", []), *_logging_is_on()]
+        return super().invoke(*args, **kwargs)
+
+
 @pytest.fixture(scope="module")
 def runs(tmp_path_factory: pytest.TempPathFactory):
     """One shard scan of each config, then ash merge and ash report over the first.
@@ -135,7 +175,7 @@ def runs(tmp_path_factory: pytest.TempPathFactory):
         kwargs["log_format"] = "BOTH"
         return get_logger(*args, **kwargs)
 
-    runner = CliRunner()
+    runner = _EnabledRunner()
     found: Dict[str, object] = {"root": root, "defaults_root": defaults_root}
     with pytest.MonkeyPatch.context() as mp:
         for name, value in ENV.items():
@@ -182,6 +222,7 @@ def runs(tmp_path_factory: pytest.TempPathFactory):
         found["merge_config"] = merge("merged-config", "--config", str(operator))
         found["report_refused"] = report()
         found["report"] = report(*SEVERITY_OVERRIDE)
+    found["logging turned back on"] = runner.turned_on
     return found
 
 
@@ -324,7 +365,10 @@ def test_the_debug_line_showing_a_section_is_written(runs, command, directory):
     """The control for the test above: the line that shows a reporter's section,
     built from the config, is among what was checked."""
     channels = _channels(runs, command, runs["root"] / directory)
-    assert any(SHOWN_SECTION in text for text in channels.values()), list(channels)
+    assert any(SHOWN_SECTION in text for text in channels.values()), {
+        "characters per channel": {n: len(t) for n, t in channels.items()},
+        "logging turned back on before a run": runs["logging turned back on"],
+    }
 
 
 def test_the_scan_logs_were_written(runs):
@@ -400,13 +444,17 @@ def test_an_anchored_path_has_only_its_env_part_replaced(tmp_path, probe_env):
         "scanners:\n  bandit:\n    options:\n      config_file: ${ASH_PROBE_RELATIVE}\n",
     )
     config = resolve_config(config_path=path, source_dir=tmp_path / "tree")
-    directory = path.parent.resolve().as_posix()
+    directory = path.parent.resolve()
     # The control: the load took the relative path from the file's directory.
-    assert str(config.scanners.bandit.options.config_file) == (
-        f"{directory}/cfg/bandit.yaml"
+    assert (
+        Path(str(config.scanners.bandit.options.config_file))
+        == directory / "cfg" / "bandit.yaml"
     )
+    # The path is a Path once configured, so its prefix is written with this
+    # platform's separators (backslashes on Windows) and only the part the
+    # environment gave is put back.
     recorded = _recorded(config)["scanners"]["bandit"]["options"]["config_file"]
-    assert recorded == f"{directory}/${{ASH_PROBE_RELATIVE}}"
+    assert recorded == f"{directory}{os.sep}${{ASH_PROBE_RELATIVE}}"
 
 
 def test_a_patch_value_and_a_base_value_are_recorded_as_written(tmp_path, probe_env):

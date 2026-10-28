@@ -50,6 +50,13 @@ SCANNERS = ("bandit", "detect-secrets")
 def _ignored_tree(root: Path) -> Path:
     root.mkdir(parents=True)
     (root / "app.py").write_text(FINDINGS_PY, encoding="utf-8")
+    # A file the ignore path does not name. With app.py the only Python file, the
+    # ignore path leaves bandit nothing to scan, the run has shown the target to be
+    # neither clean nor dirty, and it exits 1 (run_ash_scan.nothing_to_scan_message);
+    # here the scan covers a clean file and the ignored one reports nothing.
+    (root / "clean.py").write_text(
+        "def add(a, b):\n    return a + b\n", encoding="utf-8"
+    )
     (root / ".ash").mkdir()
     (root / ".ash" / ".ash.yaml").write_text(
         yaml.safe_dump(

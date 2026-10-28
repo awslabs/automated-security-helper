@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from automated_security_helper.config.resolve_config import resolve_config
+from tests.utils.helpers import mark_git_checkout
 
 GRANT = "/opt/linked-grant"
 GRANTS = f"project_name: linked\nsandbox:\n  extra_read_paths: ['{GRANT}']\n"
@@ -39,7 +40,7 @@ def _no_ash_config_variable(monkeypatch):
 
 
 def _checkout(path: Path) -> Path:
-    (path / ".git").mkdir(parents=True)
+    mark_git_checkout(path)
     return path
 
 

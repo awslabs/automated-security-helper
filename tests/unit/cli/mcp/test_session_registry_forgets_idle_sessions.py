@@ -118,7 +118,7 @@ def test_a_session_whose_lock_is_held_is_kept(registry) -> None:
 
 def test_a_session_with_a_write_in_progress_is_kept(registry) -> None:
     writing = _unused_for_a_long_time(registry.session_for("writing"))
-    assert writing.try_begin_write()
+    assert writing.try_begin_write() is None
     _fill_with_idle_sessions(registry, THRESHOLD - 1)
 
     registry.session_for("newest")

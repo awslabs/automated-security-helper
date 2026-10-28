@@ -626,7 +626,7 @@ scanner_results:
     dependencies_satisfied: true
     duration: 0.0
     excluded: false
-    exit_code: 0
+    exit_code: 125
     finding_count: 1
     missing_reason: null
     severity_counts:
@@ -644,7 +644,7 @@ scanner_results:
     dependencies_satisfied: true
     duration: 0.0
     excluded: false
-    exit_code: 0
+    exit_code: 125
     finding_count: 1
     missing_reason: null
     severity_counts:
@@ -662,7 +662,7 @@ scanner_results:
     dependencies_satisfied: false
     duration: 0.0
     excluded: false
-    exit_code: 0
+    exit_code: 125
     finding_count: 0
     missing_reason: 'api: its dependencies were not available; no reason was recorded,
       and ash.log has the scanner''s own message'
@@ -681,7 +681,7 @@ scanner_results:
     dependencies_satisfied: true
     duration: 0.0
     excluded: false
-    exit_code: 0
+    exit_code: 125
     finding_count: 1
     missing_reason: null
     severity_counts:

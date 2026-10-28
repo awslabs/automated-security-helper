@@ -5,6 +5,7 @@ scanners run as ordinary child processes with your user's full access: they can 
 `~/.ssh`, write anywhere you can, and open network connections. `--sandbox` runs every
 scanner subprocess inside an OS-level sandbox instead. It is off by default.
 
+<!-- doctest: illustrative reason="needs a sandbox backend on the host and the tool of every enabled scanner" -->
 ```bash
 ash scan --sandbox auto            # best sandbox this machine has
 ash scan --sandbox bwrap --offline # bubblewrap, no scanner gets a network
@@ -111,13 +112,13 @@ it needs.
   `TRIVY_CONFIG` for a file outside the scanned tree), against the cache directory
   the scan reads. A lock in that cache directory makes
   concurrent scans take turns, and each tool is updated once per scan. The scanners
-  then run with their own update turned off (`--skip-db-update`,
+  then run with their own update turned off (`trivy --skip-db-update`,
   `GRYPE_DB_AUTO_UPDATE=false`). Offline nothing is updated, and in both cases ASH's
   staleness check still holds the database to its bound. trivy's Java database
   (about 935 MiB) is not updated and trivy and trivy-repo run with
-  `--skip-java-db-update`: `trivy fs` and `trivy repository` do not analyze JAR, WAR
+  `trivy --skip-java-db-update`: `trivy fs` and `trivy repository` do not analyze JAR, WAR
   or EAR files and never read it. In every run, sandboxed or not, online or offline,
-  trivy and trivy-repo keep their scan cache in memory (`--cache-backend=memory`),
+  trivy and trivy-repo keep their scan cache in memory (`trivy --cache-backend=memory`),
   because trivy otherwise opens
   `fanal/fanal.db` in a cache directory it may only read, and exits 1. A cache can
   be read-only outside a sandbox too, when it is shared or baked into an image.
@@ -128,7 +129,7 @@ it needs.
   `~/Library/Caches` on macOS, and `%LOCALAPPDATA%\cache` (grype) or
   `%LocalAppData%` (trivy) on Windows. grype keeps its database in `grype/db` under
   it and trivy in `trivy`. The sandbox does not pass `XDG_CACHE_HOME`, so in every
-  run, sandboxed or not, ASH names the directory to the scan (`--cache-dir`,
+  run, sandboxed or not, ASH names the directory to the scan (`trivy --cache-dir`,
   `GRYPE_DB_CACHE_DIR`), to the update and to the staleness check, and all three read
   the same database. A `cache.dir` in a `trivy.yaml` or a `db.cache-dir` in a grype
   config does not move it; set the variable instead. ASH logs a warning naming the
@@ -220,7 +221,7 @@ it needs.
   reached. The variables that name these endpoints (`SSH_AUTH_SOCK`,
   `DBUS_SESSION_BUS_ADDRESS`, `DOCKER_HOST`, `CONTAINER_HOST`, `XDG_RUNTIME_DIR`)
   are not passed in. firejail sets `DBUS_SESSION_BUS_ADDRESS` itself, to a path of
-  its own that `--dbus-user=none` leaves unserved.
+  its own that `firejail --dbus-user=none` leaves unserved.
 - A results directory that is, or is reached through, a symlink is refused (the
   scanner is recorded `MISSING`). The default output directory is inside the source
   tree, so the scanned repository could otherwise plant one pointing anywhere.
@@ -232,7 +233,7 @@ it needs.
   there by a fixed name such as `ash.log`, is one. The scan stops with an error that names the link before ASH
   writes anything there, whatever the sandbox mode, since ASH clears and writes
   those itself; pass `--output-dir` with a directory that is not a link. See
-  [Output directory](concepts.md#output-directory) for the full list. Links above an
+  [Links are refused](../reference/output-files.md#links) for the full list. Links above an
   output directory outside the source tree (`/tmp` on macOS) are your own and are
   not examined.
 - ASH writes into the results directory after the scanner exits, and ASH is not
@@ -300,6 +301,7 @@ skipped for lacking a declaration, and never run unsandboxed.
 
 A plugin that needs more declares it:
 
+<!-- doctest: illustrative reason="a fragment of a scanner plugin class that names a config class defined elsewhere" -->
 ```python
 from typing import ClassVar
 
@@ -370,7 +372,7 @@ which it does when its settings list the verification filter. Only the operator'
 configuration can list it: ASH removes it from a `.secrets.baseline` inside the
 scanned tree and from a config file the scanned repository or an MCP client wrote,
 and offline from every source (see
-[Secret verification](configuration-guide.md#secret-verification)). A baseline the
+[What each tier may set](../concepts/trust-model.md#what-each-tier-may-set)). A baseline the
 operator names can still load a detect-secrets plugin from a file outside the tree, so
 the sandbox doesn't take detect-secrets' own word for it either: detect-secrets gets a
 network only when `sandbox.network_scanners` names it, and a repository can't set that
@@ -385,6 +387,8 @@ and the sandbox wraps them like any other scanner. To let detect-secrets verify
 secrets under the sandbox, pass `--config-overrides 'sandbox.network_scanners=[detect-secrets]'`
 (plus any other scanners that need a network). Under `--offline` it gets none.
 
+### Give a scanner more access {#grants}
+
 To give an extra scanner network access, or take it away:
 
 ```yaml
@@ -393,6 +397,8 @@ sandbox:
   network_scanners: [grype, trivy-repo]   # replaces the per-scanner defaults
   extra_read_paths: [/opt/company-ca]
 ```
+
+#### Who may grant
 
 Four settings grant access: `network_scanners`, `extra_read_paths`, and the two
 below that let a scanner have what its own options ask for. A config file the
@@ -422,6 +428,13 @@ adds with `patch`; a `mode` its own `patch` sets counts as written. ASH logs a
 warning that names the files that can't grant and the settings it dropped. A `network_scanners` list in such a file still takes network away: a scanner
 it doesn't name gets none, so a repository can keep its own scan offline with
 `network_scanners: []`.
+
+For a config in `/home/me/src/app/.ash/.ash.yaml` that grants grype a network and a
+read path, the warning reads:
+
+```text
+WARNING  Ignoring sandbox.network_scanners, sandbox.extra_read_paths from /home/me/src/app/.ash/.ash.yaml: that config is inside a git checkout or the scanned tree, or was delivered by an MCP client. A network_scanners list there still removes network from scanners it does not name, and a sandbox mode there still applies when nothing else turns the sandbox on. To keep a setting, move the file outside every git checkout, or pass the setting with --config-overrides. A file inside the scanned directory has to move out of it as well.
+```
 
 This applies to a trusted config kept in a checkout of its own as well, such as an
 ops or dotfiles repository: its grants are dropped with the same warning. Pass them
@@ -463,7 +476,7 @@ reason names the link.
 Plugin modules are judged by the same rule. A tool config file a scanner option
 names is judged by it too when a config inside the scanned tree names it; one the
 operator names may sit in a checkout of the operator's own. See
-[Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose).
+[How a file's tier is decided](../concepts/trust-model.md#how-the-tier-is-decided).
 
 Sandbox grants follow a scanner's own name, the one its code gives it. If a config
 file renames a scanner's section, for example by setting `name: grype` on a plugin's
@@ -478,6 +491,8 @@ a checkout, because a mode other than `off` grants nothing. Only `--sandbox off`
 sandbox on, the repository's `mode` applies, because a sandbox the repository asks
 for only takes access away. In workspace mode, the operator's `--config` decides for
 a project that has its own config file, the same as for one that doesn't.
+
+### Install tools before a sandboxed scan
 
 A sandboxed scan does not install tools, for scanners and converters alike:
 installing runs a package's build code and writes uv's tool directory, which a
@@ -564,7 +579,7 @@ Out of scope:
   target, with every link on the way resolved, is outside the source directory, and
   warns about each one, as `Not scanning 'vendor/config.py': link leaves the scanned
   tree`, naming only the link (see
-  [Ignore files and the scan set](configuration-guide.md#ignore-files-and-the-scan-set)).
+  [Ignore files and the scan set](../reference/coverage.md#what-decides-the-files)).
   So the scanners and converters that read the scan set
   are not given it, and npm-audit does not audit a package whose files link out of
   the tree. The scanners that walk the directory they scan themselves are told to
@@ -579,7 +594,7 @@ Out of scope:
 - Plugin modules. A config file can list `ash_plugin_modules`, which ASH imports into
   its own process, so they run unsandboxed. From a config file inside the scanned
   tree, only installed modules outside the tree are imported (see
-  [Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose)),
+  [What each tier may set](../concepts/trust-model.md#what-each-tier-may-set)),
   but an installed package still runs with ASH's access. The sandbox doesn't change
   this; review the plugin modules a repository's config names before you scan it.
   ASH's own `ash_aws_plugins` and `ash_snyk_plugins` packages are not imported from
@@ -600,6 +615,73 @@ Out of scope:
   network namespace forces all traffic through it; that is future work.
 - Results integrity. A scanner can still write false results to its own results file.
 - Kernel defects. All backends share the host kernel.
+
+## When a scanner cannot be sandboxed {#missing}
+
+ASH records a scanner it cannot sandbox as `MISSING`, and under the default
+`fail_on_incomplete_scanners` the scan exits 1. The reason is in the scan output, in
+`ash.log`, and in the scanner's `missing_reason` in `ash_aggregated_results.json`:
+
+```text
+ERROR    bandit not run: scanner sandbox unavailable: firejail is not installed
+```
+
+| Message | Fix |
+|---|---|
+| `bwrap is not installed (install the 'bubblewrap' package)` | Install bubblewrap. |
+| `bwrap cannot create a sandbox here (...)` | Allow unprivileged user namespaces, or use `landlock`. |
+| `bwrap cannot apply the Unix-socket filter in its sandbox (...)` | Use the bwrap from your distribution, on x86_64 or aarch64, on a kernel that allows seccomp filters. |
+| `Landlock is not available (...)` | Add `landlock` to the `lsm=` kernel parameter. |
+| `Landlock ABI <n> is below 3 (Linux 6.2), ...` | Use bwrap, a kernel with Landlock ABI 3 or later, or container mode. |
+| `firejail is not installed` | Install firejail, or use another backend. |
+| `firejail ran a test command without a sandbox (...)` | Use `bwrap` or `landlock`; firejail does not sandbox inside this container. |
+| `sandbox-exec is not present (it has been removed from this macOS)` | No macOS backend remains; scan in a container. |
+| `--sandbox auto found no working sandbox (...)` | Lists why each backend failed; fix one of them. |
+| `no scanner sandbox is available on Windows; ...` | Use WSL2 or container mode. |
+| `<name>: the config names this scanner '<name>', but its own name is '<other>'` | Configure the scanner under its own name; grants follow a scanner's own name. |
+| `<scanner> cannot be sandboxed as requested: ...` | Logged while ASH checks the scanner's tool; fix the reason that follows. |
+| `the results directory path <path> is a symlink, ...` | Remove the link under the output directory, or pass another `--output-dir`. |
+| `a scanner tried to start a shell command, which the sandbox does not wrap` | The scanner's plugin starts its tool through a shell. Leave that scanner out of sandboxed scans, or ask the plugin's author to start the tool directly. |
+
+## Scan a repository you do not trust {#untrusted}
+
+For a repository you do not trust, on Linux or macOS:
+
+1. Install the scanners first, from a trusted environment, with
+   `ash dependencies install`. Run it from a directory outside the repository, because
+   it reads the ASH config of the directory it runs in. A sandboxed scan does not
+   install tools (see
+   [Install tools before a sandboxed scan](#install-tools-before-a-sandboxed-scan)),
+   and a scanner whose tool is missing is recorded `MISSING`.
+2. Keep your own config file outside every git checkout and outside the scanned
+   directory, and pass it with `--config`. Only such a file and `--config-overrides`
+   can grant sandbox access (see [Who may grant](#who-may-grant)).
+3. Scan in local mode with the sandbox on. On Linux, name the backend with
+   `--sandbox bwrap`, or set `sandbox.mode` to `bwrap` in that file: `--sandbox auto`
+   falls back to firejail when bwrap is not usable, and firejail leaves readable every
+   path outside `$HOME` that your user can read. On macOS the backend is sandbox-exec,
+   which reads everywhere except the home directory and the shared temporary
+   directories.
+4. Scan with `--offline` if you can, so that no scanner gets a network. Otherwise set
+   `sandbox.network_scanners` to the shortest list that works. Offline, npm-audit is
+   `MISSING` for a project that has a lockfile, because npm, pnpm and yarn audit only
+   against the package registry; leave it out with `--exclude-scanners npm-audit`.
+5. Put the output directory outside the repository with `--output-dir`. The default
+   output directory, `.ash/ash_output`, is inside the scanned directory.
+6. Do not pass `--allow-in-tree-tools` or set `ASH_ALLOW_IN_TREE_TOOLS`, so that ASH
+   starts no tool it finds only inside the repository (see
+   [Tools inside the scanned directory](advanced-usage.md#tools-inside-the-scanned-directory)).
+7. Name only plugin modules you trust. A plugin module runs in ASH's own process,
+   outside the sandbox.
+
+With the default `fail_on_incomplete_scanners`, a scanner whose tool is found only
+inside the repository, or that cannot be sandboxed under `--sandbox auto` because no
+backend works, is `MISSING`. A scanner whose sandbox backend you named and that is
+unavailable, or whose sandbox is refused for another reason, is `ERROR`. Either way the
+scan exits 1, rather than passing on fewer scanners than you asked for.
+
+On Windows there is no sandbox backend. Run ASH under WSL2 with `--sandbox bwrap`, or
+use container mode, where the container is the boundary.
 
 ## Design
 
@@ -631,13 +713,13 @@ process from a thread it created itself would not inherit it. No builtin scanner
 bubblewrap builds an empty root from a tmpfs and mounts into it only what the policy
 lists, in new user, mount, PID, IPC, UTS, cgroup and (when the scanner gets no network)
 network namespaces. It needs no setuid binary on distributions that allow unprivileged
-user namespaces. ASH passes `--die-with-parent` and `--new-session`, so a scanner
+user namespaces. ASH passes `bwrap --die-with-parent` and `bwrap --new-session`, so a scanner
 cannot outlive ASH or inject keystrokes into the terminal through `TIOCSTI`.
 
 bwrap's mounts hide `/run` and `$HOME`, but not a Unix socket inside a directory it
 does mount (the Nix daemon's socket is under `/nix`), and a scanner with a network
 shares the host's network namespace and every abstract Unix socket bound there. So
-the scanner is started through the Landlock wrapper in `--socket-filter` mode, which
+the scanner is started through the Landlock wrapper in its socket-filter mode, which
 installs only its seccomp socket filter (described under Landlock) and then execs the
 scanner. IP sockets are left to the network namespace, so a tool can still use its own
 loopback when it has no network. ASH's probe runs the filter inside bwrap once, so an
@@ -653,7 +735,7 @@ running `bwrap ... true` once per process, so a `bwrap` that is installed but ca
 start is reported as unavailable with the error it printed, not used and found broken
 mid-scan.
 
-The throwaway cache overlay uses `--overlay-src`/`--tmp-overlay`, which needs
+The throwaway cache overlay uses `bwrap --overlay-src` and `bwrap --tmp-overlay`, which need
 bubblewrap 0.8 and Linux 5.11. On older systems those caches are mounted read-only
 instead, as under the other backends, and the log says so.
 
@@ -663,10 +745,10 @@ firejail is a setuid-root binary, a privileged program of its own (it has had
 privilege-escalation advisories), and its filesystem model is "everything visible, then
 restrict" rather than "nothing visible, then allow". ASH uses
 `--noprofile --private-dev --nonewprivs --caps.drop=all --seccomp --nogroups`,
-`--dbus-user=none --dbus-system=none`, `--net=none` when the scanner gets no network,
+`firejail --dbus-user=none --dbus-system=none`, `firejail --net=none` when the scanner gets no network,
 makes `/` read-only, blacklists the container runtime sockets, `/run/user/<uid>` and
 `$SSH_AUTH_SOCK`, whitelists inside `$HOME` (and `/tmp`) only the paths the policy
-lists, uses `--private-tmp` when the policy lists nothing under `/tmp`, and makes the
+lists, uses `firejail --private-tmp` when the policy lists nothing under `/tmp`, and makes the
 results directory read-write. Paths outside `$HOME` that your user can read remain readable, and scanner
 caches are read-only because firejail has no throwaway overlay. Because
 everything outside `$HOME` stays visible, `/run` and its sockets included, the
@@ -754,6 +836,9 @@ than escaping.
 
 ### macOS: sandbox-exec
 
+`sandbox-exec` ships with macOS at `/usr/bin/sandbox-exec`; there is nothing to install.
+`--sandbox auto` uses it.
+
 `sandbox-exec` applies a Seatbelt (SBPL) profile. ASH generates one per scanner:
 deny by default, read everywhere except the home directory and the shared temporary
 directories, read the policy's tool paths inside home, write only to the results
@@ -832,6 +917,7 @@ A macOS release or a scanner update can make a tool look up a service that is no
 the list. The profile denies it, the tool usually fails or reports less, and the
 unified log says which service it was:
 
+<!-- doctest: illustrative reason="log is a macOS command" -->
 ```bash
 log show --last 10m --predicate 'sender == "Sandbox"' | grep -E 'deny\(1\) (mach-lookup|process-exec)'
 ```
@@ -848,9 +934,14 @@ scan.
 
 ### Windows
 
-There is no Windows backend. `--sandbox auto` on Windows finds nothing and the
-scanners are recorded `MISSING`. Run ASH under WSL2 and use `bwrap` there, or use
-container mode. A native backend would use an AppContainer or a restricted token plus
+There is no sandbox backend on Windows. With `--sandbox auto`, every scanner is
+reported `MISSING` with:
+
+```text
+no scanner sandbox is available on Windows; run ASH under WSL2 and use --sandbox bwrap there, or use --mode container
+```
+
+Run ASH under WSL2 and use `bwrap` there, or use container mode. A native backend would use an AppContainer or a restricted token plus
 a job object; that is a larger piece of work and is not in this release.
 
 ### Why not gVisor or nsjail by default

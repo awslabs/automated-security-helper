@@ -6,22 +6,49 @@ on:
     branches:
       - main
 
-permissions:
-  contents: write
+# No workflow-level write grant: each job asks for what it uses. tag-and-release
+# pushes the release and floating tags and creates the GitHub Release, so it holds
+# contents: write; publish-docs already declared its own block. zizmor
+# (excessive-permissions) flagged the old workflow-level `contents: write`, which
+# also reached any job added later without a block of its own.
+permissions: {}
 
 jobs:
   tag-and-release:
     name: Create tag and GitHub Release
+    permissions:
+      contents: write
     if: >-
       github.event.pull_request.merged == true &&
       startsWith(github.event.pull_request.title, 'chore(release):')
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Release runs do not overlap. The group is not per pull request or per
+    # version: the floating tag is shared by every release of a major, so two runs
+    # for different versions must not read and move it at the same time.
+    # cancel-in-progress stays false because cancelling a run between creating the
+    # release tag and moving the floating tag would leave the two out of step.
+    #
+    # GitHub keeps at most one running and one pending run per group. When a third
+    # release run arrives while one runs and one waits, the waiting run is cancelled
+    # (cancel-in-progress: false does not change that). A cancelled run creates no
+    # release and starts no docs publish, and the only trace is a "cancelled" run in
+    # the Actions list. Re-run it by hand. That is safe: the step skips a release that
+    # already exists, refuses a release tag that sits at another commit, and never
+    # moves the floating tag to an older version.
+    concurrency:
+      group: ash-release-tag
+      cancel-in-progress: false
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: main
+          # The release pull request's merge commit, not the branch: with two release
+          # pull requests merged close together, a run that read the version from the
+          # current tip of main would release the newer version at the older merge.
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
 
       # No uv cache in this workflow. It tags and publishes the release with
@@ -53,12 +80,24 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
           TAG="v${VERSION}"
 
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "::notice::Release $TAG already exists, skipping"
             exit 0
+          fi
+
+          # `gh release create --target` is ignored when the tag already exists, so a
+          # tag left at another commit would publish this release there. Read the tag
+          # on the remote first: absent, or already at the merge commit, is fine. An
+          # annotated tag lists its commit on the `^{}` line, which comes last.
+          TAG_REFS=$(git ls-remote origin "refs/tags/${TAG}" "refs/tags/${TAG}^{}")
+          TAG_SHA=$(printf '%s\n' "$TAG_REFS" | tail -n1 | cut -f1)
+          if [[ -n "$TAG_SHA" && "$TAG_SHA" != "$MERGE_SHA" ]]; then
+            echo "::error::Tag ${TAG} already exists at ${TAG_SHA}, but the release pull request merged at ${MERGE_SHA}. Creating the release would publish it at the existing tag's commit. Move or delete the tag, then rerun this job."
+            exit 1
           fi
 
           # The release body leads with this version's CHANGELOG.md entry, and
@@ -79,8 +118,12 @@ jobs:
           ' CHANGELOG.md > "$NOTES_FILE"
 
           if [[ -f "$CURATED" ]]; then
-            # The tag does not exist yet, so failing here costs a rerun after the
-            # changelog is fixed, while publishing would lose the curated notes.
+            # No release exists yet, so failing here publishes nothing, while
+            # publishing would lose the curated notes. A re-run cannot pick up a
+            # fix: the checkout is pinned to this pull request's merge commit, and a
+            # re-run replays the same event payload, so it reads the same
+            # CHANGELOG.md and fails the same way. Recovery is a new chore(release):
+            # pull request whose regenerated entry includes the file.
             if ! python3 - "$CURATED" "$NOTES_FILE" <<'PY'
           import sys
           curated = open(sys.argv[1], encoding="utf-8").read().strip()
@@ -88,7 +131,7 @@ jobs:
           sys.exit(0 if curated and curated in notes else 1)
           PY
             then
-              echo "::error::${CURATED} exists, but the CHANGELOG.md entry for ${TAG} does not contain it. Refusing to publish ${TAG} without its curated notes. Regenerate the entry with commitizen (the template includes the file), then rerun this job."
+              echo "::error::${CURATED} exists, but the CHANGELOG.md entry for ${TAG} does not contain it. Refusing to publish ${TAG} without its curated notes. Regenerate the entry with commitizen (the template includes the file) and merge it as a new chore(release): pull request. A re-run of this job reads the same CHANGELOG.md from the same merge commit and fails the same way."
               exit 1
             fi
           fi
@@ -100,9 +143,12 @@ jobs:
             echo "::warning::CHANGELOG.md has no entry for ${TAG}, so the release body is GitHub's generated notes only."
           fi
 
+          # Target the merge commit of the release pull request, not the branch name.
+          # `main` is resolved when the release is created, so a pull request merged
+          # in between would put the tag on a commit that is not the release.
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --target main \
+            --target "$MERGE_SHA" \
             --generate-notes \
             "${NOTES_ARGS[@]}" \
             --title "$TAG"
@@ -132,15 +178,82 @@ jobs:
           # A prerelease such as 4.0.0rc1 is accepted and resolves to v4 -- only the
           # major is read, and refusing one here would stop maintaining the floating
           # tag for a shape this repository has released before (v3.0.0-beta-*).
-          if [[ ! "$VERSION" =~ ^([0-9]+)\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]*$ ]]; then
+          # The suffix cannot start with a digit: submatch assignment is up to the
+          # regex engine, and a digit-led suffix would let an engine read 3.8.10 as
+          # CORE 3.8.1 with suffix 0 -- a stable release treated as a prerelease,
+          # whose floating tag then silently does not move.
+          if [[ ! "$VERSION" =~ ^(([0-9]+)\.[0-9]+\.[0-9]+)([A-Za-z.+-][0-9A-Za-z.+-]*)?$ ]]; then
             # Fails rather than skips. The GitHub release already exists by now, so a
             # skip would leave a published release whose floating tag silently never
             # moved, on a green run.
             echo "::error::VERSION is '${VERSION}', which is not a release version. Refusing to derive a floating tag name from it. The release itself was created; move the floating tag by hand and fix the 'Read version' step."
             exit 1
           fi
-          FLOATING="v${BASH_REMATCH[1]}"
-          MAIN_SHA=$(git rev-parse HEAD)
+          MAJOR="${BASH_REMATCH[2]}"
+          FLOATING="v${MAJOR}"
+
+          # Never move the floating tag to an older release than one that exists. The
+          # job is serialized by its concurrency group, but a re-run of an old run, or
+          # two runs that finish out of order, still arrive here with an older version
+          # after a newer release was tagged. The comparison is one version-order
+          # test of VERSION against every tag in the remote listing, which includes
+          # this run's own tag, in PEP 440 order via packaging.version (a declared
+          # dependency of this project, installed by `uv sync` and reached through
+          # `uv run python`): VERSION is older when any tag parses to a newer
+          # version. It is deliberately not sort -V and not scoped to stable or
+          # same-core tags: sort -V strips a trailing alphanumeric "file suffix" and
+          # compares it only on a tie, so it ranks 4.1.0rc1.dev1 after 4.1.0rc1, the
+          # inverse of PEP 440, and a suffix rule that calls every suffix a
+          # prerelease never moves the tag for 3.8.0.post1 over 3.8.0. A tag the
+          # parser refuses fails the step: an order the step cannot read must stop
+          # the move, not be skipped over.
+          #
+          # The remote is read in its own assignment so that a failing `git ls-remote`
+          # stops the step under `bash -e`: inside a pipeline its status is lost to the
+          # last command, and an empty list would read as "no newer release". Whatever
+          # its shape, VERSION must find its own tag in the listing; the check runs on
+          # the unfiltered listing, before the stable filter, so an incomplete list
+          # stops prerelease runs too. The cause is not knowable from here: the
+          # release step exits 0 once `gh release view` finds a release, and a draft
+          # release, or one whose tag was deleted (GitHub turns it into a draft), has
+          # no tag -- so the error below names the possibilities instead of claiming
+          # this run created the tag.
+          REMOTE_REFS=$(git ls-remote --tags --refs origin "refs/tags/v${MAJOR}.*")
+          if ! printf '%s\n' "$REMOTE_REFS" | sed 's|.*refs/tags/||' \
+            | grep -qxF "v${VERSION}"; then
+            echo "::error::v${VERSION} is not on the remote: the release may be a draft, or its tag may have been deleted, and neither leaves a tag for ${FLOATING} to follow. Refusing to compare against a tag list that lacks this release."
+            exit 1
+          fi
+          # The comparison program is a file so that the tag list keeps stdin.
+          RUNNER_TEMP="${RUNNER_TEMP:-$(mktemp -d)}"
+          cat > "$RUNNER_TEMP/compare_versions.py" <<'PY'
+          import sys
+          from packaging.version import Version
+          version = Version(sys.argv[1])
+          tags = [line.strip() for line in sys.stdin if line.strip()]
+          newer = [tag for tag in tags if Version(tag) > version]
+          print(max(newer, key=Version) if newer else "")
+          PY
+          NEWEST=$(printf '%s\n' "$REMOTE_REFS" \
+            | sed 's|.*refs/tags/v||' \
+            | uv run python "$RUNNER_TEMP/compare_versions.py" "$VERSION"
+          )
+          OLDER=false
+          if [[ -n "$NEWEST" ]]; then
+            OLDER=true
+          fi
+          if [[ "$OLDER" == true ]]; then
+            echo "::notice::v${VERSION} is older than v${NEWEST}, so ${FLOATING} stays where it is."
+            exit 0
+          fi
+
+          # The floating tag follows the release tag, never the checkout's HEAD. HEAD
+          # is whatever main is now, so a merge whose release already existed, or a
+          # pull request merged after the release, would otherwise move the floating
+          # tag onto unreleased code. The release tag was created server-side after
+          # the checkout, so fetch it first.
+          git fetch --no-tags origin "refs/tags/v${VERSION}:refs/tags/v${VERSION}"
+          MAIN_SHA=$(git rev-list -n1 "refs/tags/v${VERSION}")
 
           if gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/${FLOATING}" >/dev/null 2>&1; then
             gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/${FLOATING}" \

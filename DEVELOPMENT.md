@@ -1,99 +1,19 @@
-# Local Development Setup Guide
+# Development
 
-This guide will help you set up your local development environment for the Automated Security Helper project.
+The development guide is part of the documentation site, under Contributing:
 
-## Prerequisites
+- [Contribute to ASH](docs/content/contributing/index.md): set up a development checkout, the project layout, running
+  ASH from your checkout, pull requests, commit messages, what CI runs, code style, and the pre-commit hooks.
+- [Test your change](docs/content/contributing/testing.md): the unit, integration, and snapshot tests, the rules the
+  suite enforces on new tests, and testing an MCP change locally.
+- [Test the documentation](docs/content/contributing/documentation.md): how the docs are checked and how to mark
+  a code block.
+- [Releases and versions](docs/content/contributing/releases.md): versions, the changelog, cutting a release, tags, and
+  the version-pinned pages.
 
-- Python 3.10 or later
-- UV (Python package manager) - **Note: Project has migrated from Poetry to UV**
+The short version, from a git clone:
 
-## Setting up UV
-
-1. Install UV on your system
-
-[Official instructions](https://docs.astral.sh/uv/getting-started/installation/)
-
-Linux, macOS, Windows (WSL)
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-Windows PowerShell:
-
-```ps1
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-
-2. Verify UV installation:
-
-```bash
-uv --version
-```
-
-### Windows: Enable Long Paths
-
-Windows has a 260-character path limit that can cause `git clone` or `git reset` failures due to deeply nested test file paths. Run this once before cloning:
-
-```ps1
-git config --global core.longpaths true
-```
-
-## Project Setup
-
-### Option 1: Manual Setup
-
-1. Clone the repository:
-
-```bash
-git clone https://github.com/awslabs/automated-security-helper.git
-cd automated-security-helper
-```
-
-2. Install project dependencies:
-
-```bash
-uv sync
-```
-
-This command will:
-- Create a virtual environment
-- Install all dependencies from pyproject.toml and uv.lock
-- Set up the project in development mode
-
-3. Activate the virtual environment:
-
-```bash
-source .venv/bin/activate
-```
-
-Or use UV's built-in environment management:
-
-```bash
-uv run <command>
-```
-
-### Option 2: Using Development Containers
-
-If you're using an IDE that supports devfiles (like Eclipse Che, Red Hat OpenShift Dev Spaces, or other devfile-compatible environments), you can use the provided `devfile.yaml`:
-
-The devfile includes pre-configured commands:
-- `install`: Sets up UV and installs dependencies
-- `build`: Builds the project using UV
-- `test`: Runs the test suite
-
-This provides a consistent development environment across different platforms and IDEs.
-
-## Testing
-
-Run the tests from a git checkout with `git` on `PATH`. Some of them list the
-repository's files with `git ls-files` rather than walking the directory tree (see
-[Do Not Walk the Repository Tree](docs/content/docs/testing/parallel_testing.md)), and so
-do `scripts/verify_docs_freshness.py` and `check-snapshot-trailers.py --orphans`; in a
-copy that is not a git work tree they fail instead of checking nothing.
-
-Run the test suite:
-
+<!-- doctest: illustrative reason="installs packages from the network and runs the full test suite" -->
 ```bash
 uv sync
 uv run pytest                                      # everything
@@ -133,12 +53,39 @@ A plain `uv sync` installs neither optional extra. The tests that need the `cdk`
 (cdk-nag) or the `symbols` extra (tree-sitter, for symbol-scoped suppressions) skip
 without it, and the skip reason names the extra. To run them:
 
+The [design system](docs/content/developer-guide/interface-design.md) covers the
+website, terminal, TUI, and human reports. The [surface review](docs/content/developer-guide/high-end-design-review.md)
+records the navigation architecture, motion vocabulary, and platform decisions.
+
+Follow the [preview workflow](docs/ui-tests/README.md) to generate representative
+reports and terminal screens, build the documentation, run browser checks, and
+inspect the gallery. Review the affected theme, width, keyboard, empty, and
+error states. The generated GitHub comment preview approximates GitHub's native
+renderer.
+
+Edit versioned content in its `.md.template` and regenerate the output with
+`uv run python scripts/version_template_manager.py generate`. Editor and agent
+content has its own canonical source in
+`ash-agent-plugins/agentic-coding/transpiler/_base/`.
+
+Refresh the README's report and terminal images with `npm run capture -- --readme`
+in `docs/ui-tests`. Rebuild the local MIT animation module with `npm run vendor:motion`
+after changing its pinned dependency.
+
+## Devfile environments
+
+`devfile.yaml` defines `install`, `build`, and `test` commands for IDEs that read
+devfiles (see [Devfile environments](docs/content/contributing/index.md#devfile-environments)).
+To run them by hand, for example when the IDE integration fails:
+
+<!-- doctest: illustrative reason="installs uv and packages from the network" -->
 ```bash
 uv sync --extra cdk --extra symbols
 ```
 
 Integration tests and slow tests are skipped unless you ask for them:
 
+<!-- doctest: illustrative reason="runs this repository's tests, whose --run-integration option comes from the repository's own tests/conftest.py, so it needs a checkout of this repository" -->
 ```bash
 uv run pytest tests/integration --run-integration
 uv run pytest tests/integration/scanners --run-integration
@@ -149,6 +96,7 @@ CI's unit-test step (`.github/actions/run-unit-tests/action.yml`) installs both 
 fails instead of skipping when a test cannot find its extra, and fails the run when total
 coverage is below 80%. To run the suite the way it does:
 
+<!-- doctest: illustrative reason="installs the extras from this repository's pyproject.toml and runs its test suite, so it needs a checkout of this repository" -->
 ```bash
 uv sync --extra cdk --extra symbols
 ASH_REQUIRE_CDK_EXTRA=1 ASH_REQUIRE_SYMBOLS_EXTRA=1 uv run pytest \
@@ -176,6 +124,7 @@ exercise.
 
 Install the hooks, the commit-message one included, and run them over the whole tree:
 
+<!-- doctest: illustrative reason="installs and runs this repository's pre-commit hooks, so it needs a checkout of this repository" -->
 ```bash
 uv run pre-commit install --hook-type pre-commit --hook-type commit-msg
 uv run pre-commit run --all-files
@@ -190,25 +139,13 @@ the plugin outputs.
 
 ## Snapshot tests
 
-What ASH prints and writes is pinned by snapshot tests, so a change to user-visible
-output fails CI until someone has looked at it and said why it changed.
+Moved to [Snapshot tests](docs/content/contributing/testing.md#snapshot-tests).
 
-### What is snapshotted
+## Release line
 
-- `tests/snapshot/`: syrupy snapshot tests of CLI output, reports and other rendered
-  output. Snapshots live next to their test module, in
-  `tests/snapshot/**/__snapshots__/<test_module>.ambr` for structured data and
-  `__snapshots__/<test_module>/<test_name>.<ext>` for whole rendered documents.
-- `.github/actions/validate-mcp/tool_surface.golden.json`: the MCP tool surface a client
-  sees, compared against the live server by the `validate-mcp` action.
+Moved to [The release line](docs/content/contributing/releases.md#the-release-line).
 
-The Snapshot-Update rule below also covers the other committed files that a generator
-writes in full and CI regenerates and compares: the JSON schemas in
-`automated_security_helper/schemas/*.json`, `docs/content/docs/cli-reference-generated.md`,
-and the MCP tool reference in
-`ash-agent-plugins/agentic-coding/transpiler/_base/references/tool-reference.md`. The full
-list, and why each candidate is in or out, is the `GOLDEN` table in
-`.github/scripts/check-snapshot-trailers.py`.
+## Release App setup
 
 ### Normalization
 
@@ -233,6 +170,7 @@ only after the test has been shown to differ between runs or between time zones 
 several times, and under `TZ=Pacific/Kiritimati` and `TZ=America/Adak`), opt in to
 masking for that test or module:
 
+<!-- doctest: illustrative reason="one line for a test module, which needs pytest imported and a test file to put it in" -->
 ```python
 pytestmark = pytest.mark.snapshot_masking(mask_instants=True, mask_durations=True)
 ```
@@ -258,6 +196,7 @@ timezone.
 
 1. Run the tests and read the diff syrupy prints:
 
+   <!-- doctest: illustrative reason="runs this repository's snapshot tests, so it needs a checkout of this repository" -->
    ```bash
    uv run pytest tests/snapshot
    ```
@@ -265,6 +204,7 @@ timezone.
 2. Decide whether the new output is what you intended. If it is not, fix the code.
 3. If it is, rewrite the snapshots for the tests you changed:
 
+   <!-- doctest: illustrative reason="rewrites this repository's snapshot files, so it needs a checkout of this repository" -->
    ```bash
    uv run pytest tests/snapshot/<area>/test_snapshot_<area>_<topic>.py -n 0 --snapshot-update
    ```
@@ -281,6 +221,7 @@ timezone.
 5. Commit the code change and its snapshots together, with a trailer saying why the
    output changed:
 
+   <!-- doctest: illustrative reason="commits the changes staged in a contributor's clone, and nothing is staged here" -->
    ```bash
    git commit --trailer "Snapshot-Update: the summary table now shows suppressed findings"
    ```
@@ -352,6 +293,7 @@ uv run ruff format .
 
 - Run a specific script:
 
+<!-- doctest: illustrative reason="runs ash from this repository's own environment, so it needs a checkout of this repository" -->
 ```bash
 uv run ash
 ```
@@ -371,6 +313,7 @@ Scanner tools (Bandit, Checkov, Semgrep) are managed via UV tool isolation at ru
 itself. The weekly ASH - Pinned Tool Versions workflow compares those pins with each
 upstream's latest release; to run the same check locally:
 
+<!-- doctest: illustrative reason="runs a script from this repository's scripts directory that asks GitHub for each tool's latest release" -->
 ```bash
 uv run python scripts/check_pinned_tool_versions.py
 uv run python scripts/check_pinned_tool_versions.py --fail-on-outdated --markdown
@@ -403,6 +346,7 @@ python --version
 
 2. Try cleaning and rebuilding the environment:
 
+<!-- doctest: illustrative reason="removes and reinstalls this repository's virtual environment over the network, so it needs a checkout of this repository" -->
 ```bash
 rm -rf .venv
 uv sync
@@ -410,6 +354,7 @@ uv sync
 
 3. Update UV and dependencies:
 
+<!-- doctest: illustrative reason="updates uv itself over the network and upgrades this repository's dependencies" -->
 ```bash
 uv self update
 uv sync --upgrade
@@ -417,6 +362,7 @@ uv sync --upgrade
 
 4. If using a devfile-compatible IDE and encountering issues, try running the devfile commands manually:
 
+<!-- doctest: illustrative reason="downloads the uv installer over the network, then builds and tests this repository" -->
 ```bash
 # Install dependencies
 curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR="$HOME/.local/bin" sh && export PATH="$HOME/.local/bin:$PATH" && uv sync
@@ -432,6 +378,7 @@ export PATH="$HOME/.local/bin:$PATH" && uv run pytest
 
 The project includes a migration validator to help diagnose UV-related issues:
 
+<!-- doctest: illustrative reason="runs a module of this repository's package through the repository's own environment, so it needs a checkout of this repository" -->
 ```bash
 # Check migration status
 uv run python -m automated_security_helper.utils.migration_validator
@@ -521,6 +468,7 @@ To confirm the setup, run the release workflow and check that the **Mint a GitHu
 
 ### Manual Version Bumping
 
+<!-- doctest: illustrative reason="bumps the version of this repository with commitizen, so it needs a checkout of this repository and its commit history" -->
 ```bash
 # Show current version
 uv run cz version --project
@@ -547,6 +495,7 @@ To cut 4.0.0 once v4 is on `main`: set `RELEASE_LINE` to `auto` in the change th
 
 Preview either line locally:
 
+<!-- doctest: illustrative reason="previews a version bump of this repository with commitizen, so it needs a checkout of this repository and its commit history" -->
 ```bash
 uv run cz bump --dry-run --changelog --increment MINOR   # what RELEASE_LINE 3.x produces when a major is detected
 uv run cz bump --dry-run --changelog                     # what RELEASE_LINE auto produces
@@ -632,6 +581,7 @@ class MyCustomScanner(ScannerPluginBase[MyCustomScannerConfig]):
 
 The `_get_tool_version_constraint()` method is **optional** and only needs to be implemented if your scanner requires specific version constraints for UV tool installation:
 
+<!-- doctest: illustrative reason="a method for a scanner plugin class, shown without the class around it" -->
 ```python
 def _get_tool_version_constraint(self) -> Optional[str]:
     """Get version constraint for tool installation.
@@ -667,6 +617,7 @@ When testing custom scanner plugins:
 1. Unit tests: test scanner logic in isolation
 2. Integration tests: test with actual tool execution
 
+<!-- doctest: illustrative reason="runs this repository's own unit and integration tests, so it needs a checkout of this repository" -->
 ```bash
 # Run scanner-specific unit tests
 uv run pytest tests/unit/plugin_modules/ -v

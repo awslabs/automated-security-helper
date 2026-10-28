@@ -397,14 +397,17 @@ class TestTheScanRunnerDiscoversUnderTheGate:
         link = tree.link(target)
         opened = _record_opens(monkeypatch)
 
+        from automated_security_helper.core.orchestrator import ASHScanOrchestrator
+
+        # The run resolves its config once, inside the orchestrator it builds
+        # (run_ash_scan._run_local_mode); the refusal must come from that
+        # resolution, before any scanner runs.
         with (
-            patch(
-                "automated_security_helper.core.orchestrator.ASHScanOrchestrator"
-            ) as orchestrator,
+            patch.object(ASHScanOrchestrator, "execute_scan") as execute_scan,
             pytest.raises(SystemExit) as excinfo,
         ):
             ras._run_local_mode(self._opts(tree), MagicMock())
 
         assert excinfo.value.code == 3
-        orchestrator.create.assert_not_called()
+        execute_scan.assert_not_called()
         assert link not in opened

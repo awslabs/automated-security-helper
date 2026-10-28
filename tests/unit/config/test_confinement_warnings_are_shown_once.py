@@ -26,7 +26,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from tests.utils.helpers import importing_this_checkout
+from tests.utils.helpers import importing_this_checkout, mark_git_checkout
 
 ESC, BEL = chr(0x1B), chr(0x07)
 
@@ -70,7 +70,7 @@ def _written(path: Path) -> str:
 
 def _checkout(tmp_path: Path, config: str, base_name: str, base: str) -> Path:
     checkout = tmp_path / "checkout"
-    (checkout / ".git").mkdir(parents=True)
+    mark_git_checkout(checkout)
     (checkout / ".ash").mkdir()
     (checkout / ".ash" / ".ash.yaml").write_text(config, encoding="utf-8")
     (checkout / ".ash" / base_name).write_text(base, encoding="utf-8")
