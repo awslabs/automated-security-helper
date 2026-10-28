@@ -27,6 +27,20 @@ import pytest
 
 BAD_YAML = "project_name: [unclosed\n"
 
+#: The IDs the outer run handed the stand-in runner, newest last. The host reads a
+#: results file back only when it records that the run with its ID completed
+#: (utils/inner_run_outcome.py), so the read-back below carries that record.
+_OUTER_RUN_IDS: list[str] = []
+
+
+def _read_back_that_records_the_last_run(*_args, **_kwargs):
+    """What parsing the results file gives when the scan inside completed."""
+    read_back = MagicMock()
+    read_back.validation_checkpoints = [
+        {"type": "run_completed", "metadata": {"run_id": _OUTER_RUN_IDS[-1]}}
+    ]
+    return read_back
+
 
 def _make_opts(tmp_path, **update):
     from automated_security_helper.core.enums import RunMode
@@ -361,6 +375,7 @@ def test_a_toml_config_with_a_byte_order_mark_reaches_the_runner(tmp_path, monke
 
     def fake_run_ash_container(**kwargs):
         results_file.write_text('{"sarif": null, "scanners": []}', encoding="utf-8")
+        _OUTER_RUN_IDS.append(kwargs["outer_run_id"])
         done = MagicMock()
         done.returncode = 0
         return done
@@ -373,7 +388,7 @@ def test_a_toml_config_with_a_byte_order_mark_reaches_the_runner(tmp_path, monke
         patch(
             "automated_security_helper.interactions.run_ash_scan"
             ".AshAggregatedResults.model_validate_json",
-            return_value=MagicMock(),
+            side_effect=_read_back_that_records_the_last_run,
         ),
     ):
         _run_container_mode(opts, MagicMock())
@@ -399,6 +414,7 @@ def test_control_a_config_that_parses_reaches_the_runner(tmp_path, monkeypatch):
 
     def fake_run_ash_container(**kwargs):
         results_file.write_text('{"sarif": null, "scanners": []}', encoding="utf-8")
+        _OUTER_RUN_IDS.append(kwargs["outer_run_id"])
         done = MagicMock()
         done.returncode = 0
         return done
@@ -411,7 +427,7 @@ def test_control_a_config_that_parses_reaches_the_runner(tmp_path, monkeypatch):
         patch(
             "automated_security_helper.interactions.run_ash_scan"
             ".AshAggregatedResults.model_validate_json",
-            return_value=MagicMock(),
+            side_effect=_read_back_that_records_the_last_run,
         ),
     ):
         _run_container_mode(opts, MagicMock())
@@ -431,6 +447,7 @@ def test_control_no_config_found_reaches_the_runner(tmp_path, monkeypatch):
 
     def fake_run_ash_container(**kwargs):
         results_file.write_text('{"sarif": null, "scanners": []}', encoding="utf-8")
+        _OUTER_RUN_IDS.append(kwargs["outer_run_id"])
         done = MagicMock()
         done.returncode = 0
         return done
@@ -443,7 +460,7 @@ def test_control_no_config_found_reaches_the_runner(tmp_path, monkeypatch):
         patch(
             "automated_security_helper.interactions.run_ash_scan"
             ".AshAggregatedResults.model_validate_json",
-            return_value=MagicMock(),
+            side_effect=_read_back_that_records_the_last_run,
         ),
     ):
         _run_container_mode(opts, MagicMock())

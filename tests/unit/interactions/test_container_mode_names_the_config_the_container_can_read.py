@@ -23,10 +23,13 @@ at the assembled-command seam, in run_ash_container's own tests.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from automated_security_helper.utils.inner_run_outcome import completion_marker
 
 CONFIG_TEXT = "project_name: operator-config\n"
 
@@ -72,7 +75,15 @@ def _ran(opts):
 
     def fake_run_ash_container(**kwargs):
         seen.update(kwargs)
-        results_file.write_text('{"sarif": null, "scanners": []}', encoding="utf-8")
+        # With the record that the run with the host's ID completed, as the scan
+        # inside writes it (utils/inner_run_outcome.py): the host reads the file
+        # back only when it holds that record.
+        document = {
+            "sarif": None,
+            "scanners": [],
+            "validation_checkpoints": [completion_marker(kwargs["outer_run_id"])],
+        }
+        results_file.write_text(json.dumps(document), encoding="utf-8")
         done = MagicMock()
         done.returncode = 0
         return done

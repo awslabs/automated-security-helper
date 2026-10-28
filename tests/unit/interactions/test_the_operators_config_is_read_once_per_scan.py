@@ -35,6 +35,10 @@ from automated_security_helper.core.enums import RunMode
 from automated_security_helper.interactions import run_ash_container
 from automated_security_helper.interactions import run_ash_scan as ras
 from automated_security_helper.utils import subprocess_utils
+from automated_security_helper.utils.inner_run_outcome import (
+    OUTER_RUN_ID_ENV,
+    completion_marker,
+)
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 
 
@@ -69,6 +73,17 @@ def recording_runner(monkeypatch):
         cmd = [str(item) for item in cmd_list if item is not None]
         commands.append(cmd)
         if len(cmd) > 1 and cmd[1] == "run":
+            # The scan inside records that the run with the host's ID completed
+            # (utils/inner_run_outcome.py); the ID reaches the runner through
+            # its environment, named with -e and no value on the command line.
+            run_id = (kwargs.get("env") or {}).get(OUTER_RUN_ID_ENV)
+            document = {
+                "sarif": None,
+                "scanners": [],
+                "validation_checkpoints": (
+                    [completion_marker(run_id)] if run_id else []
+                ),
+            }
             for i, arg in enumerate(cmd[:-1]):
                 if arg == "--mount":
                     fields = dict(
@@ -77,9 +92,7 @@ def recording_runner(monkeypatch):
                     if fields.get("destination") == "/out":
                         Path(
                             fields["source"], "ash_aggregated_results.json"
-                        ).write_text(
-                            '{"sarif": null, "scanners": []}', encoding="utf-8"
-                        )
+                        ).write_text(json.dumps(document), encoding="utf-8")
         return create_completed_process(args=cmd, returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(subprocess_utils, "get_host_uid", lambda: 1000)
