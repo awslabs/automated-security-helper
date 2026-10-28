@@ -50,7 +50,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 #: The runnable pages and the blocks the runner executes on them, measured on this
 #: tree. Raise them when runnable blocks are added; lowering one is a decision to run
 #: fewer examples, made in the commit that does it.
-RUNNABLE_PAGES_FLOOR = 43
+# Was 43: two pages had only network or repository-only blocks, now marked illustrative.
+RUNNABLE_PAGES_FLOOR = 41
 EXECUTED_BLOCKS_FLOOR = 151
 #: The output samples the runner compares with their run block's output, measured the
 #: same way. A sample marker the runner stops honoring would otherwise pass silently,
