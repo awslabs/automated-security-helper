@@ -16,7 +16,7 @@ every way the run fails to show what the page claims:
   workflow's ids, once per matrix entry) ended as its commands say it should, the
   gate job failed (gitlab-ci-local), the build failed (Jenkinsfile Runner, the
   CircleCI CLI), the BUILD phase failed (the CodeBuild agent);
-* ASH's verdict line, exiting 2, with the count the fixture plants: two findings in
+* ASH's verdict line, exiting 2, with the count the fixture plants: three findings in
   app.py, one more in changed.py on a pull or merge request branch, only that one for
   a scan of the changed files; exactly one verdict from each job that gates on
   findings (under act, in each of its runs) and none from any other job;
@@ -846,16 +846,22 @@ def _launch_jenkins(prepared: Prepared, session: Session) -> Launched:
         "bin_dir": session.options.bin_dir,
         "jenkins_dir": session.options.jenkins_dir,
         "jenkinsfile": project / prepared.path,
-        "cwd": project,
         "tool_cache": session.tool_cache,
         "outer": os.environ,
         "timeout": session.options.launch_timeout,
     }
+    # Jenkinsfile Runner explodes the WAR into a new directory of its working directory
+    # on every start. Neither start runs in the project, which ash scans, or the exploded
+    # core's files would be scanned as the project's own.
+    lint_cwd, run_cwd = work / "jenkins-cwd-lint", work / "jenkins-cwd-run"
+    lint_cwd.mkdir()
+    run_cwd.mkdir()
     lint_log = out / "jenkinsfile-runner-lint.log"
     lint, timed_out = _timed(
         lambda: run_jenkinsfile_runner.run_jenkinsfile_runner(
             leg,
             command="lint",
+            cwd=lint_cwd,
             jenkins_home=work / "jenkins-home-lint",
             workspace=None,
             plugin_copy=work / "plugins-lint",
@@ -873,6 +879,7 @@ def _launch_jenkins(prepared: Prepared, session: Session) -> Launched:
         lambda: run_jenkinsfile_runner.run_jenkinsfile_runner(
             leg,
             command="run",
+            cwd=run_cwd,
             jenkins_home=work / "jenkins-home",
             workspace=project,
             plugin_copy=work / "plugins-run",

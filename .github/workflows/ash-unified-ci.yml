@@ -1583,10 +1583,14 @@ jobs:
             --no-cov -p no:randomly -n 0 \
             --junit-xml=test-results/integration.junit.xml
       # Runs even when the step above failed, so the two verdicts stay separate.
+      # PATH gains the same two directories as in the step above, for this step only:
+      # the local tutorial's twin and the tutorial page's bandit scan look for the bandit
+      # the install step put in ~/.local/bin, and fail when it is not on PATH.
       - name: Run the docs examples
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         run: |
+          export PATH="$HOME/.ash/bin:$HOME/.local/bin:$PATH"
           uv run pytest \
             tests/integration/docs \
             --run-integration \

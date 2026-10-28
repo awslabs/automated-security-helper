@@ -35,10 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 DEFINER_NAME = "Write the one_line helper"
 #: The function the definer writes. In the C locale [[:cntrl:]] is C0 and DEL; the
-#: UTF-8 bytes of C1 (U+0080 to U+009F), U+2028 and U+2029 are named. The `##[`
-#: replacement is an unquoted assignment: inside double quotes, bash before 4.3
-#: (the 3.2 of macOS) leaves the quotes of a replacement string in the result, so
-#: `# #[` came out as `'# #['`.
+#: UTF-8 bytes of C1 (U+0080 to U+009F), U+2028 and U+2029 are named.
 HELPER_TEXT = (
     "one_line() {\n"
     "  local LC_ALL=C\n"
@@ -46,7 +43,7 @@ HELPER_TEXT = (
     "  text=\"${text//$'\\xc2'[$'\\x80'-$'\\x9f']/ }\"\n"
     "  text=\"${text//$'\\xe2\\x80'[$'\\xa8\\xa9']/ }\"\n"
     '  while [[ "${text}" == *::* ]]; do text="${text//::/: :}"; done\n'
-    "  while [[ \"${text}\" == *'##['* ]]; do text=${text//'##['/'# #['}; done\n"
+    "  while [[ \"${text}\" == *'##['* ]]; do text=\"${text//'##['/'# #['}\"; done\n"
     "  printf '%s' \"${text}\"\n"
     "}\n"
 )

@@ -102,10 +102,10 @@ license = "unknown"
 source = "fixed in circleci-cli v0.1.47860 local/local.go; Docker Hub, no ECR Public copy; still served; a single linux/amd64 manifest, 0.05 GB compressed, label version 1.0.105680-924e1373"
 
 [jenkins.cores.lts]
-core_version = "2.580.1"
-war_url = "https://get.jenkins.io/war-stable/2.580.1/jenkins.war"
-war_sha256 = "393bf2476352dd726519fd1f92ce66eac7d23c0936e6967420b717060c4c40d0"
-java = "21"
+core_version = "2.462.3"
+war_url = "https://get.jenkins.io/war-stable/2.462.3/jenkins.war"
+war_sha256 = "3e53b52a816405e3b10ad07f1c48cd0cb5cb3f893207ef7f9de28415806b93c1"
+java = "17"
 plugins = "jenkins/plugins-lts.toml"
 
 [jenkins.cores.bundled]

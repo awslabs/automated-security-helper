@@ -70,8 +70,18 @@
     },
     {
       "kind": "no-harness",
-      "path": "automated_security_helper/plugin_modules/ash_builtin/reporters/assets/ash-report.js",
-      "reason": "A browser-side script that html_reporter.py reads as text and inlines into the generated HTML report; it runs in the reader's browser, never under node, and its tree is the Python package (pyproject.toml, uv.lock) with no package.json, tsconfig, jest or vitest config in any ancestor directory, so no JS harness exists to import or measure it. Its bytes are exercised by the Python snapshot tests of the HTML reporter, which pin the report that embeds it."
+      "path": "docs/content/assets/javascripts/ash.js",
+      "reason": "The docs site's browser script, loaded on every page through mkdocs.yml extra_javascript. No ancestor of docs/content/assets/javascripts carries a package.json, tsconfig, jest or vitest config, so no JS harness exists to measure it; docs/ui-tests is a sibling Playwright suite, which exercises this file in a real browser (site.spec.cjs routes and asserts on it) and emits no jest coverage report."
+    },
+    {
+      "kind": "no-harness",
+      "path": "docs/content/assets/javascripts/ash-scan.js",
+      "reason": "The docs scan-demo page's browser script, same disposition as ash.js above: served by the MkDocs site, exercised by the sibling Playwright suite (scan.spec.cjs routes and asserts on it, including the aborted-load path), and measured by no jest report because no ancestor directory holds a JS harness config."
+    },
+    {
+      "kind": "no-harness",
+      "path": "docs/content/assets/javascripts/vendor/anime.js",
+      "reason": "The vendored MIT animejs 4.5.0 build, written whole by docs/ui-tests/vendor-motion.cjs (which checks the upstream license and version before copying). Third-party vendored output, not code this repository authors; no ancestor directory holds a JS harness config, so no harness exists to measure it."
     },
     {
       "kind": "no-harness",

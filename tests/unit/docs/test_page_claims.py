@@ -50,6 +50,7 @@ import contextlib
 import csv
 import dataclasses
 import difflib
+import errno
 import getpass
 import hashlib
 import http.client
@@ -8054,6 +8055,87 @@ os.execvp(sys.argv[2], sys.argv[2:])
 #: The server children the running test started; ``_reap_server_children`` ends them.
 _SERVER_CHILDREN: List[subprocess.Popen] = []
 
+#: How long a server start is tried when the operating system answers that it cannot
+#: make a process now (``EAGAIN``). A macOS runner refused a start for longer than two
+#: seconds while sibling tests held their servers, and those servers end only when
+#: their tests do, so the bound is a time budget and not a count of attempts: the
+#: start is tried again until ``_START_WINDOW_SECONDS`` have passed since the first
+#: attempt, which lets the sibling tests end. The pause after the first refusal is
+#: ``_START_PAUSE_SECONDS`` and each later pause is that much longer, up to
+#: ``_START_PAUSE_CAP_SECONDS``: 0.5, 1.0, 1.5, 2.0, 2.0 seconds and so on.
+_START_WINDOW_SECONDS = 60.0
+_START_PAUSE_SECONDS = 0.5
+_START_PAUSE_CAP_SECONDS = 2.0
+
+
+def _eagain_note(attempts: int, waited: float) -> str:
+    """What the last refusal says about the host: how many starts were refused over
+    how many seconds, the process limit the host reports, the processor count and the
+    platform. Nothing here starts a process, because a new process is what the host
+    refused."""
+    try:
+        import resource
+
+        soft, hard = resource.getrlimit(resource.RLIMIT_NPROC)
+        limit = f"RLIMIT_NPROC soft={soft} hard={hard}"
+    except (ImportError, AttributeError, ValueError, OSError):
+        limit = "RLIMIT_NPROC unavailable"
+    return (
+        f"the host refused to make a new process {attempts} times over "
+        f"{waited:.1f} seconds (EAGAIN); {limit}; cpu_count={os.cpu_count()}; "
+        f"platform={sys.platform}"
+    )
+
+
+def _popen_after_eagain(
+    argv: List[str],
+    kwargs: Dict[str, Any],
+    *,
+    popen: Optional[Callable[..., Any]] = None,
+    pause: Optional[Callable[[float], None]] = None,
+    clock: Optional[Callable[[], float]] = None,
+) -> Any:
+    """``popen(argv, **kwargs)``, tried again when the operating system refuses to make
+    a process for now.
+
+    A macOS runner answered ``BlockingIOError: [Errno 35] Resource temporarily
+    unavailable`` from ``fork_exec`` for a server start on some jobs and not on others
+    running the same test, so the refusal is a property of the host at that moment and
+    not of the call. Only ``EAGAIN`` is tried again, with a growing pause, until
+    ``_START_WINDOW_SECONDS`` have passed since the first attempt. The last refusal is
+    raised with a note saying how many starts were refused and what limit the host
+    reports (``_eagain_note``), and any other error (a missing program, a refused
+    argument) is raised unchanged at the first attempt. On Python 3.10, which has no
+    exception notes, the last refusal is raised as a new ``BlockingIOError`` with the
+    same errno and the note in its message, chained from the refusal.
+
+    ``popen``, ``pause`` and ``clock`` default to ``subprocess.Popen``, ``time.sleep``
+    and ``time.monotonic``, looked up when called, and are parameters so a test can
+    answer the start, skip the pause and move the clock.
+    """
+    now = clock or time.monotonic
+    started = now()
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            return (popen or subprocess.Popen)(argv, **kwargs)
+        except BlockingIOError as refused:
+            if refused.errno != errno.EAGAIN:
+                raise
+            waited = now() - started
+            if waited >= _START_WINDOW_SECONDS:
+                note = _eagain_note(attempt, waited)
+                if hasattr(refused, "add_note"):
+                    refused.add_note(note)
+                    raise
+                raise BlockingIOError(
+                    refused.errno, f"{refused.strerror}; {note}"
+                ) from refused
+        (pause or time.sleep)(
+            min(_START_PAUSE_SECONDS * attempt, _START_PAUSE_CAP_SECONDS)
+        )
+
 
 def _server_popen(argv: List[str], **kwargs: Any) -> subprocess.Popen:
     """``subprocess.Popen(argv, **kwargs)`` for a server child that must not outlive
@@ -8076,7 +8158,7 @@ def _server_popen(argv: List[str], **kwargs: Any) -> subprocess.Popen:
         ]
     if os.name != "nt":
         kwargs["start_new_session"] = True
-    process = subprocess.Popen(argv, **kwargs)
+    process = _popen_after_eagain(argv, kwargs)
     _SERVER_CHILDREN.append(process)
     return process
 
@@ -8108,6 +8190,175 @@ def _reap_server_children() -> Iterator[None]:
     yield
     while _SERVER_CHILDREN:
         _end_server_child(_SERVER_CHILDREN.pop())
+
+
+def _eagain() -> BlockingIOError:
+    """The error a host gives when it cannot make a process now."""
+    return BlockingIOError(errno.EAGAIN, "Resource temporarily unavailable")
+
+
+def _fake_popen(
+    outcomes: List[Any],
+) -> Tuple[Callable[..., Any], List[Tuple[List[str], Dict[str, Any]]]]:
+    """A stand-in for ``subprocess.Popen`` that answers each call with the next
+    outcome, raising it when it is an exception, and the calls it received. No process
+    starts."""
+    calls: List[Tuple[List[str], Dict[str, Any]]] = []
+
+    def popen(argv: List[str], **kwargs: Any) -> Any:
+        calls.append((argv, kwargs))
+        outcome = outcomes[len(calls) - 1]
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    return popen, calls
+
+
+class _FakeTime:
+    """A clock that moves only when the retry pauses, and the pauses it was asked
+    for. Nothing sleeps."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.pauses: List[float] = []
+
+    def clock(self) -> float:
+        return self.now
+
+    def pause(self, seconds: float) -> None:
+        self.pauses.append(seconds)
+        self.now += seconds
+
+
+def test_a_server_start_the_host_refuses_twice_is_made_a_third_time() -> None:
+    """Two ``EAGAIN`` answers are waited out with a growing pause, and the third
+    attempt's process is the result. Each attempt gets the same arguments. The clock
+    stays inside the window, so the retry does not give up."""
+    started = object()
+    popen, calls = _fake_popen([_eagain(), _eagain(), started])
+    pauses: List[float] = []
+    result = _popen_after_eagain(
+        ["server", "--quiet"],
+        {"cwd": "here"},
+        popen=popen,
+        pause=pauses.append,
+        clock=lambda: 0.0,
+    )
+    assert result is started
+    assert calls == [(["server", "--quiet"], {"cwd": "here"})] * 3, calls
+    assert pauses == pytest.approx([0.5, 1.0]), pauses
+
+
+def test_a_server_start_the_host_always_refuses_raises_the_last_refusal() -> None:
+    """The retry gives up once the window is spent on the injected clock: the pauses
+    grow by half a second to the cap and stay there, there is no pause after the last
+    attempt, and the error raised is the last refusal itself with a note naming the
+    process limit (a chained ``BlockingIOError`` with the note in its message on
+    Python 3.10, which has no exception notes)."""
+    refusals = [_eagain() for _ in range(200)]
+    popen, calls = _fake_popen(list(refusals))
+    fake = _FakeTime()
+    with pytest.raises(BlockingIOError) as raised:
+        _popen_after_eagain(
+            ["server"], {}, popen=popen, pause=fake.pause, clock=fake.clock
+        )
+    pauses = fake.pauses
+    assert pauses[:5] == pytest.approx([0.5, 1.0, 1.5, 2.0, 2.0]), pauses
+    assert set(pauses[3:]) == {_START_PAUSE_CAP_SECONDS}, pauses
+    assert sum(pauses) >= _START_WINDOW_SECONDS, pauses
+    assert sum(pauses[:-1]) < _START_WINDOW_SECONDS, pauses
+    assert len(calls) == len(pauses) + 1, (len(calls), len(pauses))
+    error = raised.value
+    assert error.errno == errno.EAGAIN
+    if hasattr(error, "add_note"):
+        assert error is refusals[len(calls) - 1]
+        text = "\n".join(error.__notes__)
+    else:
+        assert error.__cause__ is refusals[len(calls) - 1]
+        text = str(error)
+    assert "RLIMIT_NPROC" in text, text
+    assert f"{len(calls)} times" in text, text
+
+
+def test_a_server_start_the_host_refuses_for_ten_seconds_is_made_when_it_allows_one() -> (
+    None
+):
+    """A host that refuses for ten seconds and then allows a start gives the process:
+    the retry waits the ten seconds out, on the injected clock and without a real
+    pause, and does not give up at the old two-second mark."""
+    started = object()
+    fake = _FakeTime()
+    calls: List[float] = []
+
+    def popen(argv: List[str], **kwargs: Any) -> Any:
+        calls.append(fake.now)
+        if fake.now < 10.0:
+            raise _eagain()
+        return started
+
+    result = _popen_after_eagain(
+        ["server"], {}, popen=popen, pause=fake.pause, clock=fake.clock
+    )
+    assert result is started
+    assert fake.pauses == pytest.approx([0.5, 1.0, 1.5, 2.0, 2.0, 2.0, 2.0]), (
+        fake.pauses
+    )
+    assert len(calls) == len(fake.pauses) + 1, calls
+    assert calls[-1] >= 10.0 > calls[-2], calls
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        pytest.param(FileNotFoundError(errno.ENOENT, "no such program"), id="missing"),
+        pytest.param(PermissionError(errno.EACCES, "not executable"), id="denied"),
+        pytest.param(
+            BlockingIOError(errno.EBADF, "not an EAGAIN answer"), id="other-errno"
+        ),
+    ],
+)
+def test_a_server_start_failing_for_another_reason_is_not_tried_again(
+    error: OSError,
+) -> None:
+    """Only ``EAGAIN`` is waited out: a program that is not there, one that cannot run,
+    and a ``BlockingIOError`` with another errno each raise at the first attempt, with
+    no pause."""
+    popen, calls = _fake_popen([error, object()])
+    pauses: List[float] = []
+    with pytest.raises(OSError) as raised:
+        _popen_after_eagain(["server"], {}, popen=popen, pause=pauses.append)
+    assert raised.value is error
+    assert len(calls) == 1, calls
+    assert pauses == []
+
+
+def test_a_server_start_made_by_the_helper_the_tests_use_goes_through_the_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``_server_popen``, which every server start in this file uses, starts through
+    ``_popen_after_eagain`` and keeps the child for ``_reap_server_children``."""
+    started = object()
+    seen: List[Tuple[List[str], Dict[str, Any]]] = []
+
+    def answer(argv: List[str], kwargs: Dict[str, Any]) -> Any:
+        seen.append((argv, dict(kwargs)))
+        return started
+
+    monkeypatch.setattr(sys.modules[__name__], "_popen_after_eagain", answer)
+    try:
+        assert _server_popen(["server", "--quiet"], cwd="here") is started
+        assert _SERVER_CHILDREN[-1] is started
+    finally:
+        # The stand-in is not a process: keep it from the reaper that follows.
+        with contextlib.suppress(ValueError):
+            _SERVER_CHILDREN.remove(started)
+    assert len(seen) == 1, seen
+    argv, kwargs = seen[0]
+    assert argv[-2:] == ["server", "--quiet"], argv
+    assert kwargs["cwd"] == "here"
+    if os.name != "nt":
+        assert kwargs["start_new_session"] is True, kwargs
 
 
 def _mcp_serving_stdio(
@@ -9050,6 +9301,32 @@ def _assert_previous_results_back(output: Path) -> None:
     )
 
 
+def _assert_previous_results_intact(output: Path) -> None:
+    """The previous results of a server that was ended at once are intact, in one of
+    the states the product allows: still held in ``.ash_previous_results``, halfway
+    back in ``.ash_previous_results.restoring`` (a restore renames the held set there
+    and moves the entries back from it), or put back where they were, each entry as
+    the setup wrote it. Which one is a race between the scan unwinding and the exit."""
+    found = {
+        name: (output / name).read_text(encoding="utf-8")
+        if (output / name).is_file()
+        else None
+        for name in _MCP_PREVIOUS_RESULTS
+    }
+    states = []
+    if (output / ".ash_previous_results").is_dir():
+        states.append("held")
+    if (output / ".ash_previous_results.restoring").is_dir():
+        states.append("halfway back")
+    if found == _MCP_PREVIOUS_RESULTS:
+        states.append("put back")
+    assert states, (
+        "the previous results are in none of the states the product allows (held, "
+        f"halfway back, put back): found {found}, the output directory holds "
+        f"{sorted(entry.name for entry in output.iterdir())}"
+    )
+
+
 @pytest.mark.parametrize("stop", ["sigterm", "sighup", "ctrl-c"])
 def test_a_signal_stops_a_stdio_scan_while_the_client_keeps_the_connection_open(
     tmp_path: Path, stop: str
@@ -9446,8 +9723,12 @@ def test_an_http_mcp_server_waits_at_most_5_seconds_for_open_requests_when_it_st
     results back, with its own ``ash.log`` beside them.
 
     With a second Ctrl-C a second after the first, the server must exit with 130
-    within half the wait of it, before the 5 seconds are up. The tool must be gone,
-    and the previous results still held in ``.ash_previous_results``. The next MCP scan
+    within half the wait of it, before the 5 seconds are up. The tool must be gone.
+    The second Ctrl-C does not wait for the scans, and the page says: "previous
+    results a scan had not put back stay in `.ash_previous_results`". A scan that
+    unwound first may have put them back, or be halfway through, so they must be
+    intact in one of three states: still held, halfway back in
+    ``.ash_previous_results.restoring``, or put back where they were. The next MCP scan
     of that directory, over stdio and canceled while its tool runs, must then put
     those results back, as it puts back previous results it found in place.
 
@@ -9532,7 +9813,7 @@ def test_an_http_mcp_server_waits_at_most_5_seconds_for_open_requests_when_it_st
                 "once the wait was over, not at the second"
             )
             assert _gone_soon(pid), "the scan's tool outlived the server"
-            assert held_dir.is_dir(), "the previous results are no longer held"
+            _assert_previous_results_intact(setup.output)
         else:
             if held_open:
                 running_until(
@@ -14949,6 +15230,89 @@ def test_a_profile_holding_an_environment_value_inside_a_path_is_refused_without
     assert answer.get("success") is False, answer
     assert _ENV_PROBE_VALUE not in json.dumps(answer), answer
     assert _files_holding(tmp_path, _ENV_PROBE_VALUE) == []
+
+
+@pytest.mark.parametrize(
+    "how",
+    [
+        pytest.param("select_profile", id="select-profile"),
+        pytest.param(
+            "select_profile_with_patch_ops", id="select-profile-with-patch-ops"
+        ),
+        pytest.param("workspace_scan", id="a-workspace-scan-with-it"),
+    ],
+)
+def test_a_refused_profile_leaves_no_file_holding_the_environment_value(
+    tmp_path: Path, how: str
+) -> None:
+    """mcp-server.md (Config profiles). The planted control for the refusal above.
+
+    The same server and profile, bound the same ways, with the answer's
+    ``success`` left unread: the refusal must come before the write, so a
+    refusal that had already written the session's copy fails here. A file
+    holding the value is planted first, and the scan for it must find that one
+    file, so an empty answer afterwards is not a scan that cannot see.
+    """
+    assert_on_page(MCP_SERVER, _A_VALUE_INSIDE_A_LONGER_STRING_IS_REFUSED)
+    planted = tmp_path / "planted-control.txt"
+    planted.write_text(_ENV_PROBE_VALUE, encoding="utf-8")
+    assert _files_holding(tmp_path, _ENV_PROBE_VALUE) == [planted.name]
+    planted.unlink()
+    profile = _profile_anchoring_a_value(tmp_path / "operator")
+    env = {**_mcp_child_env(tmp_path), _ENV_PROBE: _ENV_PROBE_VALUE}
+    command = [*_ASH_MODULE, "mcp", "--quiet"]
+    command += ["--profile", f"{_PROFILE_NAME}={profile}"]
+    server = _McpStdioClient(command, tmp_path, env)
+    try:
+        if how == "workspace_scan":
+            answer = server.tool(
+                "run_ash_workspace_scan",
+                workspace_file=str(_a_workspace_of_one_project(tmp_path)),
+                profile=_PROFILE_NAME,
+            )
+        elif how == "select_profile_with_patch_ops":
+            answer = server.tool(
+                "select_profile",
+                profile_name=_PROFILE_NAME,
+                patch_ops=_ADD_AN_IGNORE_PATH,
+            )
+        else:
+            answer = server.tool("select_profile", profile_name=_PROFILE_NAME)
+    finally:
+        server.close()
+
+    assert _ENV_PROBE_VALUE not in json.dumps(answer), answer
+    assert _files_holding(tmp_path, _ENV_PROBE_VALUE) == []
+
+
+def test_a_workspace_scan_refuses_a_value_inside_a_path_under_the_select_profile_error_type(
+    tmp_path: Path,
+) -> None:
+    """mcp-server.md (Config profiles).
+
+    The page names one refusal for ``select_profile`` and a workspace scan's
+    ``profile``, so a client that branches on ``error_type`` reads one spelling
+    from either tool: ``environment_value_in_longer_string``, not the name of the
+    exception class. The reply still must not hold the value.
+    """
+    assert_on_page(MCP_SERVER, _A_VALUE_INSIDE_A_LONGER_STRING_IS_REFUSED)
+    profile = _profile_anchoring_a_value(tmp_path / "operator")
+    env = {**_mcp_child_env(tmp_path), _ENV_PROBE: _ENV_PROBE_VALUE}
+    command = [*_ASH_MODULE, "mcp", "--quiet"]
+    command += ["--profile", f"{_PROFILE_NAME}={profile}"]
+    server = _McpStdioClient(command, tmp_path, env)
+    try:
+        answer = server.tool(
+            "run_ash_workspace_scan",
+            workspace_file=str(_a_workspace_of_one_project(tmp_path)),
+            profile=_PROFILE_NAME,
+        )
+    finally:
+        server.close()
+
+    assert answer.get("success") is False, answer
+    assert answer["error_type"] == "environment_value_in_longer_string", answer
+    assert _ENV_PROBE_VALUE not in json.dumps(answer), answer
 
 
 # --------------------------------------------------------------------------- #

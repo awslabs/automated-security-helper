@@ -207,8 +207,8 @@ _UV_CACHE_REASON = (
 _UV_SPLIT_CACHE_REASON = (
     _UV_CACHE_REASON + " Restored with actions/cache/restore except on a tag push, "
     "and saved from a push to main only, in place of setup-uv's own cache, which "
-    "restored on every event and saved from every ref. The workflows that use it "
-    "run on tag pushes, and a tag run reads no cache entry."
+    "restored on every event and saved from every ref. The workflow that uses it "
+    "runs on tag pushes, and a tag run reads no cache entry."
 )
 _NPM_CACHE_REASON = (
     "npm's download cache, keyed on a committed lockfile. Holds third-party "
@@ -844,33 +844,6 @@ ALLOWLIST: tuple[Entry, ...] = (
             "key=uv-agent-plugins-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ash-agent-plugins/agentic-coding/transpiler/uv.lock') }}"
         ),
         reason=_UV_SPLIT_CACHE_REASON,
-    ),
-    Entry(
-        file=".github/workflows/ash-repo-docs.yml",
-        kind=KIND_CACHE,
-        action="actions/cache/restore",
-        publishes=(
-            "path=~/.cache/uv "
-            "key=uv-docs-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}"
-        ),
-        count=2,
-        reason=_UV_SPLIT_CACHE_REASON
-        + (
-            " Twice: build-docs restores it, and deploy-docs only looks the key up"
-            " (lookup-only: true, nothing downloaded) so its save can skip an entry"
-            " main already wrote. deploy-docs publishes the site and restores nothing."
-        ),
-    ),
-    Entry(
-        file=".github/workflows/ash-repo-docs.yml",
-        kind=KIND_CACHE,
-        action="actions/cache/save",
-        publishes=(
-            "path=~/.cache/uv "
-            "key=uv-docs-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}"
-        ),
-        reason=_UV_SPLIT_CACHE_REASON
-        + " Saved by deploy-docs, the only job here that runs on main.",
     ),
 )
 

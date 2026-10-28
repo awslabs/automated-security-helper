@@ -692,11 +692,11 @@ REAL_BLOCK_COUNTS = {
     "getting-started/ci.md #1 + #2": ({"reusable-workflow": 2, "ash-version": 1}, []),
     "how-to/ci/github-actions.md #3": ({"reusable-workflow": 2, "ash-version": 1}, []),
     "how-to/ci/github-actions.md #4": (
-        {"install": 1, "provenance": 1},
+        {"install": 1, "artifact-actions": 1, "provenance": 1},
         [("ash", False)],
     ),
     "how-to/scale-large-repos.md": (
-        {"install": 1, "provenance": 2},
+        {"install": 1, "artifact-actions": 2, "serial-matrix": 1, "provenance": 2},
         [("shard", True), ("merge", False)],
     ),
     "how-to/ci/gitlab-ci.md #9": (
@@ -736,6 +736,130 @@ def test_each_real_block_rewrites_with_its_expected_counts(name):
     ]
     assert prints == expected_prints
     _assert_literal(result)
+
+
+# ---------------------------------------------------------------------------
+# What act 0.2.89 cannot run: the current artifact actions and a parallel matrix
+# ---------------------------------------------------------------------------
+
+#: The pinned releases the act rewrite writes, spelled out here rather than imported.
+UPLOAD_V4 = "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
+DOWNLOAD_V4 = "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093"
+SCALE_PAGE = "docs/content/how-to/scale-large-repos.md"
+
+
+def _scale_rewrite():
+    block = _block(SCALE_PAGE, "github-actions")
+    rewrite = _api("rewrite", "rewrite_pipeline")
+    return block.body, rewrite(
+        "github-actions", block.body, _context("act", WHEEL), where="scale.md:1"
+    )
+
+
+def test_act_runs_the_pages_artifact_steps_on_the_pinned_v4_actions():
+    body, result = _scale_rewrite()
+    # The page keeps naming the current releases for the people who use GitHub.
+    assert "actions/upload-artifact@043fb46d" in body
+    assert "actions/download-artifact@3e5f45b2" in body
+    assert result.original == body
+    steps = [s for job in _load(result.text)["jobs"].values() for s in job["steps"]]
+    upload = [s for s in steps if str(s.get("uses", "")).startswith("actions/upload-")]
+    download = [s for s in steps if "download-artifact" in str(s.get("uses", ""))]
+    assert [s["uses"] for s in upload] == [UPLOAD_V4]
+    assert [s["uses"] for s in download] == [DOWNLOAD_V4]
+    assert "# v4.6.2" in result.text and "# v4.3.0" in result.text
+    # Each step keeps its inputs, which v4 reads as v7 and v8 do.
+    original = {
+        s["uses"].split("@")[0]: s
+        for job in _load(body)["jobs"].values()
+        for s in job["steps"]
+        if "-artifact@" in str(s.get("uses", ""))
+    }
+    assert upload[0]["with"] == original["actions/upload-artifact"]["with"]
+    assert upload[0]["if"] == original["actions/upload-artifact"]["if"]
+    assert download[0]["with"] == original["actions/download-artifact"]["with"]
+    assert {
+        (a.old.split("@")[0], a.count) for a in _applied(result, "artifact-actions")
+    } == {("actions/upload-artifact", 1), ("actions/download-artifact", 1)}
+
+
+def test_act_runs_the_pages_matrix_one_entry_at_a_time():
+    body, result = _scale_rewrite()
+    jobs = _load(result.text)["jobs"]
+    strategy = jobs["shard"]["strategy"]
+    assert strategy["max-parallel"] == 1
+    assert strategy["matrix"] == _load(body)["jobs"]["shard"]["strategy"]["matrix"]
+    assert strategy["fail-fast"] is False
+    assert "strategy" not in jobs["merge"]
+    assert "act issue 6028" in result.text
+    assert _count(result, "serial-matrix") == 1
+
+
+def test_the_artifact_and_matrix_rewrites_change_nothing_a_second_time():
+    _, result = _scale_rewrite()
+    artifacts = _api("rewrite", "_rewrite_artifact_actions")
+    matrices = _api("rewrite", "_serialize_matrices")
+    again: list = []
+    text = artifacts(result.text, "scale.md:1", again)
+    text = matrices(text, "scale.md:1", again)
+    assert text == result.text and again == []
+
+
+def test_an_existing_max_parallel_is_set_to_one_and_only_on_a_matrix():
+    matrices = _api("rewrite", "_serialize_matrices")
+    text = (
+        "jobs:\n"
+        "  a:\n"
+        "    strategy:\n"
+        "      max-parallel: 4  # as the page has it\n"
+        "      matrix:\n"
+        "        n: [1, 2]\n"
+        "    steps: []\n"
+        "  b:\n"
+        "    strategy:\n"
+        "      fail-fast: false\n"
+        "    steps: []\n"
+    )
+    applied: list = []
+    jobs = _load(matrices(text, "page.md:3", applied))["jobs"]
+    assert jobs["a"]["strategy"]["max-parallel"] == 1
+    assert "max-parallel" not in jobs["b"]["strategy"]
+    assert sum(a.count for a in applied) == 1
+
+
+@pytest.mark.parametrize(
+    "old,new,named",
+    [
+        (
+            "      - uses: actions/upload-artifact@043fb46d",
+            '      - uses: "actions/upload-artifact@043fb46d',
+            "actions/upload-artifact",
+        ),
+        (
+            (
+                "    strategy:\n      fail-fast: false\n      matrix:\n"
+                "        shard: [0, 1, 2, 3]\n"
+            ),
+            "    strategy: {matrix: {shard: [0, 1, 2, 3]}}\n",
+            "the job shard has a matrix",
+        ),
+    ],
+    ids=["a quoted uses", "a flow-style strategy"],
+)
+def test_an_artifact_step_or_matrix_the_rewrite_cannot_read_is_refused(old, new, named):
+    body = _block(SCALE_PAGE, "github-actions").body
+    assert body.count(old) == 1
+    rewrite = _api("rewrite", "rewrite_pipeline")
+    error = _api("rewrite", "RewriteError")
+    with pytest.raises(error) as raised:
+        rewrite(
+            "github-actions",
+            body.replace(old, new),
+            _context("act", WHEEL),
+            where="scale.md:1",
+        )
+    message = str(raised.value)
+    assert "scale.md:1" in message and named in message, message
 
 
 # ---------------------------------------------------------------------------

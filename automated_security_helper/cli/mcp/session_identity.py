@@ -171,9 +171,7 @@ def _header_value(headers: Mapping[str, str], name: str) -> Optional[str]:
     return None
 
 
-def resolve_session_id(
-    headers: Optional[Mapping[str, str]], *, refuse_reserved: bool = False
-) -> str:
+def resolve_session_id(headers: Optional[Mapping[str, str]]) -> str:
     """Resolve the session id a tool call belongs to.
 
     This is the path of an in-process caller's stand-in context, reached through
@@ -198,9 +196,8 @@ def resolve_session_id(
             single directory, per :func:`validate_path_component` -- it contains a path
             separator, is a relative-path component, carries a control character
             or a character with path meaning such as a drive-specifying ``:``,
-            or exceeds ``session_paths.MAX_COMPONENT_LEN``; or, with
-            ``refuse_reserved``, if it names a directory ASH owns. Refused
-            rather than sanitized: see the module docstring.
+            or exceeds ``session_paths.MAX_COMPONENT_LEN``. Refused rather than
+            sanitized: see the module docstring.
 
     No headers at all (``None``, or a mapping with no entries) has no request
     behind it, so it is the default session with local trust, matching the
@@ -352,7 +349,7 @@ def resolve_caller_session_id(ctx: object) -> str:
     _PROTOCOL_VERSION_IS_CAUSE.set(False)
     sdk_context = _as_sdk_context(ctx)
     if sdk_context is None:
-        return resolve_session_id(getattr(ctx, "headers", None), refuse_reserved=True)
+        return resolve_session_id(getattr(ctx, "headers", None))
 
     try:
         request = sdk_context.request_context.request

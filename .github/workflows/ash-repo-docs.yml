@@ -2,15 +2,20 @@ name: Docs Deploy
 # Publishes the documentation site. It only deploys: the strict site build and the
 # versioned-site check run in ash-unified-ci.yml (the build-docs job), on every pull
 # request and merge queue entry, where required-checks depends on them.
+#
+# A tag push never deploys. A tag pushed on any commit runs that commit's own copy of
+# this file, and the deploy job holds a contents: write token, so the push trigger
+# has no tags filter. Release tags are created by ash-tag-on-merge.yml with
+# GITHUB_TOKEN, and a push made with GITHUB_TOKEN starts no workflow. The site is
+# deployed from main; a maintainer publishes a release by workflow_dispatch on the
+# tag.
 on:
   push:
     branches:
       - main
-    tags:
-      - "*"
   workflow_dispatch: {}
-  # The tag workflow calls this one for a release it has just tagged. It does not
-  # dispatch it: that would need write access to Actions, which can start any workflow.
+  # A release is published by calling this workflow with the tag as `ref`, or by
+  # running it with workflow_dispatch on the tag. A tag push does neither.
   workflow_call:
     inputs:
       ref:
@@ -47,19 +52,151 @@ jobs:
       contents: write
     # A push to main publishes the version main; a release tag vX.Y.Z publishes X.Y.Z
     # (scripts/docs_versions.py decides, and publishes nothing for any other tag, such
-    # as the floating v3). The tag workflow creates release tags with GITHUB_TOKEN,
-    # whose pushes start no workflow, so it calls this workflow with the tag as
-    # `ref`; a maintainer can run workflow_dispatch on the tag to publish it again.
+    # as the floating v3). A tag push never reaches this job: the push trigger has no
+    # tags filter, and this condition admits a push only on main, so a tag trigger
+    # added later would still start no deploy. A release is published by running
+    # this workflow with workflow_dispatch on the tag, or by a workflow_call that
+    # passes the tag as `ref`.
     # In a called workflow github.ref and github.event_name belong to the caller, so
     # a call is recognized by its `ref` input, which the other events never set.
     if: >-
       inputs.ref != ''
-      || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-      && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
+      || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      || (github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
     env:
       RELEASE_TAG: ${{ inputs.ref }}
 
     steps:
+      # The same helper run-ash-security-scan.yml writes, byte for byte (a test holds
+      # the copies equal): the tag below is a caller's input, and a tag that fails the
+      # check is printed in the error, so one_line keeps it on the line it is printed in.
+      - name: Write the one_line helper
+        if: ${{ inputs.ref != '' }}
+        shell: bash
+        run: |
+          cat > "${RUNNER_TEMP}/ash-one-line.sh" <<'EOF'
+          one_line() {
+            local LC_ALL=C
+            local text="${1//[[:cntrl:]]/ }"
+            text="${text//$'\xc2'[$'\x80'-$'\x9f']/ }"
+            text="${text//$'\xe2\x80'[$'\xa8\xa9']/ }"
+            while [[ "${text}" == *::* ]]; do text="${text//::/: :}"; done
+            while [[ "${text}" == *'##['* ]]; do text="${text//'##['/'# #['}"; done
+            printf '%s' "${text}"
+          }
+          __wcs_clock() {
+            __wcs_now="${EPOCHREALTIME:-}"
+            __wcs_now="${__wcs_now//[!0-9]/}"
+            if [ -z "${__wcs_now}" ]; then
+              __wcs_now=$((SECONDS * 1000000))
+            fi
+          }
+          __wcs_end_group() {
+            local __wcs_now="" __wcs_until=""
+            if [ -z "${__wcs_pid}" ]; then
+              return 0
+            fi
+            __wcs_clock
+            __wcs_until=$((__wcs_now + $1 * 100000))
+            while kill -0 -- "-${__wcs_pid}" 2>/dev/null && [ "${__wcs_now}" -lt "${__wcs_until}" ]; do
+              sleep 0.1
+              __wcs_clock
+            done
+            if ! kill -0 -- "-${__wcs_pid}" 2>/dev/null; then
+              return 0
+            fi
+            kill -s KILL -- "-${__wcs_pid}" 2>/dev/null || true
+            __wcs_until=$((__wcs_now + 500000))
+            while kill -0 -- "-${__wcs_pid}" 2>/dev/null && [ "${__wcs_now}" -lt "${__wcs_until}" ]; do
+              sleep 0.1
+              __wcs_clock
+            done
+            return 1
+          }
+          __wcs_on_signal() {
+            if [ -z "${__wcs_pid}" ] && [ "${!:-}" != "${__wcs_before}" ]; then
+              __wcs_pid="${!:-}"
+            fi
+            if [ -n "${__wcs_pid}" ]; then
+              kill -s "$1" -- "-${__wcs_pid}" 2>/dev/null || kill -s "$1" "${__wcs_pid}" 2>/dev/null || true
+            fi
+            if [ "$1" = TERM ]; then
+              __wcs_end_group 10 || __wcs_left=1
+              if [ -n "${__wcs_open}" ]; then
+                printf '\n::%s::\n' "${__wcs_token}"
+              fi
+              if [ -n "${__wcs_left}" ]; then
+                printf '%s\n' "::error::processes the command started did not end in time, so they were sent SIGKILL and the step fails"
+              fi
+              exit 143
+            fi
+            __wcs_interrupted="$2"
+          }
+          __wcs_exec() {
+            if command -v setsid >/dev/null 2>&1; then
+              exec setsid -w "$@"
+            fi
+            exec perl -MPOSIX -e 'my $s = POSIX::setsid(); exit 127 unless defined $s && $s >= 0; exec { $ARGV[0] } @ARGV; exit 127' -- "$@"
+          }
+          with_commands_stopped() {
+            if [ "${BASH_SUBSHELL:-0}" -gt 0 ]; then
+              printf '%s\n' "::error::with_commands_stopped must run in the step's own shell, the one process the runner signals on a cancel, not in a subshell, a pipeline, a command substitution or a background job. For ( cd DIR && ... ), use env -C DIR, or cd at the top level" >&2
+              kill -s TERM "$$" 2>/dev/null || true
+              return 1
+            fi
+            local __wcs_out="" __wcs_var="" __wcs_file="" __wcs_token __wcs_status=0
+            local __wcs_pid="" __wcs_interrupted="" __wcs_open="" __wcs_left="" __wcs_before="${!:-}"
+            case "${1:-}" in
+              --stdout) __wcs_out="$2"; shift 2 ;;
+              --capture) __wcs_var="$2"; shift 2 ;;
+            esac
+            __wcs_token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+            if [ "${#__wcs_token}" -ne 32 ]; then
+              printf '%s\n' "::error::no random token could be read for stop-commands, so the command did not run"
+              return 1
+            fi
+            if [ -n "${__wcs_var}" ]; then
+              __wcs_file="$(mktemp "${RUNNER_TEMP:-/tmp}/ash-wcs.XXXXXX")" || return 1
+              __wcs_out="${__wcs_file}"
+            fi
+            trap '__wcs_on_signal INT 130' INT
+            trap '__wcs_on_signal QUIT 131' QUIT
+            trap '__wcs_on_signal TERM 143' TERM
+            __wcs_open=1
+            printf '::stop-commands::%s\n' "${__wcs_token}"
+            if [ -z "${__wcs_interrupted}" ]; then
+              if [ -n "${__wcs_out}" ]; then
+                (trap - INT QUIT TERM; __wcs_exec "$@") 2>&1 > "${__wcs_out}" <&0 &
+              else
+                (trap - INT QUIT TERM; __wcs_exec "$@") 2>&1 <&0 &
+              fi
+              __wcs_pid=$!
+              wait "${__wcs_pid}" || __wcs_status=$?
+            fi
+            if [ -n "${__wcs_interrupted}" ] && [ -n "${__wcs_pid}" ]; then
+              wait "${__wcs_pid}" 2>/dev/null || true
+            fi
+            __wcs_end_group 50 || __wcs_left=1
+            printf '\n::%s::\n' "${__wcs_token}"
+            __wcs_open=""
+            trap - INT QUIT TERM
+            if [ -n "${__wcs_left}" ]; then
+              printf '%s\n' "::error::processes the command started did not end in time, so they were sent SIGKILL and the step fails"
+              if [ "${__wcs_status}" -eq 0 ]; then
+                __wcs_status=1
+              fi
+            fi
+            if [ -n "${__wcs_interrupted}" ]; then
+              exit "${__wcs_interrupted}"
+            fi
+            if [ -n "${__wcs_file}" ]; then
+              printf -v "${__wcs_var}" '%s' "$(cat "${__wcs_file}")"
+              rm -f -- "${__wcs_file}"
+            fi
+            return "${__wcs_status}"
+          }
+          EOF
+
       # A call names the tag it publishes, so check its shape before anything is
       # checked out or pushed. This is the rule the floating-tag step in
       # ash-tag-on-merge.yml applies to the version: a release version, with a
@@ -67,8 +204,9 @@ jobs:
       - name: Check the release tag
         if: ${{ inputs.ref != '' }}
         run: |
+          . "${RUNNER_TEMP}/ash-one-line.sh"
           if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]*$ ]]; then
-            echo "::error::The release tag is '${RELEASE_TAG}', which is not a release tag such as v3.8.0. Refusing to publish docs for it."
+            echo "::error::The release tag is '$(one_line "${RELEASE_TAG}")', which is not a release tag such as v3.8.0. Refusing to publish docs for it."
             exit 1
           fi
 

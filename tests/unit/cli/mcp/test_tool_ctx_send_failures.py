@@ -52,10 +52,10 @@ def _server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "workspaces"))
     monkeypatch.delenv("ASH_MCP_TRANSPORT", raising=False)
     clear_profile_registry()
-    clear_session_state()
+    clear_session_state(None)
     yield
     clear_profile_registry()
-    clear_session_state()
+    clear_session_state(None)
 
 
 class _ContextShape:

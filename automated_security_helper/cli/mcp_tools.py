@@ -212,6 +212,12 @@ CONFIG_CHECK_FAILED = "config_check_failed"
 #: (``ASHConfigEnvNotResolvedError``).
 CONFIG_ENV_NOT_RESOLVED = "config_env_not_resolved"
 
+#: ``error_type`` of the refusal of a profile in which a value read from the
+#: environment is part of a longer string, which a session's copy would hold as
+#: the value (``EnvironmentValueInPath``). The message names the key path and the
+#: variable, never the value.
+ENV_VALUE_IN_LONGER_STRING = "environment_value_in_longer_string"
+
 #: ``error_type`` of the refusal of a config whose ``ash_plugin_modules`` a
 #: scan refuses (a module outside the plugin namespace, or one no installed
 #: package provides). Its own type: the file loaded and parsed, so the
@@ -5955,12 +5961,27 @@ def _materialize_or_error(
     from automated_security_helper.cli.mcp.profile_registry import (
         materialize_session_binding,
     )
+    from automated_security_helper.config.environment_record import (
+        EnvironmentValueInPath,
+    )
     from automated_security_helper.core.resource_management.error_handling import (
         ErrorCategory,
     )
 
     try:
         materialized = materialize_session_binding(session_id, registered, patched)
+    except EnvironmentValueInPath as exc:
+        # Refused before any file is written (AshConfig.save builds the dump
+        # first), and the message holds no value.
+        return with_exit_code(
+            {
+                "success": False,
+                "error": raw_controls_on_one_line(str(exc)),
+                "error_type": ENV_VALUE_IN_LONGER_STRING,
+                "error_category": ErrorCategory.INVALID_FORMAT.value,
+            },
+            REFUSED_CONFIG_EXIT_CODE,
+        )
     except (OSError, RuntimeError) as exc:
         _logger.error(f"Could not materialize the session config: {exc}")
         return {

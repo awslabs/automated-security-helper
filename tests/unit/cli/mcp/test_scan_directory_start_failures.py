@@ -53,11 +53,11 @@ def _server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     monkeypatch.delenv("ASH_MCP_TRANSPORT", raising=False)
     clear_profile_registry()
-    clear_session_state()
+    clear_session_state(None)
     reset_default_registry_for_tests()
     yield
     clear_profile_registry()
-    clear_session_state()
+    clear_session_state(None)
     reset_default_registry_for_tests()
 
 

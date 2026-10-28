@@ -146,6 +146,12 @@ class EnvironmentReference:
     origin: Optional[Tuple[Path, Tuple[PathSegment, ...]]] = dataclass_field(
         default=None, compare=False
     )
+    #: How many entries the innermost list the file wrote it in had, when it
+    #: wrote it in a list (as an entry, or inside a mapping that is one); None
+    #: otherwise.
+    length: Optional[int] = None
+    #: Where in ``path`` the index of that list entry sits; set with ``length``.
+    index_at: Optional[int] = None
 
     def moved_to_unknown_list(
         self, path: Tuple[PathSegment, ...]
@@ -549,6 +555,26 @@ def with_environment_values_shown(
     )
 
 
+class EnvironmentValueInPath(RuntimeError):
+    """A value read from the environment sits inside a longer string, so a copy
+    written for a session could not hold it as the reference.
+
+    Raised by ``record_environment_references(..., whole_only=True)`` where a
+    string is a path the load anchored on the value (``_anchored``) and not the
+    value itself: written as it is, the copy would hold the value. The message
+    names the key path and the variable, never the value.
+    """
+
+    def __init__(self, key_path: str, variable: str) -> None:
+        super().__init__(
+            f"This profile can't be written to a session: at {key_path}, the value "
+            f"read from environment variable {variable} is part of a longer string. "
+            f"Set {variable} to an absolute path, or to the whole string."
+        )
+        self.key_path = key_path
+        self.variable = variable
+
+
 class _Index:
     def __init__(
         self,
@@ -562,6 +588,9 @@ class _Index:
         self.mark = mark
         self.whole_only = whole_only
         self.exact_indices = exact_indices
+        #: The data's strings by exact position, and its lists' lengths (``scan``).
+        self.strings: Dict[Tuple[PathSegment, ...], str] = {}
+        self.lengths: Dict[Tuple[PathSegment, ...], int] = {}
         for reference in references:
             target = self.keys if reference.key else self.values
             target.setdefault(_normal_path(reference.path, exact_indices), []).append(
@@ -658,7 +687,11 @@ class _Index:
             return result
         if isinstance(item, (list, tuple)):
             return type(item)(
-                self.record(value, (*path, index if self.exact_indices else _ANY_INDEX))
+                self.record(
+                    value,
+                    (*path, index if self.exact_indices else _ANY_INDEX),
+                    (*exact, index),
+                )
                 for index, value in enumerate(item)
             )
         if isinstance(item, str):
@@ -668,7 +701,7 @@ class _Index:
                 # one: a plain entry equal to the value, beside the reference's
                 # own entry, is the file's own text and stays as written.
                 candidates = self.pending(exact, here, item)
-                return self._string(item, candidates)
+                return self._string(item, candidates, exact)
         return item
 
     def fill(
@@ -716,13 +749,31 @@ class _Index:
     def _whole(self, reference: EnvironmentReference) -> Any:
         return reference.written if self.mark is None else self.mark(reference.written)
 
-    def _string(self, text: str, candidates: List[EnvironmentReference]) -> Any:
+    def _key_path(self, exact: Tuple[PathSegment, ...]) -> str:
+        """``exact`` as a dotted key path, a key the environment named shown as
+        ``<key>``: the path is named in a refusal, and the key is a value."""
+        named = {_normal(r.resolved) for refs in self.keys.values() for r in refs}
+        return ".".join("<key>" if s in named else str(s) for s in exact)
+
+    def _string(
+        self,
+        text: str,
+        candidates: List[EnvironmentReference],
+        exact: Tuple[PathSegment, ...] = (),
+    ) -> Any:
         if self.mark is None:
             return _recorded_string(text, candidates)
         for reference in candidates:
             if text == reference.resolved:
                 return self._whole(reference)
         if self.whole_only:
+            for reference in candidates:
+                if _anchored(text, reference):
+                    # Written as the text, the copy would hold the value.
+                    raise EnvironmentValueInPath(
+                        self._key_path(exact),
+                        referenced_name(reference.written) or "?",
+                    )
             return text
         for reference in candidates:
             if reference.value in text:
@@ -757,9 +808,9 @@ def record_environment_references(
     """
     if not references:
         return data
-    return _Index(references, mark, whole_only, exact_indices).record(
-        data, _normal_path(at, exact_indices)
-    )
+    index = _Index(references, mark, whole_only, exact_indices)
+    index.scan(data, _exact_path(at))
+    return index.record(data, _normal_path(at, exact_indices), _exact_path(at))
 
 
 def setting_names(

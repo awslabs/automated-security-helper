@@ -48,7 +48,11 @@ WRITER_ACTIONS = {
 _USES = re.compile(
     r"uses:\s*['\"]?(?P<repo>[\w.-]+/[\w.-]+)(?P<path>/[^@\s'\"]*)?@(?P<ref>[^\s'\"#]+)"
 )
-_LOCAL_USES = re.compile(r"uses:\s*['\"]?(?P<path>\./[^\s'\"#]+)")
+#: A ``uses:`` key that starts a mapping entry (``uses:`` or ``- uses:``), so a comment
+#: line, or a ``uses:`` mentioned in the middle of a line of prose, never names a path.
+_LOCAL_USES = re.compile(
+    r"^\s*(?:-\s+)?uses:\s*['\"]?(?P<path>\./[^\s'\"#]+)", re.MULTILINE
+)
 
 
 def writer_action_refs(texts: Iterable[str]) -> list[str]:
@@ -63,7 +67,11 @@ def writer_action_refs(texts: Iterable[str]) -> list[str]:
 
 
 def local_uses(text: str) -> list[str]:
-    """The ``./`` paths a workflow's ``uses:`` lines name, in order."""
+    """The ``./`` paths a workflow's ``uses:`` keys name, in order.
+
+    Only a ``uses:`` key at the start of a mapping entry counts. A comment that quotes
+    one (``# (`uses: ./.github/workflows/...`) has that repository as``) names no file.
+    """
     seen: list[str] = []
     for match in _LOCAL_USES.finditer(text):
         path = match["path"]

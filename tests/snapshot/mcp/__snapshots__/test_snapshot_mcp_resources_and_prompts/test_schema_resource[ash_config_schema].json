@@ -62,7 +62,7 @@
             }
           ],
           "default": null,
-          "description": "Command name or path of pyflakes, which actionlint runs on 'shell: python' steps. Unset (the default) disables the integration. Any config may set 'pyflakes', looked up on PATH. Another program, or a path that resolves outside the scanned tree: Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. From such a config it is ignored with a warning. When set and not found, the scanner reports MISSING.",
+          "description": "Command name or absolute path of pyflakes, which actionlint runs on 'shell: python' steps. Unset (the default) disables the integration. Any config may set 'pyflakes', looked up on PATH. Another program, or a path that resolves outside the scanned tree: Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. From such a config it is ignored with a warning. When set and not found, the scanner reports MISSING.",
           "title": "Pyflakes"
         },
         "scan_timeout": {
@@ -4320,7 +4320,7 @@
             "type": "string"
           },
           "default": {},
-          "description": "Map of JSON-Pointer pattern \u2192 regex. add/replace ops are rejected when any string leaf reachable from the op's value matches the regex; lists and dicts are walked recursively so a forbidden token cannot be hidden inside a nested structure. The `test` op is exempt because it is read-only. Each key starts with '/'.",
+          "description": "Map of JSON-Pointer pattern to regex. add/replace ops are rejected when any string leaf reachable from the op's value matches the regex; lists and dicts are walked recursively so a forbidden token cannot be hidden inside a nested structure. The `test` op is exempt because it is read-only. Each key starts with '/'.",
           "title": "Denied Value Patterns",
           "type": "object"
         },

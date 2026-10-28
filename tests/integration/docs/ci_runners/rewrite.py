@@ -23,6 +23,15 @@ these rules:
 ``ash-version``
     The scan workflow's ``ash-version`` becomes the head commit, and ``ash-repo`` the
     base repository, on the line after it.
+``artifact-actions`` (github-actions)
+    ``actions/upload-artifact`` and ``actions/download-artifact`` at any ref become the
+    pinned v4 releases (ACT_UPLOAD_ARTIFACT, ACT_DOWNLOAD_ARTIFACT), because act 0.2.89
+    cannot take the v6 and later releases' requests (see _rewrite_artifact_actions).
+    The page keeps naming the current releases.
+``serial-matrix`` (github-actions)
+    Every ``strategy:`` with a ``matrix:`` gets ``max-parallel: 1``, because act runs
+    the entries of a matrix at once and its action cache races on them (see
+    _serialize_matrices).
 ``image`` (gitlab-ci, circleci)
     A job image becomes its pinned digest from RewriteContext.images. An image the run
     built itself stays. Any other image is an error naming it.
@@ -48,7 +57,8 @@ these rules:
     ``<report_mount>/<job>/``, because ``circleci local execute`` discards the project
     directory when the job ends.
 
-The first four are exact string replacements with a count. provenance,
+The first four, artifact-actions and serial-matrix are string replacements with a
+count. provenance,
 built-provenance and report-copy insert text at places read from the parsed YAML, and
 the result is parsed again to check that each insertion landed where it should.
 
@@ -188,6 +198,25 @@ MOUNTED_WHEEL_RUNNERS = frozenset({"gitlab-ci-local", "circleci"})
 
 #: Text a literal value never holds: each is expanded later by a shell or a runner.
 NOT_LITERAL = ("${{", "$RUNNER_TEMP", "$HOME", "~")
+
+#: The artifact actions act 0.2.89 can run, each at a full commit SHA with its release
+#: in the comment, and the action they stand in for. act's artifact server rejects
+#: upload-artifact v7's CreateArtifact request (upload-artifact v7.0.0 sends the
+#: ``mime_type`` field, which act's strict decode refuses, act issue 6114), and the
+#: download-artifact v8 request fails the same way; the v4 releases work.
+ACT_UPLOAD_ARTIFACT = (
+    "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2"
+)
+ACT_DOWNLOAD_ARTIFACT = (
+    "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0"
+)
+#: ``uses:`` of an artifact action at any ref, with the comment after it, to line end.
+_ARTIFACT_USES = re.compile(
+    r"(?m)^(?P<head>[ \t]*(?:-[ \t]+)?uses:[ \t]*)"
+    r"(?P<action>actions/(?:upload|download)-artifact)@[^\s#]+(?:[ \t]+#[^\n]*)?[ \t]*$"
+)
+#: A ``strategy:`` line with nothing after it (a block mapping follows).
+_STRATEGY_LINE = re.compile(r"^(?P<indent> *)strategy:[ \t]*(?:#.*)?$")
 
 #: The step that prints the install's direct_url.json in a GitHub Actions job.
 PROVENANCE_STEP_NAME = "Print the direct_url.json of the installed ASH"
@@ -2931,6 +2960,130 @@ def _ash_images(
 # ---------------------------------------------------------------------------
 
 
+def _rewrite_artifact_actions(text: str, where: str, applied: list[Applied]) -> str:
+    """Run the pipeline's artifact steps on the v4 actions act 0.2.89 can run.
+
+    The pages name the current ``actions/upload-artifact`` and
+    ``actions/download-artifact`` for the people who use GitHub. act 0.2.89, the newest
+    release, cannot serve them: upload-artifact v7.0.0 and later send a
+    ``mime_type`` field that act's artifact server rejects as unknown (act issue 6114,
+    pull requests 6115 and 6174 fix it and are not merged), and the later releases of
+    both actions are reported to fail against it too. The v4 releases work. So each
+    ``uses:`` of either action, at any ref, becomes ACT_UPLOAD_ARTIFACT or
+    ACT_DOWNLOAD_ARTIFACT, and the step's ``with:`` block is left as it is: ``name``,
+    ``path``, ``pattern`` and ``merge-multiple`` mean the same in v4. A line already on
+    the pinned release is left alone, so the rewrite can run twice.
+
+    A ``uses:`` of either action that the pattern does not read (a quoted value, a flow
+    mapping) is an error, since that step would still run a release act cannot serve.
+    """
+    pinned = {
+        "actions/upload-artifact": ACT_UPLOAD_ARTIFACT,
+        "actions/download-artifact": ACT_DOWNLOAD_ARTIFACT,
+    }
+    found: dict[str, int] = {}
+
+    def swap(match: re.Match[str]) -> str:
+        new = pinned[match["action"]]
+        old = match.group(0).removeprefix(match["head"]).rstrip()
+        if old == new:
+            return match.group(0)
+        found[old] = found.get(old, 0) + 1
+        return match["head"] + new
+
+    text = _ARTIFACT_USES.sub(swap, text)
+    for old, count in found.items():
+        action = old.split("@", 1)[0]
+        applied.append(Applied("artifact-actions", old, pinned[action], count))
+    for line in text.split("\n"):
+        for action, new in pinned.items():
+            if "uses:" in line and f"{action}@" in line and new not in line:
+                raise RewriteError(
+                    f"{where}: {line.strip()!r} uses {action} in a form the rewrite "
+                    "does not read, so act would run a release it cannot serve"
+                )
+    return text
+
+
+def _serialize_matrices(text: str, where: str, applied: list[Applied]) -> str:
+    """Give every ``strategy:`` that has a ``matrix:`` the line ``max-parallel: 1``.
+
+    act runs the entries of a matrix at the same time whatever ``--concurrent-jobs``
+    says, and its action cache then races when several entries fetch one action
+    (act issue 6028, reported cause: one entry reads the cached repository while
+    another deletes its working branch, and the step fails with ``failed to read
+    'action.yml' ... file does not exist``). ``max-parallel`` is the setting act reads
+    to bound a matrix, so one entry runs at a time. A ``max-parallel`` already in the
+    block is set to 1. The result is read back as YAML: a matrix the line edit did not
+    reach (a ``strategy`` written as a flow mapping) is an error.
+    """
+    lines = text.split("\n")
+    inserted = 0
+    for index in range(len(lines) - 1, -1, -1):
+        header = _STRATEGY_LINE.match(lines[index])
+        if not header:
+            continue
+        indent = len(header["indent"])
+        end = index + 1
+        while end < len(lines) and (
+            not lines[end].strip()
+            or len(lines[end]) - len(lines[end].lstrip(" ")) > indent
+        ):
+            end += 1
+        body = [
+            k
+            for k in range(index + 1, end)
+            if lines[k].strip() and not lines[k].lstrip().startswith("#")
+        ]
+        if not body:
+            continue
+        child = len(lines[body[0]]) - len(lines[body[0]].lstrip(" "))
+        keys = {
+            m["key"]: k
+            for k in body
+            if (m := re.match(r" {%d}(?P<key>[\w-]+):" % child, lines[k]))
+        }
+        if "matrix" not in keys:
+            continue
+        pad = " " * child
+        if "max-parallel" in keys:
+            current = lines[keys["max-parallel"]]
+            if current.split(":", 1)[1].split("#", 1)[0].strip() == "1":
+                continue
+            lines[keys["max-parallel"]] = f"{pad}max-parallel: 1"
+        else:
+            lines[index + 1 : index + 1] = [
+                f"{pad}# act runs matrix entries at once and its action cache",
+                f"{pad}# races on them (act issue 6028), so one runs at a time.",
+                f"{pad}max-parallel: 1",
+            ]
+        inserted += 1
+    if inserted:
+        applied.append(
+            Applied(
+                "serial-matrix",
+                "strategy: matrix",
+                "strategy: matrix, max-parallel: 1",
+                inserted,
+            )
+        )
+    text = "\n".join(lines)
+    document = _load(text, where)
+    jobs = document.get("jobs") if isinstance(document, dict) else None
+    for job_id, body in jobs.items() if isinstance(jobs, dict) else ():
+        strategy = body.get("strategy") if isinstance(body, dict) else None
+        if (
+            isinstance(strategy, dict)
+            and "matrix" in strategy
+            and strategy.get("max-parallel") != 1
+        ):
+            raise RewriteError(
+                f"{where}: the job {job_id} has a matrix that the max-parallel edit "
+                "did not reach, so act would run its entries at once"
+            )
+    return text
+
+
 def rewrite_pipeline(
     kind: str, text: str, ctx: RewriteContext, *, where: str
 ) -> RewriteResult:
@@ -2975,6 +3128,8 @@ def rewrite_pipeline(
                 applied=applied,
             )
         text = _rewrite_ash_version(text, ctx, where, applied)
+        text = _rewrite_artifact_actions(text, where, applied)
+        text = _serialize_matrices(text, where, applied)
     used_built = False
     document = None if kind == "jenkinsfile" else _load(text, where)
     _ash_images(kind, text, document, ctx, where)

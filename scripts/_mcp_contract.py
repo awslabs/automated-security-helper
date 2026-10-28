@@ -813,8 +813,16 @@ class Evaluator:
         self._evaluations = 0
         self._returns: dict[int, Shape] = {}
         #: Calls that carry bindings or a parent scope, by what :meth:`_call_key`
-        #: makes of them; only results that no recursion guard shaped are kept.
-        self._bound_returns: dict[tuple, Shape] = {}
+        #: makes of them; only results that no recursion guard shaped are kept. An
+        #: entry is (result, the functions and names its read went through, the
+        #: deepest the stack got below the call, itself included); see
+        #: :meth:`returns` for when it may be used.
+        self._bound_returns: dict[tuple, tuple[Shape, frozenset, int]] = {}
+        #: What the running call has read so far: the ids of the functions it
+        #: called and the (scope, name) keys it evaluated, and the deepest the stack
+        #: has been. Each call hands these up to its caller when it ends.
+        self._reads: set = set()
+        self._peak = 0
         #: The lowest stack position a recursion or depth guard answered for since
         #: the call being read began; see :meth:`_note_guard`.
         self._guard_floor = _NO_GUARD
@@ -924,6 +932,7 @@ class Evaluator:
             )
             return scope.bindings.get(name, NOTHING)
         self._names_in_progress.add(key)
+        self._reads.add(key)
         try:
             if scope.func is None or scope.locals is None:
                 return union(
@@ -2425,7 +2434,11 @@ class Evaluator:
         unpacking binds from it, the work grows with the number of call paths to
         it, which is exponential in the depth of a chain of such calls. Its result
         is kept only when no recursion or depth guard shaped it from outside the
-        call (:meth:`_note_guard`), so a kept result is the one a fresh read gives.
+        call (:meth:`_note_guard`). A kept result is also tied to what the read went
+        through: the functions it called, the names it evaluated and how deep it got.
+        It is used only where none of those is in progress and the depth still fits,
+        since a fresh read there would be cut off at the one that is, so the result
+        of a read does not depend on which one came first.
         """
         site = f"{module.rel}:{getattr(func, 'lineno', 0)}"
         if id(func) in self._stack or len(self._stack) >= MAX_CALL_DEPTH:
@@ -2433,14 +2446,26 @@ class Evaluator:
             return unread(f"{site} (recursive or too deep)")
         memo = not bindings and parent is None
         if memo and id(func) in self._returns:
+            self._reads.add(id(func))
             return self._returns[id(func)]
         key = None
         if not memo:
             key = self._call_key(func, owner, owner_module, parent, bindings)
-        if key is not None and key in self._bound_returns:
-            return self._bound_returns[key]
+        kept = self._bound_returns.get(key) if key is not None else None
+        if kept is not None:
+            shape, reads, height = kept
+            if (
+                reads.isdisjoint(self._stack)
+                and reads.isdisjoint(self._names_in_progress)
+                and len(self._stack) + height <= MAX_CALL_DEPTH
+            ):
+                self._reads |= reads
+                self._peak = max(self._peak, len(self._stack) + height)
+                return shape
         position = len(self._stack)
         outer_floor, self._guard_floor = self._guard_floor, _NO_GUARD
+        outer_reads, self._reads = self._reads, {id(func)}
+        outer_peak, self._peak = self._peak, position + 1
         self._stack.append(id(func))
         self._sites.append(site)
         try:
@@ -2480,10 +2505,13 @@ class Evaluator:
             self._sites.pop()
             floor = self._guard_floor
             self._guard_floor = min(outer_floor, floor)
+            reads, self._reads = self._reads, outer_reads
+            height, self._peak = self._peak - position, max(outer_peak, self._peak)
+            outer_reads |= reads
         if memo:
             self._returns[id(func)] = result
         elif key is not None and floor >= position:
-            self._bound_returns[key] = result
+            self._bound_returns[key] = (result, frozenset(reads), height)
         return result
 
     def _note_guard(self, func_id: int) -> None:
