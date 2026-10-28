@@ -866,7 +866,7 @@ jobs:
           ASH_VALUE_OPTIONS="--ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --output-dir --output-format --output-formats --phases --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
           mode="${ASH_MODE}"
           value_of=""
-          for word in "${args[@]}"; do
+          for word in ${args[@]+"${args[@]}"}; do
             if [ -n "${value_of}" ]; then
               if [ "${value_of}" = "--mode" ]; then
                 mode="${word}"
@@ -920,7 +920,7 @@ jobs:
             rm -f -- "${git_ran}"
             # The single quotes are deliberate: the inner sh expands $0 and $@.
             # shellcheck disable=SC2016
-            with_commands_stopped "${out[@]}" sh -c ': > "$0" && exec git "$@"' "${git_ran}" "$@" || status=$?
+            with_commands_stopped ${out[@]+"${out[@]}"} sh -c ': > "$0" && exec git "$@"' "${git_ran}" "$@" || status=$?
             [ -e "${git_ran}" ] || exit 1
             return "${status}"
           }
