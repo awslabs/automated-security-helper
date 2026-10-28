@@ -568,6 +568,9 @@ class _Index:
         self.mark = mark
         self.whole_only = whole_only
         self.exact_indices = exact_indices
+        #: The data's strings by exact position, and its lists' lengths (``scan``).
+        self.strings: Dict[Tuple[PathSegment, ...], str] = {}
+        self.lengths: Dict[Tuple[PathSegment, ...], int] = {}
         for reference in references:
             target = self.keys if reference.key else self.values
             target.setdefault(_normal_path(reference.path, exact_indices), []).append(
@@ -664,7 +667,11 @@ class _Index:
             return result
         if isinstance(item, (list, tuple)):
             return type(item)(
-                self.record(value, (*path, index if self.exact_indices else _ANY_INDEX))
+                self.record(
+                    value,
+                    (*path, index if self.exact_indices else _ANY_INDEX),
+                    (*exact, index),
+                )
                 for index, value in enumerate(item)
             )
         if isinstance(item, str):
@@ -763,9 +770,9 @@ def record_environment_references(
     """
     if not references:
         return data
-    return _Index(references, mark, whole_only, exact_indices).record(
-        data, _normal_path(at, exact_indices)
-    )
+    index = _Index(references, mark, whole_only, exact_indices)
+    index.scan(data, _exact_path(at))
+    return index.record(data, _normal_path(at, exact_indices), _exact_path(at))
 
 
 def setting_names(
