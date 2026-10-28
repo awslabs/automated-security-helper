@@ -70,7 +70,7 @@ async def _scan(workspace: Path, **kwargs) -> Dict[str, Any]:
 
 def test_the_documented_value_is_three():
     assert LINK_REFUSED == 3
-    assert ASH_EXIT_CODES[3] == "invalid config"
+    assert ASH_EXIT_CODES[3] == "invalid config or refused input"
 
 
 def test_the_exception_maps_to_three():
