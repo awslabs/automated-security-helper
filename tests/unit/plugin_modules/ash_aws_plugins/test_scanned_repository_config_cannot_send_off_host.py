@@ -497,16 +497,17 @@ def test_the_operator_enabling_it_sends_only_to_the_operators_destination(
     _assert_sent_to_the_operator(cloud, reporter)
 
 
-def test_a_destination_written_beside_options_is_not_read(
-    tmp_path, monkeypatch, cloud, reported, warnings_logged
+def test_a_destination_written_beside_options_refuses_the_scan(
+    tmp_path, monkeypatch, cloud, reported
 ):
     """``reporters.s3: {enabled: true, bucket_name: ...}``, the bucket outside ``options``.
 
-    A reporter section keeps unknown keys, but the S3 reporter reads its bucket
-    and region from ``options`` only, so these name no destination: with the
-    operator enabling S3, the upload goes to the operator's bucket and region. The
-    ``key_prefix`` under ``options`` is the repository's too, and is named as
-    ignored, which shows the scan read the file.
+    A key beside ``enabled`` that the reporter's config does not declare is
+    refused once the plugins are loaded
+    (base/plugin_config._refuse_unknown_section_keys,
+    config/plugin_option_check.refuse_unknown_plugin_options): the scan ends with
+    exit 3 before any reporter runs, so the repository's keys name no destination
+    and nothing reaches AWS, with the operator enabling S3 or not.
     """
     checkout = _scanned_checkout(
         tmp_path,
@@ -520,13 +521,12 @@ def test_a_destination_written_beside_options_is_not_read(
         },
     )
 
-    _scan(tmp_path, monkeypatch, checkout, overrides=("reporters.s3.enabled=true",))
+    with pytest.raises(SystemExit) as exited:
+        _scan(tmp_path, monkeypatch, checkout, overrides=("reporters.s3.enabled=true",))
 
-    assert _ignored_from_the_checkout(
-        warnings_logged, checkout, "reporters.s3.options.key_prefix"
-    ), warnings_logged
-    assert "S3Reporter" in reported
-    _assert_sent_to_the_operator(cloud, REPORTERS["s3"])
+    assert exited.value.code == 3
+    assert reported == []
+    assert not cloud.any(), (cloud.sessions, cloud.clients, cloud.requests)
 
 
 @pytest.mark.parametrize("key", list(REPORTERS))
