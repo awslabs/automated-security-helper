@@ -8055,12 +8055,36 @@ os.execvp(sys.argv[2], sys.argv[2:])
 #: The server children the running test started; ``_reap_server_children`` ends them.
 _SERVER_CHILDREN: List[subprocess.Popen] = []
 
-#: How many times a server start is tried when the operating system answers that it
-#: cannot make a process now (``EAGAIN``), and the pause after the first refusal. The
-#: pause after attempt ``n`` is ``n`` times this, so five attempts wait 0.2, 0.4, 0.6
-#: and 0.8 seconds, 2 seconds in all.
-_START_ATTEMPTS = 5
-_START_PAUSE_SECONDS = 0.2
+#: How long a server start is tried when the operating system answers that it cannot
+#: make a process now (``EAGAIN``). A macOS runner refused a start for longer than two
+#: seconds while sibling tests held their servers, and those servers end only when
+#: their tests do, so the bound is a time budget and not a count of attempts: the
+#: start is tried again until ``_START_WINDOW_SECONDS`` have passed since the first
+#: attempt, which lets the sibling tests end. The pause after the first refusal is
+#: ``_START_PAUSE_SECONDS`` and each later pause is that much longer, up to
+#: ``_START_PAUSE_CAP_SECONDS``: 0.5, 1.0, 1.5, 2.0, 2.0 seconds and so on.
+_START_WINDOW_SECONDS = 60.0
+_START_PAUSE_SECONDS = 0.5
+_START_PAUSE_CAP_SECONDS = 2.0
+
+
+def _eagain_note(attempts: int, waited: float) -> str:
+    """What the last refusal says about the host: how many starts were refused over
+    how many seconds, the process limit the host reports, the processor count and the
+    platform. Nothing here starts a process, because a new process is what the host
+    refused."""
+    try:
+        import resource
+
+        soft, hard = resource.getrlimit(resource.RLIMIT_NPROC)
+        limit = f"RLIMIT_NPROC soft={soft} hard={hard}"
+    except (ImportError, AttributeError, ValueError, OSError):
+        limit = "RLIMIT_NPROC unavailable"
+    return (
+        f"the host refused to make a new process {attempts} times over "
+        f"{waited:.1f} seconds (EAGAIN); {limit}; cpu_count={os.cpu_count()}; "
+        f"platform={sys.platform}"
+    )
 
 
 def _popen_after_eagain(
@@ -8069,6 +8093,7 @@ def _popen_after_eagain(
     *,
     popen: Optional[Callable[..., Any]] = None,
     pause: Optional[Callable[[float], None]] = None,
+    clock: Optional[Callable[[], float]] = None,
 ) -> Any:
     """``popen(argv, **kwargs)``, tried again when the operating system refuses to make
     a process for now.
@@ -8076,22 +8101,40 @@ def _popen_after_eagain(
     A macOS runner answered ``BlockingIOError: [Errno 35] Resource temporarily
     unavailable`` from ``fork_exec`` for a server start on some jobs and not on others
     running the same test, so the refusal is a property of the host at that moment and
-    not of the call. Only ``EAGAIN`` is tried again, at most ``_START_ATTEMPTS`` times
-    with a growing pause; the last refusal is raised unchanged, and any other error
-    (a missing program, a refused argument) is raised at the first attempt.
+    not of the call. Only ``EAGAIN`` is tried again, with a growing pause, until
+    ``_START_WINDOW_SECONDS`` have passed since the first attempt. The last refusal is
+    raised with a note saying how many starts were refused and what limit the host
+    reports (``_eagain_note``), and any other error (a missing program, a refused
+    argument) is raised unchanged at the first attempt. On Python 3.10, which has no
+    exception notes, the last refusal is raised as a new ``BlockingIOError`` with the
+    same errno and the note in its message, chained from the refusal.
 
-    ``popen`` and ``pause`` default to ``subprocess.Popen`` and ``time.sleep``, looked
-    up when called, and are parameters so a test can answer the start and skip the
-    pause.
+    ``popen``, ``pause`` and ``clock`` default to ``subprocess.Popen``, ``time.sleep``
+    and ``time.monotonic``, looked up when called, and are parameters so a test can
+    answer the start, skip the pause and move the clock.
     """
-    for attempt in range(1, _START_ATTEMPTS + 1):
+    now = clock or time.monotonic
+    started = now()
+    attempt = 0
+    while True:
+        attempt += 1
         try:
             return (popen or subprocess.Popen)(argv, **kwargs)
         except BlockingIOError as refused:
-            if refused.errno != errno.EAGAIN or attempt == _START_ATTEMPTS:
+            if refused.errno != errno.EAGAIN:
                 raise
-        (pause or time.sleep)(_START_PAUSE_SECONDS * attempt)
-    raise AssertionError("unreachable: the last attempt returns or raises")
+            waited = now() - started
+            if waited >= _START_WINDOW_SECONDS:
+                note = _eagain_note(attempt, waited)
+                if hasattr(refused, "add_note"):
+                    refused.add_note(note)
+                    raise
+                raise BlockingIOError(
+                    refused.errno, f"{refused.strerror}; {note}"
+                ) from refused
+        (pause or time.sleep)(
+            min(_START_PAUSE_SECONDS * attempt, _START_PAUSE_CAP_SECONDS)
+        )
 
 
 def _server_popen(argv: List[str], **kwargs: Any) -> subprocess.Popen:
@@ -8172,32 +8215,97 @@ def _fake_popen(
     return popen, calls
 
 
+class _FakeTime:
+    """A clock that moves only when the retry pauses, and the pauses it was asked
+    for. Nothing sleeps."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.pauses: List[float] = []
+
+    def clock(self) -> float:
+        return self.now
+
+    def pause(self, seconds: float) -> None:
+        self.pauses.append(seconds)
+        self.now += seconds
+
+
 def test_a_server_start_the_host_refuses_twice_is_made_a_third_time() -> None:
     """Two ``EAGAIN`` answers are waited out with a growing pause, and the third
-    attempt's process is the result. Each attempt gets the same arguments."""
+    attempt's process is the result. Each attempt gets the same arguments. The clock
+    stays inside the window, so the retry does not give up."""
     started = object()
     popen, calls = _fake_popen([_eagain(), _eagain(), started])
     pauses: List[float] = []
     result = _popen_after_eagain(
-        ["server", "--quiet"], {"cwd": "here"}, popen=popen, pause=pauses.append
+        ["server", "--quiet"],
+        {"cwd": "here"},
+        popen=popen,
+        pause=pauses.append,
+        clock=lambda: 0.0,
     )
     assert result is started
     assert calls == [(["server", "--quiet"], {"cwd": "here"})] * 3, calls
-    assert pauses == pytest.approx([0.2, 0.4]), pauses
+    assert pauses == pytest.approx([0.5, 1.0]), pauses
 
 
 def test_a_server_start_the_host_always_refuses_raises_the_last_refusal() -> None:
-    """The attempts are bounded, there is no pause after the last one, and the error
-    raised is the last one itself, not a copy or a wrapper."""
-    refusals = [_eagain() for _ in range(_START_ATTEMPTS)]
+    """The retry gives up once the window is spent on the injected clock: the pauses
+    grow by half a second to the cap and stay there, there is no pause after the last
+    attempt, and the error raised is the last refusal itself with a note naming the
+    process limit (a chained ``BlockingIOError`` with the note in its message on
+    Python 3.10, which has no exception notes)."""
+    refusals = [_eagain() for _ in range(200)]
     popen, calls = _fake_popen(list(refusals))
-    pauses: List[float] = []
+    fake = _FakeTime()
     with pytest.raises(BlockingIOError) as raised:
-        _popen_after_eagain(["server"], {}, popen=popen, pause=pauses.append)
-    assert raised.value is refusals[-1]
-    assert len(calls) == _START_ATTEMPTS, calls
-    expected = [_START_PAUSE_SECONDS * n for n in range(1, _START_ATTEMPTS)]
-    assert pauses == pytest.approx(expected), pauses
+        _popen_after_eagain(
+            ["server"], {}, popen=popen, pause=fake.pause, clock=fake.clock
+        )
+    pauses = fake.pauses
+    assert pauses[:5] == pytest.approx([0.5, 1.0, 1.5, 2.0, 2.0]), pauses
+    assert set(pauses[3:]) == {_START_PAUSE_CAP_SECONDS}, pauses
+    assert sum(pauses) >= _START_WINDOW_SECONDS, pauses
+    assert sum(pauses[:-1]) < _START_WINDOW_SECONDS, pauses
+    assert len(calls) == len(pauses) + 1, (len(calls), len(pauses))
+    error = raised.value
+    assert error.errno == errno.EAGAIN
+    if hasattr(error, "add_note"):
+        assert error is refusals[len(calls) - 1]
+        text = "\n".join(error.__notes__)
+    else:
+        assert error.__cause__ is refusals[len(calls) - 1]
+        text = str(error)
+    assert "RLIMIT_NPROC" in text, text
+    assert f"{len(calls)} times" in text, text
+
+
+def test_a_server_start_the_host_refuses_for_ten_seconds_is_made_when_it_allows_one() -> (
+    None
+):
+    """A host that refuses for ten seconds and then allows a start gives the process:
+    the retry waits the ten seconds out, on the injected clock and without a real
+    pause, and does not give up at the old two-second mark."""
+    started = object()
+    fake = _FakeTime()
+    calls: List[float] = []
+
+    def popen(argv: List[str], **kwargs: Any) -> Any:
+        calls.append(fake.now)
+        if fake.now < 10.0:
+            raise _eagain()
+        return started
+
+    result = _popen_after_eagain(
+        ["server"], {}, popen=popen, pause=fake.pause, clock=fake.clock
+    )
+    assert result is started
+    assert fake.pauses == pytest.approx([0.5, 1.0, 1.5, 2.0, 2.0, 2.0, 2.0]), (
+        fake.pauses
+    )
+    assert len(calls) == len(fake.pauses) + 1, calls
+    assert calls[-1] >= 10.0 > calls[-2], calls
 
 
 @pytest.mark.parametrize(
