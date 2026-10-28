@@ -70,6 +70,21 @@
     },
     {
       "kind": "no-harness",
+      "path": "docs/content/assets/javascripts/ash.js",
+      "reason": "The docs site's browser script, loaded on every page through mkdocs.yml extra_javascript. No ancestor of docs/content/assets/javascripts carries a package.json, tsconfig, jest or vitest config, so no JS harness exists to measure it; docs/ui-tests is a sibling Playwright suite, which exercises this file in a real browser (site.spec.cjs routes and asserts on it) and emits no jest coverage report."
+    },
+    {
+      "kind": "no-harness",
+      "path": "docs/content/assets/javascripts/ash-scan.js",
+      "reason": "The docs scan-demo page's browser script, same disposition as ash.js above: served by the MkDocs site, exercised by the sibling Playwright suite (scan.spec.cjs routes and asserts on it, including the aborted-load path), and measured by no jest report because no ancestor directory holds a JS harness config."
+    },
+    {
+      "kind": "no-harness",
+      "path": "docs/content/assets/javascripts/vendor/anime.js",
+      "reason": "The vendored MIT animejs 4.5.0 build, written whole by docs/ui-tests/vendor-motion.cjs (which checks the upstream license and version before copying). Third-party vendored output, not code this repository authors; no ancestor directory holds a JS harness config, so no harness exists to measure it."
+    },
+    {
+      "kind": "no-harness",
       "path": ".github/scripts/assert-coverage-completeness.mjs",
       "reason": "This census script itself. Invoked as `node .github/scripts/...` from a workflow step, and neither .github/scripts/, .github/ nor the repository root carries a package.json, tsconfig, jest or vitest config -- verified against `git ls-files` -- so no JS harness exists anywhere in its tree to measure it. Named here rather than left unlisted because the gate is deliberately self-inclusive: it censuses every tracked JS/TS file, including its own, and an unexplained absence is what it exists to reject."
     },
