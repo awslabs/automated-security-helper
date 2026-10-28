@@ -135,6 +135,22 @@ def converter(test_plugin_context):
     )
 
 
+@pytest.fixture
+def deferred_converter(test_plugin_context):
+    """A converter as the convert phase builds it: inside
+    deferred_tool_version_probes(), so the version probe waits for the dependency
+    check (core/phases/convert_phase.py)."""
+    from automated_security_helper.base.uv_tool_mixin import (
+        deferred_tool_version_probes,
+    )
+
+    test_plugin_context.run_id = RUN_ID
+    with deferred_tool_version_probes():
+        return JupyterConverter(
+            context=test_plugin_context, config=JupyterConverterConfig()
+        )
+
+
 @pytest.fixture(autouse=True)
 def installed_jupyter(monkeypatch, tmp_path) -> Path:
     """A jupyter-nbconvert on PATH, outside the scanned tree, for the direct route.
@@ -411,12 +427,13 @@ class TestValidatePluginDependencies:
         assert "bin/jupyter-nbconvert" not in reason, reason
 
     def test_a_replaced_copys_install_refreshes_the_reported_version(
-        self, converter, monkeypatch
+        self, deferred_converter, monkeypatch
     ):
         """The install that replaces an unverified copy refreshes tool_version
         under the converter's requirement, as the no-copy install branch does:
         the reported version is the installed environment's, not the probe's
         earlier answer."""
+        converter = deferred_converter
         refuse_stand_in_nbconvert(monkeypatch)
         monkeypatch.setattr(
             f"{MODULE}.lookup_for_scan",
@@ -473,11 +490,14 @@ class TestValidatePluginDependencies:
         )
         assert converter.tool_version == "7.16.4"
 
-    def test_a_fresh_installs_refresh_resolves_under_the_runs_spec(self, converter):
+    def test_a_fresh_installs_refresh_resolves_under_the_runs_spec(
+        self, deferred_converter
+    ):
         """The version refresh after a fresh install resolves under the run's
         own spec, as the replaced-copy branch's refresh does: the reported
         version is the installed environment's under the converter's
         requirement, not whatever a spec-less probe would answer."""
+        converter = deferred_converter
         converter._get_tool_installation_info = Mock(return_value={"available": False})
         converter._install_uv_tool = Mock(return_value=True)
         asked = []
@@ -1208,11 +1228,12 @@ class TestExecuteNbconvertViaUv:
         assert kwargs["version_constraint"] == ">=7.16.0,<8.0.0"
 
     def test_the_version_probe_resolves_under_the_converters_requirement(
-        self, converter, monkeypatch
+        self, deferred_converter, monkeypatch
     ):
         """The probe, the install refreshes and the run share one --from spec,
         so the reported tool_version is the version that runs: one resolved
         environment, one entry-point cache, one answer."""
+        converter = deferred_converter
         asked = []
 
         def version(runner, tool_name, package_name=None, *args, **kwargs):
@@ -1226,11 +1247,12 @@ class TestExecuteNbconvertViaUv:
         assert asked == [("jupyter-nbconvert", "nbconvert>=7.16.0,<8.0.0")]
 
     def test_the_version_probe_resolves_the_requirement_of_the_check(
-        self, converter, monkeypatch
+        self, deferred_converter, monkeypatch
     ):
         """The spec is the one the dependency check and the run use, read when
         the probe runs: a tool_version set after the converter was built is the
         one probed, not the one it was built with."""
+        converter = deferred_converter
         converter.config.options.tool_version = ">=7.99.0"
         # The control: the run's spec reads the new requirement.
         assert converter._uv_from_spec() == "nbconvert>=7.99.0"
