@@ -158,9 +158,9 @@ def _a_failing_scan_in_the_session(
 def test_a_runner_failure_shows_no_value_the_config_read(tmp_path, monkeypatch):
     secret = "a-value-read-from-the-environment"
     monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(tmp_path))
-    monkeypatch.setenv("ASH_SCAN_START_TOKEN", secret)
+    monkeypatch.setenv("ASH_SCAN_START_HELD", secret)
     (tmp_path / ".ash.yaml").write_text(
-        "project_name: ${ASH_SCAN_START_TOKEN:unset}\n", encoding="utf-8"
+        "project_name: ${ASH_SCAN_START_HELD:unset}\n", encoding="utf-8"
     )
     registry = ScanRegistry()
     logger = MagicMock(spec=ASHLogger)
@@ -202,13 +202,13 @@ def test_a_runner_failure_shows_no_value_the_config_read(tmp_path, monkeypatch):
 _PROFILE_SECRET = "a-profile-value-read-from-the-environment"
 _BASE_SECRET = "a-base-value-read-from-the-environment"
 _SESSION_PROFILE_TEXT = (
-    "extends: base.ash.yaml\nproject_name: ${ASH_PROFILE_TOKEN:unset}\n"
+    "extends: base.ash.yaml\nproject_name: ${ASH_PROFILE_ARM_HELD:unset}\n"
 )
 _SESSION_BASE_TEXT = (
     "global_settings:\n"
     "  ignore_paths:\n"
     "    - path: nothing-here\n"
-    "      reason: ${ASH_PROFILE_BASE_TOKEN:unset}\n"
+    "      reason: ${ASH_PROFILE_BASE_HELD:unset}\n"
 )
 
 
@@ -229,8 +229,8 @@ def test_a_runner_arm_shows_no_value_the_trusted_profile_read(
     assessment lines, not only the error arm's."""
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 
-    monkeypatch.setenv("ASH_PROFILE_TOKEN", _PROFILE_SECRET)
-    monkeypatch.setenv("ASH_PROFILE_BASE_TOKEN", _BASE_SECRET)
+    monkeypatch.setenv("ASH_PROFILE_ARM_HELD", _PROFILE_SECRET)
+    monkeypatch.setenv("ASH_PROFILE_BASE_HELD", _BASE_SECRET)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     target, delivered = _a_session_with_a_bound_profile(
         tmp_path / "ws",
@@ -326,13 +326,13 @@ def test_each_sessions_scan_redacts_with_its_own_profile(tmp_path, monkeypatch):
     other session's profile would leave this session's value in clear."""
     first_secret = "a-first-sessions-profile-value"
     second_secret = "a-second-sessions-profile-value"
-    monkeypatch.setenv("ASH_FIRST_SESSION_TOKEN", first_secret)
-    monkeypatch.setenv("ASH_SECOND_SESSION_TOKEN", second_secret)
+    monkeypatch.setenv("ASH_FIRST_SESSION_HELD", first_secret)
+    monkeypatch.setenv("ASH_SECOND_SESSION_HELD", second_secret)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     ws = tmp_path / "ws"
     for session_id, reference, secret in (
-        ("first-session", "ASH_FIRST_SESSION_TOKEN", first_secret),
-        ("second-session", "ASH_SECOND_SESSION_TOKEN", second_secret),
+        ("first-session", "ASH_FIRST_SESSION_HELD", first_secret),
+        ("second-session", "ASH_SECOND_SESSION_HELD", second_secret),
     ):
         target, delivered = _a_session_with_a_bound_profile(
             ws,
@@ -407,13 +407,13 @@ def test_a_timed_out_scan_hides_a_limit_the_profile_also_read(tmp_path, monkeypa
     value, the cell above shows the token still prints the plain limit."""
     import time
 
-    monkeypatch.setenv("ASH_LIMIT_TWIN_TOKEN", "0.05")
+    monkeypatch.setenv("ASH_LIMIT_TWIN_HELD", "0.05")
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     target, delivered = _a_session_with_a_bound_profile(
         tmp_path / "ws",
         monkeypatch,
         "limit-session",
-        "project_name: ${ASH_LIMIT_TWIN_TOKEN:unset}\n",
+        "project_name: ${ASH_LIMIT_TWIN_HELD:unset}\n",
     )
     monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(target))
     registry = ScanRegistry()
@@ -463,9 +463,9 @@ def test_a_settle_failure_shows_no_value_the_config_read(tmp_path, monkeypatch):
     like every other reason the runner logs."""
     secret = "a-value-read-from-the-environment"
     monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(tmp_path))
-    monkeypatch.setenv("ASH_SCAN_START_TOKEN", secret)
+    monkeypatch.setenv("ASH_SCAN_START_HELD", secret)
     (tmp_path / ".ash.yaml").write_text(
-        "project_name: ${ASH_SCAN_START_TOKEN:unset}\n", encoding="utf-8"
+        "project_name: ${ASH_SCAN_START_HELD:unset}\n", encoding="utf-8"
     )
     registry = ScanRegistry()
     logger = MagicMock(spec=ASHLogger)
@@ -511,9 +511,9 @@ def test_an_incomplete_scans_assessment_failure_shows_no_value(tmp_path, monkeyp
 
     secret = "a-value-read-from-the-environment"
     monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(tmp_path))
-    monkeypatch.setenv("ASH_SCAN_START_TOKEN", secret)
+    monkeypatch.setenv("ASH_SCAN_START_HELD", secret)
     (tmp_path / ".ash.yaml").write_text(
-        "project_name: ${ASH_SCAN_START_TOKEN:unset}\n", encoding="utf-8"
+        "project_name: ${ASH_SCAN_START_HELD:unset}\n", encoding="utf-8"
     )
     registry = ScanRegistry()
     logger = MagicMock(spec=ASHLogger)
@@ -568,9 +568,9 @@ def test_a_coverage_assessment_failure_shows_no_value_the_config_read(
 
     secret = "a-value-read-from-the-environment"
     monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(tmp_path))
-    monkeypatch.setenv("ASH_SCAN_START_TOKEN", secret)
+    monkeypatch.setenv("ASH_SCAN_START_HELD", secret)
     (tmp_path / ".ash.yaml").write_text(
-        "project_name: ${ASH_SCAN_START_TOKEN:unset}\n", encoding="utf-8"
+        "project_name: ${ASH_SCAN_START_HELD:unset}\n", encoding="utf-8"
     )
     registry = ScanRegistry()
     logger = MagicMock(spec=ASHLogger)

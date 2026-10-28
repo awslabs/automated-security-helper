@@ -230,9 +230,9 @@ def test_a_start_failure_shows_no_value_the_scan_config_read(tmp_path, monkeypat
     defense-in-depth contract: a text that ever carries one stays hidden."""
     secret = "a-value-read-from-the-environment"
     monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(tmp_path))
-    monkeypatch.setenv("ASH_SCAN_START_TOKEN", secret)
+    monkeypatch.setenv("ASH_SCAN_START_HELD", secret)
     (tmp_path / ".ash.yaml").write_text(
-        "project_name: ${ASH_SCAN_START_TOKEN:unset}\n", encoding="utf-8"
+        "project_name: ${ASH_SCAN_START_HELD:unset}\n", encoding="utf-8"
     )
     registry = ScanRegistry()
     logger = MagicMock(spec=ASHLogger)
@@ -295,9 +295,9 @@ def test_a_start_failures_context_and_suggestions_show_no_value(tmp_path, monkey
     the defense-in-depth contract for the surfaces beside the text."""
     secret = "a-value-read-from-the-environment"
     monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(tmp_path))
-    monkeypatch.setenv("ASH_SCAN_START_TOKEN", secret)
+    monkeypatch.setenv("ASH_SCAN_START_HELD", secret)
     (tmp_path / ".ash.yaml").write_text(
-        "project_name: ${ASH_SCAN_START_TOKEN:unset}\n", encoding="utf-8"
+        "project_name: ${ASH_SCAN_START_HELD:unset}\n", encoding="utf-8"
     )
     registry = ScanRegistry()
 
@@ -341,9 +341,9 @@ def test_a_start_failures_context_leaves_show_no_value(tmp_path, monkeypatch, le
     control that the walk still reaches it."""
     secret = "a-value-read-from-the-environment"
     monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(tmp_path))
-    monkeypatch.setenv("ASH_SCAN_START_TOKEN", secret)
+    monkeypatch.setenv("ASH_SCAN_START_HELD", secret)
     (tmp_path / ".ash.yaml").write_text(
-        "project_name: ${ASH_SCAN_START_TOKEN:unset}\n", encoding="utf-8"
+        "project_name: ${ASH_SCAN_START_HELD:unset}\n", encoding="utf-8"
     )
     registry = ScanRegistry()
     if leaf == "path-object":
@@ -387,10 +387,10 @@ def test_a_start_failure_shows_no_value_the_operator_config_read(tmp_path, monke
     target.mkdir()
     operator_config = tmp_path / "op.ash.yaml"
     operator_config.write_text(
-        "project_name: ${ASH_OPERATOR_TOKEN:unset}\n", encoding="utf-8"
+        "project_name: ${ASH_OPERATOR_HELD:unset}\n", encoding="utf-8"
     )
     monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(target))
-    monkeypatch.setenv("ASH_OPERATOR_TOKEN", secret)
+    monkeypatch.setenv("ASH_OPERATOR_HELD", secret)
     monkeypatch.setenv("ASH_CONFIG", str(operator_config))
     monkeypatch.chdir(tmp_path)
     registry = ScanRegistry()
@@ -435,9 +435,9 @@ def test_an_unmakeable_output_directory_shows_no_value_the_config_read(
     other failure arms do."""
     secret = "a-value-read-from-the-environment"
     monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(tmp_path))
-    monkeypatch.setenv("ASH_SCAN_START_TOKEN", secret)
+    monkeypatch.setenv("ASH_SCAN_START_HELD", secret)
     (tmp_path / ".ash.yaml").write_text(
-        "project_name: ${ASH_SCAN_START_TOKEN:unset}\n", encoding="utf-8"
+        "project_name: ${ASH_SCAN_START_HELD:unset}\n", encoding="utf-8"
     )
     registry = ScanRegistry()
     real_mkdir = Path.mkdir
@@ -475,9 +475,9 @@ def test_a_set_aside_warning_shows_no_value_the_scan_config_read(tmp_path, monke
     failure arms do."""
     secret = "a-value-read-from-the-environment"
     monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(tmp_path))
-    monkeypatch.setenv("ASH_SCAN_START_TOKEN", secret)
+    monkeypatch.setenv("ASH_SCAN_START_HELD", secret)
     (tmp_path / ".ash.yaml").write_text(
-        "project_name: ${ASH_SCAN_START_TOKEN:unset}\n", encoding="utf-8"
+        "project_name: ${ASH_SCAN_START_HELD:unset}\n", encoding="utf-8"
     )
     output = tmp_path / ".ash" / "ash_output"
     output.mkdir(parents=True)
@@ -518,9 +518,9 @@ def test_a_registration_refusal_shows_no_value_the_scan_config_read(
     carries one shows the redacted form."""
     secret = "a-value-read-from-the-environment"
     monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(tmp_path))
-    monkeypatch.setenv("ASH_SCAN_START_TOKEN", secret)
+    monkeypatch.setenv("ASH_SCAN_START_HELD", secret)
     (tmp_path / ".ash.yaml").write_text(
-        "project_name: ${ASH_SCAN_START_TOKEN:unset}\n", encoding="utf-8"
+        "project_name: ${ASH_SCAN_START_HELD:unset}\n", encoding="utf-8"
     )
     registry = ScanRegistry()
 
