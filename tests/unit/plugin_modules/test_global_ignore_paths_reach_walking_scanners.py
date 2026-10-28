@@ -415,7 +415,6 @@ def test_trivy_is_given_the_ignored_files_and_directories(tmp_path, monkeypatch)
     monkeypatch.setattr(
         _trivy_scanner_base, "prepare_content_db", lambda *args, **kwargs: None
     )
-    monkeypatch.setattr(trivy_repo_scanner, "sandboxed_online", lambda offline: False)
     source = _tree(tmp_path)
     scanner = trivy_repo_scanner.TrivyRepoScanner(
         context=_context(source, tmp_path),
