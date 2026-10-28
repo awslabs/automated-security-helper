@@ -1867,7 +1867,7 @@ jobs:
       # Pinned to a commit rather than to `v1`, which is a moving major tag on this
       # action: .github/scripts/assert-actions-pinned.mjs requires 40 hex characters
       # plus a trailing version comment, the latter because Dependabot reads that
-      # comment to learn which release a sha is. This sha is v1.321.0.
+      # comment to learn which release a sha is. This sha is v1.332.0.
       #
       # No `bundler-cache: true`. That input has the action run `bundle install`
       # itself against BUNDLE_GEMFILE, and this Gemfile is not in the repository at

@@ -122,7 +122,7 @@ fails, because a scan with findings exits 2:
 ```yaml
 - name: Upload SARIF to code scanning
   if: ${{ !cancelled() }}
-  uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+  uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
   with:
     sarif_file: .ash/ash_output/reports/ash.ghas.sarif
     category: ash

@@ -29,18 +29,13 @@ permissions:
   contents: read
 
 concurrency:
-  # One in-flight run per pull request or branch; pushing again supersedes the previous
-  # run.
-  #
-  # github.ref is refs/pull/<n>/merge on pull_request, and on merge_group it is the
-  # per-entry gh-readonly-queue/main/pr-<n>-<sha> branch, so every queue entry lands
-  # in its own group and entries never serialize behind one another.
-  group: ${{ github.workflow }}-${{ github.ref }}
-  # pull_request runs may be cancelled, and so may push runs on branches other than
-  # main: a newer push to the same pull request or branch supersedes the build of its
-  # old head, and only a push to main deploys. A push to main must finish, because it is
-  # the publish, and a workflow_dispatch run was asked for by a person.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main') }}
+  # One in-flight deploy per published ref. A push to main publishes main; a call, or a
+  # workflow_dispatch run on a release tag, publishes that tag. In a called workflow
+  # github.ref and github.event_name belong to the caller, so the group is keyed on the
+  # `ref` input when one is given. A deploy is never cancelled: it is the publish, and
+  # the script redoes its version if a concurrent deploy pushed first.
+  group: docs-deploy-${{ inputs.ref && format('refs/tags/{0}', inputs.ref) || github.ref }}
+  cancel-in-progress: false
 
 jobs:
   deploy-docs:
