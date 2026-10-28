@@ -59,6 +59,7 @@ from automated_security_helper.utils.sandbox.policy import (
 from automated_security_helper.utils.sandbox.scope import SandboxScope
 from automated_security_helper.utils.tool_config_dir import TOOL_CONFIG_DIR_PREFIX
 from automated_security_helper.utils.uv_tool_runner import UVToolRunner
+from tests.utils.helpers import mark_git_checkout
 
 PluginContext.model_rebuild()
 AshConfig.model_rebuild()
@@ -225,7 +226,7 @@ def _context(tmp_path: Path, case: Optional[Case] = None) -> PluginContext:
     """A checkout scanned with the default output directory, inside it."""
     source = tmp_path / "repo"
     source.mkdir()
-    (source / ".git").mkdir()
+    mark_git_checkout(source)
     (source / "app.py").write_text("x = 1\n", encoding="utf-8")
     (source / "requirements.txt").write_text("requests==2.19.1\n", encoding="utf-8")
     for name, text in (case.files if case is not None else {}).items():

@@ -24,6 +24,8 @@ from typing import Any, Iterator, List
 
 import pytest
 
+from tests.utils.helpers import mark_git_checkout
+
 OPTION = "scanners.detect-secrets.options.max_worker_output_mib"
 
 # os.rmdir of the process's working directory is PermissionError on Windows,
@@ -35,7 +37,7 @@ _POSIX_ONLY_CWD_REMOVAL = pytest.mark.skipif(
 
 def _checkout(tmp_path: Path, body: str = "") -> Path:
     checkout = tmp_path / "checkout"
-    (checkout / ".git").mkdir(parents=True)
+    mark_git_checkout(checkout)
     if body:
         (checkout / ".ash").mkdir()
         (checkout / ".ash" / ".ash.yaml").write_text(body, encoding="utf-8")

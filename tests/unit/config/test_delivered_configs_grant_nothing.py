@@ -30,6 +30,7 @@ import yaml
 from automated_security_helper.config import client_config_policy
 from automated_security_helper.config import resolve_config as rc
 from automated_security_helper.config.ash_config import SandboxConfig
+from tests.utils.helpers import mark_git_checkout
 
 #: The sandbox settings every client file writes: the four grants and a
 #: network_scanners list. Each differs from the default.
@@ -63,7 +64,7 @@ class Layout:
         self.outside.mkdir()
         #: The scanned repository.
         self.repo = tmp_path / "repo"
-        (self.repo / ".git").mkdir(parents=True)
+        mark_git_checkout(self.repo)
 
     def write(self, path: Path, document: Dict[str, Any]) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)

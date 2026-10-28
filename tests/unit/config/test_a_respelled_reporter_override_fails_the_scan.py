@@ -26,6 +26,7 @@ from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
     ASHRespelledOverrideError,
 )
+from tests.utils.helpers import mark_git_checkout
 
 
 def _scan_resolution(tmp_path, override):
@@ -39,7 +40,7 @@ def _scan_resolution(tmp_path, override):
     )
 
     checkout = tmp_path / "checkout"
-    (checkout / ".git").mkdir(parents=True)
+    mark_git_checkout(checkout)
     (checkout / ".ash").mkdir()
     (checkout / ".ash" / ".ash.yaml").write_text(
         "project_name: repo\n", encoding="utf-8"
@@ -93,7 +94,7 @@ def _scan_resolution_with_repo_spelling(tmp_path, override):
     )
 
     checkout = tmp_path / "checkout"
-    (checkout / ".git").mkdir(parents=True)
+    mark_git_checkout(checkout)
     (checkout / ".ash").mkdir()
     (checkout / ".ash" / ".ash.yaml").write_text(
         "project_name: repo\nreporters:\n  AwsSecurityHub:\n    enabled: true\n",
@@ -151,7 +152,7 @@ def _resolution(tmp_path, repo_text, operator_text, override):
     from automated_security_helper.config.resolve_config import resolve_config
 
     checkout = tmp_path / "checkout"
-    (checkout / ".git").mkdir(parents=True)
+    mark_git_checkout(checkout)
     (checkout / ".ash").mkdir()
     (checkout / ".ash" / ".ash.yaml").write_text(repo_text, encoding="utf-8")
     operator = tmp_path / "operator.yaml"

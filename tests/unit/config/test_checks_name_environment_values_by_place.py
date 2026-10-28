@@ -30,6 +30,8 @@ from typing import Any, Dict, Iterator, List
 import pytest
 from typer.testing import CliRunner
 
+from tests.utils.helpers import mark_git_checkout
+
 #: How a message shows a value read from the environment
 #: (``environment_record.ENVIRONMENT_VALUE_SHOWN``), written out so that the
 #: tests read the same on a tree without it.
@@ -1318,7 +1320,7 @@ def test_an_in_tree_warning_names_a_base_the_environment_chose_by_place(
 
     settings, start = _IN_TREE_SETTINGS[setting]
     checkout = tmp_path / "checkout"
-    (checkout / ".git").mkdir(parents=True)
+    mark_git_checkout(checkout)
     if root_from == "discovered":
         root = _in_tree_chain(checkout, ".ash/.ash.yaml", settings, layout, monkeypatch)
     else:
