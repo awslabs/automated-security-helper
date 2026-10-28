@@ -4476,12 +4476,21 @@ def _not_in_a_checkout(path: Path) -> Path:
 
 
 def _get_config_from_elsewhere(tmp_path, monkeypatch, config: Path) -> dict[str, Any]:
+    """get_config of ``config``, a file the operator names, from a working
+    directory that does not hold it.
+
+    A path named to get_config is the client's unless it is in a directory
+    ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` names, and a client's file that sets the
+    Security Hub section is refused outright. These tests are about how a file
+    the operator names is shown, so the test's directory is set aside as the
+    operator's."""
     from automated_security_helper.cli.mcp_tools import mcp_get_config
 
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(tmp_path))
     return mcp_get_config(config_path=str(config))
 
 
@@ -4633,6 +4642,8 @@ def test_get_config_does_not_judge_a_named_file_by_ash_configs_checkout(
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
     monkeypatch.setenv("ASH_CONFIG", str(ash_config))
+    # The operator names the file (see _get_config_from_elsewhere).
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(tmp_path))
 
     options = _security_hub_options(mcp_get_config(config_path=str(named)))
 
@@ -4650,6 +4661,8 @@ def test_get_config_shows_the_operators_value_where_the_target_holds_the_file(
     mark_git_checkout(checkout)
     monkeypatch.chdir(checkout)
     monkeypatch.setenv("ASH_CONFIG", str(_operator_file(tmp_path, "operator-scope")))
+    # The operator names the file (see _get_config_from_elsewhere).
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(tmp_path))
 
     options = _security_hub_options(
         mcp_get_config(config_path=str(checkout / ".ash" / ".ash.yaml"))
