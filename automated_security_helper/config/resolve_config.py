@@ -2389,9 +2389,21 @@ def resolve_config(
     reporter_source = (
         named_config_source if named_config_source is not None else tier_two_source
     )
+    # The destinations are held to the configuration as the operator set it:
+    # the trusted base with the operator's own chain files' reporters sections
+    # merged over it (a --config outside the tree that extends the repository's
+    # file is one; see _with_operator_chain_reporters). Judged against the bare
+    # base, the operator file's own region, profile, scope and enabled were
+    # replaced in the resolved sections and named as ignored "from" the
+    # repository's file, which never wrote them, and reporter_section then
+    # warned a second time because the resolved section no longer matched the
+    # view it runs with.
+    operator_chain_reporters = _with_operator_chain_reporters(
+        trusted, view_chain, in_tree, reads, environment_paths
+    )
     confine_reporter_destinations(
         config,
-        trusted,
+        operator_chain_reporters,
         tier_two_overrides,
         list(in_tree),
         source=reporter_source,
@@ -2497,9 +2509,7 @@ def resolve_config(
     # tree: a --config that extends the repository's) merge over the trusted
     # base first, then the operator's reporters overrides apply on top.
     operator_reporters = _with_reporter_overrides(
-        _with_operator_chain_reporters(
-            trusted, view_chain, in_tree, reads, environment_paths
-        ),
+        operator_chain_reporters,
         operator_overrides,
         config,
     )
