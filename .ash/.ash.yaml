@@ -467,6 +467,41 @@ global_settings:
         version exists. Reachable only through dev/build tooling (micromatch via
         fast-glob and jsii-rosetta) and not shipped in the wheel or container image. Revisit when a fix
         ships; see the block comment above.
+    # === Time-boxed: deepmerge GHSA-gcqx-w48m-w2h4, no patched version (expires 2026-11-27) ===
+    # deepmerge 4.2.0 through 4.3.1 is affected (mergeObject() prototype poisoning of
+    # the returned object) and no fixed release exists: the advisory, published
+    # 2026-09-18 and updated 2026-10-27, lists no patched version, and the only fix npm
+    # offers is a major downgrade of jest to 25.1.0, which is refused. Both lockfiles,
+    # deploy/cdk and deploy/cdk-constructs, reach deepmerge 4.3.1 through jest-config
+    # as a dev dependency ("dev": true); none of it ships in the wheel or the
+    # container image. One entry per lockfile, because package_path pins one install
+    # path. Revisit when a fixed deepmerge ships; the transitive
+    # `npm-audit-transitive-<package>` findings are covered by these root entries, as
+    # the braces block above explains.
+    - rule_id: "GHSA-gcqx-w48m-w2h4"
+      path: "node_modules/deepmerge/package.json"
+      package_name: "deepmerge"
+      package_version: "4.3.1"
+      package_path: "deploy/cdk/node_modules/deepmerge"
+      expiration: "2026-11-27"
+      reason: >-
+        GHSA-gcqx-w48m-w2h4: deepmerge 4.3.1 in deploy/cdk/package-lock.json. No patched
+        version exists (advisory published 2026-09-18, updated 2026-10-27). Dev dependency
+        only, reached through jest-config, not shipped in the wheel or the container image.
+        npm's only fix is a jest 25.1.0 major downgrade, refused. Revisit when a fix ships;
+        see the block comment above.
+    - rule_id: "GHSA-gcqx-w48m-w2h4"
+      path: "node_modules/deepmerge/package.json"
+      package_name: "deepmerge"
+      package_version: "4.3.1"
+      package_path: "deploy/cdk-constructs/node_modules/deepmerge"
+      expiration: "2026-11-27"
+      reason: >-
+        GHSA-gcqx-w48m-w2h4: deepmerge 4.3.1 in deploy/cdk-constructs/package-lock.json. No
+        patched version exists (advisory published 2026-09-18, updated 2026-10-27). Dev
+        dependency only, reached through jest-config, not shipped in the wheel or the
+        container image. npm's only fix is a jest 25.1.0 major downgrade, refused. Revisit
+        when a fix ships; see the block comment above.
     # === Time-boxed: filelock GHSA-v4x8-3wr5-3wq8 on Python 3.10 (expires 2026-11-27) ===
     # uv.lock holds two filelock entries. The one for Python 3.11 and later is at 4.2.1,
     # which is outside the affected range (up to 4.2.0). The one for Python 3.10 stays at
