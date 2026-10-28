@@ -138,8 +138,20 @@ def _rejected(name: str) -> list[int]:
 LOST_COVERAGE = {"ferret-scan": {3}}
 
 
+#: Accepted codes the scanner refuses beside an EMPTY results file: snyk exits 1
+#: only for issues found, so exit 1 with no SARIF result is a contradiction it
+#: reports as an error (snyk_code_scanner.py, the "holds no results" check), not
+#: a clean scan. Left out of the empty-results controls; the finding-bearing exit 1
+#: is test_snyk_code_exit_1_with_a_finding_is_a_finding_not_an_error.
+NEEDS_FINDINGS = {"snyk-code": {1}}
+
+
 def _accepted_and_complete(name: str) -> list[int]:
-    return sorted(EXIT_CODE_TABLE[name][1] - LOST_COVERAGE.get(name, set()))
+    return sorted(
+        EXIT_CODE_TABLE[name][1]
+        - LOST_COVERAGE.get(name, set())
+        - NEEDS_FINDINGS.get(name, set())
+    )
 
 
 EMPTY_SARIF = json.dumps(
@@ -672,7 +684,7 @@ def test_a_rejected_exit_code_after_an_accepted_one_is_an_error_row(
     For grype that is 2 and then 1, and the largest code across both runs, 2, is one
     grype accepts.
     """
-    accepted = max(EXIT_CODE_TABLE[name][1])
+    accepted = max(EXIT_CODE_TABLE[name][1] - NEEDS_FINDINGS.get(name, set()))
     content = _empty_results(name)
 
     rows = _rows(
