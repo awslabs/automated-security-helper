@@ -233,7 +233,7 @@ sandbox:
 
 def _checkout_with_base(tmp_path: Path, base: str = BASE_GRANTS) -> Path:
     source = tmp_path / "repo"
-    (source / ".git").mkdir(parents=True)
+    mark_git_checkout(source)
     (source / ".ash").mkdir()
     (source / ".ash" / "base.yaml").write_text(base)
     return source
@@ -311,7 +311,7 @@ def test_a_base_the_repository_links_elsewhere_is_judged_by_its_link(tmp_path, c
     # its grants would apply: the repository would choose which operator file
     # grants. Judged by the path the extends entry names, it is in the checkout.
     source = tmp_path / "repo"
-    (source / ".git").mkdir(parents=True)
+    mark_git_checkout(source)
     (source / ".ash").mkdir()
     other = tmp_path / "other.yaml"
     other.write_text(BASE_GRANTS)
@@ -332,7 +332,7 @@ def test_a_base_the_repository_links_elsewhere_is_judged_by_its_link(tmp_path, c
 def _repository_links_its_config_to(tmp_path: Path, target: Path) -> Path:
     """A checkout whose .ash/.ash.yaml the repository made a link to ``target``."""
     source = tmp_path / "repo"
-    (source / ".git").mkdir(parents=True)
+    mark_git_checkout(source)
     (source / ".ash").mkdir()
     _symlink(source / ".ash" / ".ash.yaml", target)
     return source
@@ -436,7 +436,7 @@ def test_an_operator_config_in_a_checkout_keeps_no_grants_of_its_own(tmp_path):
     # whatever its base is.
     ops = tmp_path / "ops"
     _checkout_with_base(ops)
-    (ops / ".git").mkdir()
+    mark_git_checkout(ops)
     operator = ops / "ash.yaml"
     operator.write_text(OPERATOR_OWN)
     target = tmp_path / "target"
@@ -973,12 +973,12 @@ def test_ash_configs_own_mode_off_does_not_lift_the_operator_files_floor(
     )
 
     ops = tmp_path / "ops"
-    (ops / ".git").mkdir(parents=True)
+    mark_git_checkout(ops)
     operator = ops / "operator.yaml"
     operator.write_text(TRUSTED_BWRAP)
     workspace = tmp_path / "workspace"
     project = _workspace_project(workspace, REPO_OFF, operator)
-    (workspace / ".git").mkdir()
+    mark_git_checkout(workspace)
     (workspace / "shared.yaml").write_text("project_name: shared\n")
     ash_config = tmp_path / "ashcfg.yaml"
     ash_config.write_text(
@@ -1227,7 +1227,7 @@ def test_a_pwd_naming_another_directory_does_not_replace_the_given_names(
 
 def test_a_fresh_pwd_does_not_replace_the_resolved_path(tmp_path, monkeypatch):
     checkout = tmp_path / "checkout"
-    (checkout / ".git").mkdir(parents=True)
+    mark_git_checkout(checkout)
     (checkout / ".ash").mkdir()
     rogue = checkout / ".ash" / "rogue.yaml"
     rogue.write_text(REPO_CONFIG)
@@ -1245,7 +1245,7 @@ def test_a_fresh_pwd_does_not_replace_the_resolved_path(tmp_path, monkeypatch):
 
 def test_a_pwd_naming_a_deleted_directory_is_ignored(tmp_path, monkeypatch):
     checkout = tmp_path / "checkout"
-    (checkout / ".git").mkdir(parents=True)
+    mark_git_checkout(checkout)
     monkeypatch.chdir(checkout)
     monkeypatch.setenv("PWD", str(tmp_path / "gone"))
     assert sandbox_grants._logical_paths(Path(".")) == []
@@ -1258,7 +1258,7 @@ def test_a_pwd_naming_a_deleted_directory_is_ignored(tmp_path, monkeypatch):
 
 def test_a_trusted_config_kept_in_its_own_checkout_cannot_grant(tmp_path, caplog):
     ops = tmp_path / "ops"
-    (ops / ".git").mkdir(parents=True)
+    mark_git_checkout(ops)
     operator = ops / "ash.yaml"
     operator.write_text(REPO_CONFIG)
     target = tmp_path / "target"
@@ -1290,7 +1290,7 @@ def test_a_config_outside_every_checkout_and_the_target_still_grants(tmp_path):
 
 def test_an_override_still_grants_beside_a_checkout_config(tmp_path):
     ops = tmp_path / "ops"
-    (ops / ".git").mkdir(parents=True)
+    mark_git_checkout(ops)
     operator = ops / "ash.yaml"
     operator.write_text(REPO_CONFIG)
     sandbox = resolve_config(
@@ -1313,7 +1313,7 @@ def test_a_checkout_config_cannot_grant_read_paths_or_environment(tmp_path, capl
         "project_name: x\nsandbox:\n  mode: bwrap\n"
         "  read_path_scanners: [zizmor]\n  env_scanners: [zizmor]\n",
     )
-    (source / ".git").mkdir()
+    mark_git_checkout(source)
     caplog.set_level("WARNING")
     sandbox = resolve_config(source_dir=source).sandbox
     assert any(
@@ -1328,7 +1328,7 @@ def test_a_checkout_config_cannot_grant_read_paths_or_environment(tmp_path, capl
 def test_a_checkout_config_found_only_by_its_own_name(tmp_path):
     # The config file's name is inside a checkout; its resolved path is not.
     ops = tmp_path / "ops"
-    (ops / ".git").mkdir(parents=True)
+    mark_git_checkout(ops)
     real = tmp_path / "real.yaml"
     real.write_text(REPO_CONFIG)
     _symlink(ops / "ash.yaml", real)
@@ -1591,7 +1591,7 @@ def test_an_extends_base_in_another_checkout_cannot_grant(tmp_path):
     # Bases must stay under the root config's directory, so the other checkout is
     # vendored there.
     other = tmp_path / "etc" / "vendor"
-    (other / ".git").mkdir(parents=True)
+    mark_git_checkout(other)
     (other / "base.yaml").write_text(REPO_CONFIG)
     root = tmp_path / "etc" / "ash.yaml"
     root.write_text("project_name: x\nextends: vendor/base.yaml\n")
@@ -1610,7 +1610,7 @@ def test_an_operator_config_named_inside_a_checkout_is_not_the_trusted_base(
     )
 
     ops = tmp_path / "ops"
-    (ops / ".git").mkdir(parents=True)
+    mark_git_checkout(ops)
     real = tmp_path / "elsewhere.yaml"
     real.write_text(TRUSTED_BWRAP)
     _symlink(ops / "operator.yaml", real)
@@ -1627,7 +1627,7 @@ def test_an_operator_config_named_inside_a_checkout_is_not_the_trusted_base(
 
 def test_ash_config_named_inside_a_checkout_cannot_grant(tmp_path, monkeypatch):
     ops = tmp_path / "ops"
-    (ops / ".git").mkdir(parents=True)
+    mark_git_checkout(ops)
     real = tmp_path / "elsewhere.yaml"
     real.write_text(REPO_CONFIG)
     _symlink(ops / "ash.yaml", real)
@@ -1815,7 +1815,7 @@ def test_a_baseline_outside_the_tree_is_not_read_under_the_sandbox(tmp_path, cap
     host.write_text('{"results": {}, "plugins_used": [], "filters_used": []}')
     caplog.set_level("WARNING")
     scanner = _detect_secrets(source, ["sandbox.mode=bwrap"], host)
-    assert scanner.config.options.baseline_file is None
+    assert not scanner._baseline_in_use()
     assert any("baseline" in r.getMessage() for r in caplog.records)
     # Granted, the file still has to be inside one of the operator's
     # extra_read_paths entries, as an option path a scanner reads itself does:
@@ -1826,7 +1826,7 @@ def test_a_baseline_outside_the_tree_is_not_read_under_the_sandbox(tmp_path, cap
         ["sandbox.mode=bwrap", "sandbox.read_path_scanners=[detect-secrets]"],
         host,
     )
-    assert granted_anywhere.config.options.baseline_file is None
+    assert not granted_anywhere._baseline_in_use()
     granted = _detect_secrets(
         source,
         [
@@ -1836,13 +1836,13 @@ def test_a_baseline_outside_the_tree_is_not_read_under_the_sandbox(tmp_path, cap
         ],
         host,
     )
-    assert granted.config.options.baseline_file is not None
+    assert granted._baseline_in_use()
     unsandboxed = _detect_secrets(source, [], host)
-    assert unsandboxed.config.options.baseline_file is not None
+    assert unsandboxed._baseline_in_use()
     inside = source / ".secrets.baseline"
     inside.write_text('{"results": {}, "plugins_used": [], "filters_used": []}')
     in_tree = _detect_secrets(source, ["sandbox.mode=bwrap"], inside)
-    assert in_tree.config.options.baseline_file is not None
+    assert in_tree._baseline_in_use()
 
 
 @pytest.mark.parametrize("named", ["by-option", "by-name"])
@@ -1877,7 +1877,7 @@ def test_a_baseline_an_mcp_client_delivered_is_not_read(
                 plugin_type="scanner", plugin_name="detect-secrets"
             ),
         )
-    assert scanner.config.options.baseline_file is None
+    assert not scanner._baseline_in_use()
     assert any(
         "an MCP client delivered" in record.getMessage() for record in caplog.records
     )
@@ -2051,7 +2051,7 @@ def test_a_baseline_in_the_tree_that_links_out_is_not_read(tmp_path):
     scanner = _detect_secrets(
         source, ["sandbox.mode=bwrap"], source / ".secrets.baseline"
     )
-    assert scanner.config.options.baseline_file is None
+    assert not scanner._baseline_in_use()
 
 
 def test_a_plugin_whose_config_is_not_its_own_class_is_not_sandboxed(
