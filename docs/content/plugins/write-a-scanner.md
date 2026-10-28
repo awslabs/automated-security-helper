@@ -220,6 +220,36 @@ ASH calls `_post_process_sarif` after reading the SARIF file. The other hooks yo
 
 ASH constructs a plugin with keyword arguments, `context` and `config`, so a unit test can do the same and call the method ASH calls. Build a `PluginContext` (from `automated_security_helper.base.plugin_context`) whose `source_dir` holds the files to scan, an `output_dir`, and a `config` such as `AshConfig(project_name="scanner-test")` (from `automated_security_helper.config.ash_config`). Then `RuffSecurityScanner(context=context).scan(target=context.source_dir, target_type="source")` runs ruff and returns the `SarifReport` read from its output, with one result per finding, before ASH makes paths relative and applies suppressions.
 
+## Logging from threads your plugin starts
+
+Each scan logs to its own `ash.log`. ASH knows which scan a line belongs to from the context the line is logged in, and ASH's own scanner threads carry that context. A thread your plugin starts with `threading.Thread`, or a task it submits to a `ThreadPoolExecutor`, starts in an empty context, so its lines belong to no scan. A CLI scan's `ash.log` still takes them, because that scan is the process's only one. The MCP server runs several sessions' scans in one process, so it puts such lines in no scan's `ash.log`, only in the server's own log (stderr, at the level the server was started with — its own log-level option, `INFO` when not given; `quiet` and `simple` name no logging level, so with either it is `ASH_LOG_LEVEL`, or `WARNING` when that is unset — when the server has no handler of its own on that logger). So start every thread your plugin makes with `ash_thread`: when the MCP server runs your plugin, a line from a thread without the scan's context never reaches the scan's `ash.log`.
+
+Under `ash scan`, a line no handler takes reaches stderr at the scan's console level: its flags first, then `ASH_DEBUG` or `ASH_VERBOSE`, then `INFO`, and `ERROR` for `--quiet` and `--simple` unless `--verbose` or `--debug` is also given. `--log-level INFO` reads as the default, so it does not override `ASH_DEBUG` or `ASH_VERBOSE`; every other `--log-level` does. `ASH_LOG_LEVEL` does not change it there; under the MCP server it is the fallback for `quiet` and `simple`.
+
+Start the thread with `ash_thread`, which runs the target in a copy of the scan's context, and submit to an executor through a copy the same way:
+
+```python
+import contextvars
+from concurrent.futures import ThreadPoolExecutor
+
+from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.threads import ash_thread
+
+
+def check_one(path):
+    ASH_LOGGER.info("checked %s", path)
+
+
+worker = ash_thread(check_one, args=("app.py",), name="my-plugin-worker")
+worker.start()
+worker.join()
+
+with ThreadPoolExecutor(4) as pool:
+    pool.submit(contextvars.copy_context().run, check_one, "lib.py").result()
+```
+
+`ash_thread` takes the copy when it makes the thread, so make it in your scanner's own code (inside `scan()`), not at import time. It returns the thread unstarted, as `threading.Thread` does.
+
 ## A scanner with no external tool
 
 A scanner that does its work in Python overrides `scan()` instead of `_execute_scan()`, and must still define `_execute_scan`, which is abstract, as a stub that raises `NotImplementedError`. Declare `python_only: ClassVar[bool] = True` on it ([above](#declare-whether-the-scanner-is-python-only)). ASH calls `scan(target=..., target_type=...)` once for the source directory and, when a converter wrote files, once more for the converted files, with `target_type` set to `converted`. `scan()` must return a `SarifReport` (from `automated_security_helper.schemas.sarif_schema_model`) for its findings to reach the reports. Return `False` if the scanner cannot run, which reports it MISSING; so does any other empty value, such as `[]`. Returning `None` reports it ERROR. Any other value, including a dictionary of findings, is recorded as PASSED with no findings, so do not catch an exception and return something else: let it propagate, and ASH reports the scanner as ERROR. Read files from the scan set with `open_in_scanned_tree` from `automated_security_helper.utils.scanned_tree`, which refuses links and paths outside the source directory. The scanner of the example plugin package in the ASH repository, [`examples/ash_plugins_example/my_ash_plugins/scanner.py`](https://github.com/awslabs/automated-security-helper/blob/main/examples/ash_plugins_example/my_ash_plugins/scanner.py), overrides `scan()` and returns a `SarifReport`, and a test in the repository runs it through a scan.
