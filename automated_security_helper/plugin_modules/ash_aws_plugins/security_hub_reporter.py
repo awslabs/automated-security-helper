@@ -20,7 +20,13 @@ from botocore.exceptions import (
     NoCredentialsError,
     ParamValidationError,
 )
-from pydantic import Field, PrivateAttr, ValidationError, field_validator
+from pydantic import (
+    Field,
+    PrivateAttr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
@@ -30,7 +36,10 @@ from automated_security_helper.base.reporter_plugin import (
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
+    MAX_RETRIES,
+    MAX_RETRY_DELAY_SECONDS,
     RETRYABLE_EXCEPTIONS,
+    check_retry_delays,
     report_missing_setting,
     retry_with_backoff,
 )
@@ -217,6 +226,7 @@ class SecurityHubReporterConfigOptions(ReporterOptionsBase):
     max_retries: Annotated[
         int,
         Field(
+            le=MAX_RETRIES,
             description=(
                 "Maximum number of retries for a throttled or failed "
                 "BatchImportFindings request"
@@ -226,12 +236,14 @@ class SecurityHubReporterConfigOptions(ReporterOptionsBase):
     base_delay: Annotated[
         float,
         Field(
+            le=MAX_RETRY_DELAY_SECONDS,
             description="Base delay in seconds between retry attempts",
         ),
     ] = 1.0
     max_delay: Annotated[
         float,
         Field(
+            le=MAX_RETRY_DELAY_SECONDS,
             description="Maximum delay in seconds between retry attempts",
         ),
     ] = 60.0
@@ -276,6 +288,10 @@ class SecurityHubReporterConfigOptions(ReporterOptionsBase):
         if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
             return f"{value:012d}"
         return value
+
+    @model_validator(mode="after")
+    def _retry_delays_are_bounded(self):
+        return check_retry_delays(self)
 
 
 class SecurityHubReporterConfig(ReporterPluginConfigBase):

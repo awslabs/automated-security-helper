@@ -392,11 +392,17 @@ class TestReportCommand:
             str(self._plugin_config(tmp_path)),
             "--config-overrides",
             "reporters.aws-security-hub.enabled=true",
+            "--config-overrides",
+            "reporters.aws-security-hub.options.aws_region=us-east-1",
+            "--config-overrides",
+            "reporters.aws-security-hub.options.findings_scope=fixture-project",
         )
 
         assert result.exit_code == 0, result.output
         assert security_hub_runs == ["SecurityHubReporter"]
-        assert json.loads(result.output)["findings_count"] == 0
+        # The import receipt: the stored results hold no finding, so nothing
+        # was sent and no AWS call was needed.
+        assert json.loads(result.output)["imported"] == 0
 
     def _s3_operator_config(self, root, enabled_line=""):
         """An operator config with every option S3 needs to upload, and ``enabled_line``."""

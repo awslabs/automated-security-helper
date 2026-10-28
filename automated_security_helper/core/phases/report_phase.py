@@ -13,6 +13,7 @@ from automated_security_helper.base.reporter_plugin import (
     reporter_file_names,
     reporter_format_name,
     reporter_matches_requested_formats,
+    warn_off_host_section_without_enabled,
 )
 from automated_security_helper.config.operator_only_options import reporter_section
 from automated_security_helper.core.cancellation import (
@@ -260,20 +261,22 @@ def _warn_if_configured_but_not_enabled(
         return
     # The key its section is read under, which the remedy names.
     name = plugin_config_key(type(plugin_instance))
-    if "enabled" in plugin_config:
-        # The value's type, never the value: a config file can read it from the
-        # environment.
-        value = plugin_config["enabled"]
-        kind = "null" if value is None else f"a {type(value).__name__}"
-        why = (
-            f"its config section sets enabled to {kind}, and only the boolean "
-            "true turns it on"
-        )
-    else:
-        why = "its config section does not set enabled: true"
+    if "enabled" not in plugin_config:
+        # The shared voice (base/reporter_plugin.py): once per process, since a
+        # workspace's projects each read the same section, naming the key that
+        # turns the reporter on and the override that sets it.
+        warn_off_host_section_without_enabled(type(plugin_instance), plugin_config)
+        return
+    # The value's type, never the value: a config file can read it from the
+    # environment.
+    value = plugin_config["enabled"]
+    kind = "null" if value is None else f"a {type(value).__name__}"
     ASH_LOGGER.warning(
-        f"Reporter '{name}' sends findings off the host and is not run: {why} "
-        f"(reporters.{name}.enabled).",
+        f"Reporter '{name}' sends findings off the host and is not run: its config "
+        f"section sets enabled to {kind}, and only the boolean true turns it on "
+        f"(reporters.{name}.enabled). To run it, set reporters.{name}.enabled: true "
+        f"in the operator's config, or pass --config-overrides "
+        f"reporters.{name}.enabled=true.",
         extra=NO_MARKUP,
     )
 
