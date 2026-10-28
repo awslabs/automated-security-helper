@@ -2652,6 +2652,108 @@ def test_validate_config_entry_types_hold_its_classifier_kinds():
     assert not field_names & set(validate.entry_types)
 
 
+def _chain_server(levels: int) -> str:
+    """A server whose tool calls a chain of helpers, each calling the next twice."""
+    lines = [
+        "import os",
+        "",
+        "mcp = object()",
+        "",
+        "",
+        "def level0(kind):",
+        '    return {"error_type": kind}',
+    ]
+    for level in range(1, levels + 1):
+        lines += [
+            "",
+            "",
+            f"def level{level}(kind):",
+            '    if os.environ.get("A"):',
+            f"        return level{level - 1}(kind)",
+            f"    return level{level - 1}(kind)",
+        ]
+    lines += [
+        "",
+        "",
+        "@mcp.tool()",
+        "def run_thing():",
+        f'    return level{levels}("chain_refused")',
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def test_a_helper_called_with_the_same_arguments_is_read_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A chain of 14 helpers that each call the next twice is 2**14 reads of the
+    last one when every call is read again, and the MCP tools page's generator
+    never finished on the real server. It is one read per helper now."""
+    reader = _reader()
+    reads = []
+    original = reader.Evaluator.returns
+
+    def counted(self, module, func, *args, **kwargs):
+        reads.append(getattr(func, "name", ""))
+        return original(self, module, func, *args, **kwargs)
+
+    monkeypatch.setattr(reader.Evaluator, "returns", counted)
+    package = _plant_server(tmp_path, _chain_server(14))
+    contract = reader.tool_contracts(package)["run_thing"]
+    assert contract.error_types == ("chain_refused",)
+    assert contract.error_types_unread == ()
+    assert len(reads) < 100, f"{len(reads)} reads of 16 functions"
+
+
+def test_a_cached_read_does_not_depend_on_what_was_read_first(tmp_path: Path):
+    """``g`` and ``h`` call each other. Read from ``g``, ``h``'s answer stops at
+    ``g``, which is on the stack; read first, it does not. A result that stopped at
+    a caller above it is not kept for the next caller, so a tool reads the same
+    whether or not another tool was read before it."""
+    package = _plant_server(
+        tmp_path,
+        """
+        import os
+
+        mcp = object()
+
+
+        def g(kind):
+            if os.environ.get("A"):
+                return h(kind)
+            return {"error_type": kind}
+
+
+        def h(kind):
+            if os.environ.get("A"):
+                return g(kind)
+            return {"error_type": "from_h"}
+
+
+        @mcp.tool()
+        def first():
+            return g("shared_refused")
+
+
+        @mcp.tool()
+        def second():
+            return h("shared_refused")
+        """,
+    )
+    reader = _reader()
+    together = reader.tool_contracts(package)
+    assert set(together) == {"first", "second"}
+    for name in together:
+        source = reader.Source(package)
+        server = source.module(reader.SERVER_MODULE)
+        node = next(
+            n
+            for n in server.tree.body
+            if isinstance(n, ast.FunctionDef) and n.name == name
+        )
+        alone = reader.Evaluator(source).returns(server, node)
+        assert together[name].response == alone, name
+
+
 def test_example_keys_read_json_and_sketches():
     reader = _reader()
     sketch = """{
