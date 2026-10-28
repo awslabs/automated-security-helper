@@ -638,8 +638,9 @@ async def run_ash_scan(
         in its output tree), or a file git tracks in `.ash/ash_output` where the
         scan writes, or cannot say whether it does (`error_type`
         committed_output_files); 5 for the request itself (an unusable session
-        header or severity_threshold, a source_dir that is missing or not a
-        directory, or no source_dir with nothing delivered); 4 for a target the
+        header, no session at all (`session_identity_required`), an unusable
+        severity_threshold, a source_dir that is missing or not a directory, or
+        no source_dir with nothing delivered); 4 for a target the
         server will not scan (outside the permitted roots, or a delivered tree
         no longer on disk); 1 for anything else, another scan of the same
         directory included.
@@ -657,7 +658,9 @@ async def run_ash_scan(
         refusal = session_identity_refusal(session_id, "run_ash_scan", ctx)
         if refusal is not None:
             await _tell_client_error(ctx, raw_controls_on_one_line(refusal["error"]))
-            return refusal
+            # A call that carries no session is the request's own fault, as an
+            # unusable session header is, so it reports the same usage code.
+            return with_exit_code(refusal, REFUSED_USAGE_EXIT_CODE)
 
         if source_dir is None:
             resolved = _resolve_omitted_source_dir(session_id)
