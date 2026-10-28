@@ -579,7 +579,7 @@ Out of scope:
   target, with every link on the way resolved, is outside the source directory, and
   warns about each one, as `Not scanning 'vendor/config.py': link leaves the scanned
   tree`, naming only the link (see
-  [Ignore files and the scan set](configuration-guide.md#ignore-files-and-the-scan-set)).
+  [Ignore files and the scan set](../reference/coverage.md#what-decides-the-files)).
   So the scanners and converters that read the scan set
   are not given it, and npm-audit does not audit a package whose files link out of
   the tree. The scanners that walk the directory they scan themselves are told to

@@ -117,7 +117,7 @@ repos:
 pre-commit run ash --all-files
 ```
 
-The `ash` hook runs bandit, detect-secrets, checkov, cdk-nag and npm-audit. It needs pre-commit running on Python 3.10 to 3.14, and Node.js and npm on `PATH` for cdk-nag and npm-audit. `ash-simple-scan` is the same hook under its earlier id. See [Using ASH with pre-commit](tutorials/using-ash-with-pre-commit.md) for running without Node.js and for the container hook, `ash-full-scan`.
+The `ash` hook runs bandit, detect-secrets, checkov, cdk-nag and npm-audit. It needs pre-commit running on Python 3.10 to 3.14, and Node.js and npm on `PATH` for cdk-nag and npm-audit. `ash-simple-scan` is the same hook under its earlier id. See [Using ASH with pre-commit](how-to/pre-commit.md) for running without Node.js and for the container hook, `ash-full-scan`.
 
 ## Output Files
 
@@ -140,13 +140,13 @@ ASH v3 can run directly on Windows in local mode with Python 3.10+. Simply insta
 <details>
 <summary>How do I run ASH in CI/CD pipelines?</summary>
 
-ASH can be run in container mode in any CI/CD environment that supports containers. See the [tutorials](docs/content/tutorials/running-ash-in-ci.md) for examples.
+ASH can be run in container mode in any CI/CD environment that supports containers. See the [tutorials](getting-started/ci.md) for examples.
 </details>
 
 <details>
 <summary>How do I exclude files from scanning?</summary>
 
-ASH leaves out of its scan set every file a `.gitignore` or `.ignore` file in the scanned tree matches. You can also configure ignore paths in your `.ash/.ash.yaml` configuration file. The summaries record how many files the ignore files excluded, and `--no-honor-ignore-files` (or `honor_ignore_files: false` in a config file outside the scanned tree) scans those files too. See [Ignore files and the scan set](docs/configuration-guide.md#ignore-files-and-the-scan-set).
+ASH leaves out of its scan set every file a `.gitignore` or `.ignore` file in the scanned tree matches. You can also configure ignore paths in your `.ash/.ash.yaml` configuration file. The summaries record how many files the ignore files excluded, and `--no-honor-ignore-files` (or `honor_ignore_files: false` in a config file outside the scanned tree) scans those files too. See [Ignore files and the scan set](reference/coverage.md#what-decides-the-files).
 </details>
 
 <details>
@@ -170,11 +170,11 @@ ASH uses CDK Nag underneath to apply NagPack rules to *CloudFormation templates*
 ## Feedback and Contributing
 
 - Create an issue [in the GitHub repository](https://github.com/awslabs/automated-security-helper/issues)
-- See [CONTRIBUTING](contributing.md) for contribution guidelines
+- See [CONTRIBUTING](contributing/index.md) for contribution guidelines
 
 ## Security
 
-See [CONTRIBUTING](contributing.md#security-issue-notifications) for security issue reporting information.
+See [CONTRIBUTING](contributing/index.md) for security issue reporting information.
 
 ## License
 
