@@ -75,6 +75,11 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner 
     SyftScannerConfig,
     SyftScannerConfigOptions,
 )
+from automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner import (
+    GuardDogScanner,
+    GuardDogScannerConfig,
+    GuardDogScannerConfigOptions,
+)
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Location,
@@ -906,6 +911,37 @@ class TestScannerOptionLists:
         assert ("vendor" in excluded) is applies, excluded
 
     @pytest.mark.parametrize(
+        "expiration,applies",
+        [("2026-06-16", True), ("2026-06-15", False), ("2000-01-01", False)],
+        ids=["expires-tomorrow", "expires-today", "long-expired"],
+    )
+    def test_guarddog_excluded_paths(self, tmp_path, expiration, applies):
+        """GuardDog stages the files ASH would scan, less its ``excluded_paths``."""
+        context = _context(tmp_path, _config())
+        source = Path(context.source_dir)
+        (source / "vendor").mkdir()
+        (source / "vendor" / "lib.txt").write_text("vendored\n")
+        (source / "app.txt").write_text("kept\n")
+        scanner = GuardDogScanner(
+            context=context,
+            config=GuardDogScannerConfig(
+                options=GuardDogScannerConfigOptions(
+                    excluded_paths=[
+                        IgnorePathWithReason(
+                            path="vendor/**", reason="vendored", expiration=expiration
+                        )
+                    ]
+                )
+            ),
+        )
+        candidates = {
+            path.relative_to(source).as_posix()
+            for path in scanner._candidate_files(source, "source", [])
+        }
+        assert ("vendor/lib.txt" not in candidates) is applies, candidates
+        assert "app.txt" in candidates, candidates
+
+    @pytest.mark.parametrize(
         "options_cls,field",
         [
             (BanditScannerConfigOptions, "excluded_paths"),
@@ -1474,14 +1510,12 @@ class TestEveryReaderFiltersExpiredEntries:
             "plugin_modules/ash_builtin/scanners/syft_scanner.py",
             "exclude",
         ): "scanner-option",
-        # Read as ``self._opts.excluded_paths`` in ``_candidate_files`` and turned
-        # into path filters there, not through active_ignore_paths(), so an
-        # expired entry still applies. It is kept apart from "scanner-option" so
-        # that the read check below does not claim the filter is applied.
+        # Read as ``config.options.excluded_paths`` in ``_candidate_files``, through
+        # active_ignore_paths(), and turned into path filters there.
         (
             "plugin_modules/ash_guarddog_plugins/guarddog_scanner.py",
             "excluded_paths",
-        ): "option-not-filtered",
+        ): "scanner-option",
     }
     # Readers of a scanner option list that do not turn it into arguments.
     # None: bandit's _execute_scan does not save and restore the list.

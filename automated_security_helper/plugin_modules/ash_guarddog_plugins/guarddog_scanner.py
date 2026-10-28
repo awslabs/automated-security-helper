@@ -1028,11 +1028,12 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
 
         The source scan set, or every file under the converted directory, less
         KNOWN_IGNORE_PATHS components, ASH's output directory, the global ignore
-        paths and ``options.excluded_paths``. Symlinks are dropped here, so
-        nothing reachable only through one is ever staged.
+        paths and ``options.excluded_paths`` (expired entries left out). Symlinks
+        are dropped here, so nothing reachable only through one is ever staged.
         """
         from automated_security_helper.utils.scan_output_dirs import scan_set_of
         from automated_security_helper.utils.suppression_matcher import (
+            active_ignore_paths,
             file_path_matches,
         )
 
@@ -1049,8 +1050,15 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         ignored_components = {p.strip("/") for p in KNOWN_IGNORE_PATHS}
         output_dir = Path(self._ctx.output_dir).absolute()
         source_dir = Path(self._ctx.source_dir).absolute()
+        # An expired entry no longer applies (active_ignore_paths), as for bandit's
+        # excluded_paths. Read as config.options.excluded_paths, the shape
+        # tests/unit/utils/test_ignore_path_expiration.py looks for.
+        option_entries = active_ignore_paths(
+            cast(GuardDogScannerConfig, self.config).options.excluded_paths,
+            where="scanners.guarddog.options.excluded_paths",
+        )
         patterns = [p.path for p in global_ignore_paths or []] + [
-            p.path for p in self._opts.excluded_paths
+            p.path for p in option_entries
         ]
 
         kept: List[Path] = []
