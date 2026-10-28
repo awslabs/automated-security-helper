@@ -448,7 +448,9 @@ class TestAFailedConversionIsRecorded:
 
         ((path, reason),) = [(r["path"], r["reason"]) for r in failed(converter)]
         assert path == "nb.ipynb"
-        assert reason.startswith("FileNotFoundError: uv could not run nbconvert")
+        assert reason == (
+            "uv could not run nbconvert, and no other jupyter-nbconvert is run in its place"
+        )
 
     def test_the_gate_names_at_most_five_and_counts_the_rest(
         self, direct, tree, monkeypatch
@@ -491,7 +493,7 @@ class TestTheDirectRouteRunsAResolvedNbconvert:
         return tree / "nb.ipynb"
 
     def test_one_reached_only_through_the_working_directory_is_not_run(
-        self, direct, tree, monkeypatch
+        self, direct, tree, monkeypatch, ash_warnings
     ):
         converter, observed, _ = direct
         fake_executable(tree, NBCONVERT)
@@ -503,7 +505,15 @@ class TestTheDirectRouteRunsAResolvedNbconvert:
 
         assert observed.calls == [], "a jupyter-nbconvert in the cwd was run"
         ((_, reason),) = [(r["path"], r["reason"]) for r in failed(converter)]
-        assert "no jupyter-nbconvert executable was found on PATH" in reason
+        # The record carries a fixed, path-free sentence; the lookup's own
+        # words (why no copy could be run) are logged once.
+        assert reason == (
+            "the jupyter-nbconvert the dependency check chose cannot be used now, "
+            "and no other jupyter-nbconvert is run in its place"
+        )
+        assert [m for m in ash_warnings if "nbconvert is not run for" in m], (
+            ash_warnings
+        )
 
     def test_an_installed_one_later_on_path_is_run_instead(
         self, direct, tree, monkeypatch
