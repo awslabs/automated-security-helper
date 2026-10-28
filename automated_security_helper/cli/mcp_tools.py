@@ -4730,10 +4730,8 @@ def _answer_get_config(
         # Before the open: a FIFO's open waits for a writer, and a directory or a
         # device is not a config.
         from automated_security_helper.config.config_sources import (
-            environment_read_refusals,
             read_config_bytes,
             read_opened_config_bytes,
-            refuse_env_everywhere,
             refuse_unless_a_file,
         )
 
@@ -4748,36 +4746,24 @@ def _answer_get_config(
         # is refused as a resolved read refuses it, not left to the tool's
         # generic handler. (json.JSONDecodeError and UnicodeDecodeError are both
         # ValueErrors.)
+        # Raw mode asks for a document, not a run: it judges nothing and refuses
+        # no file for reading the environment, whoever named it, because it
+        # resolves no reference. Each value the loader would read from the
+        # environment comes back as the reference the file writes, marked
+        # (ENV_VALUE_PREFIX), so the answer holds the client's own text and
+        # nothing of the server's. Whether a file may resolve its references is
+        # the resolved read's question (env_refused_for), answered there.
         try:
             # Read from the descriptor of the file the check judged, which the
             # call holds open; a name the check could not open is opened once,
             # and only if it is the file that was checked. One read: the bytes
-            # below are what the answer is made of, judged and shown alike.
+            # below are what the answer is made of.
             opened = held.files.get(checked) if checked is not None else None
             content = (
                 read_opened_config_bytes(opened, Path(path))
                 if opened is not None
                 else read_config_bytes(Path(path), expect=checked)
             )
-            # A client's file (one a client delivered, or one it named outside
-            # the directories the operator set aside) resolves no environment
-            # reference in the resolved read, and the raw read refuses it the
-            # same way rather than showing the document: the two answers for
-            # one file agree, and the file is judged on the bytes read above,
-            # with the chain walk's own rule (environment_read_refusals). A file
-            # in a directory ASH_MCP_ALLOWED_CONFIG_ROOTS names is the
-            # operator's and is shown as written, its references marked.
-            untrusted = (
-                client_named_config_is_untrusted(Path(path), session_id=session_id)
-                if config_path is not None
-                else config_is_client_supplied(Path(path))
-            )
-            if untrusted:
-                env_refusals = environment_read_refusals(
-                    {Path(path): content.decode("utf-8")}, {}, refuse_env_everywhere
-                )
-                for env_refusal in env_refusals.values():
-                    return _config_env_refusal(env_refusal, "get_config")
             return _config_as_written(path, expect=checked, content=content) or {}
         except (
             ASHConfigValidationError,
