@@ -242,5 +242,134 @@ class TestTheCommentsMatchTheWorkflow:
 
     def test_no_comment_still_states_a_superseded_total(self):
         """The figures this file replaced, so a merge that brings one back is seen."""
-        for stale in ("expands to 92 jobs", "contributes 117 check", "117 is this"):
+        for stale in (
+            "expands to 92 jobs",
+            "contributes 117 check",
+            "117 is this",
+            "expands to 280 jobs",
+            "contributes 478 check",
+            "478 is this",
+        ):
             assert stale not in COMMENTS
+
+
+SETUP_ASH = "./.github/actions/setup-ash"
+ENSURE_CACHE = "ensure-cache"
+SETUP_ASH_ACTION = REPO_ROOT / ".github" / "actions" / "setup-ash" / "action.yml"
+RUN_UNIT_TESTS_ACTION = (
+    REPO_ROOT / ".github" / "actions" / "run-unit-tests" / "action.yml"
+)
+#: Jobs that call setup-ash and do not wait for ensure-cache, each with the reason. The
+#: test below fails when an entry is no longer true, so the list cannot become stale.
+NOT_WAITING = {
+    "warm-image-layers": (
+        "push-only, off the critical path of its own cache, and its image layer cache "
+        "is a different cache with its own one-writer concurrency group"
+    ),
+}
+
+
+def _setup_ash_steps(job: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        step
+        for step in job.get("steps") or []
+        if str(step.get("uses", "")).startswith(SETUP_ASH)
+    ]
+
+
+def _needs(job: dict[str, Any]) -> list[str]:
+    needs = job.get("needs") or []
+    return [needs] if isinstance(needs, str) else list(needs)
+
+
+def _runner_images(job: dict[str, Any]) -> set[str]:
+    """The runner images a job runs on: its os axis, or the literal runs-on."""
+    runs_on = str(job["runs-on"])
+    if "matrix.os" in runs_on:
+        return {entry["os"] for entry in _cells(job)}
+    return {runs_on}
+
+
+SETUP_ASH_CALLERS = [
+    name for name, job in JOBS.items() if name != ENSURE_CACHE and _setup_ash_steps(job)
+]
+
+
+class TestEnsureCache:
+    """The one job that writes the uv cache, and the jobs that only read it.
+
+    The legs are derived from the callers, not typed twice: the key setup-uv builds is the
+    runner image plus a hash of the dependency files, so there is one leg for each distinct
+    image any setup-ash caller runs on.
+    """
+
+    def test_the_callers_are_found(self):
+        # Positive control: a scan that found none would pass every test below.
+        assert len(SETUP_ASH_CALLERS) >= 10, SETUP_ASH_CALLERS
+
+    def test_it_has_one_leg_per_runner_image_the_callers_use(self):
+        images = set().union(*(_runner_images(JOBS[n]) for n in SETUP_ASH_CALLERS))
+        job = JOBS[ENSURE_CACHE]
+        matrix = job["strategy"]["matrix"]
+        assert sorted(matrix) == ["os"], "a second axis would write a key twice"
+        assert sorted(matrix["os"]) == sorted(images)
+        assert LEGS[ENSURE_CACHE] == len(images)
+        assert job["strategy"]["max-parallel"] == len(images)
+
+    def test_every_caller_waits_for_it_except_the_named_ones(self):
+        for name in SETUP_ASH_CALLERS:
+            waits = ENSURE_CACHE in _needs(JOBS[name])
+            assert waits == (name not in NOT_WAITING), (
+                f"{name}: waits={waits}; NOT_WAITING names {sorted(NOT_WAITING)}"
+            )
+        assert set(NOT_WAITING) <= set(SETUP_ASH_CALLERS), "a stale NOT_WAITING entry"
+
+    def test_it_runs_on_every_event_and_reads_only_the_repository(self):
+        job = JOBS[ENSURE_CACHE]
+        assert "if" not in job, "a skipped ensure-cache would skip its dependents"
+        assert "needs" not in job
+        assert "continue-on-error" not in job
+        assert job["permissions"] == {"contents": "read"}
+        assert job["strategy"]["fail-fast"] is False
+        assert job["timeout-minutes"] == 15
+
+    def test_the_gate_waits_for_it(self):
+        assert ENSURE_CACHE in _needs(JOBS["required-checks"])
+
+    def test_only_it_asks_setup_ash_to_save(self):
+        savers = {
+            name: step["with"]["save-cache"]
+            for name, job in JOBS.items()
+            for step in _setup_ash_steps(job)
+            if "save-cache" in (step.get("with") or {})
+        }
+        assert savers == {ENSURE_CACHE: "true"}
+
+    def test_setup_ash_restores_only_unless_asked(self):
+        action = yaml.safe_load(SETUP_ASH_ACTION.read_text(encoding="utf-8"))
+        assert action["inputs"]["save-cache"]["default"] == "false"
+        uv = [s for s in action["runs"]["steps"] if s.get("id") == "setup-uv"]
+        assert len(uv) == 1
+        assert uv[0]["with"]["enable-cache"] is True
+        assert uv[0]["with"]["save-cache"] == "${{ inputs.save-cache }}"
+
+    def test_it_syncs_the_unit_test_extras_and_leaves_ash_out(self):
+        unit = yaml.safe_load(RUN_UNIT_TESTS_ACTION.read_text(encoding="utf-8"))
+        unit_syncs = [
+            str(s["run"])
+            for s in unit["runs"]["steps"]
+            if str(s.get("run", "")).strip().startswith("uv sync")
+        ]
+        assert len(unit_syncs) == 1, unit_syncs
+        ensure_syncs = [
+            str(s["run"])
+            for s in JOBS[ENSURE_CACHE]["steps"]
+            if "uv sync" in str(s.get("run", ""))
+        ]
+        assert len(ensure_syncs) == 1, ensure_syncs
+        ensure_extras = sorted(re.findall(r"--extra (\S+)", ensure_syncs[0]))
+        unit_extras = sorted(re.findall(r"--extra (\S+)", unit_syncs[0]))
+        assert ensure_extras == unit_extras
+        assert unit_extras, "the unit-test sync installs no extras to compare"
+        assert "--no-install-project" in ensure_syncs[0]
+        assert "--frozen" in ensure_syncs[0]

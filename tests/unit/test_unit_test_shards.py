@@ -597,7 +597,10 @@ class TestTheCoverageJobReadsWhatTheShardsUpload:
     def test_it_downloads_and_combines_its_family(self):
         job = _workflow_job("unit-coverage")
         assert isinstance(job["needs"], list), job["needs"]
-        assert sorted(job["needs"]) == sorted(UNIT_TEST_JOB_IDS), (
+        # ensure-cache is here because the job calls setup-ash, as every job that
+        # restores the uv cache lists the job that writes it. The three unit-test jobs
+        # need it too, so it adds no wait.
+        assert sorted(job["needs"]) == sorted([*UNIT_TEST_JOB_IDS, "ensure-cache"]), (
             "the coverage gate must wait for all three unit-test jobs, or it combines "
             "the shards of an OS family that is still running"
         )
