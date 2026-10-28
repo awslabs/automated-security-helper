@@ -1,26 +1,42 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Resolve SARIF plain message evidence for identity without changing display."""
+"""A SARIF message stays out of a lone finding's id, and display is unchanged.
+
+The message reaches the finding identity only as the occurrence digest, which
+tells apart results of one run that share a key. It is the message as the result
+carries it, so a message given by id and arguments is not resolved against a rule
+or component table, and its arguments are never formatted into a template.
+"""
 
 import json
+import re
 
 import pytest
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.models import flat_vulnerability
-from automated_security_helper.utils import occurrence_context
+from automated_security_helper.utils import finding_identity, occurrence_context
 
 
-def _flat(
-    message, rule_id="RULE", reference=None, driver=None, extensions=None, props=None
+def _flats(
+    messages,
+    rule_id="RULE",
+    reference=None,
+    driver=None,
+    extensions=None,
+    props=None,
 ):
-    result = {"message": message, "properties": props or {}}
-    if rule_id is not None:
-        result["ruleId"] = rule_id
-    if reference is not None:
-        result["rule"] = reference
+    """The flattened findings of one run that holds one result per message."""
+    results = []
+    for message in messages:
+        result = {"message": message, "properties": props or {}}
+        if rule_id is not None:
+            result["ruleId"] = rule_id
+        if reference is not None:
+            result["rule"] = reference
+        results.append(result)
     report = SarifReport.model_validate(
         {
             "version": "2.1.0",
@@ -30,27 +46,30 @@ def _flat(
                         "driver": driver or {"name": "scanner"},
                         "extensions": extensions or [],
                     },
-                    "results": [result],
+                    "results": results,
                 }
             ],
         }
     )
     before = report.model_dump(mode="json")
-    flat = AshAggregatedResults(sarif=report).to_flat_vulnerabilities()[0]
+    flats = AshAggregatedResults(sarif=report).to_flat_vulnerabilities()
     assert report.model_dump(mode="json") == before
-    assert (
-        json.loads(flat.raw_data)["message"]
-        == report.runs[0]
-        .results[0]
-        .model_dump(mode="json", exclude_none=True)["message"]
-    )
-    return flat
+    for flat, result in zip(flats, report.runs[0].results):
+        assert (
+            json.loads(flat.raw_data)["message"]
+            == result.model_dump(mode="json", exclude_none=True)["message"]
+        )
+    return flats
 
 
-def test_direct_arguments_affect_identity_but_not_display_or_unused_arguments():
+def _flat(message, **kwargs):
+    return _flats([message], **kwargs)[0]
+
+
+def test_direct_arguments_do_not_affect_identity_or_display():
     first = _flat({"text": "Issue {0}", "arguments": ["one", "unused-a"]})
     second = _flat({"text": "Issue {0}", "arguments": ["two", "unused-b"]})
-    assert first.id != second.id
+    assert first.id == second.id
     assert first.description == second.description == "Issue {0}"
     assert first.id == _flat({"text": "Issue one"}).id
     assert (
@@ -61,7 +80,7 @@ def test_direct_arguments_affect_identity_but_not_display_or_unused_arguments():
 
 @pytest.mark.parametrize("global_table", [False, True])
 @pytest.mark.parametrize("extension", [False, True])
-def test_rule_and_global_lookup_in_driver_or_explicit_extension(
+def test_arguments_of_a_message_id_do_not_affect_identity_in_any_lookup_table(
     global_table, extension
 ):
     component = {
@@ -87,11 +106,11 @@ def test_rule_and_global_lookup_in_driver_or_explicit_extension(
     )
     first = _flat({"id": "msg", "arguments": ["one"]}, **kwargs)
     second = _flat({"id": "msg", "arguments": ["two"]}, **kwargs)
-    assert first.id != second.id
+    assert first.id == second.id
     assert first.description == second.description == ""
 
 
-def test_implicit_merged_extension_lookup_uses_unambiguous_scanner_attribution():
+def test_implicit_merged_extension_does_not_affect_identity():
     extension = {
         "name": "scanner",
         "rules": [{"id": "RULE", "messageStrings": {"msg": {"text": "Issue {0}"}}}],
@@ -103,65 +122,59 @@ def test_implicit_merged_extension_lookup_uses_unambiguous_scanner_attribution()
     }
     assert (
         _flat({"id": "msg", "arguments": ["one"]}, **kwargs).id
-        != _flat({"id": "msg", "arguments": ["two"]}, **kwargs).id
+        == _flat({"id": "msg", "arguments": ["two"]}, **kwargs).id
     )
 
 
-def test_message_id_fallback_distinguishes_unavailable_messages_without_raw_args():
-    assert (
-        _flat({"id": "one", "arguments": ["private"]}).id
-        != _flat({"id": "two", "arguments": ["private"]}).id
-    )
-    assert (
-        _flat({"id": "one", "arguments": ["private"]}).id
-        == _flat({"id": "one", "arguments": ["other"]}).id
-    )
-
-
-def test_safe_braces_and_missing_arguments_are_not_general_formatting():
-    assert (
-        _flat({"text": "Issue {{literal}} {0}", "arguments": ["one"]}).id
-        == _flat({"text": "Issue {literal} one"}).id
-    )
-    assert (
-        _flat({"text": "Issue {1}", "arguments": ["unused"]}).id
-        == _flat({"text": "Issue {1}", "arguments": ["changed"]}).id
-    )
-    assert (
-        _flat({"text": "Issue {0.__class__}", "arguments": ["unused"]}).id
-        == _flat({"text": "Issue {0.__class__}", "arguments": ["changed"]}).id
-    )
-
-
-def test_mismatching_component_and_rule_references_do_not_guess_templates():
-    component = {
-        "name": "scanner",
-        "rules": [{"id": "RULE", "messageStrings": {"msg": {"text": "Issue {0}"}}}],
+def test_message_ids_and_arguments_never_change_a_lone_findings_id():
+    ids = {
+        _flat({"id": "one", "arguments": ["private"]}).id,
+        _flat({"id": "two", "arguments": ["private"]}).id,
+        _flat({"id": "one", "arguments": ["other"]}).id,
+        _flat({"text": "plain"}).id,
     }
-    for reference in (
-        {"id": "other", "index": 0},
-        {"id": "RULE", "toolComponent": {"name": "wrong", "index": 0}},
+    assert len(ids) == 1
+
+
+def test_message_text_is_not_formatted_with_its_arguments():
+    for text, arguments in (
+        ("Issue {{literal}} {0}", ["one"]),
+        ("Issue {1}", ["unused"]),
+        ("Issue {0.__class__}", ["unused"]),
     ):
-        kwargs = {
-            "driver": {"name": "aggregate"},
-            "extensions": [component],
-            "reference": reference,
-        }
-        assert (
-            _flat({"id": "msg", "arguments": ["one"]}, **kwargs).id
-            == _flat({"id": "msg", "arguments": ["two"]}, **kwargs).id
-        )
+        flat = _flat({"text": text, "arguments": arguments})
+        assert flat.description == text
 
 
-def test_rendered_b105_message_is_masked_as_a_whole_with_reference_rule_id(monkeypatch):
+def test_results_that_share_a_key_are_told_apart_by_their_message_text():
+    same = _flats([{"text": "same"}, {"text": "same"}])
+    different = _flats([{"text": "same"}, {"text": "different"}])
+    assert same[0].id != same[1].id
+    # The first result's own message is unchanged, so its id is too.
+    assert different[0].id == same[0].id
+    assert different[1].id not in (same[0].id, same[1].id)
+
+
+def test_results_with_no_message_text_are_told_apart_by_order_alone():
+    flats = _flats(
+        [
+            {"id": "one", "arguments": ["a"]},
+            {"id": "two", "arguments": ["b"]},
+        ]
+    )
+    assert [flat.description for flat in flats] == ["", ""]
+    assert flats[0].id != flats[1].id
+
+
+def test_message_arguments_never_reach_the_identity_hash_input(monkeypatch):
     captured = []
-    original = flat_vulnerability.hashlib.sha256
+    original = finding_identity.hashlib.sha256
 
     def capture(value):
         captured.append(value.decode())
         return original(value)
 
-    monkeypatch.setattr(flat_vulnerability.hashlib, "sha256", capture)
+    monkeypatch.setattr(finding_identity.hashlib, "sha256", capture)
     _flat(
         {
             "text": "Possible hardcoded password: '{0}{1}'",
@@ -170,9 +183,10 @@ def test_rendered_b105_message_is_masked_as_a_whole_with_reference_rule_id(monke
         rule_id=None,
         reference={"id": "B105"},
     )
-    assert "synthetic-" not in captured[0]
-    assert "private-value" not in captured[0]
-    assert "Possible hardcoded password" in captured[0]
+    assert captured
+    assert all("synthetic-" not in seed for seed in captured)
+    assert all("private-value" not in seed for seed in captured)
+    assert any("Possible hardcoded password" in seed for seed in captured)
 
 
 def test_actual_merge_keeps_lookup_in_the_scanner_extension():
@@ -224,52 +238,14 @@ def test_inline_plain_text_skips_all_rule_and_component_lookup(monkeypatch):
     assert _flat({"text": "same"}).description == "same"
 
 
-def test_rule_table_precedes_global_and_direct_text_precedes_both():
-    driver = {
-        "name": "scanner",
-        "rules": [{"id": "RULE", "messageStrings": {"msg": {"text": "Rule {0}"}}}],
-        "globalMessageStrings": {"msg": {"text": "Global {0}"}},
-    }
-    first = _flat({"id": "msg", "arguments": ["one"]}, driver=driver)
-    changed = json.loads(json.dumps(driver))
-    changed["globalMessageStrings"]["msg"]["text"] = "Changed global {0}"
-    assert first.id == _flat({"id": "msg", "arguments": ["one"]}, driver=changed).id
-    assert (
-        _flat({"text": "inline", "id": "msg"}, driver=driver).id
-        == _flat({"text": "inline", "id": "msg"}, driver=changed).id
-    )
-
-
-def test_ambiguous_extensions_and_invalid_reference_indices_leave_args_unused():
-    component = {
-        "name": "scanner",
-        "globalMessageStrings": {"msg": {"text": "Issue {0}"}},
-    }
-    for reference, extensions in [
-        (None, [component, component]),
-        ({"id": "RULE", "toolComponent": {"index": 20}}, [component]),
-    ]:
-        kwargs = {
-            "driver": {"name": "AWS Labs - Automated Security Helper"},
-            "extensions": extensions,
-            "reference": reference,
-            "props": {"scanner_name": "scanner"},
-        }
-        assert (
-            _flat({"id": "msg", "arguments": ["one"]}, **kwargs).id
-            == _flat({"id": "msg", "arguments": ["two"]}, **kwargs).id
-        )
-
-
 def test_direct_factory_without_context_accepts_id_only_message():
     from automated_security_helper.schemas.sarif_schema_model import Result
 
     result = Result.model_validate(
         {"message": {"id": "missing", "arguments": ["unused"]}}
     )
-    assert (
-        flat_vulnerability.FlatVulnerability.from_sarif_result(
-            result, "scanner", "SAST"
-        ).description
-        == ""
+    flat = flat_vulnerability.FlatVulnerability.from_sarif_result(
+        result, "scanner", "SAST"
     )
+    assert flat.description == ""
+    assert re.fullmatch(r"scanner-unknown-[0-9a-f]{12}", flat.id)

@@ -8,10 +8,10 @@ import json
 import pytest
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.models import flat_vulnerability
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.cli.mcp.scan_target import ASH_MCP_ALLOWED_ROOTS_ENV
 from automated_security_helper.cli.mcp_tools import mcp_explain_finding
+from automated_security_helper.utils import finding_identity
 from automated_security_helper.utils.occurrence_context import (
     valid_context,
     persisted_context,
@@ -46,6 +46,15 @@ def _result():
 
 def _flat(report):
     return AshAggregatedResults(sarif=report).to_flat_vulnerabilities()
+
+
+def _contexts(report):
+    """The occurrence context each result of the report carries, in order."""
+    return [
+        getattr(result.properties, CONTEXT, None)
+        for run in report.runs
+        for result in run.results or []
+    ]
 
 
 @pytest.mark.parametrize(
@@ -105,13 +114,20 @@ def test_run_local_indices_resolve_only_referenced_source_evidence(kind):
             result["ruleIndex"] = 0
             run["tool"] = {"driver": {"name": "scanner", "rules": [{"id": value}]}}
         reports.append(_report([result], **run))
-    assert _flat(reports[0])[0].id != _flat(reports[1])[0].id
+    # A run-local index is not part of the finding identity, so alone the two
+    # results share an id; the evidence they reference is kept in their context.
+    assert _flat(reports[0])[0].id == _flat(reports[1])[0].id
     model = AshAggregatedResults()
     originals = [report.model_dump(mode="json") for report in reports]
     for report in reports:
         model.sarif.merge_sarif_report(report)
     assert [report.model_dump(mode="json") for report in reports] == originals
+    merged = _contexts(model.sarif)
+    assert len(merged) == 2
+    assert all(context is not None for context in merged)
+    assert merged[0] != merged[1]
     saved = AshAggregatedResults.from_json(model.model_dump_json())
+    assert _contexts(saved.sarif) == merged
     assert len({flat.id for flat in saved.to_flat_vulnerabilities()}) == 2
     remerged = AshAggregatedResults()
     remerged.sarif.merge_sarif_report(saved.sarif, include_driver=False)
@@ -217,13 +233,13 @@ def test_template_secret_span_masks_before_substitution_can_change_boundaries(
         + quote
     )
     captured = []
-    original = flat_vulnerability.hashlib.sha256
+    original = finding_identity.hashlib.sha256
 
     def capture(value):
         captured.append(value.decode())
         return original(value)
 
-    monkeypatch.setattr(flat_vulnerability.hashlib, "sha256", capture)
+    monkeypatch.setattr(finding_identity.hashlib, "sha256", capture)
     report = _report(
         [
             {
@@ -234,7 +250,8 @@ def test_template_secret_span_masks_before_substitution_can_change_boundaries(
         ]
     )
     flat = _flat(report)[0]
-    assert "private-value-only" not in captured[0]
+    assert captured
+    assert all("private-value-only" not in seed for seed in captured)
     assert json.loads(flat.raw_data)["message"]["arguments"] == args
 
 
@@ -301,10 +318,16 @@ def test_referenced_uri_base_chain_scopes_relative_artifacts_across_merge():
         )
         for value in ("one", "two")
     ]
-    assert _flat(reports[0])[0].id != _flat(reports[1])[0].id
+    # The base the relative artifact is read against is not part of the identity,
+    # so alone the two share an id; the chain is kept in their context.
+    assert _flat(reports[0])[0].id == _flat(reports[1])[0].id
     model = AshAggregatedResults()
     for report in reports:
         model.sarif.merge_sarif_report(report)
+    merged = _contexts(model.sarif)
+    assert len(merged) == 2
+    assert all(context is not None for context in merged)
+    assert merged[0] != merged[1]
     restored = AshAggregatedResults.from_json(model.model_dump_json())
     assert len({flat.id for flat in restored.to_flat_vulnerabilities()}) == 2
 
@@ -322,10 +345,21 @@ def test_first_marker_transition_curates_nonempty_target_and_deep_parent_chains(
     source = _report([result], addresses=[{"name": "root-two"}])
     target.merge_sarif_report(source, include_driver=False)
     flats = _flat(target)
-    assert flats[0].id == before
+    # Both results now share a key, so each also carries an occurrence digest and
+    # the first no longer has the id it had alone; the second is told apart.
     assert flats[0].id != flats[1].id
+    assert flats[0].id != before
+    # The first result's whole parent chain was curated before the table changed.
+    contexts = _contexts(target)
+
+    def chain(context):
+        return context["locations"][0]["address"]["index"]["entries"]
+
+    assert len(chain(contexts[0])) == 71
+    assert chain(contexts[0])[-1]["name"] == "root-one"
+    assert chain(contexts[1])[-1]["name"] == "root-two"
     other = _report([result], addresses=[*parents[:-1], {"name": "other-root"}])
-    assert before != _flat(other)[0].id
+    assert before == _flat(other)[0].id
 
 
 @pytest.mark.parametrize(
@@ -422,20 +456,20 @@ def test_unavailable_marked_context_and_ash_named_raw_producer_do_not_gain_templ
     assert persisted_context(raw.runs[0].results[0], raw.runs[0]) is None
     source_id = _flat(raw)[0].id
     raw.runs[0].results[0].message.root.arguments = ["two"]
-    assert _flat(raw)[0].id != source_id
+    assert _flat(raw)[0].id == source_id
 
 
 def test_hierarchical_secret_rule_and_long_malformed_quoted_template_are_safe(
     monkeypatch,
 ):
     captured = []
-    original = flat_vulnerability.hashlib.sha256
+    original = finding_identity.hashlib.sha256
 
     def capture(value):
         captured.append(value.decode())
         return original(value)
 
-    monkeypatch.setattr(flat_vulnerability.hashlib, "sha256", capture)
+    monkeypatch.setattr(finding_identity.hashlib, "sha256", capture)
     for template in (
         "Possible hardcoded password: '{0}'",
         "Possible hardcoded password: '" + "\\" * 10000 + "{0}",
@@ -453,6 +487,7 @@ def test_hierarchical_secret_rule_and_long_malformed_quoted_template_are_safe(
             ]
         )
         _flat(report)
+    assert captured
     assert all("private-value-only" not in seed for seed in captured)
 
 
@@ -483,15 +518,21 @@ def test_current_inline_message_wins_over_saved_source_rendering(change, monkeyp
             "synthetic'private-value-only" if change == "secret" else "two"
         ]
     captured = []
-    original = flat_vulnerability.hashlib.sha256
+    original = finding_identity.hashlib.sha256
 
     def capture(value):
         captured.append(value.decode())
         return original(value)
 
-    monkeypatch.setattr(flat_vulnerability.hashlib, "sha256", capture)
+    monkeypatch.setattr(finding_identity.hashlib, "sha256", capture)
     restored = AshAggregatedResults.from_json(json.dumps(payload))
-    assert restored.to_flat_vulnerabilities()[0].id != original_id
+    flat = restored.to_flat_vulnerabilities()[0]
+    # A lone finding keeps its id whatever its message says; the current inline
+    # text, not the saved rendering, is the one it shows.
+    assert flat.id == original_id
+    if change == "text":
+        assert flat.description == "Changed issue {0}"
+    assert captured
     assert all("private-value-only" not in seed for seed in captured)
 
 
@@ -506,7 +547,7 @@ def test_ruleless_direct_used_arguments_keep_source_identity_when_marker_turns_o
     target.merge_sarif_report(source, include_driver=False)
     assert _flat(target)[0].id == before
     target.runs[0].results[0].message.root.arguments = ["two"]
-    assert _flat(target)[0].id != before
+    assert _flat(target)[0].id == before
 
 
 @pytest.mark.parametrize("owner", ["rule", "component"])
