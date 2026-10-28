@@ -44,9 +44,9 @@ def root(tmp_path, monkeypatch) -> Path:
     workspace = tmp_path / "ws"
     workspace.mkdir()
     monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(workspace))
-    clear_session_state()
+    clear_session_state(None)
     yield workspace
-    clear_session_state()
+    clear_session_state(None)
 
 
 def _outside_file(tmp_path: Path, name: str = "ash.yaml") -> Path:

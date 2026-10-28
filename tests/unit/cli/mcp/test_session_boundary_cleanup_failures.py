@@ -62,7 +62,7 @@ def root(tmp_path, monkeypatch) -> Path:
     sessions.reset_default_registry_for_tests()
     yield workspace
     sessions.reset_default_registry_for_tests()
-    clear_session_state()
+    clear_session_state(None)
 
 
 @pytest.fixture
