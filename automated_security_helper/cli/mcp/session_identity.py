@@ -171,9 +171,7 @@ def _header_value(headers: Mapping[str, str], name: str) -> Optional[str]:
     return None
 
 
-def resolve_session_id(
-    headers: Optional[Mapping[str, str]], *, refuse_reserved: bool = False
-) -> str:
+def resolve_session_id(headers: Optional[Mapping[str, str]]) -> str:
     """Resolve the session id a tool call belongs to.
 
     This is the path of an in-process caller's stand-in context, reached through
@@ -184,10 +182,6 @@ def resolve_session_id(
         headers: Request headers carried by the call, or ``None`` when it has
             none (stdio, an in-process caller). ``Context.headers`` supplies
             this.
-        refuse_reserved: Accepted so a caller can state that it wants reserved
-            ids refused, as :func:`resolve_caller_session_id` does. It does not
-            change the result: a header naming a reserved id is refused whether
-            or not it is set.
 
     Returns:
         The ``Mcp-Session-Id`` header value when the headers carry a usable one;
@@ -355,7 +349,7 @@ def resolve_caller_session_id(ctx: object) -> str:
     _PROTOCOL_VERSION_IS_CAUSE.set(False)
     sdk_context = _as_sdk_context(ctx)
     if sdk_context is None:
-        return resolve_session_id(getattr(ctx, "headers", None), refuse_reserved=True)
+        return resolve_session_id(getattr(ctx, "headers", None))
 
     try:
         request = sdk_context.request_context.request
