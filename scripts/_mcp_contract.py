@@ -456,6 +456,16 @@ Guarded = tuple[
 ]
 
 _NESTED = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
+#: Scopes between a construction and its function in which a name can be bound by
+#: something this reader does not follow (a comprehension's loop variable).
+_OPAQUE_SCOPES = (
+    ast.Lambda,
+    ast.ClassDef,
+    ast.ListComp,
+    ast.SetComp,
+    ast.DictComp,
+    ast.GeneratorExp,
+)
 _MUTATORS = frozenset({"update", "setdefault", "append", "extend", "insert"})
 
 
@@ -796,6 +806,13 @@ class Evaluator:
         self._names_in_progress: set[tuple[int, str]] = set()
         self._calls_by_name: Optional[dict[str, list[tuple[_Module, ast.Call]]]] = None
         self._caught_memo: dict[int, Shape] = {}
+        #: Parent of each node, per module tree, for :meth:`_construction_site`.
+        self._parents: dict[int, dict[int, ast.AST]] = {}
+        #: How often each name is used in the package, and the names an import
+        #: renames; see :meth:`_passed_through`.
+        self._name_uses: Optional[dict[str, int]] = None
+        self._renamed_imports: frozenset[str] = frozenset()
+        self._passed_memo: dict[tuple[int, str], Optional[Shape]] = {}
         self._rebound_memo: dict[int, frozenset[str]] = {}
         self._rebindable_memo: dict[int, frozenset[str]] = {}
         self._flags_memo: dict[int, frozenset[str]] = {}
@@ -1705,11 +1722,22 @@ class Evaluator:
             )
         return unread(scope.site(node))
 
-    def _instance(self, ref: _Ref, node: ast.Call, scope: _Scope) -> Shape:
+    def _instance(
+        self,
+        ref: _Ref,
+        node: ast.Call,
+        scope: _Scope,
+        family: Optional[list[ast.AST]] = None,
+    ) -> Shape:
         """An instance of a package class: what its ``__init__`` sets on ``self``.
 
         A class without its own ``__init__`` in the package (a NamedTuple, a
         dataclass) is built from its annotated fields instead.
+
+        ``family`` is given when :meth:`_caught` builds the instance of a caught
+        exception: the class nodes the handler catches (the class and its
+        package subclasses). An argument is then read by
+        :meth:`_construction_argument` first.
         """
         cls = ref.node
         if not isinstance(cls, ast.ClassDef) or ref.module is None:
@@ -1723,10 +1751,12 @@ class Evaluator:
         for name, value in zip(positional, node.args):
             if isinstance(value, ast.Starred):
                 break
-            bindings[name] = self.evaluate(value, scope)
+            bindings[name] = self._argument(value, name, init, scope, node, family)
         for keyword in node.keywords:
             if keyword.arg is not None:
-                bindings[keyword.arg] = self.evaluate(keyword.value, scope)
+                bindings[keyword.arg] = self._argument(
+                    keyword.value, keyword.arg, init, scope, node, family
+                )
         init_scope = _Scope(
             module=init.module,
             func=init.node,
@@ -1752,6 +1782,271 @@ class Evaluator:
             attrs.setdefault(name, value)
         return one(ObjectV(cls.name, tuple(attrs.items())))
 
+    def _argument(
+        self,
+        value: ast.expr,
+        param: str,
+        init: _Ref,
+        scope: _Scope,
+        call: ast.Call,
+        family: Optional[list[ast.AST]],
+    ) -> Shape:
+        """What a construction passes for ``__init__``'s ``param``."""
+        if family is not None:
+            found = self._construction_argument(
+                value, param, init, scope.module, call, family
+            )
+            if found is not None:
+                return found
+        return self.evaluate(value, scope)
+
+    def _construction_argument(
+        self,
+        value: ast.expr,
+        param: str,
+        init: _Ref,
+        module: _Module,
+        call: ast.Call,
+        family: list[ast.AST],
+    ) -> Optional[Shape]:
+        """An argument of a caught exception's construction that the module's own
+        scope cannot place but the source fully determines, or None.
+
+        * A parameter of the function that builds the exception (a helper that
+          raises it with the type its caller names): what every call of that
+          function passes for it, see :meth:`_passed_through`.
+        * ``e.<param>`` in a handler of ``except K as e`` where ``K`` is the
+          exception being collected or one of its package subclasses, and
+          ``__init__`` stores ``<param>`` only as ``self.<param>``: the exception
+          is raised again with the type the caught one carries. That type is
+          one of the types some construction in the family passes, and those
+          are all in the result already, so this argument adds nothing.
+        """
+        func, handlers = self._construction_site(module, call)
+        if func is None:
+            return None
+        if isinstance(value, ast.Name):
+            return self._passed_through(value.id, func, module)
+        if (
+            isinstance(value, ast.Attribute)
+            and isinstance(value.value, ast.Name)
+            and value.attr == param
+            and self._reraises(
+                value.value.id, param, func, handlers, module, init, family
+            )
+        ):
+            return NOTHING
+        return None
+
+    def _parent_map(self, module: _Module) -> dict[int, ast.AST]:
+        key = id(module.tree)
+        if key not in self._parents:
+            parents: dict[int, ast.AST] = {}
+            for parent in ast.walk(module.tree):
+                for child in ast.iter_child_nodes(parent):
+                    parents[id(child)] = parent
+            self._parents[key] = parents
+        return self._parents[key]
+
+    def _construction_site(
+        self, module: _Module, call: ast.Call
+    ) -> tuple[Optional[ast.AST], tuple[tuple[str, ast.expr], ...]]:
+        """The function a call sits in, and the ``except K as name`` handlers
+        around it, nearest first. None for a call outside a function, and for
+        one inside a lambda, a comprehension or a nested class, where a name
+        can be bound by something this reader does not follow."""
+        parents = self._parent_map(module)
+        handlers: list[tuple[str, ast.expr]] = []
+        child: ast.AST = call
+        node = parents.get(id(call))
+        while node is not None:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                return node, tuple(handlers)
+            if isinstance(node, _OPAQUE_SCOPES):
+                return None, ()
+            if (
+                isinstance(node, ast.ExceptHandler)
+                and node.name
+                and node.type is not None
+                and any(child is stmt for stmt in node.body)
+            ):
+                handlers.append((node.name, node.type))
+            child, node = node, parents.get(id(node))
+        return None, ()
+
+    def _plain_parameter(self, name: str, func: ast.AST, module: _Module) -> bool:
+        """Whether ``name`` is a parameter of ``func`` that nothing in it rebinds."""
+        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return False
+        args = func.args
+        if name not in {
+            a.arg for a in [*args.posonlyargs, *args.args, *args.kwonlyargs]
+        }:
+            return False
+        local = self._locals_for(func, module)
+        return not (
+            local.assigns.get(name)
+            or local.key_sets.get(name)
+            or local.calls.get(name)
+            or name in local.unread
+            or name in local.caught
+            or self._func_rebindable(func, name)
+        )
+
+    def _index_names(self) -> dict[str, int]:
+        """How many ``Name`` and ``Attribute`` nodes of the package spell each
+        name, and (as ``_renamed_imports``) the names an ``import ... as`` renames."""
+        if self._name_uses is None:
+            uses: dict[str, int] = {}
+            renamed: set[str] = set()
+            for module in self.source.all_modules():
+                for node in ast.walk(module.tree):
+                    if isinstance(node, ast.Name):
+                        uses[node.id] = uses.get(node.id, 0) + 1
+                    elif isinstance(node, ast.Attribute):
+                        uses[node.attr] = uses.get(node.attr, 0) + 1
+                    elif (
+                        isinstance(node, ast.alias)
+                        and node.asname
+                        and node.asname != node.name
+                    ):
+                        renamed.add(node.name)
+            self._name_uses = uses
+            self._renamed_imports = frozenset(renamed)
+        return self._name_uses
+
+    def _passed_through(
+        self, name: str, func: ast.AST, module: _Module
+    ) -> Optional[Shape]:
+        """What every call of ``func`` passes for its parameter ``name``, or None.
+
+        ``func`` must be an undecorated function at module level, and every use of
+        its name in the package a call of it that this reader places (not an
+        alias, a reference passed on, a method of that name or a spread
+        argument), so that the calls found are all the calls there are. A
+        call that leaves the parameter out gives the parameter's default.
+        Each argument is read in its call's module scope, as a construction's are.
+        """
+        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return None
+        if not self._plain_parameter(name, func, module):
+            return None
+        if module.defs.get(func.name) is not func or func.decorator_list:
+            return None
+        key = (id(func), name)
+        if key in self._passed_memo:
+            return self._passed_memo[key]
+        self._passed_memo[key] = None
+        uses = self._index_names()
+        calls = [
+            (m, c)
+            for m, c in self._constructions(func.name)
+            if self._names_function(c.func, m, func)
+        ]
+        found: Optional[Shape] = None
+        if func.name not in self._renamed_imports and uses.get(func.name, 0) == len(
+            calls
+        ):
+            found = self._call_arguments(name, func, module, calls)
+        self._passed_memo[key] = found
+        return found
+
+    def _names_function(self, expr: ast.expr, module: _Module, func: ast.AST) -> bool:
+        ref = self._ref_of(expr, _Scope(module=module))
+        return ref is not None and ref.kind == "function" and ref.node is func
+
+    def _call_arguments(
+        self,
+        name: str,
+        func: ast.AST,
+        module: _Module,
+        calls: list[tuple[_Module, ast.Call]],
+    ) -> Optional[Shape]:
+        args = func.args  # type: ignore[attr-defined]
+        positional = [a.arg for a in [*args.posonlyargs, *args.args]]
+        every = [*args.posonlyargs, *args.args]
+        default: Optional[ast.expr] = None
+        for arg, value in zip(every[len(every) - len(args.defaults) :], args.defaults):
+            if arg.arg == name:
+                default = value
+        for arg, value in zip(args.kwonlyargs, args.kw_defaults):
+            if arg.arg == name:
+                default = value
+        parts: list[Shape] = []
+        for call_module, call in calls:
+            if any(isinstance(a, ast.Starred) for a in call.args) or any(
+                k.arg is None for k in call.keywords
+            ):
+                return None
+            passed = next((k.value for k in call.keywords if k.arg == name), None)
+            where = call_module
+            if passed is None and name in positional:
+                index = positional.index(name)
+                if index < len(call.args):
+                    passed = call.args[index]
+            if passed is None:
+                passed, where = default, module
+            if passed is None:
+                return None
+            parts.append(self.evaluate(passed, _Scope(module=where)))
+        return union(*parts) if parts else None
+
+    def _reraises(
+        self,
+        name: str,
+        param: str,
+        func: ast.AST,
+        handlers: tuple[tuple[str, ast.expr], ...],
+        module: _Module,
+        init: _Ref,
+        family: list[ast.AST],
+    ) -> bool:
+        """Whether ``name.<param>`` is the type of an exception of ``family`` the
+        enclosing handler caught, handed on to the same attribute of a new one."""
+        caught = next((kind for bound, kind in handlers if bound == name), None)
+        if caught is None:
+            return False
+        if isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            local = self._locals_for(func, module)
+            if (
+                name in local.params
+                or local.assigns.get(name)
+                or local.key_sets.get(name)
+                or local.calls.get(name)
+                or name in local.unread
+            ):
+                return False
+        scope = _Scope(module=module)
+        types = caught.elts if isinstance(caught, ast.Tuple) else [caught]
+        for type_expr in types:
+            kind = self._ref_of(type_expr, scope)
+            if (
+                kind is None
+                or kind.kind != "class"
+                or not any(kind.node is node for node in family)
+            ):
+                return False
+        # The caught object's attribute reaches the new one's attribute of the
+        # same name only: ``__init__`` stores the parameter as ``self.<param>``
+        # and nowhere else.
+        for stmt in _own_nodes(init.node):  # type: ignore[arg-type]
+            if not isinstance(stmt, (ast.Assign, ast.AnnAssign)) or stmt.value is None:
+                continue
+            if not any(
+                isinstance(n, ast.Name) and n.id == param for n in ast.walk(stmt.value)
+            ):
+                continue
+            targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+            for target in targets:
+                if not (
+                    isinstance(target, ast.Attribute)
+                    and isinstance(target.value, ast.Name)
+                    and target.value.id == "self"
+                    and target.attr == param
+                ):
+                    return False
+        return True
+
     def _caught(self, type_node: ast.expr, scope: _Scope) -> Shape:
         """``e`` in ``except X as e``: every ``X(...)`` the package builds.
 
@@ -1771,9 +2066,11 @@ class Evaluator:
                 continue
             key = id(ref.node)
             if key not in self._caught_memo:
+                kinds = [ref, *self._subclasses(ref)]
+                family = [kind.node for kind in kinds if kind.node is not None]
                 built = [
-                    self._instance(kind, call, _Scope(module=module))
-                    for kind in [ref, *self._subclasses(ref)]
+                    self._instance(kind, call, _Scope(module=module), family)
+                    for kind in kinds
                     for module, call in self._constructions(kind.node.name)  # type: ignore[union-attr]
                     if self._is_class(call.func, module, kind.node)  # type: ignore[arg-type]
                 ]
