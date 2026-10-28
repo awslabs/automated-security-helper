@@ -915,15 +915,39 @@ def test_a_long_value_is_hidden_in_bounded_time():
 def test_a_one_letter_value_a_message_cuts_is_hidden_in_bounded_time():
     """The one-letter value of the _cut_pieces cell above, through redact_values:
     every cut piece that starts inside the value's own full match lies inside a
-    span already hidden, so none of them joins the whole-word fixed point."""
-    import time
+    span already hidden, so none of them joins the whole-word fixed point.
 
-    value = "a" * 20000
-    started = time.monotonic()
-    redacted = redact_values(value + "...", [value])
-    elapsed = time.monotonic() - started
-    assert redacted == f"{REDACTED}..."
-    assert elapsed < 2.0, elapsed
+    It is timed by how the time grows, not by a second on the clock: a bound of 2.0 s
+    read 2.0039 s and 2.0175 s on two CI runs while the same code passed on others, so
+    the host's load decided it and not the code. A value of 5000 letters and
+    one of 20000, four times as long, are each hidden. Time linear in the length takes
+    four times as long for the second; time in its square, which is what the cut
+    pieces joining the fixed point cost, sixteen times. The second must be under eight
+    times the first plus a tenth of a second (the floor for a first run so short that
+    a pause shows), and eight sits between four and sixteen. Load that slows both runs
+    slows them alike, and the ratio keeps its place. The shortest of three runs of
+    each is timed (``_best_time``), and a run is cut off at its limit, so a square is
+    ended at that limit and not run for minutes."""
+    first_length, second_length = 5000, 20000
+    absolute_bound = 30.0
+    first = _best_time(
+        "a" * first_length + "...",
+        ["a" * first_length],
+        f"{REDACTED}...",
+        absolute_bound,
+    )
+    limit = 8 * first + 0.1
+    second = _best_time(
+        "a" * second_length + "...",
+        ["a" * second_length],
+        f"{REDACTED}...",
+        absolute_bound,
+        limit,
+    )
+    assert second < limit, (
+        f"{second_length} letters took {second:.3f} s against {limit:.3f} s, "
+        f"8 times the {first:.3f} s of {first_length} letters plus 0.1 s"
+    )
 
 
 #: Thirty long values a message never prints.
