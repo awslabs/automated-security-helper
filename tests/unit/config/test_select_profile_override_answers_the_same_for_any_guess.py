@@ -94,7 +94,7 @@ def select(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path))
     monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
-    monkeypatch.setenv("ASH_KEY", CANARY)
+    monkeypatch.setenv("ASH_SECTION", CANARY)
 
     def _select(
         profile_text: str, override: str
@@ -129,7 +129,7 @@ def _neutral(answer: Tuple[Dict[str, Any], Optional[str]], guess: str) -> str:
 @pytest.mark.parametrize("policy", sorted(POLICIES))
 @pytest.mark.parametrize("shape", SHAPES)
 def test_an_override_answers_a_right_guess_as_a_wrong_one(select, shape, policy):
-    profile = _document(shape, "${ASH_KEY}", POLICIES[policy])
+    profile = _document(shape, "${ASH_SECTION}", POLICIES[policy])
     right = _neutral(
         select(profile, _document(shape, CANARY, POLICIES[policy])), CANARY
     )
@@ -154,8 +154,8 @@ def test_an_override_that_writes_the_reference_keeps_the_profile_s_value(select)
     """An override that writes the setting as the profile does, as its
     reference, changes nothing, and the session keeps the value the profile
     read from the environment, recorded as the reference."""
-    profile = _document("project-name", "${ASH_KEY}", NOTHING)
+    profile = _document("project-name", "${ASH_SECTION}", NOTHING)
     result, bound = select(profile, profile)
     assert result.get("success") is True, result.get("error")
-    kept = bound is not None and "${ASH_KEY}" in bound and CANARY not in bound
+    kept = bound is not None and "${ASH_SECTION}" in bound and CANARY not in bound
     assert kept, "the bound configuration does not hold the reference"

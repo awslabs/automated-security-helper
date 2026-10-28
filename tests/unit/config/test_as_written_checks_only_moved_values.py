@@ -143,7 +143,7 @@ LIST = ("external_reports_to_include:\n  - ${ASH_PN}\n  - other.sarif\n") + _all
 # section) makes every patch of the profile refused
 # (test_runtime_patch_refuses_a_profile_whose_key_can_name_a_built_in.py).
 KEYED = (
-    "scanners:\n  customx:\n    enabled: true\n    options:\n      ${ASH_KEY}: x\n"
+    "scanners:\n  customx:\n    enabled: true\n    options:\n      ${ASH_SECTION}: x\n"
 ) + _allowing(["/scanners/customx/options"])
 
 
@@ -218,7 +218,7 @@ def _session(environment, monkeypatch, profile_text, ops) -> dict:
         ),
         pytest.param(
             KEYED,
-            "ASH_KEY",
+            "ASH_SECTION",
             lambda guess: {
                 "op": "replace",
                 "path": "/scanners/customx/options",

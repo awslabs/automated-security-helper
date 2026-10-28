@@ -4,7 +4,7 @@
 """A profile that reads a key from the environment where the configuration has
 built-in keys is not patched, overridden or tested.
 
-A section of ``reporters`` or ``scanners`` named ``${ASH_KEY}`` is a built-in's
+A section of ``reporters`` or ``scanners`` named ``${ASH_SECTION}`` is a built-in's
 section when the variable names a built-in (``markdown``, ``bandit``): the
 profile's settings merge with the built-in's. The profile as written then has
 no section under the built-in's name, and another value leaves the built-in's
@@ -55,7 +55,7 @@ def _profile(section: str, policy: str) -> str:
     return (
         "project_name: demo\n"
         + POLICIES[policy]
-        + f"{section}:\n  ${{ASH_KEY}}:\n    enabled: false\n"
+        + f"{section}:\n  ${{ASH_SECTION}}:\n    enabled: false\n"
     )
 
 
@@ -73,7 +73,7 @@ def _override(section: str, policy: str, kind: str) -> str:
 
 @pytest.fixture
 def select(tmp_path, monkeypatch):
-    """select_profile on a registered profile with ASH_KEY holding a value: the
+    """select_profile on a registered profile with ASH_SECTION holding a value: the
     response, and the config path the session was bound to, or None."""
     from automated_security_helper.cli.mcp import profile_registry
     from automated_security_helper.cli.mcp_tools import mcp_select_profile
@@ -85,11 +85,11 @@ def select(tmp_path, monkeypatch):
     monkeypatch.delenv("ASH_CONFIG", raising=False)
 
     def _select(value: str | None, profile_text: str, **mode):
-        # None leaves ASH_KEY unset.
+        # None leaves ASH_SECTION unset.
         if value is None:
-            monkeypatch.delenv("ASH_KEY", raising=False)
+            monkeypatch.delenv("ASH_SECTION", raising=False)
         else:
-            monkeypatch.setenv("ASH_KEY", value)
+            monkeypatch.setenv("ASH_SECTION", value)
         profile = tmp_path / f"{value}.ash.yaml"
         profile.write_text(profile_text, encoding="utf-8")
         profile_registry.clear_profile_registry()
@@ -179,20 +179,20 @@ def _same_refusal(answers: dict) -> None:
 
 
 #: Profiles whose file writes a reporters key as a reference, and the values of
-#: ASH_KEY (None: unset) a client must not tell apart. Decided from the file as
+#: ASH_SECTION (None: unset) a client must not tell apart. Decided from the file as
 #: written: whether the variable is set, and whether its value is a key the
 #: profile also writes as text, change nothing.
 WRITTEN_KEYS = {
     "a-default-naming-a-built-in": (
-        "reporters:\n  ${ASH_KEY:markdown}:\n    enabled: false\n",
+        "reporters:\n  ${ASH_SECTION:markdown}:\n    enabled: false\n",
         (None, "markdown"),
     ),
     "a-default-naming-no-built-in": (
-        "reporters:\n  ${ASH_KEY:markdowm}:\n    enabled: false\n",
+        "reporters:\n  ${ASH_SECTION:markdowm}:\n    enabled: false\n",
         (None, "markdowm"),
     ),
     "beside-the-built-in-it-can-name": (
-        "reporters:\n  markdown:\n    enabled: true\n  ${ASH_KEY}:\n    enabled: false\n",
+        "reporters:\n  markdown:\n    enabled: true\n  ${ASH_SECTION}:\n    enabled: false\n",
         ("markdown", "markdowm"),
     ),
 }
@@ -243,9 +243,9 @@ def test_a_workspace_override_on_a_key_written_as_a_reference(
     rules = []
     for value in values:
         if value is None:
-            monkeypatch.delenv("ASH_KEY", raising=False)
+            monkeypatch.delenv("ASH_SECTION", raising=False)
         else:
-            monkeypatch.setenv("ASH_KEY", value)
+            monkeypatch.setenv("ASH_SECTION", value)
         profile = tmp_path / f"{value}.ash.yaml"
         profile.write_text(
             "project_name: demo\n" + POLICIES["all"] + section, encoding="utf-8"
@@ -264,18 +264,18 @@ def test_a_workspace_override_on_a_key_written_as_a_reference(
 #: has fixed fields, so the key names one of them, and the entry as written
 #: differs with it.
 SUPPRESSION = (
-    "  suppressions:\n    - path: a.py\n      reason: r\n      ${ASH_KEY}: pkg\n"
+    "  suppressions:\n    - path: a.py\n      reason: r\n      ${ASH_SECTION}: pkg\n"
 )
 SUPPRESSION_KEYS = ("package_name", "package_path")
 
 
 def _entry_as_written(tmp_path, monkeypatch, guess: str):
-    """The suppression entry as the profile's record writes it when ASH_KEY
+    """The suppression entry as the profile's record writes it when ASH_SECTION
     holds ``guess``: the value a client's test op compares for that guess."""
     from automated_security_helper.config.resolve_config import load_config_file_for_run
     from automated_security_helper.config.runtime_patch import _as_written
 
-    monkeypatch.setenv("ASH_KEY", guess)
+    monkeypatch.setenv("ASH_SECTION", guess)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     path = tmp_path / f"guess-{guess}.ash.yaml"
     path.write_text(
@@ -342,7 +342,7 @@ def test_a_key_read_where_there_are_no_built_in_keys_is_patched(select):
         "project_name: demo\n"
         + POLICIES["all"]
         + "scanners:\n  customx:\n    enabled: true\n    options:\n"
-        "      ${ASH_KEY}: x\n"
+        "      ${ASH_SECTION}: x\n"
     )
     result, bound = select(
         "anything",
@@ -369,7 +369,7 @@ def test_a_workspace_override_is_refused_with_the_one_text(
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     rules = []
     for value in NAMES[section]:
-        monkeypatch.setenv("ASH_KEY", value)
+        monkeypatch.setenv("ASH_SECTION", value)
         profile = tmp_path / f"{value}.ash.yaml"
         profile.write_text(_profile(section, "all"), encoding="utf-8")
         with pytest.raises(RuntimePatchDeniedError) as refused:

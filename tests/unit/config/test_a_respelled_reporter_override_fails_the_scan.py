@@ -210,9 +210,9 @@ def test_the_replays_applied_line_names_no_env_read_key(tmp_path, monkeypatch):
     from automated_security_helper.config.resolve_config import load_config_file_for_run
 
     value = "Aws_Security-HUB"
-    monkeypatch.setenv("ASH_RESPELL_OP_KEY", value)
+    monkeypatch.setenv("ASH_RESPELL_OP_NAME", value)
     operator_text = (
-        "project_name: op\nreporters:\n  ${ASH_RESPELL_OP_KEY}:\n    enabled: true\n"
+        "project_name: op\nreporters:\n  ${ASH_RESPELL_OP_NAME}:\n    enabled: true\n"
     )
     # The must-fire control: the key really is read from the environment.
     control = tmp_path / "control" / "env.yaml"
@@ -247,13 +247,13 @@ def test_the_replays_appended_line_names_no_env_read_key(tmp_path, monkeypatch):
     redacted too. Both applications append -- the repository's section and the
     trusted base's are lists -- which is the must-fire control."""
     value = "Aws_Security-HUB"
-    monkeypatch.setenv("ASH_RESPELL_LIST_KEY", value)
+    monkeypatch.setenv("ASH_RESPELL_LIST_NAME", value)
     handler, restore = _capturing()
     try:
         _resolution(
             tmp_path,
             "project_name: repo\nreporters:\n  AwsSecurityHub: []\n",
-            "project_name: op\nreporters:\n  ${ASH_RESPELL_LIST_KEY}: []\n",
+            "project_name: op\nreporters:\n  ${ASH_RESPELL_LIST_NAME}: []\n",
             "reporters.AwsSecurityHub+=x",
         )
     finally:
@@ -276,10 +276,10 @@ def test_the_drop_warnings_text_names_no_env_read_key(tmp_path, monkeypatch):
     )
 
     value = "Aws_Security-HUB"
-    monkeypatch.setenv("ASH_RESPELL_DROP_KEY", value)
+    monkeypatch.setenv("ASH_RESPELL_DROP_NAME", value)
     trusted_path = tmp_path / "drop-trusted.yaml"
     trusted_path.write_text(
-        "project_name: op\nreporters:\n  ${ASH_RESPELL_DROP_KEY}:\n    enabled: true\n",
+        "project_name: op\nreporters:\n  ${ASH_RESPELL_DROP_NAME}:\n    enabled: true\n",
         encoding="utf-8",
     )
     trusted = load_config_file_for_run(trusted_path)[1]
