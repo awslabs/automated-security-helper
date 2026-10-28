@@ -717,12 +717,12 @@ ALLOWLIST: tuple[Entry, ...] = (
         file=".github/actions/setup-ash/action.yml",
         kind=KIND_BUILTIN_CACHE,
         action=_SETUP_UV,
-        publishes=(
-            "enable-cache=true "
-            "save-cache=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}"
-        ),
+        publishes=("enable-cache=true save-cache=${{ inputs.save-cache }}"),
         reason=_UV_CACHE_REASON
-        + " Saved from a push to main only; every other ref restores and writes nothing.",
+        + " Saved only by a caller that passes save-cache, which is the ensure-cache"
+        " job in ash-unified-ci.yml; every other caller restores and writes nothing."
+        " ensure-cache syncs without installing ASH itself, so what it saves is the"
+        " packages ASH depends on and nothing ASH builds.",
     ),
     Entry(
         file=".github/workflows/ash-package.yml",

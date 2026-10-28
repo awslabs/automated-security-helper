@@ -35,18 +35,20 @@ import ast
 import json
 import re
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import List, Optional, Tuple
 
 import pytest
 import yaml
 from typer.testing import CliRunner
 
+from automated_security_helper.config import ash_config
 from automated_security_helper.config.ash_config import (
     load_config_yaml,
     load_yaml_config,
 )
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.exceptions import ASHConfigSourceError
+from automated_security_helper.utils.yaml_aliases import NoRecursiveAliasLoader
 
 ALIASED = "project_name: &name repeated\nglobal_settings:\n  ignore_paths: [*name]\n"
 
@@ -386,21 +388,24 @@ NOT_ASH_CONFIGURATION = {
 AS_WRITTEN_LOADERS = {"config/ash_config.py": "_KeepsEnvReferences"}
 
 
-def loader_names_in(source: str) -> Dict[int, str]:
-    """{line: class name} for each call in ``source`` that passes ``Loader=``
-    a bare class name."""
-    names = {}
-    for node in ast.walk(ast.parse(source)):
-        if not isinstance(node, ast.Call):
-            continue
-        for keyword in node.keywords:
-            if keyword.arg == "Loader" and isinstance(keyword.value, ast.Name):
-                names[node.lineno] = keyword.value.id
-    return names
+def loader_named_by(call: ast.Call) -> Optional[str]:
+    """The ``Loader=`` this one call passes: a bare class name as written, any
+    other expression as its source text (``yaml.FullLoader`` stays dotted, so it
+    never reads as the bare class name), None when the call passes no
+    ``Loader=`` keyword."""
+    for keyword in call.keywords:
+        if keyword.arg == "Loader":
+            if isinstance(keyword.value, ast.Name):
+                return keyword.value.id
+            return ast.unparse(keyword.value)
+    return None
 
 
-def yaml_loads_in(source: str) -> List[Tuple[int, str]]:
-    """(line, call) for every call to a PyYAML load function in ``source``."""
+def yaml_loads_in(source: str) -> List[Tuple[int, str, Optional[str]]]:
+    """(line, call, loader) for every call to a PyYAML load function in
+    ``source``; ``loader`` is what that same call passes as ``Loader=``
+    (``loader_named_by``), so a call is judged by its own loader and never by
+    another call on its line."""
     tree = ast.parse(source)
     module_names = {"yaml"}
     function_names = set()
@@ -424,10 +429,24 @@ def yaml_loads_in(source: str) -> List[Tuple[int, str]]:
             and isinstance(func.value, ast.Name)
             and func.value.id in module_names
         ):
-            found.append((node.lineno, f"{func.value.id}.{func.attr}"))
+            found.append(
+                (node.lineno, f"{func.value.id}.{func.attr}", loader_named_by(node))
+            )
         elif isinstance(func, ast.Name) and func.id in function_names:
-            found.append((node.lineno, func.id))
+            found.append((node.lineno, func.id, loader_named_by(node)))
     return found
+
+
+def direct_loads_in(source: str, as_written: Optional[str]) -> List[Tuple[int, str]]:
+    """(line, call) for every PyYAML load in ``source`` that the one as-written
+    loader does not cover. A call is covered when it passes that class as its
+    own ``Loader=``; a second load on the same line is judged on its own."""
+    offenders = []
+    for line, call, loader in yaml_loads_in(source):
+        if as_written is not None and loader == as_written:
+            continue
+        offenders.append((line, call))
+    return offenders
 
 
 class TestEveryYamlLoadUsesTheSharedLoaders:
@@ -439,10 +458,7 @@ class TestEveryYamlLoadUsesTheSharedLoaders:
                 continue
             source = path.read_text(encoding="utf-8")
             as_written = AS_WRITTEN_LOADERS.get(relative)
-            named = loader_names_in(source) if as_written else {}
-            for line, call in yaml_loads_in(source):
-                if as_written is not None and named.get(line) == as_written:
-                    continue
+            for line, call in direct_loads_in(source, as_written):
                 offenders.append(f"{relative}:{line} {call}")
 
         assert offenders == [], (
@@ -457,7 +473,7 @@ class TestEveryYamlLoadUsesTheSharedLoaders:
             "yaml.safe_load('a')\ny.load('a', Loader=None)\ns('a')\n"
         )
 
-        assert [call for _, call in yaml_loads_in(source)] == [
+        assert [call for _, call, _ in yaml_loads_in(source)] == [
             "yaml.safe_load",
             "y.load",
             "s",
@@ -475,10 +491,61 @@ class TestEveryYamlLoadUsesTheSharedLoaders:
             "yaml.load('a')\n"
         )
 
-        assert loader_names_in(source) == {2: "_KeepsEnvReferences"}
-        assert [line for line, _ in yaml_loads_in(source)] == [2, 3, 4]
+        assert [(line, loader) for line, _, loader in yaml_loads_in(source)] == [
+            (2, "_KeepsEnvReferences"),
+            (3, "yaml.SafeLoader"),
+            (4, None),
+        ]
+        assert direct_loads_in(source, "_KeepsEnvReferences") == [
+            (3, "yaml.load"),
+            (4, "yaml.load"),
+        ]
+
+    def test_control_a_second_load_on_the_exempt_line_is_still_an_offender(self):
+        source = (
+            "import yaml\n"
+            "x = yaml.load(a, Loader=_KeepsEnvReferences); y = yaml.load(b)\n"
+        )
+
+        loads = yaml_loads_in(source)
+        assert len(loads) == 2
+        assert {loader for _, _, loader in loads} == {"_KeepsEnvReferences", None}
+        assert direct_loads_in(source, "_KeepsEnvReferences") == [(2, "yaml.load")]
+
+    def test_control_an_attribute_loader_never_reads_as_the_exempt_class(self):
+        source = (
+            "import yaml\n"
+            "x = yaml.load(a, Loader=_KeepsEnvReferences); "
+            "y = yaml.load(b, Loader=yaml.FullLoader)\n"
+        )
+
+        assert {loader for _, _, loader in yaml_loads_in(source)} == {
+            "_KeepsEnvReferences",
+            "yaml.FullLoader",
+        }
+        assert direct_loads_in(source, "_KeepsEnvReferences") == [(2, "yaml.load")]
+
+    def test_control_the_exempt_call_alone_is_no_offender(self):
+        source = "import yaml\nyaml.load(a, Loader=_KeepsEnvReferences)\n"
+
+        assert direct_loads_in(source, "_KeepsEnvReferences") == []
+
+    def test_control_a_file_with_no_as_written_loader_exempts_nothing(self):
+        source = "import yaml\nyaml.load(a, Loader=_KeepsEnvReferences)\nyaml.load(b)\n"
+
+        assert direct_loads_in(source, None) == [(2, "yaml.load"), (3, "yaml.load")]
 
     def test_control_the_as_written_loader_is_still_where_it_was(self):
         for relative, loader in AS_WRITTEN_LOADERS.items():
             source = (PACKAGE / relative).read_text(encoding="utf-8")
-            assert loader in loader_names_in(source).values(), relative
+            assert loader in {named for _, _, named in yaml_loads_in(source)}, relative
+
+    def test_the_as_written_loader_is_a_safe_loader(self):
+        loader = getattr(ash_config, AS_WRITTEN_LOADERS["config/ash_config.py"])
+
+        assert issubclass(loader, yaml.SafeLoader)
+        assert issubclass(loader, NoRecursiveAliasLoader)
+        with pytest.raises(yaml.constructor.ConstructorError):
+            yaml.load(  # nosec B506 - a SafeLoader, which refuses a python tag
+                "x: !!python/object/apply:os.getcwd []\n", Loader=loader
+            )

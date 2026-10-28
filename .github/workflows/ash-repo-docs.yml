@@ -81,7 +81,7 @@ jobs:
             text="${text//$'\xc2'[$'\x80'-$'\x9f']/ }"
             text="${text//$'\xe2\x80'[$'\xa8\xa9']/ }"
             while [[ "${text}" == *::* ]]; do text="${text//::/: :}"; done
-            while [[ "${text}" == *'##['* ]]; do text="${text//'##['/'# #['}"; done
+            while [[ "${text}" == *'##['* ]]; do text="${text//'##['/# #[}"; done
             printf '%s' "${text}"
           }
           __wcs_clock() {
@@ -90,6 +90,12 @@ jobs:
             if [ -z "${__wcs_now}" ]; then
               __wcs_now=$((SECONDS * 1000000))
             fi
+          }
+          __wcs_last_bg() {
+            case "$-" in
+              *u*) set +u; printf '%s' "$!"; set -u ;;
+              *) printf '%s' "$!" ;;
+            esac
           }
           __wcs_end_group() {
             local __wcs_now="" __wcs_until=""
@@ -114,8 +120,8 @@ jobs:
             return 1
           }
           __wcs_on_signal() {
-            if [ -z "${__wcs_pid}" ] && [ "${!:-}" != "${__wcs_before}" ]; then
-              __wcs_pid="${!:-}"
+            if [ -z "${__wcs_pid}" ] && [ "$(__wcs_last_bg)" != "${__wcs_before}" ]; then
+              __wcs_pid="$(__wcs_last_bg)"
             fi
             if [ -n "${__wcs_pid}" ]; then
               kill -s "$1" -- "-${__wcs_pid}" 2>/dev/null || kill -s "$1" "${__wcs_pid}" 2>/dev/null || true
@@ -145,7 +151,7 @@ jobs:
               return 1
             fi
             local __wcs_out="" __wcs_var="" __wcs_file="" __wcs_token __wcs_status=0
-            local __wcs_pid="" __wcs_interrupted="" __wcs_open="" __wcs_left="" __wcs_before="${!:-}"
+            local __wcs_pid="" __wcs_interrupted="" __wcs_open="" __wcs_left="" __wcs_before="$(__wcs_last_bg)"
             case "${1:-}" in
               --stdout) __wcs_out="$2"; shift 2 ;;
               --capture) __wcs_var="$2"; shift 2 ;;
