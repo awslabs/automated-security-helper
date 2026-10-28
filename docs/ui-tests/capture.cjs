@@ -8,14 +8,14 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 
 const root = path.resolve(__dirname, "../..");
-const output = process.env.ASH_UI_PREVIEWS || path.join(__dirname, ".previews");
+const output = process.env.DOCS_UI_PREVIEWS || path.join(__dirname, ".previews");
 let server;
 let browser;
 
 async function startServer() {
-  if (process.env.ASH_UI_BASE_URL) return process.env.ASH_UI_BASE_URL;
+  if (process.env.DOCS_UI_BASE_URL) return process.env.DOCS_UI_BASE_URL;
   await fs.access(path.join(root, "public/index.html"));
-  server = spawn(process.env.ASH_UI_PYTHON || "python3", [
+  server = spawn(process.env.DOCS_UI_PYTHON || "python3", [
     "-u", "-m", "http.server", "0", "--bind", "127.0.0.1",
     "--directory", path.join(root, "public"),
   ], { stdio: ["ignore", "pipe", "ignore"] });
@@ -42,7 +42,7 @@ async function startServer() {
   const baseUrl = base.endsWith("/") ? base : `${base}/`;
   const siteUrl = relative => new URL(relative, baseUrl).href;
   browser = await chromium.launch({
-    executablePath: process.env.ASH_UI_CHROME || undefined,
+    executablePath: process.env.DOCS_UI_CHROME || undefined,
     headless: true,
   });
   const images = [];
@@ -54,7 +54,7 @@ async function startServer() {
     });
     try {
       const page = await context.newPage();
-      if (!process.env.ASH_UI_BASE_URL) {
+      if (!process.env.DOCS_UI_BASE_URL) {
         const prefix = new URL("automated-security-helper/", baseUrl).href;
         await page.route(`${prefix}**`, async route => {
           const target = new URL(route.request().url().slice(prefix.length), baseUrl);

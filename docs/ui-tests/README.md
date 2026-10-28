@@ -31,21 +31,24 @@ Use `npm run capture -- --skip-tui` for a browser-only preview. `--output /path/
 
 ## Browser configuration
 
-| Variable | Purpose |
-| --- | --- |
-| `ASH_UI_CHROME` | Use an existing Chrome/Chromium executable |
-| `ASH_UI_BASE_URL` | Review an already served site instead of starting the local server |
-| `ASH_UI_PREVIEWS` | Directory containing generated report and terminal artifacts |
-| `ASH_UI_PYTHON` | Python executable used for the local static server |
+The scripts in this directory read four settings from the environment. They belong to
+these scripts, not to ASH, so the `ash` command ignores them.
 
-Without `ASH_UI_BASE_URL`, the test suite serves `public/` on loopback port 8849. The capture tool uses an available loopback port and closes its server after capture.
+| Setting | Purpose |
+| --- | --- |
+| `DOCS_UI_CHROME` | Use an existing Chrome/Chromium executable |
+| `DOCS_UI_BASE_URL` | Review an already served site instead of starting the local server |
+| `DOCS_UI_PREVIEWS` | Directory containing generated report and terminal artifacts |
+| `DOCS_UI_PYTHON` | Python executable used for the local static server |
+
+Without `DOCS_UI_BASE_URL`, the test suite serves `public/` on loopback port 8849. The capture tool uses an available loopback port and closes its server after capture.
 
 For example:
 
 <!-- doctest: illustrative reason="runs in a checkout of this repository and needs Node.js and a browser" -->
 ```sh
-ASH_UI_CHROME=/usr/bin/google-chrome npm test
-ASH_UI_CHROME=/usr/bin/google-chrome npm run capture
+DOCS_UI_CHROME=/usr/bin/google-chrome npm test
+DOCS_UI_CHROME=/usr/bin/google-chrome npm run capture
 ```
 
 `npm run report` opens the Playwright test report. Failures retain screenshots and traces. `npm run test:headed` is useful for inspecting keyboard flows.

@@ -39,7 +39,7 @@ To send us a pull request, please:
 3. Modify the source; please focus on the specific change you are contributing. If you also reformat all the code,
    it will be hard for us to focus on your change.
 4. Ensure local tests pass: `uv sync`, then `uv run pytest`, or `uv run pytest <path>` for part of the suite.
-   [DEVELOPMENT.md](DEVELOPMENT.md#testing) has the commands for the optional extras, the integration tests,
+   [DEVELOPMENT.md](DEVELOPMENT.md#devfile-environments) has the commands for the optional extras, the integration tests,
    and running the suite with the coverage threshold the way CI does.
 5. Commit to your fork using clear commit messages.
 6. Send us a pull request, answering any default questions in the pull request interface.

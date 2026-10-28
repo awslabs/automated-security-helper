@@ -338,5 +338,6 @@ ash config validate --config misspelled.yaml
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash dependencies install --tool not-a-tool
+tool=not-a-tool
+ash dependencies install --tool "${tool}"
 ```
