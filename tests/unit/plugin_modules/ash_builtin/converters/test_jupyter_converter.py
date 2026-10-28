@@ -1299,11 +1299,14 @@ class TestExecuteNbconvertViaUv:
             "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
             return_value=uv_runner,
         ):
-            with pytest.raises(subprocess.CalledProcessError) as raised:
-                converter._execute_nbconvert_via_uv(["jupyter", "nbconvert"])
+            assert (
+                converter._execute_nbconvert_via_uv(["jupyter", "nbconvert"]) is False
+            )
 
-        assert raised.value.returncode == 3
-        assert raised.value.stderr == "nbconvert blew up"
+        warnings = messages_at(ash_log_records, logging.WARNING)
+        assert any(m.startswith("uv could not run nbconvert: ") for m in warnings), (
+            warnings
+        )
 
     def test_uv_failing_to_start_returns_false_for_the_fallback(
         self, converter, uv_runner
