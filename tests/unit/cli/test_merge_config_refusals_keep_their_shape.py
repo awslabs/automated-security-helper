@@ -72,7 +72,13 @@ def test_the_shard_disagreement_refusal_prints_on_its_lines(tmp_path):
 
 
 def test_a_config_name_over_the_limit_is_refused_not_traced(tmp_path):
-    """ENAMETOOLONG from the stat: exit 3 in the read arm's words."""
+    """A name over the limit: exit 3 in one of the two refusal shapes.
+
+    The stat answers "not a file" for a name over NAME_MAX (``Path.is_file``
+    reads the ENAMETOOLONG as False), so the refusal is the existence arm's;
+    the read arm ("could not be read") is reached by the EACCES test below.
+    Either way the refusal names the config path and no traceback is printed.
+    """
     too_long = tmp_path / ("a" * 300 + ".yaml")
 
     result = _merge(
@@ -81,7 +87,11 @@ def test_a_config_name_over_the_limit_is_refused_not_traced(tmp_path):
 
     assert result.exit_code == 3, result.output
     assert "Invalid configuration:" in result.output
-    assert "could not be read" in result.output
+    assert "a" * 300 in result.output, result.output
+    assert (
+        "does not exist or is not a file" in result.output
+        or "could not be read" in result.output
+    ), result.output
     assert "Traceback" not in result.output
     assert not (tmp_path / "merged").exists()
 
