@@ -58,6 +58,7 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_con
 from automated_security_helper.utils import subprocess_utils, uv_tool_runner
 from automated_security_helper.utils.normalizers import get_normalized_filename
 from tests.unit.converters.nbconvert_stand_in import (
+    accept_stand_in_nbconvert,
     expand,
     notebook_patterns,
     run_like_nbconvert,
@@ -159,9 +160,11 @@ def replace_subprocess(monkeypatch, run) -> None:
             SubprocessError=subprocess.SubprocessError,
         ),
     )
-    # The converter starts nbconvert through spawn_run, so a scanner sandbox can
-    # confine it.
+    # The converter starts nbconvert through spawn_run under a sandbox, so a
+    # scanner sandbox can confine it, and through run_ended_with_the_server
+    # otherwise (jupyter_converter._run_nbconvert); both are this double.
     monkeypatch.setattr(jupyter_converter, "spawn_run", run)
+    monkeypatch.setattr(jupyter_converter, "run_ended_with_the_server", run)
 
 
 @pytest.fixture(autouse=True)
@@ -227,6 +230,11 @@ def direct(make_converter, monkeypatch, outside):
     observed = Observed()
     jupyter = fake_executable(outside / "bin", NBCONVERT)
     monkeypatch.setenv("PATH", str(jupyter.parent))
+    # A conversion runs a jupyter-nbconvert only once verify_pre_installed_tool
+    # says its nbconvert satisfies the requirement, and the fake belongs to no
+    # nbconvert distribution; these tests are about what the verified copy is
+    # handed, so the verification accepts it. The lookup's refusals still hold.
+    accept_stand_in_nbconvert(monkeypatch)
     replace_subprocess(monkeypatch, direct_route_run(observed))
     return converter, observed, jupyter
 
@@ -268,15 +276,24 @@ def convert_one(converter, notebook_path: Path, monkeypatch) -> list[Path]:
 
 
 def failed(converter) -> list[dict]:
-    return [record.model_dump() for record in converter.failed_inputs]
+    """Each failed input's path and reason. The record carries more (kind,
+    accepted, accepted_reason, accepted_by), which these tests do not assert."""
+    return [
+        {"path": record.path, "reason": record.reason}
+        for record in converter.failed_inputs
+    ]
 
 
 def gate(converter) -> list[tuple[str, str]]:
-    """What the completeness gate says about a results row built from ``converter``."""
+    """What the completeness gate says about a results row built from ``converter``,
+    as (name, reason); the row's third field, ``kinds``, is not asserted here."""
     row = ConverterStatusInfo(**_input_record_fields(converter))
-    return incomplete_converters(
-        AshAggregatedResults(converter_results={"jupyter": row})
-    )
+    return [
+        (listed.name, listed.reason)
+        for listed in incomplete_converters(
+            AshAggregatedResults(converter_results={"jupyter": row})
+        )
+    ]
 
 
 @pytest.mark.parametrize(
