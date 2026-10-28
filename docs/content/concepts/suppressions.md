@@ -6,7 +6,7 @@ ASH has three ways to keep a finding from failing a scan, and they differ in wha
 
 | | Suppression | Ignore path | Scanner exclusion |
 |---|---|---|---|
-| Set in | `global_settings.suppressions`, or an inline `ash-ignore` comment | `global_settings.ignore_paths` | the scanner's options, such as bandit `excluded_paths`, checkov `skip_path`, semgrep and opengrep `exclude`, and syft `exclude` |
+| Set in | `global_settings.suppressions`, or an inline `ash-ignore` comment | `global_settings.ignore_paths` | the scanner's options, such as bandit `excluded_paths`, checkov `skip_path`, semgrep and opengrep `exclude`, syft `exclude`, and guarddog `excluded_paths` |
 | Matches | a path, optionally narrowed by rule ID, line range, package, or symbol | a path | what the scanner's tool matches |
 | Is the file scanned? | Yes | Passed to every scanner; some skip the files, others scan them | No |
 | Is the finding in the results? | Yes, marked suppressed with the reason | No | No, it never existed |

@@ -34,6 +34,8 @@ OFF_HOST = [AWS, SNYK]
 COMMUNITY = [
     "automated_security_helper.plugin_modules.ash_trivy_plugins",
     "automated_security_helper.plugin_modules.ash_ferret_plugins",
+    "automated_security_helper.plugin_modules.ash_guarddog_plugins",
+    "automated_security_helper.plugin_modules.ash_hadolint_plugins",
 ]
 BUILTIN = "automated_security_helper.plugin_modules.ash_builtin"
 REPO = Path(__file__).resolve().parents[3]

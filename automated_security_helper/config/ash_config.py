@@ -1270,6 +1270,19 @@ class RuntimeOverridesConfig(RedactedSection):
         "/scanners/gitleaks/options/config_file",
         "/scanners/zizmor/options/config_file",
         "/scanners/zizmor/options/online_audits",
+        # The same for the plugin scanners hadolint and guarddog. hadolint's config
+        # file is the operator's alone (utils/config_trust.py). Of GuardDog's
+        # options, ecosystems narrows which package roots are scanned, rules and
+        # exclude_rules choose the rules it runs, verify downloads every dependency
+        # of every manifest from its registry, and sandbox set to disabled turns off
+        # GuardDog's own kernel sandbox. Its excluded_paths is marked and
+        # re-applied to the results instead (config/client_scanner_exclusions.py).
+        "/scanners/hadolint/options/config_file",
+        "/scanners/guarddog/options/ecosystems",
+        "/scanners/guarddog/options/rules",
+        "/scanners/guarddog/options/exclude_rules",
+        "/scanners/guarddog/options/verify",
+        "/scanners/guarddog/options/sandbox",
         # Whether snyk code test may apply the .snyk and .dcignore files in the
         # tree it tests, which leave files out of its analysis.
         "/scanners/snyk-code/options/honor_tree_exclusions",

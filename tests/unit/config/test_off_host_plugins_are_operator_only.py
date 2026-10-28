@@ -137,6 +137,16 @@ LOCAL: Dict[Plugin, str] = {
     ("scanners", "cfn-lint"): "reads the templates",
     ("scanners", "cfn-guard"): "reads the templates and its installed rules bundle",
     ("scanners", "gitleaks"): "reads the files",
+    ("scanners", "guarddog"): (
+        "reads copies of the package files ASH stages for it "
+        "(guarddog_scanner.py:1001-1060, :1105-1118); its `verify` option, off by "
+        "default, downloads the manifest's dependencies from their registries "
+        "(:1412-1431) and uploads nothing"
+    ),
+    ("scanners", "hadolint"): (
+        "reads the Dockerfiles in the scan set (hadolint_scanner.py:391-448); "
+        "declares no network (:284)"
+    ),
     ("reporters", "csv"): "writes a file",
     ("reporters", "cyclonedx"): "writes a file",
     ("reporters", "flat-json"): "writes a file",

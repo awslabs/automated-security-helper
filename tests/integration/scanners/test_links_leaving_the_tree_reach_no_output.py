@@ -46,6 +46,10 @@ import pytest
 from tests.utils.gitleaks_fixture import fabricated_tokens
 from tests.utils.helpers import importing_this_checkout
 
+#: The committed fixture files the in-tree controls of the scanners added later are
+#: copied from. Each is the positive its scanner's own tests pin.
+FIXTURES = Path(__file__).resolve().parents[2] / "test_data" / "scanners"
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
@@ -150,6 +154,10 @@ PLUGIN_MODULES = [
     "automated_security_helper.plugin_modules.ash_trivy_plugins",
     "automated_security_helper.plugin_modules.ash_ferret_plugins",
     "automated_security_helper.plugin_modules.ash_snyk_plugins",
+    # Scanners in a module that is not loaded are registered and left out of the
+    # results, so a scanner here that is not listed would never be checked.
+    "automated_security_helper.plugin_modules.ash_hadolint_plugins",
+    "automated_security_helper.plugin_modules.ash_guarddog_plugins",
 ]
 
 
@@ -218,6 +226,7 @@ def _build(base: Path) -> Path:
     (tree / "settings.yml").write_text(
         f"aws_access_key_id: {IN_TREE_KEY}\n", encoding="utf-8"
     )
+    _build_in_tree_controls(tree)
     for link, name in LINKS_OUT.items():
         (tree / link).parent.mkdir(parents=True, exist_ok=True)
         (tree / link).symlink_to(outside / name)
@@ -236,6 +245,37 @@ def _build(base: Path) -> Path:
     )
     (tree / "in_tree_link.py").symlink_to("real.py")
     return tree
+
+
+#: Files copied into the tree: (the fixture under tests/test_data/scanners, its path
+#: in the tree). The workflow is the positive of actionlint and zizmor, the template
+#: of cfn-lint and cfn-guard, the Dockerfile of hadolint and setup.py of guarddog.
+IN_TREE_COPIES = [
+    (
+        "actionlint/repo/.github/workflows/vulnerable.yml",
+        ".github/workflows/vulnerable.yml",
+    ),
+    ("cfn_lint_guard/repo/templates/insecure.yaml", "templates/insecure.yaml"),
+    ("hadolint/positive/Dockerfile", "images/Dockerfile"),
+    ("guarddog/fixture_repo/pypi_suspicious/setup.py", "pypi_suspicious/setup.py"),
+]
+
+
+def _build_in_tree_controls(tree: Path) -> None:
+    """The in-tree positives of the scanners that have no finding in the files above.
+
+    The fixtures' own tests pin what each scanner reports for them. gitleaks gets a
+    fabricated token in the form its own fixture uses (the committed tree holds a
+    marker, and the value is materialized here), because no key above is one its
+    rules match.
+    """
+    for source, target in IN_TREE_COPIES:
+        (tree / target).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(FIXTURES / source, tree / target)
+    token = fabricated_tokens()["settings_github_pat"]
+    (tree / "gitleaks_settings.py").write_text(
+        f'GITHUB_TOKEN = "{token}"\n', encoding="utf-8"
+    )
 
 
 def _config(base: Path) -> Path:
@@ -298,8 +338,19 @@ def _isolated_env(base: Path) -> dict[str, str]:
 
 
 @pytest.fixture(scope="module")
-def scan(tmp_path_factory):
-    base = tmp_path_factory.mktemp("links-leaving-the-tree")
+def scan_base(tmp_path_factory):
+    return tmp_path_factory.mktemp("links-leaving-the-tree")
+
+
+@pytest.fixture(scope="module")
+def scan_env(scan_base):
+    """The environment the scan runs in, which also says what can run in it."""
+    return _isolated_env(scan_base)
+
+
+@pytest.fixture(scope="module")
+def scan(scan_base, scan_env):
+    base = scan_base
     tree = _build(base)
     output = base / "out"
     completed = subprocess.run(  # nosec B603 -- fixed argv, the test's own interpreter
@@ -324,7 +375,7 @@ def scan(tmp_path_factory):
         capture_output=True,
         text=True,
         timeout=3600,
-        env=_isolated_env(base),
+        env=scan_env,
         cwd=base,
     )
     assert completed.returncode == 0, (
@@ -399,10 +450,15 @@ class Control:
     importable and ``database`` set in the environment. ``offline`` says why the
     scanner never runs in this offline scan. ``in_tree`` is a path a finding of
     the scanner's must sit at; None with no ``sbom_package`` means any finding at
-    a path in the tree.
+    a path in the tree. ``uv_tool`` is for a scanner that runs a command missing from
+    PATH through ``uv tool run --offline``, from uv's cache (checkov, zizmor and
+    guarddog do: ``get_uv_tool_command`` probes it, and a scanner whose probe passes is
+    graded on what it runs): it can run here when that probe passes in the scan's own
+    environment.
     """
 
     commands: tuple[str, ...] = ()
+    uv_tool: bool = False
     module: str | None = None
     database: str | None = None
     offline: str | None = None
@@ -413,14 +469,38 @@ class Control:
 #: One for every registered scanner. The in-tree findings were measured with
 #: bandit 1.9.4, checkov 3.3.26, detect-secrets, semgrep 1.180.0, opengrep 1.30.2,
 #: cfn-nag, cdk-nag, grype 0.120.1, trivy 0.75.0 and syft 1.54.1; ferret-scan's,
-#: actionlint's, cfn-lint's, cfn-guard's, gitleaks's, trivy's and zizmor's have not
-#: been measured in this scan. The last six read the findings their own integration
-#: tests record on the same fixtures (tests/integration/scanners/
-#: test_actionlint_real_binary.py, test_cfn_lint_and_cfn_guard_real.py,
-#: test_gitleaks_real_binary.py and test_zizmor_real_binary.py).
+#: actionlint's, cfn-lint's, cfn-guard's, gitleaks's, trivy's, zizmor's, hadolint's
+#: and guarddog's have not been measured in this scan. The first six of those read the
+#: findings their own integration tests record on the same fixtures
+#: (tests/integration/scanners/test_actionlint_real_binary.py,
+#: test_cfn_lint_and_cfn_guard_real.py, test_gitleaks_real_binary.py and
+#: test_zizmor_real_binary.py); hadolint and guarddog read the Dockerfile and the
+#: setup.py that their own tests pin under tests/test_data/scanners.
 CONTROLS = {
     "bandit": Control(commands=("bandit",), in_tree="real.py"),
-    "checkov": Control(commands=("checkov",), in_tree="real.tf"),
+    "checkov": Control(commands=("checkov",), uv_tool=True, in_tree="real.tf"),
+    "actionlint": Control(
+        commands=("actionlint",), in_tree=".github/workflows/vulnerable.yml"
+    ),
+    "zizmor": Control(
+        commands=("zizmor",), uv_tool=True, in_tree=".github/workflows/vulnerable.yml"
+    ),
+    "gitleaks": Control(commands=("gitleaks",), in_tree="gitleaks_settings.py"),
+    "cfn-lint": Control(commands=("cfn-lint",), in_tree="templates/insecure.yaml"),
+    # The rules bundle is found through ASH_CFN_GUARD_RULES_DIR: the scan repoints
+    # ASH_BIN_PATH, so the default location beside it is empty.
+    "cfn-guard": Control(
+        commands=("cfn-guard",),
+        database="ASH_CFN_GUARD_RULES_DIR",
+        in_tree="templates/insecure.yaml",
+    ),
+    "hadolint": Control(commands=("hadolint",), in_tree="images/Dockerfile"),
+    "guarddog": Control(
+        commands=("guarddog",), uv_tool=True, in_tree="pypi_suspicious/setup.py"
+    ),
+    "trivy": Control(
+        commands=("trivy",), database="TRIVY_CACHE_DIR", in_tree="requirements.txt"
+    ),
     "detect-secrets": Control(commands=("detect-secrets",), in_tree="settings.yml"),
     "semgrep": Control(commands=("semgrep",), in_tree="real.py"),
     "opengrep": Control(commands=("opengrep",), in_tree="real.py"),
@@ -477,7 +557,47 @@ def _registered_scanner_names() -> set[str]:
     return names
 
 
-def _why_it_cannot_run(control: Control) -> str | None:
+#: The scanner's own probe allows uv this long (``_UV_VERSION_PROBE_TIMEOUT``).
+UV_PROBE_TIMEOUT_S = 5
+
+
+def _uv_tool_runs_offline(command: str, scan_env: dict[str, str], cwd: Path) -> bool:
+    """Whether ``uv tool run --offline <command> --version`` passes in the scan's env.
+
+    The probe ``get_uv_tool_command`` makes. Run in the scan's environment, so the
+    cache it reads is the one the scan's uv reads.
+    """
+    uv = shutil.which("uv", path=scan_env.get("PATH"))
+    if uv is None:
+        return False
+    try:
+        probe = subprocess.run(  # nosec B603 -- fixed argv, a version probe
+            [uv, "tool", "run", "--offline", command, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=UV_PROBE_TIMEOUT_S,
+            env={**scan_env, "UV_OFFLINE": "1"},
+            cwd=cwd,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return probe.returncode == 0
+
+
+@pytest.fixture(scope="module")
+def uv_runnable(scan_env, scan_base) -> set[str]:
+    """The commands of the ``uv_tool`` controls that uv can run in the scan's env."""
+    return {
+        command
+        for control in CONTROLS.values()
+        if control.uv_tool
+        for command in control.commands
+        if _uv_tool_runs_offline(command, scan_env, scan_base)
+    }
+
+
+def _why_it_cannot_run(control: Control, uv_runnable: set[str]) -> str | None:
     """None when the scanner can run here; otherwise what it lacks."""
     if control.offline:
         return control.offline
@@ -489,7 +609,10 @@ def _why_it_cannot_run(control: Control) -> str | None:
     # list` shows here) is not one the scan finds, and the scanner records MISSING.
     # CI installs the uv tools the suite needs before it starts, onto PATH.
     missing = [
-        command for command in control.commands if not shutil.which(command, path=path)
+        command
+        for command in control.commands
+        if not shutil.which(command, path=path)
+        and not (control.uv_tool and command in uv_runnable)
     ]
     if missing:
         return f"{', '.join(missing)} is not installed here"
@@ -513,7 +636,7 @@ def test_every_registered_scanner_has_a_control():
 
 
 @pytest.mark.parametrize("scanner", sorted(CONTROLS))
-def test_each_scanner_that_can_run_here_scanned_the_tree(scan, scanner):
+def test_each_scanner_that_can_run_here_scanned_the_tree(scan, uv_runnable, scanner):
     """Ran (PASSED, or FAILED on its findings), and found what is in the tree.
 
     A scanner that cannot run here is skipped with what it lacks and the status the
@@ -522,7 +645,7 @@ def test_each_scanner_that_can_run_here_scanned_the_tree(scan, scanner):
     output, results, _ = scan
     status = _statuses(results).get(scanner)
     control = CONTROLS[scanner]
-    reason = _why_it_cannot_run(control)
+    reason = _why_it_cannot_run(control, uv_runnable)
     if reason is not None:
         assert status not in TOOK_PART, (scanner, status, reason)
         pytest.skip(f"{scanner} did not take part ({status}): {reason}")
@@ -538,17 +661,21 @@ def test_each_scanner_that_can_run_here_scanned_the_tree(scan, scanner):
         assert uris, f"{scanner} reported nothing in the tree"
 
 
-def test_the_scanners_that_took_part_are_the_ones_that_can_run_here(scan):
+def test_the_scanners_that_took_part_are_the_ones_that_can_run_here(scan, uv_runnable):
     """Every registered scanner is in the results, and only those that can run took part.
 
     The ones that did not take part are each listed by the skipped test above.
     """
     _, results, _ = scan
     statuses = _statuses(results)
-    can_run = {name for name, c in CONTROLS.items() if _why_it_cannot_run(c) is None}
+    can_run = {
+        name
+        for name, c in CONTROLS.items()
+        if _why_it_cannot_run(c, uv_runnable) is None
+    }
     took_part = {name for name, status in statuses.items() if status in TOOK_PART}
     not_taking_part = {
-        name: f"{statuses.get(name)}: {_why_it_cannot_run(CONTROLS[name])}"
+        name: f"{statuses.get(name)}: {_why_it_cannot_run(CONTROLS[name], uv_runnable)}"
         for name in sorted(set(CONTROLS) - took_part)
     }
 

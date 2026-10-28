@@ -9,25 +9,12 @@ fail_on_findings: true
 ash_plugin_modules:
   - automated_security_helper.plugin_modules.ash_trivy_plugins
   - automated_security_helper.plugin_modules.ash_ferret_plugins
+  - automated_security_helper.plugin_modules.ash_guarddog_plugins
+  - automated_security_helper.plugin_modules.ash_hadolint_plugins
 external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM
   suppressions:
-    # === GuardDog false positive in this repository's own tests (line-pinned) ===
-    # GuardDog's heuristics read source text, so test code that writes a fake
-    # credentials file matches them. Pinned to the one line GuardDog reports, so a
-    # real finding elsewhere in the file is still reported. The test writes creds.env
-    # twice, at lines 775 and 991; GuardDog 3.2.0 drops a match whose code snippet
-    # is the same as one it already reported, so it reports 775 only.
-    - rule_id: "threat-filesystem-read"
-      path: "tests/integration/scanners/test_trivy_real_binary.py"
-      line_start: 775
-      line_end: 775
-      reason: >-
-        False positive. The line writes a creds.env holding a fake AWS key id and
-        secret, generated per run with secrets.choice, into the test's temporary
-        fixture tree so trivy's secret scanner has something to find. Nothing reads
-        a real credentials file.
     # === Product code and documents: pinned or scoped to the file ===
     - rule_id: B104
       path: automated_security_helper/cli/mcp/__init__.py
@@ -110,6 +97,17 @@ global_settings:
     - rule_id: API_KEY_OR_SECRET
       path: tests/unit/plugin_modules/ash_aws_plugins/test_security_hub_batch_import.py
       reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/plugin_modules/ash_hadolint_plugins/test_hadolint_scanner_behavior.py
+      line_start: 880
+      line_end: 882
+      reason: >-
+        False positive. The three lines hold the commit hadolint's v2.15.1 tag points at
+        and the SHA256 of its LICENSE and ThirdPartyNotices.txt files at that commit, which
+        the third-party-license test compares the vendored copies against. They are public
+        digests, not credentials. Pinned to the three lines so a value added elsewhere in
+        the file still reports; the inline pragma on each line is detect-secrets', which
+        ferret-scan does not read.
     - rule_id: API_KEY_OR_SECRET
       path: tests/unit/plugin_modules/ash_snyk_plugins/test_snyk_code_scanner_behavior.py
       reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
@@ -272,6 +270,22 @@ global_settings:
     - path: pyproject.toml
       rule_id: API_KEY_OR_SECRET
       reason: "False positive — hatch build config paths contain strings that match secret patterns"
+    # === GuardDog false positives, continued: the docs-CI and MCP waves ===
+    #
+    # The same dispositions as the line-pinned block below: heuristics matching
+    # docstrings that NAME sensitive paths, fixtures that PLANT the hazard a test
+    # asserts is refused, and a doc-claims harness talking to its own loopback
+    # server. One entry per finding, pinned to its line.
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/cli/mcp/source_delivery.py
+      line_start: 2252
+      line_end: 2252
+      reason: "A docstring bullet naming /etc/passwd as an example of the absolute archive paths delivery REJECTS; prose, not a read."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/utils/path_matching.py
+      line_start: 218
+      line_end: 218
+      reason: "A docstring naming .env and .npmrc as dotfiles the detect-secrets scan set must keep; prose, not a read."
     # === ferret-scan API_KEY_OR_SECRET, unquoted-assignment false positives ===
     # ferret-scan v2.3.3 added unquoted keyword-assignment detection to the SECRETS
     # validator, so an ordinary identifier whose NAME is a secret keyword (session,
@@ -590,8 +604,8 @@ global_settings:
     # look like high-entropy secrets because a SHA256 is high-entropy.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 334
-      line_end: 439
+      line_start: 353
+      line_end: 464
       reason: >-
         False positive — every string in this range is a published SHA256 release
         checksum or the SHA256 of what one of those verified archives extracts to.
@@ -614,8 +628,8 @@ global_settings:
         would silently swallow a real secret added here later.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 907
-      line_end: 933
+      line_start: 935
+      line_end: 979
       reason: >-
         False positive, the same shape as the entry above, over _THIRD_PARTY_HASHES:
         the commit SHA each bundled tool's release tag points to, and the SHA256 of
@@ -1490,51 +1504,33 @@ global_settings:
       line_start: 973
       line_end: 973
       reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
-    - rule_id: threat-filesystem-destruction
-      path: deploy/cdk-constructs/test/ash-scan-step.test.ts
-      line_start: 367
-      line_end: 367
-      reason: "'main; rm -rf /' is an input the test asserts is rejected at synth."
+    - rule_id: threat-process-download-exec
+      path: automated_security_helper/assets/install-pinned-tool.py
+      line_start: 1050
+      line_end: 1050
+      reason: "The second `uv tool dir` run, uv resolved with shutil.which; it runs nothing this script downloaded."
+    - rule_id: threat-process-download-exec
+      path: automated_security_helper/utils/python_installer.py
+      line_start: 80
+      line_end: 80
+      reason: "The pip install argv ASH builds for its own interpreter when it runs outside a uv tool environment; returned to the caller, which installs ASH's own pinned requirements. Nothing downloaded here is executed."
     - rule_id: threat-filesystem-read
-      path: deploy/cdk-constructs/test/ash-scan-step.test.ts
-      line_start: 362
-      line_end: 362
-      reason: "file:///etc/passwd is an input the test asserts is rejected as non-https."
-    - rule_id: threat-filesystem-destruction
-      path: tests/snapshot/test_snapshot_normalizer.py
-      line_start: 264
-      line_end: 264
-      reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
-    - rule_id: threat-filesystem-destruction
-      path: tests/snapshot/test_snapshot_normalizer.py
-      line_start: 272
-      line_end: 272
-      reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
-    - rule_id: threat-filesystem-read
-      path: tests/unit/test_artifact_contents_gate.py
-      line_start: 782
-      line_end: 782
-      reason: "Symlink target in a synthetic archive that the gate under test must reject."
-    - rule_id: threat-filesystem-read
-      path: tests/unit/test_artifact_contents_gate.py
-      line_start: 1469
-      line_end: 1469
-      reason: "Symlink target in a synthetic archive that the gate under test must reject."
-    - rule_id: threat-filesystem-read
-      path: tests/unit/test_defense_in_depth.py
-      line_start: 404
-      line_end: 404
-      reason: "'v1.0|cat /etc/passwd' is a revision string the test asserts is rejected."
-    - rule_id: threat-filesystem-read
-      path: tests/unit/test_pinned_tool_version_check.py
-      line_start: 1131
-      line_end: 1131
-      reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
-    - rule_id: threat-runtime-obfuscation-base64exec
-      path: tests/unit/utils/test_opengrep_pinned_download.py
-      line_start: 392
-      line_end: 392
-      reason: "Decodes a nix SRI hash to hex to compare with the pinned table; nothing is executed."
+      path: automated_security_helper/interactions/run_ash_container.py
+      line_start: 3943
+      line_end: 3943
+      reason: "The container.env file ASH writes, under a temporary directory it has checked is outside the source and output trees, to hand its own variables to the container runner; a write of ASH's file, not a read of a dotenv."
+    # === GuardDog: hits the self-scan reports with max_hits: 0 ===
+    # Measured with GuardDog 3.2.0 over the tree the plugin stages, with no hit limit
+    # (scanners.guarddog.options.max_hits: 0 in .ash/.ash_community_plugins.yaml, the
+    # config the self-scan runs GuardDog under). Each is code whose text is what the
+    # rule describes: an input a check must reject, a file planted under a test's
+    # temporary directory, a command string a test inspects, or one variable read by
+    # name. One entry per line, as above.
+    - rule_id: threat-runtime-environment-read
+      path: deploy/cdk/lib/ash-container-scripts.ts
+      line_start: 559
+      line_end: 559
+      reason: "The entrypoint reads one variable by name, ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN, the secret it needs to resolve; nothing else in the environment."
     # === trivy license scanner: two expressions the approved list does not match ===
     #
     # The approved-license entries above are keyed on rule ids of the form
@@ -1774,8 +1770,9 @@ global_settings:
     # The same entry as in .ash/.ash.yaml, where the default mode already made
     # this call. Without it here, the community scanners report the docs'
     # illustrative DATABASE_PASSWORD example (gitleaks and ferret-scan, on
-    # platform-teams.md, its .template and reference/coverage.md), which is not
-    # shipped code or a real credential.
+    # platform-teams.md, its .template and reference/coverage.md) and the docs
+    # UI suite's browser assertions (guarddog, on docs/ui-tests/specs), none of
+    # which are shipped code or real credentials.
     - path: "docs/**"
       reason: Documentation content with example code snippets — secrets/keywords in examples are illustrative, not real credentials.
 reporters:
@@ -1869,6 +1866,23 @@ scanners:
       severity_threshold: "MEDIUM"
   syft:
     enabled: false
+  # GuardDog stops a rule after 1, 3 or 5 hits per package root by default, so
+  # matches past that were never reported or reviewed. The self-scan removes the
+  # limit; every hit it then reports is either fixed or pinned to its line in the
+  # GuardDog suppressions above. Only this config raises it: ASH's default is
+  # unchanged.
+  guarddog:
+    options:
+      max_hits: 0
+      # The self-scan reads the product, not its tests. The unit and integration
+      # trees plant the hazards the tests assert ASH refuses (process spawns,
+      # downloads, dotfiles, traversal paths), and a line pin on a test file went
+      # stale at every move of the base. The product-file pins above stay.
+      excluded_paths:
+        - path: "tests/**"
+          reason: "Test code plants the hazards it asserts ASH refuses; the self-scan covers the product."
+        - path: "deploy/cdk-constructs/test/**"
+          reason: "Construct tests plant the inputs they assert synth rejects; the self-scan covers the product."
   ferret-scan:
     enabled: true
     options:

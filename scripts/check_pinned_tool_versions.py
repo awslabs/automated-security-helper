@@ -158,7 +158,19 @@ RELEASE_BINARY = "release-binary"  # TOOL_VERSIONS: one release asset per platfo
 UV_TOOL = "uv-tool"  # THIRD_PARTY_LICENSES with a distribution: a PyPI release
 RULES_BUNDLE = "rules-bundle"  # RULES_BUNDLES: one release archive of rule files
 GEM = "gem"  # GEM_PINS: a RubyGems release
-PIN_KINDS = (RELEASE_BINARY, UV_TOOL, RULES_BUNDLE, GEM)
+# THIRD_PARTY_LICENSES with bundled_in: a library a pinned wheel carries (see BUNDLED)
+BUNDLED_LIBRARY = "bundled-library"
+# THIRD_PARTY_LICENSES with none of the above, held to one version by a Dockerfile
+# ``ARG <TOOL>_VERSION=``: a dependency of a uv tool, such as the pygit2 GuardDog needs
+DOCKERFILE_ARG = "dockerfile-arg"
+PIN_KINDS = (
+    RELEASE_BINARY,
+    UV_TOOL,
+    RULES_BUNDLE,
+    GEM,
+    BUNDLED_LIBRARY,
+    DOCKERFILE_ARG,
+)
 
 # The gem CFN_NAG_GEM_VERSION is the version of; see assets/Gemfile.
 CFN_NAG_GEM = "cfn-nag"
@@ -276,8 +288,11 @@ def _github_project(url: str, where: str) -> str:
     return f"{parts[0]}/{parts[1]}"
 
 
-def enumerate_pins(pins: Any) -> list[Pin]:
+def enumerate_pins(pins: Any, dockerfile: Path = DOCKERFILE) -> list[Pin]:
     """Every pin ``pins`` carries, one per tool, sorted by tool name.
+
+    A license entry that no table names is a pin only when ``dockerfile`` has an
+    ``ARG <TOOL>_VERSION=`` for it.
 
     Raises:
         PinEnumerationError: when a pin cannot be attributed to an upstream, when
@@ -357,9 +372,17 @@ def enumerate_pins(pins: Any) -> list[Pin]:
                     ecosystem=BUNDLED,
                     project=entry.bundled_in,
                     pinned_in=("THIRD_PARTY_LICENSES (bundled)",),
+                    kind=BUNDLED_LIBRARY,
                 )
             )
             continue
+        elif entry is not None and _dockerfile_args(tool, dockerfile):
+            version = entry.version
+            kind = DOCKERFILE_ARG
+            pinned_in.append(f"Dockerfile ARG {_arg_stem(tool)}_VERSION")
+            project = _github_project(
+                entry.repository, f"THIRD_PARTY_LICENSES[{tool!r}].repository"
+            )
         else:
             # Only a license entry names it, so the version a bump changes is kept
             # somewhere this script does not read, and its steps would leave it out.
@@ -368,7 +391,8 @@ def enumerate_pins(pins: Any) -> list[Pin]:
                 f"THIRD_PARTY_LICENSES[{tool!r}] records {recorded}, but {tool} is "
                 "not in TOOL_VERSIONS or RULES_BUNDLES and has no distribution, so this "
                 "script cannot tell what a bump of it changes. Give it a kind in "
-                "PIN_KINDS, with its own steps in bump_steps."
+                "PIN_KINDS, with its own steps in bump_steps, or pin it with a "
+                f"Dockerfile ARG {_arg_stem(tool)}_VERSION."
             )
 
         if entry is not None:
@@ -876,6 +900,42 @@ def _uv_tool_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
     return _license_steps(pins, pin.tool, latest)
 
 
+def _bundled_library_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
+    """What a change to a bundled library's pin changes: its license entry only.
+
+    The library has no download of its own. Its version is whatever the wheel that
+    carries it holds, so the entry follows that wheel and not the library's releases.
+    """
+    steps = [
+        (
+            f"{pin.tool} is bundled in {pin.project}: set its version to the one "
+            "that wheel carries, not to the library's own latest release"
+        )
+    ]
+    return steps + _license_steps(pins, pin.tool, latest)
+
+
+def _dockerfile_arg_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
+    """A dependency held by a Dockerfile ARG: its license entry and what it carries.
+
+    The ARG itself is named for every kind, after these. A library entry whose
+    ``bundled_in`` names this tool records what the pinned wheel bundles, so a new
+    wheel can change it.
+    """
+    steps = _license_steps(pins, pin.tool, latest)
+    carried = sorted(
+        tool
+        for tool, entry in pins.THIRD_PARTY_LICENSES.items()
+        if getattr(entry, "bundled_in", None) and pin.tool in entry.bundled_in
+    )
+    if carried:
+        steps.append(
+            f"{', '.join(carried)}: bundled_in names {pin.tool}; re-read what the "
+            "new wheel bundles and update each entry"
+        )
+    return steps
+
+
 def _bundle_version_name(pins: Any, tool: str) -> str | None:
     """The module-level name ``RULES_BUNDLES[tool]`` takes its ``version=`` from.
 
@@ -968,6 +1028,8 @@ _KIND_STEPS: dict[str, Callable[[Any, Pin, str], list[str]]] = {
     UV_TOOL: _uv_tool_steps,
     RULES_BUNDLE: _rules_bundle_steps,
     GEM: _gem_steps,
+    BUNDLED_LIBRARY: _bundled_library_steps,
+    DOCKERFILE_ARG: _dockerfile_arg_steps,
 }
 
 

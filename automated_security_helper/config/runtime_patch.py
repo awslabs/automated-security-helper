@@ -376,6 +376,8 @@ _SHIPPED_PLUGIN_KEYS: Dict[str, FrozenSet[str]] = {
             "ferret-scan",
             "gitleaks",
             "grype",
+            "guarddog",
+            "hadolint",
             "npm-audit",
             "opengrep",
             "semgrep",

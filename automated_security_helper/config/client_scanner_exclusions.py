@@ -62,6 +62,13 @@ on a finding's path after the fact:
   any directory or run of directories in it, as semgrep documents it. A leading
   ``/`` anchors it at the scan root, and a leading ``./`` or ``**/`` is
   optional.
+* guarddog ``excluded_paths``: ASH's own path glob. A file it matches is not
+  given to GuardDog; the pattern is matched against the whole path of the file
+  relative to the source directory, with ``**`` standing for directories
+  (``utils/suppression_matcher.file_path_matches``). It is matched here by that
+  same function, not with the glob of the entries above, which also matches a
+  pattern against a directory or a run of directories in the path: ``vendor``
+  leaves out no file for GuardDog, so it hides no finding here.
 * trivy and trivy-repo ``ignore_file``: the file lists finding IDs. Each
   unexpired ID becomes an entry that matches a finding of that scanner with
   that rule ID (an ``AVD-`` prefix on either side is ignored); in a
@@ -122,7 +129,9 @@ from pydantic import BaseModel, ConfigDict
 
 from automated_security_helper.utils.log import ASH_LOGGER
 
-ExclusionKind = Literal["bandit", "checkov", "glob", "trivy-ignore-file"]
+ExclusionKind = Literal[
+    "bandit", "checkov", "glob", "guarddog-path", "trivy-ignore-file"
+]
 
 #: A trivy ignore file larger than this is not read.
 _MAX_IGNORE_FILE_BYTES = 1024 * 1024
@@ -159,6 +168,7 @@ SCANNER_EXCLUSION_OPTIONS: Tuple[ScannerExclusionOption, ...] = (
     ),
     ScannerExclusionOption("syft", "exclude", "glob"),
     ScannerExclusionOption("ferret-scan", "exclude_patterns", "glob"),
+    ScannerExclusionOption("guarddog", "excluded_paths", "guarddog-path"),
     ScannerExclusionOption("trivy-repo", "ignore_file", "trivy-ignore-file"),
     ScannerExclusionOption("trivy", "ignore_file", "trivy-ignore-file"),
 )
@@ -200,6 +210,12 @@ class ClientScannerExclusion(BaseModel):
             return checkov_skips(self.pattern, absolute, relative)
         if self.kind == "glob":
             return glob_excludes(self.pattern, relative)
+        if self.kind == "guarddog-path":
+            from automated_security_helper.utils.suppression_matcher import (
+                file_path_matches,
+            )
+
+            return file_path_matches(relative, self.pattern)
         if not rule_id or not _same_trivy_id(rule_id, self.pattern):
             return False
         if not self.paths:

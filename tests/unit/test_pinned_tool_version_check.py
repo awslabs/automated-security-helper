@@ -726,6 +726,10 @@ def _kind(pins: Any, tool: str) -> str:
     entry = pins.THIRD_PARTY_LICENSES.get(tool)
     if entry is not None and entry.distribution:
         return "uv-tool"
+    if entry is not None and getattr(entry, "bundled_in", None):
+        return "bundled-library"
+    if entry is not None and _dockerfile_args(tool):
+        return "dockerfile-arg"
     return "unknown"
 
 
@@ -935,6 +939,8 @@ class TestBumpStepsNameEveryValueABumpChanges:
         kinds = {p.tool: _kind(pins, p.tool) for p in checker.enumerate_pins(pins)}
         assert "unknown" not in kinds.values(), kinds
         assert set(kinds.values()) == {
+            "bundled-library",
+            "dockerfile-arg",
             "gem",
             "release-binary",
             "rules-bundle",

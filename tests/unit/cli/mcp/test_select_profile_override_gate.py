@@ -658,6 +658,11 @@ _CATEGORY_DENIALS: Dict[str, Any] = {
     "/scanners/trivy/options/ignore_unfixed": True,
     "/scanners/ferret-scan/options/max_live_bytes": "1KB",
     "/scanners/gitleaks/options/max_target_megabytes": 1,
+    "/scanners/guarddog/options/ecosystems": ["pypi"],
+    "/scanners/guarddog/options/rules": ["shady-links"],
+    "/scanners/guarddog/options/exclude_rules": ["shady-links"],
+    "/scanners/guarddog/options/verify": True,
+    "/scanners/guarddog/options/sandbox": "disabled",
 }
 #: Entries with the pointer each case writes and a value other than the
 #: default: a scanner's own config file, the programs it runs, whether it honors
@@ -755,6 +760,10 @@ _POINTED_DENIALS: Dict[str, Tuple[str, Any]] = {
     "/scanners/zizmor/options/online_audits": (
         "/scanners/zizmor/options/online_audits",
         True,
+    ),
+    "/scanners/hadolint/options/config_file": (
+        "/scanners/hadolint/options/config_file",
+        "/etc/other.yaml",
     ),
     "/scanners/*/options/tool_version": (
         "/scanners/checkov/options/tool_version",
@@ -1270,11 +1279,13 @@ def test_override_yaml_is_refused_by_every_shipped_denied_path(
     if entry.startswith(added_section):
         covering = first_denied_under(added_section)
     # The override restates the profile, which configures no ferret-scan,
-    # snyk-code or trivy-repo section, so its patch adds that whole section and
-    # the first denied entry under it is the one named.
+    # guarddog, hadolint, snyk-code or trivy-repo section, so its patch adds that
+    # whole section and the first denied entry under it is the one named.
     section = "/".join(entry.split("/")[:3]) + "/"
     plugin_section = section in (
         "/scanners/ferret-scan/",
+        "/scanners/guarddog/",
+        "/scanners/hadolint/",
         "/scanners/snyk-code/",
         "/scanners/trivy-repo/",
     )

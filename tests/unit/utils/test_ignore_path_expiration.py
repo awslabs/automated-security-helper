@@ -1474,6 +1474,14 @@ class TestEveryReaderFiltersExpiredEntries:
             "plugin_modules/ash_builtin/scanners/syft_scanner.py",
             "exclude",
         ): "scanner-option",
+        # Read as ``self._opts.excluded_paths`` in ``_candidate_files`` and turned
+        # into path filters there, not through active_ignore_paths(), so an
+        # expired entry still applies. It is kept apart from "scanner-option" so
+        # that the read check below does not claim the filter is applied.
+        (
+            "plugin_modules/ash_guarddog_plugins/guarddog_scanner.py",
+            "excluded_paths",
+        ): "option-not-filtered",
     }
     # Readers of a scanner option list that do not turn it into arguments.
     # None: bandit's _execute_scan does not save and restore the list.
