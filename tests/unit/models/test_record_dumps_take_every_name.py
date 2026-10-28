@@ -44,6 +44,13 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.undecodable_text import RecordModel
 
+# The constant below is a file name that is not UTF-8.
+if os.name == "nt":
+    pytest.skip(
+        "a file name that is not UTF-8 cannot exist on NTFS (names are UTF-16)",
+        allow_module_level=True,
+    )
+
 ODD = os.fsdecode(b"secr\xe9t.py")
 RECORDED = "secr\\udce9t.py"
 

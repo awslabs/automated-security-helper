@@ -29,18 +29,13 @@ permissions:
   contents: read
 
 concurrency:
-  # One in-flight run per pull request or branch; pushing again supersedes the previous
-  # run.
-  #
-  # github.ref is refs/pull/<n>/merge on pull_request, and on merge_group it is the
-  # per-entry gh-readonly-queue/main/pr-<n>-<sha> branch, so every queue entry lands
-  # in its own group and entries never serialize behind one another.
-  group: ${{ github.workflow }}-${{ github.ref }}
-  # pull_request runs may be cancelled, and so may push runs on branches other than
-  # main: a newer push to the same pull request or branch supersedes the build of its
-  # old head, and only a push to main deploys. A push to main must finish, because it is
-  # the publish, and a workflow_dispatch run was asked for by a person.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main') }}
+  # One in-flight deploy per published ref. A push to main publishes main; a call, or a
+  # workflow_dispatch run on a release tag, publishes that tag. In a called workflow
+  # github.ref and github.event_name belong to the caller, so the group is keyed on the
+  # `ref` input when one is given. A deploy is never cancelled: it is the publish, and
+  # the script redoes its version if a concurrent deploy pushed first.
+  group: docs-deploy-${{ inputs.ref && format('refs/tags/{0}', inputs.ref) || github.ref }}
+  cancel-in-progress: false
 
 jobs:
   deploy-docs:
@@ -81,7 +76,7 @@ jobs:
             text="${text//$'\xc2'[$'\x80'-$'\x9f']/ }"
             text="${text//$'\xe2\x80'[$'\xa8\xa9']/ }"
             while [[ "${text}" == *::* ]]; do text="${text//::/: :}"; done
-            while [[ "${text}" == *'##['* ]]; do text="${text//'##['/'# #['}"; done
+            while [[ "${text}" == *'##['* ]]; do text="${text//'##['/# #[}"; done
             printf '%s' "${text}"
           }
           __wcs_clock() {
@@ -90,6 +85,12 @@ jobs:
             if [ -z "${__wcs_now}" ]; then
               __wcs_now=$((SECONDS * 1000000))
             fi
+          }
+          __wcs_last_bg() {
+            case "$-" in
+              *u*) set +u; printf '%s' "$!"; set -u ;;
+              *) printf '%s' "$!" ;;
+            esac
           }
           __wcs_end_group() {
             local __wcs_now="" __wcs_until=""
@@ -114,8 +115,8 @@ jobs:
             return 1
           }
           __wcs_on_signal() {
-            if [ -z "${__wcs_pid}" ] && [ "${!:-}" != "${__wcs_before}" ]; then
-              __wcs_pid="${!:-}"
+            if [ -z "${__wcs_pid}" ] && [ "$(__wcs_last_bg)" != "${__wcs_before}" ]; then
+              __wcs_pid="$(__wcs_last_bg)"
             fi
             if [ -n "${__wcs_pid}" ]; then
               kill -s "$1" -- "-${__wcs_pid}" 2>/dev/null || kill -s "$1" "${__wcs_pid}" 2>/dev/null || true
@@ -145,7 +146,7 @@ jobs:
               return 1
             fi
             local __wcs_out="" __wcs_var="" __wcs_file="" __wcs_token __wcs_status=0
-            local __wcs_pid="" __wcs_interrupted="" __wcs_open="" __wcs_left="" __wcs_before="${!:-}"
+            local __wcs_pid="" __wcs_interrupted="" __wcs_open="" __wcs_left="" __wcs_before="$(__wcs_last_bg)"
             case "${1:-}" in
               --stdout) __wcs_out="$2"; shift 2 ;;
               --capture) __wcs_var="$2"; shift 2 ;;
@@ -220,12 +221,12 @@ jobs:
       # on release tags, so nothing a cache entry carries may reach it, and no job reads
       # an entry it would save.
       - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
         with:
           enable-cache: false
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 

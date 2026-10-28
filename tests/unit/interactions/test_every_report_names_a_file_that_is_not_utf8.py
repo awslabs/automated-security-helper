@@ -26,12 +26,22 @@ name the record form would change.
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+import pytest
+
 from tests.utils import undecodable_names as names
 from tests.utils.undecodable_names import ODD_BYTES
+
+# Every test here plants a file whose name is not UTF-8.
+if os.name == "nt":
+    pytest.skip(
+        "a file name that is not UTF-8 cannot exist on NTFS (names are UTF-16)",
+        allow_module_level=True,
+    )
 
 #: A plain file name of RECORDED's shape. A report writes the two alike, so its
 #: count of this one is the yardstick for RECORDED's.

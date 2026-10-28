@@ -238,6 +238,31 @@ class TestThePreReadCheckClassifiesEveryStatError:
         finally:
             locked.chmod(0o755)
 
+    def test_a_path_with_an_embedded_nul_is_refused_as_not_loadable(self):
+        """os.stat raises ValueError for a NUL in the path, which the check let out
+        as a bare error where every other bad path is refused as one that cannot
+        be read. An MCP client can send such a string (U+0000 is legal JSON); the
+        CLI cannot, since argv and the environment are C strings.
+
+        The message holds the path as describe_config_path writes it, the NUL
+        unescaped: the sink the message is shown through escapes it.
+        """
+        from automated_security_helper.cli.mcp import workspace as mcp_workspace
+        from automated_security_helper.config.config_sources import (
+            describe_config_path,
+        )
+        from automated_security_helper.config.resolve_config import check_config_path
+
+        name = "cfg\x00.yaml"
+
+        with pytest.raises(ASHConfigSourceError) as excinfo:
+            check_config_path(name)
+
+        message = str(excinfo.value)
+        assert describe_config_path(Path(name)) in message
+        assert "cannot be read" in message
+        assert mcp_workspace._exit_code_for(excinfo.value) == 3
+
 
 class TestARustPanicWhileResolvingIsRefused:
     """pydantic-core reports a Rust panic as pyo3's PanicException, a BaseException.

@@ -180,7 +180,7 @@ jobs:
             text="${text//$'\xc2'[$'\x80'-$'\x9f']/ }"
             text="${text//$'\xe2\x80'[$'\xa8\xa9']/ }"
             while [[ "${text}" == *::* ]]; do text="${text//::/: :}"; done
-            while [[ "${text}" == *'##['* ]]; do text="${text//'##['/'# #['}"; done
+            while [[ "${text}" == *'##['* ]]; do text="${text//'##['/# #[}"; done
             printf '%s' "${text}"
           }
           __wcs_clock() {
@@ -189,6 +189,12 @@ jobs:
             if [ -z "${__wcs_now}" ]; then
               __wcs_now=$((SECONDS * 1000000))
             fi
+          }
+          __wcs_last_bg() {
+            case "$-" in
+              *u*) set +u; printf '%s' "$!"; set -u ;;
+              *) printf '%s' "$!" ;;
+            esac
           }
           __wcs_end_group() {
             local __wcs_now="" __wcs_until=""
@@ -213,8 +219,8 @@ jobs:
             return 1
           }
           __wcs_on_signal() {
-            if [ -z "${__wcs_pid}" ] && [ "${!:-}" != "${__wcs_before}" ]; then
-              __wcs_pid="${!:-}"
+            if [ -z "${__wcs_pid}" ] && [ "$(__wcs_last_bg)" != "${__wcs_before}" ]; then
+              __wcs_pid="$(__wcs_last_bg)"
             fi
             if [ -n "${__wcs_pid}" ]; then
               kill -s "$1" -- "-${__wcs_pid}" 2>/dev/null || kill -s "$1" "${__wcs_pid}" 2>/dev/null || true
@@ -244,7 +250,7 @@ jobs:
               return 1
             fi
             local __wcs_out="" __wcs_var="" __wcs_file="" __wcs_token __wcs_status=0
-            local __wcs_pid="" __wcs_interrupted="" __wcs_open="" __wcs_left="" __wcs_before="${!:-}"
+            local __wcs_pid="" __wcs_interrupted="" __wcs_open="" __wcs_left="" __wcs_before="$(__wcs_last_bg)"
             case "${1:-}" in
               --stdout) __wcs_out="$2"; shift 2 ;;
               --capture) __wcs_var="$2"; shift 2 ;;
@@ -296,11 +302,11 @@ jobs:
           }
           EOF
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       # No uv cache: this job adds no cache other than the grype database it exists for.
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
         with:
           enable-cache: false
 

@@ -57,6 +57,13 @@ from automated_security_helper.utils.suppression_matcher import (
     ignore_path_matches,
 )
 
+# The constants below are file names that are not UTF-8.
+if os.name == "nt":
+    pytest.skip(
+        "a file name that is not UTF-8 cannot exist on NTFS (names are UTF-16)",
+        allow_module_level=True,
+    )
+
 ODD = os.fsdecode(b"secr\xe9t.py")
 RECORDED = "secr\\udce9t.py"
 ODD_DIR = os.fsdecode(b"caf\xe9")

@@ -1,17 +1,20 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The unit-test job's shards, and the pieces that must agree with them.
+"""The unit-test jobs' shards, and the pieces that must agree with them.
 
 Why this file exists
 --------------------
 The whole suite is about 47,000 items, which a 4-worker runner cannot finish inside any
 sensible job timeout, so ash-unified-ci.yml splits each OS and Python combination of the
-``unit-test`` job into shards. Four things have to agree for that to run every test
-exactly once and still gate coverage:
+unit-test matrix into shards. That matrix is three jobs, one per runner pool, so each
+pool carries its own ``max-parallel`` cap: ``unit-test-linux``, ``unit-test-macos`` and
+``unit-test-windows``. They are one test matrix cut in three, so the last class below
+holds them to the same Python versions, the same shards and the same steps. Four things
+have to agree for that to run every test exactly once and still gate coverage:
 
-* the ``shard`` axis in the workflow, one literal list whose entries each carry the total
-  they were cut for (``3of8``);
+* the ``shard`` axis in each of the three jobs, one literal list whose entries each
+  carry the total they were cut for (``3of8``);
 * ``tests/utils/sharding.py``, a ``pytest_ignore_collect`` hook that ignores the test
   modules another shard owns, so pytest's own ``testpaths``, ``python_files`` and ignore
   rules still decide what is collected;
@@ -69,6 +72,10 @@ COVERAGE_RUNNERS = [
 ]
 COVERAGE_PYTHON = "3.12"
 
+#: The unit-test matrix, split by OS family so each runner pool has its own max-parallel
+#: cap. Together the three jobs run what the single ``unit-test`` job ran.
+UNIT_TEST_JOB_IDS = ("unit-test-linux", "unit-test-macos", "unit-test-windows")
+
 
 def _load_script(filename: str) -> ModuleType:
     spec = importlib.util.spec_from_file_location(
@@ -94,10 +101,24 @@ def _action_step(name: str) -> dict[str, Any]:
     return steps[0]
 
 
+def _shard_axes() -> dict[str, list[str]]:
+    """The ``shard`` axis of each unit-test job, by job id."""
+    axes = {}
+    for job_id in UNIT_TEST_JOB_IDS:
+        axis = _workflow_job(job_id)["strategy"]["matrix"]["shard"]
+        assert isinstance(axis, list), (job_id, axis)
+        axes[job_id] = [str(entry) for entry in axis]
+    return axes
+
+
 def _shard_axis() -> list[str]:
-    axis = _workflow_job("unit-test")["strategy"]["matrix"]["shard"]
-    assert isinstance(axis, list), axis
-    return [str(entry) for entry in axis]
+    """The one shard axis the three unit-test jobs share; they must not differ."""
+    axes = _shard_axes()
+    first = axes[UNIT_TEST_JOB_IDS[0]]
+    assert all(axis == first for axis in axes.values()), (
+        f"the unit-test jobs disagree on the shard axis: {axes}"
+    )
+    return first
 
 
 def _pytest_ini_patterns(key: str) -> list[str]:
@@ -119,9 +140,10 @@ def _clean_env(**extra: str) -> dict[str, str]:
 
 
 class TestTheShardAxis:
-    def test_it_lists_every_shard_of_one_total_once(self):
+    @pytest.mark.parametrize("job_id", UNIT_TEST_JOB_IDS)
+    def test_it_lists_every_shard_of_one_total_once(self, job_id):
         """Dropping, repeating or renumbering an entry leaves part of the suite unrun."""
-        axis = _shard_axis()
+        axis = _shard_axes()[job_id]
         parsed = [sharding.parse_shard(entry) for entry in axis]
         counts = {count for _, count in parsed}
         assert len(counts) == 1, f"the shards disagree on their total: {axis}"
@@ -132,15 +154,17 @@ class TestTheShardAxis:
             "the tests of the missing shard run nowhere"
         )
 
-    def test_the_job_hands_its_shard_to_the_action(self):
-        steps = _workflow_job("unit-test")["steps"]
+    @pytest.mark.parametrize("job_id", UNIT_TEST_JOB_IDS)
+    def test_the_job_hands_its_shard_to_the_action(self, job_id):
+        steps = _workflow_job(job_id)["steps"]
         uses = [s for s in steps if s.get("uses") == "./.github/actions/run-unit-tests"]
         assert len(uses) == 1, steps
         assert uses[0]["with"]["shard"] == "${{ matrix.shard }}"
 
-    def test_the_job_name_carries_the_shard(self):
+    @pytest.mark.parametrize("job_id", UNIT_TEST_JOB_IDS)
+    def test_the_job_name_carries_the_shard(self, job_id):
         """Two legs with one name collide in the checks list and in artifacts."""
-        assert "matrix.shard" in _workflow_job("unit-test")["name"]
+        assert "matrix.shard" in _workflow_job(job_id)["name"]
 
 
 class TestTheShardFilter:
@@ -556,9 +580,14 @@ class TestTheCoverageJobReadsWhatTheShardsUpload:
     def test_it_gates_one_leg_per_os_family_the_matrix_runs(self):
         gated = _workflow_job("unit-coverage")["strategy"]["matrix"]["os"]
         assert sorted(gated) == sorted(os_name for os_name, _ in COVERAGE_RUNNERS)
-        tested = _workflow_job("unit-test")["strategy"]["matrix"]
-        assert set(gated) <= set(tested["os"])
-        assert COVERAGE_PYTHON in tested["python-version"]
+        matrices = {
+            job_id: _workflow_job(job_id)["strategy"]["matrix"]
+            for job_id in UNIT_TEST_JOB_IDS
+        }
+        tested_os = {os_name for m in matrices.values() for os_name in m["os"]}
+        assert set(gated) <= tested_os
+        for job_id, tested in matrices.items():
+            assert COVERAGE_PYTHON in tested["python-version"], job_id
 
     def test_each_leg_runs_where_its_shards_ran(self):
         """Same runner image, same workspace path: the reason no remapping is needed."""
@@ -567,7 +596,14 @@ class TestTheCoverageJobReadsWhatTheShardsUpload:
 
     def test_it_downloads_and_combines_its_family(self):
         job = _workflow_job("unit-coverage")
-        assert job["needs"] == "unit-test"
+        assert isinstance(job["needs"], list), job["needs"]
+        # ensure-cache is here because the job calls setup-ash, as every job that
+        # restores the uv cache lists the job that writes it. The three unit-test jobs
+        # need it too, so it adds no wait.
+        assert sorted(job["needs"]) == sorted([*UNIT_TEST_JOB_IDS, "ensure-cache"]), (
+            "the coverage gate must wait for all three unit-test jobs, or it combines "
+            "the shards of an OS family that is still running"
+        )
         # Exactly: ${{ cancelled() }} would read the other way round.
         assert job["if"] == "${{ !cancelled() }}", (
             "without !cancelled() a failed shard skips the job, and a skipped required "
@@ -596,6 +632,104 @@ class TestTheCoverageJobReadsWhatTheShardsUpload:
 
     def test_the_gate_still_lists_it(self):
         assert "unit-coverage" in _workflow_job("required-checks")["needs"]
+
+
+class TestTheUnitTestMatrixIsSplitByOs:
+    """The three unit-test jobs are one test matrix cut by runner pool, and stay one.
+
+    Each job has its own ``max-parallel`` and its own runner images, which is the only
+    reason there are three. Everything else has to match, or one OS family would run a
+    different suite from the others: other Python versions, a shard dropped from one job
+    only, or a step edited in one of three copies.
+    """
+
+    @staticmethod
+    def _jobs() -> dict[str, dict[str, Any]]:
+        return {job_id: _workflow_job(job_id) for job_id in UNIT_TEST_JOB_IDS}
+
+    @staticmethod
+    def _differing(base: dict[str, Any], other: dict[str, Any]) -> list[str]:
+        return sorted(
+            k for k in base.keys() | other.keys() if base.get(k) != other.get(k)
+        )
+
+    @staticmethod
+    def _comparable(job: dict[str, Any]) -> dict[str, Any]:
+        """The job without what the split is for: its cap and its matrix."""
+        strategy = {
+            k: v
+            for k, v in job["strategy"].items()
+            if k not in ("matrix", "max-parallel")
+        }
+        return {
+            **{k: v for k, v in job.items() if k != "strategy"},
+            "strategy": strategy,
+        }
+
+    def test_the_comparison_can_fail(self):
+        """Positive control: the diff helper reports a key that differs."""
+        assert self._differing({"a": 1, "b": 2}, {"a": 1, "b": 3}) == ["b"]
+        assert self._differing({"a": 1}, {"a": 1}) == []
+
+    def test_the_workflow_has_these_three_unit_test_jobs_and_no_other(self):
+        jobs = yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))["jobs"]
+        found = sorted(name for name in jobs if name.startswith("unit-test"))
+        assert found == sorted(UNIT_TEST_JOB_IDS), found
+
+    def test_no_runner_image_is_in_two_of_the_jobs(self):
+        os_lists = {
+            job_id: job["strategy"]["matrix"]["os"]
+            for job_id, job in self._jobs().items()
+        }
+        for job_id, os_list in os_lists.items():
+            assert isinstance(os_list, list) and os_list, (job_id, os_list)
+        runners = [name for os_list in os_lists.values() for name in os_list]
+        assert len(runners) == len(set(runners)), (
+            "a runner image is in more than one unit-test job, so its legs would run "
+            f"twice under two caps and share a check name: {os_lists}"
+        )
+
+    def test_the_jobs_agree_on_python_versions_and_shards(self):
+        matrices = {
+            job_id: job["strategy"]["matrix"] for job_id, job in self._jobs().items()
+        }
+        for axis in ("python-version", "shard"):
+            values = {job_id: matrix[axis] for job_id, matrix in matrices.items()}
+            first = values[UNIT_TEST_JOB_IDS[0]]
+            assert all(value == first for value in values.values()), (axis, values)
+
+    def test_the_matrices_have_the_same_axes_and_no_include_or_exclude(self):
+        keys = {
+            job_id: sorted(job["strategy"]["matrix"])
+            for job_id, job in self._jobs().items()
+        }
+        first = keys[UNIT_TEST_JOB_IDS[0]]
+        assert all(value == first for value in keys.values()), keys
+        assert not {"include", "exclude"} & set(first), (
+            "an include or an exclude changes the leg count, and the job counts in the "
+            f"workflow comments are checked against it: {keys}"
+        )
+
+    def test_the_steps_are_the_same_in_all_three(self):
+        steps = {job_id: job["steps"] for job_id, job in self._jobs().items()}
+        first = steps[UNIT_TEST_JOB_IDS[0]]
+        assert first, steps
+        for job_id, value in steps.items():
+            assert value == first, f"{job_id} runs different steps from the others"
+
+    def test_the_rendered_job_names_are_the_same_shape(self):
+        names = {job_id: job["name"] for job_id, job in self._jobs().items()}
+        first = names[UNIT_TEST_JOB_IDS[0]]
+        assert first.startswith("unit-test ("), first
+        assert all(value == first for value in names.values()), names
+
+    def test_the_jobs_differ_in_nothing_but_their_cap_and_their_runner_images(self):
+        jobs = self._jobs()
+        first_id, *others = UNIT_TEST_JOB_IDS
+        base = self._comparable(jobs[first_id])
+        for job_id in others:
+            differing = self._differing(base, self._comparable(jobs[job_id]))
+            assert not differing, f"{job_id} differs from {first_id} in {differing}"
 
 
 class TestTheCombineGate:

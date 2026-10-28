@@ -348,6 +348,7 @@ uv run ash --offline --exclude-scanners snyk-code
 
 ### Pre-commit Hook
 
+<!-- doctest: config kind=pre-commit -->
 ```yaml
 # .pre-commit-config.yaml
 repos:
@@ -362,6 +363,7 @@ repos:
 
 ### GitHub Actions
 
+<!-- doctest: config kind=github-actions runner=none reason="a workflow for the reader's own repository, which needs a Snyk token" -->
 ```yaml
 # .github/workflows/security.yml
 name: Security Scan
@@ -392,6 +394,7 @@ jobs:
 
 ### GitLab CI
 
+<!-- doctest: config kind=gitlab-ci runner=none reason="a pipeline for the reader's own project, which needs a Snyk token" -->
 ```yaml
 # .gitlab-ci.yml
 snyk-security-scan:

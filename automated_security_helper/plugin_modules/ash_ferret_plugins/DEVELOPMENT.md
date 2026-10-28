@@ -124,7 +124,7 @@ The plugin always outputs SARIF format, which is required by ASH for result aggr
 self.args = ToolArgs(
     format_arg="--format",
     format_arg_value="sarif",  # Always SARIF - required by ASH
-    ...
+    # ... the other arguments
 )
 ```
 
@@ -460,9 +460,9 @@ When making changes to the plugin:
    <!-- doctest: illustrative reason="a fragment of plugin code that names objects defined elsewhere" -->
    ```python
    if compare_versions(self.tool_version, "2.0.0") >= 0:
-       # New behavior for v2.0.0+
+       pass  # New behavior for v2.0.0+
    else:
-       # Old behavior
+       pass  # Old behavior
    ```
 3. Update version constants
 4. Update tests and documentation
@@ -481,6 +481,7 @@ with patch.object(scanner, '_pre_scan', return_value=True), \
      patch.object(scanner, '_plugin_log'), \
      patch("builtins.open", mock_open(read_data=json.dumps(mock_sarif_response))), \
      patch("pathlib.Path.exists", return_value=True):
+    ...  # run the scan under test here
 ```
 
 **Why**: The scanner uses subprocess to run ferret-scan, and we don't want to actually execute it in unit tests.
@@ -584,7 +585,7 @@ pattern another walked file that nothing ignores holds is left out rather than
 widened, and so is a path with a comma; ferret-scan reads those files and ASH drops
 their findings. The configured `exclude_patterns` are passed as written.
 
-### 10. CLI Args Override the Bundled Config's Defaults (`--exclude`, `--recursive`)
+### 10. CLI Args Override the Bundled Config's Defaults (`ferret-scan --exclude`, `ferret-scan --recursive`)
 
 Correction (verified against ferret-scan v2.4.5): an earlier version of this note claimed
 the bundled `ferret-config.yaml`, when loaded via `--config`, overrides CLI arguments so
@@ -598,7 +599,7 @@ backwards.** ferret-scan's CLI flags take precedence over the config file's `def
 ```
 
 So ASH's `exclude_patterns` (and the paths the global ignore paths ignore, which the
-plugin adds to `--exclude`; section 9) are **honoured regardless of `use_default_config`** — a security-relevant
+plugin adds to `ferret-scan --exclude`; section 9) are **honored regardless of `use_default_config`**, a security-relevant
 guarantee: ignore paths are respected. Setting `use_default_config: false` is **not**
 required for excludes to work.
 
@@ -1348,7 +1349,8 @@ scanners:
 Add a `pip install ferret-scan` step in the "Install Community Plugin Tools" block,
 alongside the Snyk and Trivy installs:
 
-```yaml
+<!-- doctest: illustrative reason="installs ferret-scan from the network, as one step of a workflow in this repository" -->
+```bash
 # Install ferret-scan (cross-platform via pip)
 echo "Installing ferret-scan..."
 pip install ferret-scan

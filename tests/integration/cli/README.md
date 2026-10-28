@@ -6,7 +6,7 @@ client does, rather than calling the tool functions directly.
 ## How to run them
 
 These tests are gated. `tests/conftest.py` skips anything marked `integration` unless
-`--run-integration` is passed. Read the summary line:
+`pytest --run-integration` is run. Read the summary line:
 
 <!-- doctest: illustrative reason="runs in a checkout of this repository" -->
 ```bash
@@ -55,7 +55,8 @@ convention that a domain failure comes back as a successful call carrying
 `success: False` while an unknown tool or a missing required argument comes back with
 `is_error: True`; `resources/list` and `resources/read` for all five resources, with a
 structural check on the generated config schema and an equality check of `ash://exit-codes`
-against `ASH_EXIT_CODES` and its `commands` entry against `ASH_EXIT_BAD_SELECTION`;
+against the exit-code table in `automated_security_helper/core/constants.py` and its
+`commands` entry against the bad-selection exit code defined beside it;
 `prompts/get` for both prompts including argument
 interpolation; and the `ASH_MCP_ALLOWED_ROOTS` scan-target policy in both directions.
 

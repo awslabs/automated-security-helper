@@ -586,9 +586,9 @@ Out of scope:
   So the scanners and converters that read the scan set
   are not given it, and npm-audit does not audit a package whose files link out of
   the tree. The scanners that walk the directory they scan themselves are told to
-  skip each such link in their own exclusion option: bandit's `--exclude`, one
-  checkov `--skip-path` each, ferret-scan's `--exclude`, grype's and syft's
-  `--exclude`, and trivy-repo's `--skip-files`. Where a link's path cannot be put in
+  skip each such link in their own exclusion option: `bandit --exclude`, one
+  `checkov --skip-path` each, `ferret-scan --exclude`, `grype --exclude` and
+  `syft --exclude`, and `trivy --skip-files` for trivy-repo. Where a link's path cannot be put in
   that option alone (a comma, a glob character or a line break, or a path another
   file's path holds, for bandit; values checkov's terraform module finder cannot
   compile into its one regex for checkov; a comma, or a path another file's path

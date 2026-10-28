@@ -717,12 +717,12 @@ ALLOWLIST: tuple[Entry, ...] = (
         file=".github/actions/setup-ash/action.yml",
         kind=KIND_BUILTIN_CACHE,
         action=_SETUP_UV,
-        publishes=(
-            "enable-cache=true "
-            "save-cache=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}"
-        ),
+        publishes=("enable-cache=true save-cache=${{ inputs.save-cache }}"),
         reason=_UV_CACHE_REASON
-        + " Saved from a push to main only; every other ref restores and writes nothing.",
+        + " Saved only by a caller that passes save-cache, which is the ensure-cache"
+        " job in ash-unified-ci.yml; every other caller restores and writes nothing."
+        " ensure-cache syncs without installing ASH itself, so what it saves is the"
+        " packages ASH depends on and nothing ASH builds.",
     ),
     Entry(
         file=".github/workflows/ash-package.yml",
@@ -1230,7 +1230,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
         with:
           enable-cache: true
       - name: Upload the wheel

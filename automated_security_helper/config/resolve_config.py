@@ -4383,12 +4383,14 @@ def _resolve_config(
             # the default config.
             config_stat = stat_named_path(config_path)
             if isinstance(config_stat, StatProblem):
-                # A symbolic link loop or a denied stat is not a missing
-                # file: falling back to the default config would run the scan
-                # with settings the operator did not choose. Only a missing
-                # path keeps the documented fallback; everything else is
-                # refused as the path problem it is, named by the errno's code
-                # and the caller's own path text, never a value.
+                # Every stat problem is refused as the problem it is, a
+                # missing file included: falling back to the default config
+                # would run the scan with settings the operator did not
+                # choose, and with none of the named file's suppressions and
+                # ignore paths. Only the absence of any config file (above)
+                # resolves to the defaults. A refusal names the errno's code
+                # where it has one and the caller's own path text, never a
+                # value.
                 if config_stat.kind == LOOP:
                     raise ASHConfigValidationError(
                         f"Config file is a symbolic link loop: {config_path.as_posix()}"
@@ -4398,18 +4400,11 @@ def _resolve_config(
                         f"Config file cannot be read ({config_stat.code}): "
                         f"{config_path.as_posix()}"
                     ) from config_stat.cause()
-                # One line: the path is the caller's text.
-                ASH_LOGGER.warning(
-                    shown_on_one_line(
-                        f"Configuration file not found: {config_path.as_posix()}"
-                    ),
-                    extra=NO_MARKUP,
-                )
-                config = overlaid_fallback(config)
-                # Apply overrides to default config if provided
-                if config_overrides and config:
-                    return apply_config_overrides(config, config_overrides)
-                return config  # Return default config if specified file doesn't exist
+                # MISSING, the one kind left: the words `ash report`, a scan and
+                # named_config.py use.
+                raise ASHConfigFileNotFoundError(
+                    f"Configuration file not found: {config_path.as_posix()}"
+                ) from config_stat.cause()
 
             # The second route to the one landing below: a caller that ran
             # discovery itself and named the file it selected (workspace mode,
@@ -4653,6 +4648,13 @@ def _config_file_not_loadable(config_path: Path) -> ASHConfigSourceError:
         return ASHConfigSourceError(
             f"Configuration file {where} cannot be read: {exc.strerror}"
         )
+    except ValueError:
+        # os.stat raises ValueError for a NUL in the path and UnicodeEncodeError,
+        # a ValueError, for a name the file system encoding cannot carry.
+        return ASHConfigSourceError(
+            f"Configuration file {where} cannot be read: the path is not a name "
+            "the file system can carry."
+        )
     return ASHConfigSourceError(
         f"Configuration file {where} is not a regular file, so it cannot be read."
     )
@@ -4669,9 +4671,13 @@ def check_config_path(config_path: Path | str) -> Path:
     path = Path(config_path)
     # os.stat, not Path.is_file: before Python 3.14 is_file raises for an error
     # other than "not found" (a directory above that cannot be searched).
+    # os.stat raises ValueError for a string with an embedded NUL, and
+    # UnicodeEncodeError, a ValueError, for a name the file system encoding
+    # cannot carry; both are "not a file that can be read", refused as a missing
+    # file is.
     try:
         regular = stat.S_ISREG(os.stat(path).st_mode)
-    except OSError:
+    except (OSError, ValueError):
         regular = False
     if not regular:
         raise _config_file_not_loadable(path)

@@ -53,6 +53,12 @@ from automated_security_helper.core.previous_results import (
 from tests.utils.helpers import checkout_env
 from tests.utils.processes import process_running
 
+# Windows has no SIGHUP, and STOPPED_BY below reads signal.SIGHUP when the module is
+# imported, which raised AttributeError at collection. The whole module is about
+# POSIX signals, so it is skipped before that line runs.
+if sys.platform == "win32":
+    pytest.skip("POSIX signals", allow_module_level=True)
+
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
 
 STARTUP_TIMEOUT_SECONDS = 180

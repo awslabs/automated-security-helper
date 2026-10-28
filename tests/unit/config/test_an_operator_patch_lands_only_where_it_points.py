@@ -1,19 +1,23 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""An operator's patch lands only in the section its pointer names.
+"""An operator's patch never reaches a repository file that uses a YAML alias.
 
-A YAML anchor in a repository file makes two sections, or two sections'
-options, ONE mapping, and jsonpatch's ``in_place=False`` application
-deep-copies the document with that sharing kept, so an operator patch adding
-an option through one section's pointer used to land in every section the
-alias shares. Where the second section's model refuses the added key, the
-aliased document's load was refused outright while its alias-free spelling
-loaded. The contract is parity with the alias-free spelling of the same
-document: the write lands where the pointer says and nowhere else, whatever
-anchors the repository used. Both operator routes reach the patch: a named
-``--config`` root and an ``ASH_CONFIG`` root, each extending the repository's
-file.
+A YAML anchor in a repository file would make two sections, or two sections'
+options, ONE mapping, so a patch adding an option through one section's pointer
+could land in every section the alias shares. ASH closes that at the parse:
+``_NoAliasSafeLoader`` refuses every YAML alias in a config file, so a
+repository file that uses one is refused before any operator patch is applied,
+and the refusal gives the parser's type and where it stopped
+(``could not be parsed (ComposerError at line N, column M)``) and quotes none
+of the file's text. The contract is the refusal, on both operator routes: a
+named ``--config`` root and an ``ASH_CONFIG`` root, each extending the
+repository's file.
+
+The control is each shape's alias-free spelling, which must load: the patch
+there lands where its pointer says and nowhere else. A shape whose alias-free
+spelling stopped loading would pass for the wrong reason, so the premise is
+checked before the refusal is.
 """
 
 import json
@@ -162,9 +166,10 @@ def _cells():
 def test_an_operator_patch_lands_as_in_the_alias_free_spelling(
     tmp_path, monkeypatch, shape, route, write
 ):
-    """The operator's patch names ONE section. A repository alias must not
-    carry the write into a second section, nor make the load fail where the
-    alias-free spelling of the same document loads."""
+    """The operator's patch names ONE section. The alias-free spelling of the
+    repository file loads and takes the patch; the spelling with the alias is
+    refused at parse, before the patch is applied, in words that name the
+    place the parser stopped and quote nothing of the file."""
     aliased_text, plain_text = _SHAPES[shape]
     patch = _WRITES[write]
     aliased = _outcome(tmp_path / "a", route, aliased_text, patch, monkeypatch)
@@ -173,8 +178,11 @@ def test_an_operator_patch_lands_as_in_the_alias_free_spelling(
         raise RuntimeError(
             "premise: the alias-free spelling must load; got " + repr(plain)[:700]
         )
-    assert aliased == plain, (
+    assert aliased[0] == "refused" and aliased[1] == "ASHConfigSourceError", (
         aliased[0],
         tuple(piece[:700] for piece in aliased[1:]),
-        plain[1][:700],
     )
+    said = aliased[2]
+    assert "could not be parsed (ComposerError at line " in said, said[:700]
+    # Nothing of the file: not the anchor's name, not the alias marker.
+    assert "shared" not in said and "*" not in said, said[:700]

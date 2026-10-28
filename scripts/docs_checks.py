@@ -92,10 +92,6 @@ DOCS_WORKFLOW = ".github/workflows/ash-repo-docs.yml"
 #: The script that publishes the site as versions with mike, and checks that it can.
 DOCS_VERSIONS_SCRIPT = "scripts/docs_versions.py"
 
-#: The workflow that creates release tags, and so has to start the docs deploy for
-#: them: a tag pushed with GITHUB_TOKEN starts no workflow of its own.
-RELEASE_TAG_WORKFLOW = ".github/workflows/ash-tag-on-merge.yml"
-
 #: Fixture projects the docs-example runner can start a page in. ``fixture=<name>``
 #: on a marker names a directory here.
 DOC_FIXTURES_DIR = "tests/test_data/docs_fixtures"
@@ -5810,7 +5806,7 @@ UNREAD_RESPONSE_EXPLAINED = (
         "get_config",
         "automated_security_helper/config/environment_record.py",
         "_Index._string",
-        "def _string(self, text: str,",
+        "def _string(",
         "2026-12-31",
         "a string-shaping helper of the same dump.",
     ),
@@ -5832,57 +5828,9 @@ UNREAD_RESPONSE_EXPLAINED = (
     ),
     (
         "get_config",
-        "automated_security_helper/config/environment_record.py",
-        "with_written_text_shown",
-        "def with_written_text_shown(",
-        "2026-12-31",
-        "the dump re-rendered with written text shown.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/config/environment_record.py",
-        "with_written_text_shown",
-        "result[shown_key] = with_written_text_shown(",
-        "2026-12-31",
-        "the dump re-rendered with written text shown.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/config/environment_record.py",
-        "with_written_text_shown",
-        "return type(view)(",
-        "2026-12-31",
-        "the dump re-rendered with written text shown.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/cli/mcp_tools.py",
-        "mcp_get_config",
-        "return _yaml.safe_load(path.read_text()) or {}",
-        "2026-12-31",
-        "the tool's own body reshapes the loaded dump for display.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/cli/mcp_tools.py",
-        "mcp_get_config",
-        "return get_default_config().model_dump()",
-        "2026-12-31",
-        "the tool's own body reshapes the loaded dump for display.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/cli/mcp_tools.py",
-        "mcp_get_config",
-        "return resolved.model_dump()",
-        "2026-12-31",
-        "the tool's own body reshapes the loaded dump for display.",
-    ),
-    (
-        "get_config",
         "automated_security_helper/cli/mcp_tools.py",
         "_config_as_written",
-        "return _json.load(f)",
+        'return _json.loads(contents().decode("utf-8-sig"))',
         "2026-12-31",
         "the same dump as the file wrote it.",
     ),
@@ -5890,7 +5838,7 @@ UNREAD_RESPONSE_EXPLAINED = (
         "get_config",
         "automated_security_helper/cli/mcp_tools.py",
         "_config_as_written",
-        "return loader.get_single_data()",
+        "document = loader.get_single_data()",
         "2026-12-31",
         "the same dump as the file wrote it.",
     ),
@@ -5917,78 +5865,6 @@ UNREAD_RESPONSE_EXPLAINED = (
         "return {k: _mark_toml_references(v) for k, v in value.items()}",
         "2026-12-31",
         "the same dump with TOML references marked.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/config/config_sources.py",
-        "read_config_file",
-        "return json.load(f)",
-        "2026-12-31",
-        "the config loader returns the file's own values.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/config/config_sources.py",
-        "parse_config_text",
-        "return json.loads(text)",
-        "2026-12-31",
-        "the config loader returns the file's own values.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/config/config_sources.py",
-        "_resolve_toml_env",
-        "def _resolve_toml_env(",
-        "2026-12-31",
-        "the loader's TOML environment resolution over the same values.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/config/config_sources.py",
-        "_resolve_toml_env",
-        "return {k: _resolve_toml_env(v) for k, v in value.items()}",
-        "2026-12-31",
-        "the loader's TOML environment resolution over the same values.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/config/ash_config.py",
-        "resolve_env_references",
-        "def resolve_env_references(",
-        "2026-12-31",
-        "the loader's environment-reference resolution over the file's values.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/config/ash_config.py",
-        "resolve_env_references",
-        "return full_value.strip()",
-        "2026-12-31",
-        "the loader's environment-reference resolution over the file's values.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/config/ash_config.py",
-        "resolve_env_references",
-        "return value.strip()",
-        "2026-12-31",
-        "the loader's environment-reference resolution over the file's values.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/config/ash_config.py",
-        "load_yaml_config",
-        "return yaml.load(stream, Loader=_AshConfigLoader)",
-        "2026-12-31",
-        "the yaml load of the config file.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/config/ash_config.py",
-        "_load_single_document",
-        "return loader.get_single_data()",
-        "2026-12-31",
-        "one yaml document of the config file.",
     ),
     # The scan views return the loaded results file reshaped; each tool's
     # refusals are separate dict literals the reader follows.
@@ -6050,39 +5926,6 @@ UNREAD_RESPONSE_EXPLAINED = (
             "the progress record's keys come from the registry entry, whose"
             " failure field is error_message; the tool's refusals are separate"
             " dict literals the reader follows."
-        ),
-    ),
-    (
-        "select_profile",
-        "automated_security_helper/cli/mcp_tools.py",
-        "_materialize_or_error",
-        "return materialize(session_id, config)",
-        "2026-12-31",
-        (
-            "the materialized session record reshaped; refusals are separate"
-            " dict literals the reader follows."
-        ),
-    ),
-    (
-        "select_profile",
-        "automated_security_helper/cli/mcp_server.py",
-        "_with_session",
-        "def _with_session(",
-        "2026-12-31",
-        (
-            "the session record keys the session wrapper adds; refusals are"
-            " separate dict literals the reader follows."
-        ),
-    ),
-    (
-        "set_source_zip_chunk",
-        "automated_security_helper/cli/mcp_server.py",
-        "_with_session",
-        "def _with_session(",
-        "2026-12-31",
-        (
-            "the session record keys the session wrapper adds; refusals are"
-            " separate dict literals the reader follows."
         ),
     ),
 )
@@ -10323,16 +10166,6 @@ REQUIRED_VERSIONING = {
 REQUIRED_MIKE_PLUGIN = {"alias_type": "copy", "canonical_version": "latest"}
 
 
-def _workflow_runs(path: Path) -> list[str] | None:
-    """Every ``run:`` script in a workflow, or None when the file does not exist."""
-    import yaml
-
-    if not path.is_file():
-        return None
-    document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return list(_strings_under_keys(document, {"run"}))
-
-
 def check_site_build(root: Path = REPO_ROOT) -> list[Finding]:
     """mkdocs.yml and the docs workflows keep the build strict, offline, redirecting
     and versioned."""
@@ -10438,22 +10271,6 @@ def check_site_build(root: Path = REPO_ROOT) -> list[Finding]:
             )
         )
     findings += _workflow_findings(root)
-    tag_runs = _workflow_runs(root / RELEASE_TAG_WORKFLOW)
-    workflow_name = Path(DOCS_WORKFLOW).name
-    if tag_runs is not None and not any(
-        re.search(rf"\bgh\s+workflow\s+run\s+{re.escape(workflow_name)}\b", r)
-        for r in tag_runs
-    ):
-        findings.append(
-            Finding(
-                "site",
-                RELEASE_TAG_WORKFLOW,
-                1,
-                f"the tag workflow does not start {workflow_name} on the release tag, "
-                "so no release gets a docs version: a tag created with GITHUB_TOKEN "
-                "starts no workflow by itself",
-            )
-        )
     return findings
 
 

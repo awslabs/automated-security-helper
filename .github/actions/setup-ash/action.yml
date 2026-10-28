@@ -9,8 +9,20 @@ inputs:
     description: "Whether to install ASH via pip after setup"
     required: false
     default: "true"
+  save-cache:
+    description: >-
+      Whether this call saves uv's cache when the job ends. Every call restores it. Only
+      the ensure-cache job in ash-unified-ci.yml passes "true"; any other caller leaves
+      the default so that it reads the cache and never writes it.
+    required: false
+    default: "false"
 
 outputs:
+  uv-cache-hit:
+    description: >-
+      "true" when uv's cache was restored from an exact key match, "false" when it was
+      not. Read by ensure-cache to report its own hit rate.
+    value: ${{ steps.setup-uv.outputs.cache-hit }}
   scripts-dir:
     description: >-
       Directory holding the installed `ash` entry point (ash.exe on Windows). Empty
@@ -22,17 +34,22 @@ outputs:
 runs:
   using: "composite"
   steps:
-    # uv's cache: restored on every ref, saved from a push to main only, the same
-    # split as pip's cache below. A pull request restores its base branch's entry,
-    # so the entries it used to save were read by nobody but itself and spent the
-    # repository's cache quota.
+    # uv's cache: restored by every caller, saved only by a caller that passes
+    # `save-cache: "true"`. That is the ensure-cache job in ash-unified-ci.yml, and every
+    # other job in that workflow that uses this action waits for it, so the entry for its
+    # key is already there and it only reads. Before, every caller saved from a push to
+    # main, which put the whole matrix on the same keys at once.
+    #
+    # The key is the runner image plus a hash of the dependency files. It does not carry
+    # the matrix Python version: setup-uv looks up the interpreter the image ships
+    # (`uv python find`) here, before the setup-python step below has run.
     - name: Install uv
       id: setup-uv
-      uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
       with:
         version: "0.11.4"
         enable-cache: true
-        save-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        save-cache: ${{ inputs.save-cache }}
 
     - name: "Cache report: uv"
       if: ${{ !cancelled() && steps.setup-uv.outcome == 'success' }}
@@ -49,7 +66,7 @@ runs:
         echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
 
     - name: Set up Python ${{ inputs.python-version }}
-      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
       with:
         python-version: ${{ inputs.python-version }}
 

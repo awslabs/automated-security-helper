@@ -20,7 +20,10 @@ through its document or its own patch, which the walk used to skip.
 import pytest
 
 from automated_security_helper.config.resolve_config import resolve_config
-from automated_security_helper.core.exceptions import ASHConfigValidationError
+from automated_security_helper.core.exceptions import (
+    ASHConfigFileNotFoundError,
+    ASHConfigValidationError,
+)
 from tests.utils.helpers import mark_git_checkout
 
 
@@ -126,22 +129,26 @@ def test_a_junk_write_in_the_ash_config_chain_refuses_when_the_named_config_is_m
         resolve_config(config_path=missing, source_dir=src, fallback_to_default=False)
 
 
-def test_control_a_missing_named_config_resolves_to_none_over_a_clean_chain(
+def test_control_a_missing_named_config_is_refused_over_a_clean_chain(
     tmp_path, monkeypatch
 ):
-    """The load shape above is real and reaches the early return: with an
-    ASH_CONFIG chain of known modes it answers no config and refuses nothing,
-    so the refusal in the cell above is the junk pass's, not the missing
-    file's."""
+    """The load shape above is real and reaches the missing-file refusal: with
+    an ASH_CONFIG chain of known modes it is refused as a config file that is
+    not there, and not as a junk write, so the refusal in the test above is the
+    junk pass's, not the missing file's."""
     src = _scanned_tree(tmp_path)
     first = _write_text(tmp_path / "plain" / "a.yaml", "sandbox:\n  mode: firejail\n")
     last = _write_text(tmp_path / "plain" / "b.yaml", "sandbox:\n  mode: bwrap\n")
     _with_ash_config(monkeypatch, src, _root(tmp_path, "ash-root.yaml", [first, last]))
     missing = tmp_path / "cli" / "not-there.yaml"
-    assert (
+    with pytest.raises(ASHConfigFileNotFoundError) as refused:
         resolve_config(config_path=missing, source_dir=src, fallback_to_default=False)
-        is None
-    )
+    message = str(refused.value)
+    assert message.startswith("Configuration file not found: "), message
+    assert missing.as_posix() in message, message
+    # The junk pass's wording (_unknown_owned_mode_refusal) is absent, so this
+    # control still tells the two chains apart.
+    assert "sets a sandbox mode" not in message, message
 
 
 _SCALAR_OWNED_FILES = {

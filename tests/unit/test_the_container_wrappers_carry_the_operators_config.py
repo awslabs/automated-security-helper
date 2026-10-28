@@ -285,7 +285,10 @@ def test_a_trailing_config_with_no_value_is_refused(fake_runner, tmp_path):
     assert "Config file not found:" in output_text
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root reads an unreadable file anyway")
+@pytest.mark.skipif(
+    getattr(os, "geteuid", lambda: -1)() == 0,
+    reason="root reads an unreadable file anyway",
+)
 def test_an_unreadable_config_is_refused(fake_runner, tmp_path):
     source = tmp_path / "project"
     source.mkdir()

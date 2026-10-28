@@ -239,7 +239,7 @@ Setting one stops the scan with exit code 3 when ASH loads the plugins, before
 anything is converted or scanned. The error names the option's location and gives the
 message in the table, for example:
 
-```
+```text
 Configuration validation failed: scanners.ferret-scan.options (scanner 'ferret-scan'): Value error, Unsupported option 'debug' in ferret-scan plugin configuration. Use 'ferret_debug: true' instead. Bare 'debug' is blocked to avoid confusion with ASH's --debug flag.
 ```
 
@@ -487,6 +487,7 @@ cp $(python -c "import automated_security_helper.plugin_modules.ash_ferret_plugi
 
 Or create a minimal config that only overrides what you need:
 
+<!-- doctest: config kind=other reason="a ferret-scan configuration file, which ferret-scan reads, not ASH" -->
 ```yaml
 # my-ferret-config.yaml
 defaults:
@@ -587,7 +588,7 @@ pip install ferret-scan
 
 **Unsupported option error**:
 If the scan exits 3 with an error like:
-```
+```text
 Configuration validation failed: scanners.ferret-scan.options (scanner 'ferret-scan'): Value error, Unsupported option 'debug' in ferret-scan plugin configuration. Use 'ferret_debug: true' instead. Bare 'debug' is blocked to avoid confusion with ASH's --debug flag.
 ```
 
@@ -628,6 +629,7 @@ uv run ash --scanners ferret-scan -o ferret_verbose=true
 
 ### Pre-commit Hook
 
+<!-- doctest: config kind=pre-commit -->
 ```yaml
 # .pre-commit-config.yaml
 repos:
@@ -642,6 +644,7 @@ repos:
 
 ### GitHub Actions
 
+<!-- doctest: config kind=github-actions runner=none reason="a workflow for the reader's own repository, which installs ferret-scan from the network" -->
 ```yaml
 # .github/workflows/security.yml
 name: Security Scan
@@ -675,6 +678,7 @@ jobs:
 
 ### GitLab CI
 
+<!-- doctest: config kind=gitlab-ci runner=none reason="a pipeline for the reader's own project, which installs ferret-scan from the network" -->
 ```yaml
 # .gitlab-ci.yml
 ferret-security-scan:
@@ -683,7 +687,8 @@ ferret-security-scan:
   before_script:
     - pip install ferret-scan uv
   script:
-    - uv run ash --scanners ferret-scan \
+    - |
+      uv run ash --scanners ferret-scan \
         --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_ferret_plugins\"]"
   artifacts:
     reports:

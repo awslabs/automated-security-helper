@@ -26,7 +26,7 @@ The MCP server did not start. The plugin starts it with `uvx`, which needs uv on
 `installed: false` means no enabled built-in scanner has its tool available, so a scan would run nothing. `ready: false` with `installed: true` means some scanners will not run: `missing_dependencies` names them, and a scan reports them as not run. On the server's host, `ash dependencies install` installs the tools ASH can install itself.
 
 **Fix:** The MCP server needs ASH on its PATH. The standard install via `uvx`:
-```
+```bash
 uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash mcp
 ```
 

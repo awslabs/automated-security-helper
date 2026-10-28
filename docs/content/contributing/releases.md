@@ -138,13 +138,14 @@ request whose title starts with `chore(release):`, does the rest:
 - It creates the tag `v<version>` and a GitHub Release at the head of `main`, with the
   version's changelog entry followed by GitHub's generated notes.
 - It moves the floating major tag (see [Tags](#tags)).
-- It starts the docs workflow on the new tag, which publishes the release's docs
-  version (see [The documentation site](#the-documentation-site)).
+
+It does not start the docs workflow. See [The documentation site](#the-documentation-site)
+for how a release's docs version is published.
 
 ### The release App
 
 A pull request opened with the workflow's `GITHUB_TOKEN` does not start its own required checks
-(`ash / SAST, SCA, and IaC Scan`, `Validate PR title`, `required-checks`):
+("ash / SAST, SCA, and IaC Scan", `Validate PR title`, `required-checks`):
 GitHub creates the runs in an approval-required state, and a maintainer with write
 access has to select **Approve workflows to run** in the pull request's merge box. The
 release pull request says so in its description when that happens. To have the checks
@@ -189,21 +190,23 @@ release is the newest one, `v3` points at it, so `v3` can name a commit that is 
 
 ## The documentation site
 
-The site is versioned. Each push to `main` publishes the version `main`, and each
-release tag publishes a version named after the release: `v3.8.0` publishes `3.8.0`.
+The site is versioned. Each push to `main` publishes the version `main`. A release
+tag does not publish anything by itself. The docs workflow, run by hand on a release
+tag, publishes a version named after the release: `v3.8.0` publishes `3.8.0`.
 The newest release also moves the `latest` alias, which is where the site root and
 search engines send readers, so a release changes what most readers see. A patch
 release for an older line, built outside the workflow as described under
-[Tags](#tags), publishes its version when its tag is pushed and leaves `latest` where
-it is. The floating major tag publishes nothing. How the versions are built and
-checked is in [Testing the documentation](documentation.md#versioned-docs).
+[Tags](#tags), publishes its version when the docs workflow is run on its tag and
+leaves `latest` where it is. The floating major tag publishes nothing. How the
+versions are built and checked is in
+[Testing the documentation](documentation.md#versioned-docs).
 
 A tag that the tag workflow creates is created with `GITHUB_TOKEN`, and a push made with
-that token starts no workflow, so the docs workflow would never see it. The tag workflow
-therefore starts the docs workflow on the tag itself, with `workflow_dispatch`. If a
-release's docs version is missing (because that run failed, say), publish it again
-from **Actions > Docs Deploy > Run workflow**, choosing the release tag as the
-ref. Running it on `main` publishes `main` again.
+that token starts no workflow, so the docs workflow never runs on it, and the tag
+workflow does not start it. To publish a release's docs version, or to publish it again
+if the version is missing, run the docs workflow from **Actions > Docs Deploy > Run
+workflow**, choosing the release tag as the ref. Running it on `main` publishes `main`
+again.
 
 A tag pushed by hand runs the docs workflow as it is at the tagged commit. For a tag on
 a commit from before the site was versioned, that is the old workflow, whose

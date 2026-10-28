@@ -171,6 +171,7 @@ See [integration options](docs/content/integrations.md).
 
 After installing ASH, add this server to your MCP client's configuration:
 
+<!-- doctest: config kind=mcp-client -->
 ```json
 {
   "mcpServers": {
@@ -238,6 +239,7 @@ can name local paths directly.
 
 Add to `.pre-commit-config.yaml`:
 
+<!-- doctest: config kind=pre-commit -->
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
@@ -248,7 +250,7 @@ repos:
 
 Run `pre-commit run ash --all-files` to check the project.
 
-The `ash` hook runs precommit mode (bandit, detect-secrets, checkov, cdk-nag and npm-audit) and installs the `cdk` extra into its environment. It needs pre-commit running on Python 3.10 to 3.14, and Node.js and npm on `PATH` for cdk-nag and npm-audit. `ash-simple-scan` is the same hook under its earlier id, and `ash-full-scan` scans in the ASH container image instead. See [Using ASH with pre-commit](docs/content/tutorials/using-ash-with-pre-commit.md) for running without Node.js and for the container hook.
+The `ash` hook runs precommit mode (bandit, detect-secrets, checkov, cdk-nag and npm-audit) and installs the `cdk` extra into its environment. It needs pre-commit running on Python 3.10 to 3.14, and Node.js and npm on `PATH` for cdk-nag and npm-audit. `ash-simple-scan` is the same hook under its earlier id, and `ash-full-scan` scans in the ASH container image instead. See [Run ASH with pre-commit](docs/content/how-to/pre-commit.md) for running without Node.js and for the container hook.
 
 <a id="configuration"></a>
 

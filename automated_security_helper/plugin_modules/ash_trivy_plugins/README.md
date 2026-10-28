@@ -224,6 +224,7 @@ uv run ash --scanners trivy-repo --log-level DEBUG
 
 ### Pre-commit Hook
 
+<!-- doctest: config kind=pre-commit -->
 ```yaml
 # .pre-commit-config.yaml
 repos:
@@ -238,6 +239,7 @@ repos:
 
 ### CI/CD Pipeline
 
+<!-- doctest: config kind=github-actions runner=none reason="two steps for a job in the reader's own workflow, shown without the workflow around them" -->
 ```yaml
 # GitHub Actions example
 - name: Security Scan with Trivy

@@ -43,7 +43,7 @@ HELPER_TEXT = (
     "  text=\"${text//$'\\xc2'[$'\\x80'-$'\\x9f']/ }\"\n"
     "  text=\"${text//$'\\xe2\\x80'[$'\\xa8\\xa9']/ }\"\n"
     '  while [[ "${text}" == *::* ]]; do text="${text//::/: :}"; done\n'
-    "  while [[ \"${text}\" == *'##['* ]]; do text=\"${text//'##['/'# #['}\"; done\n"
+    "  while [[ \"${text}\" == *'##['* ]]; do text=\"${text//'##['/# #[}\"; done\n"
     "  printf '%s' \"${text}\"\n"
     "}\n"
 )

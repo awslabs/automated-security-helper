@@ -31,7 +31,8 @@ from automated_security_helper.utils.process_env import hold_environ, release_en
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 
 #: semgrep's own switch for its version check: the variable its
-#: ``--enable-version-check/--disable-version-check`` option reads. "0" is off.
+#: ``semgrep --enable-version-check`` / ``semgrep --disable-version-check`` option
+#: reads. "0" is off.
 _VERSION_CHECK_ENV = "SEMGREP_ENABLE_VERSION_CHECK"
 _VERSION_CHECK_OFF = "0"
 

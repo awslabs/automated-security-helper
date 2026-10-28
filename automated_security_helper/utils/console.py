@@ -106,6 +106,7 @@ class _AshConsole(Console):
     def print(
         self, *objects: Any, soft_wrap: Optional[bool] = None, **kwargs: Any
     ) -> None:
+        _follow_the_stream(self)
         if (
             soft_wrap is None
             and objects
@@ -322,12 +323,47 @@ def print(  # noqa: A001 - stands in for rich's print, which shadows the builtin
         write_console.file.flush()
 
 
+# Rich decides a console's color system once, when the console is built, by asking
+# its file whether it is a terminal. The global console is built when this module
+# is imported, and a stream that is a terminal then (or only claims to be one, as a
+# worker's null device can) but is not at the time of a print, would still get
+# escape sequences around every styled span: a captured stream on one OS held them
+# and nowhere else. So the decision is made again against the stream whenever the
+# stream's answer changes, never per print, and it is left to Rich's "auto" so
+# FORCE_COLOR and TTY_COMPATIBLE keep the say they have. The record below is the
+# answer the console was built under; the object is the one this module set up,
+# which a test that points rich at another console must keep to itself.
+_configured_for_tty: Optional[bool] = None
+_configured_console: Optional[Console] = None
+
+
+def _set_up_global_console() -> None:
+    """Set rich's global console up as this module does, and note what its stream
+    answered when it was built."""
+    global _configured_for_tty
+    settings = _global_console_settings()
+    answer = _is_terminal(settings["file"])
+    rich.reconfigure(**settings)
+    _configured_for_tty = answer
+
+
+def _follow_the_stream(console: Console) -> None:
+    """Build the global console again when its stream's terminal answer has changed
+    since it was built. Any other console, and a global console some other code
+    swapped in, is left as it is."""
+    if console is not _configured_console or rich.get_console() is not console:
+        return
+    if _is_terminal(console.file) != _configured_for_tty:
+        _set_up_global_console()
+
+
 # rich's own global console, which rich.print, Progress and Live use when given no
 # console, writes through the stream too. reconfigure keeps the object (code that
 # already holds it sees the change) and replaces its settings; it is called here
 # only, so nothing else may reconfigure it (the factory test fails on any other).
-rich.reconfigure(**_global_console_settings())
+_set_up_global_console()
 # Its class becomes the factory's too, so it doesn't wrap text off a terminal
 # either. Like reconfigure, this keeps the object: code that holds it already
 # prints through the new class. _AshConsole adds no state of its own.
 rich.get_console().__class__ = _AshConsole
+_configured_console = rich.get_console()

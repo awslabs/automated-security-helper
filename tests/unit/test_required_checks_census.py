@@ -37,7 +37,8 @@ step's text rather than by executing it.
 
 Since the gate stopped taking a runner when every dependency succeeded, the census in
 ``TestTheGateCoversItsWorkflow`` is also the one that runs on a green pull request: this
-file runs in every unit-test leg, and unit-test is in the gate's ``needs``.
+file runs in every unit-test leg, and the three unit-test jobs are in the gate's
+``needs``.
 """
 
 from __future__ import annotations
@@ -58,6 +59,10 @@ UNIFIED_CI = WORKFLOWS / "ash-unified-ci.yml"
 CENSUS_SCRIPT = REPO_ROOT / ".github" / "scripts" / "assert-required-checks-census.py"
 
 GATE_JOB = "required-checks"
+
+# The unit-test matrix is three jobs, one per runner pool, so each pool has its own
+# max-parallel cap. The gate waits for every one of them.
+UNIT_TEST_JOB_IDS = ("unit-test-linux", "unit-test-macos", "unit-test-windows")
 
 # The floor exists so a workflow that lost its jobs -- or a scanner that stopped finding
 # them -- cannot satisfy the agreement tests by finding nothing on both sides.
@@ -225,6 +230,41 @@ class TestTheGateCoversItsWorkflow:
             UNIFIED_CI.read_text(encoding="utf-8"), GATE_JOB, results
         )
         assert any(p == f"{needs[0]}: skipped" for p in problems), problems
+
+
+#: The two job-level conditions that keep a gated job running after a dependency failed.
+_STATUS_CONDITIONS = ("${{!cancelled()}}", "${{always()}}")
+
+
+def _jobs_skippable_unseen(jobs: dict[str, Any], gated: list[str]) -> list[str]:
+    """Gated jobs that can be skipped without the run being cancelled or a gated job failing.
+
+    A job with `needs:` and no status function is skipped when a dependency fails or is
+    skipped. That is harmless when the gate sees the dependency's own result, which
+    holds for a gated job that is created on every run: it has no `if:` and no `needs:`
+    of its own, so it can only succeed, fail or be cancelled, and the gate runs on the
+    last two. ensure-cache is that kind of dependency. Any other dependency is not
+    enough: an ungated one reports to nobody, one with an `if:` can be skipped quietly,
+    and one with `needs:` of its own can be skipped by a failure the gate never reads.
+    Those jobs have to run under `!cancelled()` or `always()` themselves.
+    """
+
+    def always_runs(name: str) -> bool:
+        job = jobs.get(name) or {}
+        return name in gated and not job.get("if") and not job.get("needs")
+
+    bad = []
+    for name in gated:
+        job = jobs[name]
+        condition = re.sub(r"\s+", "", str(job.get("if", "")))
+        needs = job.get("needs") or []
+        needs = [needs] if isinstance(needs, str) else list(needs)
+        if condition in _STATUS_CONDITIONS:
+            continue
+        if not condition and all(always_runs(dep) for dep in needs):
+            continue
+        bad.append(f"  {name}: needs={job.get('needs')} if={condition!r}")
+    return bad
 
 
 #: Jobs that carry the docs gates, and the commands that are the gate in each: lint
@@ -631,20 +671,50 @@ class TestTheGateActuallyRunsTheScript:
         A job with `needs:` and no status function is skipped whenever a dependency
         fails or is skipped -- and if that dependency is ungated, the gate would see
         neither. So every gated job with `needs` must run under `!cancelled()` or
-        `always()`, and no gated job may carry any other job-level `if:`.
+        `always()`, and no gated job may carry any other job-level `if:`. The one
+        exception is a job that waits only for gated jobs that run on every run and
+        have no `needs` of their own (ensure-cache): its failure is in the gate's
+        `needs`, so the skip that follows it is not unseen.
         """
         data = yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))
-        bad = []
-        for name in _needs_of(UNIFIED_CI, GATE_JOB):
-            job = data["jobs"][name]
-            condition = re.sub(r"\s+", "", str(job.get("if", "")))
-            if job.get("needs") or condition:
-                if condition not in ("${{!cancelled()}}", "${{always()}}"):
-                    bad.append(f"  {name}: needs={job.get('needs')} if={condition!r}")
+        bad = _jobs_skippable_unseen(data["jobs"], _needs_of(UNIFIED_CI, GATE_JOB))
         assert not bad, (
             "these gated jobs can be skipped without the run being cancelled, which "
             "the gate's condition cannot see:\n" + "\n".join(bad)
         )
+
+    def test_a_job_that_waits_on_an_always_running_gated_job_may_skip_with_it(self):
+        jobs = {"base": {}, "leaf": {"needs": ["base"]}}
+        assert _jobs_skippable_unseen(jobs, ["base", "leaf"]) == []
+
+    def test_a_job_that_waits_on_an_ungated_job_is_caught(self):
+        jobs = {
+            "warm": {"if": "github.event_name == 'push'"},
+            "leaf": {"needs": ["warm"]},
+        }
+        assert _jobs_skippable_unseen(jobs, ["leaf"]) == [
+            "  leaf: needs=['warm'] if=''"
+        ]
+
+    def test_a_job_that_waits_on_a_conditional_gated_job_is_caught(self):
+        jobs = {
+            "base": {"if": "${{ github.event_name == 'push' }}"},
+            "leaf": {"needs": ["base"]},
+        }
+        problems = _jobs_skippable_unseen(jobs, ["base", "leaf"])
+        assert any(p.startswith("  leaf:") for p in problems), problems
+
+    def test_a_job_that_waits_on_a_job_with_needs_of_its_own_is_caught(self):
+        jobs = {"a": {}, "b": {"needs": ["a"]}, "c": {"needs": ["b"]}}
+        problems = _jobs_skippable_unseen(jobs, ["a", "b", "c"])
+        assert [p.strip().split(":")[0] for p in problems] == ["c"], problems
+
+    def test_a_status_function_keeps_a_job_with_any_dependency_running(self):
+        jobs = {
+            "warm": {"if": "github.event_name == 'push'"},
+            "leaf": {"needs": ["warm"], "if": "${{ !cancelled() }}"},
+        }
+        assert _jobs_skippable_unseen(jobs, ["leaf"]) == []
 
     def test_unit_test_carries_the_census_to_the_gate(self):
         """The drift half of the census reaches the gate through unit-test.
@@ -652,9 +722,11 @@ class TestTheGateActuallyRunsTheScript:
         When every dependency succeeds the gate does not run, so the script's census
         is not taken on a runner. TestTheGateCoversItsWorkflow takes it instead, and it
         only gates a merge because this file is collected by the unit-test legs and
-        unit-test is in the gate's `needs`.
+        the three unit-test jobs are in the gate's `needs`.
         """
-        assert "unit-test" in _needs_of(UNIFIED_CI, GATE_JOB)
+        needs = _needs_of(UNIFIED_CI, GATE_JOB)
+        missing = [job_id for job_id in UNIT_TEST_JOB_IDS if job_id not in needs]
+        assert not missing, f"{GATE_JOB} does not wait for {missing}"
         assert Path(__file__).resolve().is_relative_to(REPO_ROOT / "tests" / "unit")
 
     def test_the_old_count_literal_is_gone(self):

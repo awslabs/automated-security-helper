@@ -1,24 +1,37 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A repository file's operator-only write never makes it unloadable.
+"""A repository file that uses a YAML alias is refused, not half-loaded.
 
 A YAML anchor lets two reporter sections share one options mapping, and
 ``copy.deepcopy`` keeps that sharing in the copy, so the operator-only strip
-that pops a confined option once per section used to pop the shared mapping
-twice and raise KeyError on the second section. The contract is the one the
-alias-free control shows: the file loads, each section's operator-only write
-is settled against the trusted base and warned about, and the resolved
-configuration holds the same reporters either way. Two routes reach the
-strip: the repository's own named config file, and an operator ASH_CONFIG
-root that extends the repository's file.
+that pops a confined option once per section would pop the shared mapping twice
+and raise KeyError on the second section. ASH does not try to load such a file:
+``_NoAliasSafeLoader`` refuses every YAML alias while the document is composed,
+so no section is ever shared and the strip never meets one.
+
+The contract is the refusal, with the alias-free spelling as the control. The
+aliased file is refused as a source error that gives the parser's type and
+where it stopped (``could not be parsed (ComposerError at line N, column M)``)
+and quotes none of the file; the same document with the value written out in
+each section loads, settles each section's operator-only write against the
+trusted base, warns about it, and holds the same project name and reporters.
+Two routes reach the strip, and both refuse: the repository's own named config
+file, and an operator ASH_CONFIG root that extends the repository's file.
+
+The test names say "loads like the alias-free one" from the older contract,
+where an alias loaded; they are kept so a test's id stays the same across the
+change of contract.
 """
 
 import json
 import logging
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.core.exceptions import ASHConfigSourceError
 
 _ALIASED = (
     "project_name: shared-options\n"
@@ -60,6 +73,15 @@ def _repository_file(root: Path, body: str) -> Path:
     return named
 
 
+def _assert_refused_at_parse(refused) -> None:
+    """The refusal gives the parse place and none of the file's text."""
+    said = str(refused.value)
+    assert "could not be parsed (ComposerError at line " in said, said
+    # Not the anchor's marker, nor a value or key the file wrote.
+    assert "*shared" not in said and "findings_scope" not in said, said
+    assert "suppressed" not in said, said
+
+
 def _reporters_and_warnings(config, caplog):
     reporters = config.model_dump(mode="json")["reporters"]
     warned = [
@@ -70,90 +92,87 @@ def _reporters_and_warnings(config, caplog):
     return reporters, warned
 
 
+def _assert_the_alias_free_control_loads(tmp_path, caplog, name):
+    """The control: the alias-free spelling of the same document loads, the
+    operator-only write is settled away and warned about, and the project name
+    reads back as written."""
+    control_root = tmp_path / name
+    control_file = _repository_file(control_root, _PLAIN)
+    with caplog.at_level(logging.WARNING):
+        control = resolve_config(config_path=str(control_file), source_dir=control_root)
+    _, control_warned = _reporters_and_warnings(control, caplog)
+
+    dump = json.dumps(control.model_dump(mode="json"), default=str)
+    assert '"findings_scope": "suppressed"' not in dump, dump[:400]
+    assert control_warned, caplog.text
+    assert control.project_name == "shared-options"
+
+
 def test_an_aliased_repository_file_loads_like_the_alias_free_one(
     tmp_path, monkeypatch, caplog
 ):
     """The repository's own config file whose two reporter sections share one
-    options mapping through a YAML alias: the load succeeds, the operator-only
-    write is settled away and warned about, and the resolved reporters equal
-    the alias-free control's."""
+    options mapping through a YAML alias is refused at parse, and the same
+    document written out in each section loads (the control)."""
     monkeypatch.delenv("ASH_CONFIG", raising=False)
 
     aliased_root = tmp_path / "aliased"
     aliased_file = _repository_file(aliased_root, _ALIASED)
-    with caplog.at_level(logging.WARNING):
-        aliased = resolve_config(config_path=str(aliased_file), source_dir=aliased_root)
-    aliased_reporters, aliased_warned = _reporters_and_warnings(aliased, caplog)
-    caplog.clear()
+    with pytest.raises(ASHConfigSourceError) as refused:
+        resolve_config(config_path=str(aliased_file), source_dir=aliased_root)
+    _assert_refused_at_parse(refused)
 
-    control_root = tmp_path / "plain"
-    control_file = _repository_file(control_root, _PLAIN)
-    with caplog.at_level(logging.WARNING):
-        control = resolve_config(config_path=str(control_file), source_dir=control_root)
-    control_reporters, control_warned = _reporters_and_warnings(control, caplog)
-
-    # The write did not survive into the resolved configuration (the bare
-    # word appears in unrelated default option names, so the probe is the
-    # written pair)...
-    dump = json.dumps(aliased.model_dump(mode="json"), default=str)
-    assert '"findings_scope": "suppressed"' not in dump, dump[:400]
-    # ...the aliased form resolves to what the alias-free form resolves to...
-    assert aliased_reporters == control_reporters, (
-        aliased_reporters,
-        control_reporters,
-    )
-    # ...and both loads say what they settled.
-    assert aliased_warned and control_warned, (aliased_warned, control_warned)
+    _assert_the_alias_free_control_loads(tmp_path, caplog, "plain")
 
 
 def test_a_whole_section_alias_loads_like_the_alias_free_one(
     tmp_path, monkeypatch, caplog
 ):
-    """The alias shares the whole reporter section, so the un-sharing has to
-    copy the section itself before its options mapping: a copy of the options
-    alone still leaves both keys reading one section, whose second pop raises
-    as the shared mapping's did. Same contract as the options-level cells."""
+    """The alias shares the whole reporter section, not just its options
+    mapping. The refusal is the same: the loader refuses the alias wherever it
+    stands, so no copy of the section is ever needed. The alias-free control
+    loads."""
     monkeypatch.delenv("ASH_CONFIG", raising=False)
 
     aliased_root = tmp_path / "aliased-section"
     aliased_file = _repository_file(aliased_root, _ALIASED_SECTION)
-    with caplog.at_level(logging.WARNING):
-        aliased = resolve_config(config_path=str(aliased_file), source_dir=aliased_root)
-    aliased_reporters, aliased_warned = _reporters_and_warnings(aliased, caplog)
-    caplog.clear()
+    with pytest.raises(ASHConfigSourceError) as refused:
+        resolve_config(config_path=str(aliased_file), source_dir=aliased_root)
+    _assert_refused_at_parse(refused)
 
-    control_root = tmp_path / "plain-section"
-    control_file = _repository_file(control_root, _PLAIN)
-    with caplog.at_level(logging.WARNING):
-        control = resolve_config(config_path=str(control_file), source_dir=control_root)
-    control_reporters, control_warned = _reporters_and_warnings(control, caplog)
-
-    dump = json.dumps(aliased.model_dump(mode="json"), default=str)
-    assert '"findings_scope": "suppressed"' not in dump, dump[:400]
-    assert aliased_reporters == control_reporters, (
-        aliased_reporters,
-        control_reporters,
-    )
-    assert aliased_warned and control_warned, (aliased_warned, control_warned)
+    _assert_the_alias_free_control_loads(tmp_path, caplog, "plain-section")
 
 
 def test_an_operator_extends_of_an_aliased_repository_file_loads(
     tmp_path, monkeypatch, caplog
 ):
     """The second route to the strip: an operator ASH_CONFIG root extends the
-    repository file whose sections share one options mapping. The chain loads,
-    and the repository's operator-only write is settled away."""
-    root = tmp_path / "project"
-    named = _repository_file(root, _ALIASED)
-    operator = tmp_path / "operator.yaml"
-    operator.write_text(
-        f"extends:\n  - {named.as_posix()}\n",
+    repository file whose sections share one options mapping. The chain
+    refuses the base at parse, naming it as the base the operator's file
+    extends. The same chain over the alias-free file loads, and the
+    repository's operator-only write is settled away."""
+    aliased_root = tmp_path / "aliased-project"
+    aliased_named = _repository_file(aliased_root, _ALIASED)
+    aliased_operator = tmp_path / "aliased-operator.yaml"
+    aliased_operator.write_text(
+        f"extends:\n  - {aliased_named.as_posix()}\n",
         encoding="utf-8",
     )
-    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    monkeypatch.setenv("ASH_CONFIG", str(aliased_operator))
+    with pytest.raises(ASHConfigSourceError) as refused:
+        resolve_config(source_dir=aliased_root)
+    _assert_refused_at_parse(refused)
 
+    plain_root = tmp_path / "plain-project"
+    plain_named = _repository_file(plain_root, _PLAIN)
+    plain_operator = tmp_path / "plain-operator.yaml"
+    plain_operator.write_text(
+        f"extends:\n  - {plain_named.as_posix()}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ASH_CONFIG", str(plain_operator))
     with caplog.at_level(logging.WARNING):
-        config = resolve_config(source_dir=root)
+        config = resolve_config(source_dir=plain_root)
 
     dump = json.dumps(config.model_dump(mode="json"), default=str)
     assert '"findings_scope": "suppressed"' not in dump, dump[:400]

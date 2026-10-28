@@ -508,7 +508,7 @@
   names one beside the config instead; to keep using the repository's file, give
   its absolute path, or a path relative to where ASH runs with
   `--config-overrides`. See
-  [Relative paths in the operator's settings](docs/content/docs/configuration-guide.md#relative-paths-in-the-operators-settings).
+  [Relative paths in the operator's settings](docs/content/how-to/configure.md#relative-paths).
 
 - **In workspace mode, every field the operator's `--config` (or `ASH_CONFIG`)
   sets is final for every project.** Before, `ash --workspace ... --config <file>`
@@ -859,7 +859,7 @@
   so ASH's reported severity can differ from a scanner's own report. To keep a
   finding's severity where it is, suppress it or set the finding's own
   `issue_severity`. See "How ASH determines a finding's severity" in the
-  [scanner statistics guide](user-guide/scanner-statistics.md).
+  scanner statistics guide.
 
 - **A scanner that lost every target on any one tree now reports `ERROR`, on every
   scan, with nothing to opt into.** This is wider than the flag change above and
@@ -1252,7 +1252,7 @@
   `--config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_aws_plugins"]'`.
   Loading that package makes all four AWS reporters available, each on unless the
   operator's configuration turns it off, so turn off the ones you do not want; the
-  [`ash merge` reference](docs/content/docs/cli-reference.md#settings-a-shards-recorded-configuration-cannot-choose)
+  [`ash merge` reference](docs/content/reference/cli.md#merge--config)
   has an S3-only example. Shards that disagree on a verdict setting merge once
   `--config-overrides` sets it for all of them, or, for `fail_on_findings` and
   `fail_on_incomplete_scanners`, once the matching `ash merge` flag is given.
@@ -3082,7 +3082,7 @@
     (`automated-security-helper:<target>`, or your `ASH_IMAGE_NAME`), and
     `--no-build` runs it. Remove it, run `ash build-image --force`, and push again
     any copy you host in a registry.
-  See [Which Dockerfile ASH builds](docs/content/docs/building-your-own-image.md#which-dockerfile-ash-builds).
+  See [Which ASH goes into the image](docs/content/how-to/run-in-a-container.md#revision).
 - **Container mode always mounts the source directory read-only.** `ash --mode
   container`, `./ash` and `Invoke-ASH` used to mount `/src` read-write whenever the
   output directory was inside the source directory, which the default

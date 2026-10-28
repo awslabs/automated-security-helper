@@ -174,7 +174,7 @@ def test_findings_list_reporter():
 
 ## A reporter that sends findings somewhere
 
-The plugin from step 1 writes a local report. A reporter can also send the results elsewhere. This one uploads them to an S3 bucket and returns the object's `s3://` URL, which ASH writes as the report. Its region, profile, and bucket default to values from the environment of the process that runs ASH, and `validate_plugin_dependencies()` checks that it can reach the bucket before the scan uses it. Add it to the package from step 1, and list `FindingsBucketReporter` in `ASH_REPORTERS` beside `FindingsListReporter`:
+The plugin from step 1 writes a local report. A reporter can also send the results elsewhere. This one uploads them to an S3 bucket and returns the object's `s3://` URL, which ASH writes as the report. Its region, profile, and bucket default to values from the environment of the process that runs ASH, and `validate_plugin_dependencies()` checks that it can reach the bucket before the scan uses it. Add it to the package from step 1, and list `FindingsBucketReporter` in the reporter list of `__init__.py` beside `FindingsListReporter`:
 
 ```python
 import json

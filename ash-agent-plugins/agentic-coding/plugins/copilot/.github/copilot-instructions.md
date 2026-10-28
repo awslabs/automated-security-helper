@@ -20,7 +20,7 @@ The server scans on the machine it runs on, always in local mode, with the scann
 
 Call `run_ash_scan` with the absolute path to the project. The call returns immediately with a `scan_id`.
 
-```
+```python
 run_ash_scan(
     source_dir="/absolute/path/to/project",
     config_path=None,              # Optional path to .ash.yaml

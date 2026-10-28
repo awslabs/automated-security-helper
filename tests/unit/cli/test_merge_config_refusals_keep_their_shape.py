@@ -3,18 +3,19 @@
 """``ash merge``'s configuration refusals keep their lines and never trace back.
 
 Two refusals share the exit code 3 and the "Invalid configuration:" label but
-not their shape. The operator's ``--config`` load is refused on one line, and a
-newline in that line can only be the path's, so it is written ``\\x0a``. The
-refusals raised after the load, the shards' recorded configurations disagreeing
-on an exit-code setting among them, are written as a header, one line per setting
-and the advice, and are printed on those lines (``_invalid_config_lines``); the
+not their shape. Every configuration refusal is one line, and a newline in it
+can only be one the operator typed (a ``--config`` path, a ``--config-overrides``
+entry), so it is written ``\\x0a`` (``_invalid_config_text``). The one exception
+is the shards' recorded configurations disagreeing on an exit-code setting
+(``ShardSettingsDisagreeError``): it is written as a header, one line per setting
+and the advice, and is printed on those lines (``_invalid_config_lines``); the
 one-line form wrote every break as the two characters ``\\x0a``.
 
-``resolve_operator_config`` asks ``Path.is_file`` before it reads. That call
-answers False for a missing file but re-raises every other stat error, so a
-``--config`` under a parent this user cannot search (EACCES) or with a name over
-the limit (ENAMETOOLONG) escaped as a traceback where the read errors beside it
-were refused with exit 3.
+``resolve_operator_config`` asks ``Path.is_file`` before it reads. Before Python
+3.14 that call answers False for a missing file but re-raises every other stat
+error, so a ``--config`` under a parent this user cannot search (EACCES) or with a
+name over the limit (ENAMETOOLONG) escaped as a traceback where the read errors
+beside it were refused with exit 3.
 """
 
 from __future__ import annotations
@@ -68,6 +69,51 @@ def test_the_shard_disagreement_refusal_prints_on_its_lines(tmp_path):
         result.output
     )
     assert "\\x0a" not in result.output, result.output
+    assert not (tmp_path / "merged").exists()
+
+
+def test_an_invalid_override_with_line_breaks_is_refused_on_one_line(tmp_path):
+    """The refusal quotes the override as the operator typed it, so a line break
+    in it must not start a log line of its own: the message is one line, with the
+    breaks written as escapes. Only the shard-disagreement refusal, above, is
+    written on several lines."""
+    override = "no-separator\r\nforged: first line\nforged: second line"
+
+    result = _merge(
+        [
+            "--config-overrides",
+            override,
+            *_results_args(tmp_path, build_shards(2)),
+        ]
+    )
+
+    assert result.exit_code == 3, result.output
+    lines = result.output.splitlines()
+    forged = [line for line in lines if line.startswith("forged:")]
+    assert not forged, result.output
+    assert (
+        "Invalid config override: "
+        "'no-separator\\x0d\\x0aforged: first line\\x0aforged: second line'"
+    ) in result.output, result.output
+    assert len([line for line in lines if "Invalid configuration:" in line]) == 1
+    assert "Traceback" not in result.output
+    assert not (tmp_path / "merged").exists()
+
+
+def test_control_an_invalid_override_without_line_breaks_prints_on_one_line(tmp_path):
+    result = _merge(
+        [
+            "--config-overrides",
+            "no-separator",
+            *_results_args(tmp_path, build_shards(2)),
+        ]
+    )
+
+    assert result.exit_code == 3, result.output
+    assert (
+        "Invalid configuration: Invalid config override: 'no-separator'. "
+        "Expected format: key.path=value"
+    ) in result.output, result.output
     assert not (tmp_path / "merged").exists()
 
 

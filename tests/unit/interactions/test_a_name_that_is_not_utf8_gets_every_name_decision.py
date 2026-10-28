@@ -62,6 +62,13 @@ from tests.utils.undecodable_names import (
     SUPPRESSED,
 )
 
+# Every test here plants a file whose name is not UTF-8.
+if os.name == "nt":
+    pytest.skip(
+        "a file name that is not UTF-8 cannot exist on NTFS (names are UTF-16)",
+        allow_module_level=True,
+    )
+
 #: The rule an inline suppression names; detect-secrets reports the line under it.
 INLINE_RULE = "SECRET-SECRET-KEYWORD"
 

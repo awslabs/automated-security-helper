@@ -489,7 +489,7 @@ jobs:
             text="${text//$'\xc2'[$'\x80'-$'\x9f']/ }"
             text="${text//$'\xe2\x80'[$'\xa8\xa9']/ }"
             while [[ "${text}" == *::* ]]; do text="${text//::/: :}"; done
-            while [[ "${text}" == *'##['* ]]; do text="${text//'##['/'# #['}"; done
+            while [[ "${text}" == *'##['* ]]; do text="${text//'##['/# #[}"; done
             printf '%s' "${text}"
           }
           __wcs_clock() {
@@ -498,6 +498,12 @@ jobs:
             if [ -z "${__wcs_now}" ]; then
               __wcs_now=$((SECONDS * 1000000))
             fi
+          }
+          __wcs_last_bg() {
+            case "$-" in
+              *u*) set +u; printf '%s' "$!"; set -u ;;
+              *) printf '%s' "$!" ;;
+            esac
           }
           __wcs_end_group() {
             local __wcs_now="" __wcs_until=""
@@ -522,8 +528,8 @@ jobs:
             return 1
           }
           __wcs_on_signal() {
-            if [ -z "${__wcs_pid}" ] && [ "${!:-}" != "${__wcs_before}" ]; then
-              __wcs_pid="${!:-}"
+            if [ -z "${__wcs_pid}" ] && [ "$(__wcs_last_bg)" != "${__wcs_before}" ]; then
+              __wcs_pid="$(__wcs_last_bg)"
             fi
             if [ -n "${__wcs_pid}" ]; then
               kill -s "$1" -- "-${__wcs_pid}" 2>/dev/null || kill -s "$1" "${__wcs_pid}" 2>/dev/null || true
@@ -553,7 +559,7 @@ jobs:
               return 1
             fi
             local __wcs_out="" __wcs_var="" __wcs_file="" __wcs_token __wcs_status=0
-            local __wcs_pid="" __wcs_interrupted="" __wcs_open="" __wcs_left="" __wcs_before="${!:-}"
+            local __wcs_pid="" __wcs_interrupted="" __wcs_open="" __wcs_left="" __wcs_before="$(__wcs_last_bg)"
             case "${1:-}" in
               --stdout) __wcs_out="$2"; shift 2 ;;
               --capture) __wcs_var="$2"; shift 2 ;;
@@ -1098,7 +1104,7 @@ jobs:
 
       - name: Install uv
         id: setup-uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
         with:
           # Named here, because with no `version` setup-uv installs the uv that the
           # checkout's pyproject.toml or uv.toml asks for (`required-version`), and
@@ -1133,7 +1139,7 @@ jobs:
           echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ steps.inputs.outputs.python_version }}
 
@@ -1861,7 +1867,7 @@ jobs:
       # Pinned to a commit rather than to `v1`, which is a moving major tag on this
       # action: .github/scripts/assert-actions-pinned.mjs requires 40 hex characters
       # plus a trailing version comment, the latter because Dependabot reads that
-      # comment to learn which release a sha is. This sha is v1.321.0.
+      # comment to learn which release a sha is. This sha is v1.332.0.
       #
       # No `bundler-cache: true`. That input has the action run `bundle install`
       # itself against BUNDLE_GEMFILE, and this Gemfile is not in the repository at
@@ -1877,7 +1883,7 @@ jobs:
       # and make are still on the image; libyaml-dev is the one to check first.
       - name: Set up Ruby for cfn-nag
         if: inputs.install-cfn-nag
-        uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
+        uses: ruby/setup-ruby@b1da4809b005e0178fe08a1d57317bffc00b7b4c # v1.332.0
         with:
           ruby-version: "3.3"
           # Neither from the checkout. The action's default `bundler: Gemfile.lock`
@@ -2326,7 +2332,7 @@ jobs:
       # file it always read. That path is the scan job's checked output-dir, not the
       # input as given.
       - name: Download ASH output artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ needs.ash.outputs.artifact-name }}
           path: ${{ needs.ash.outputs.output-dir }}
@@ -2476,7 +2482,7 @@ jobs:
       # `collect-sarif-report: false` so a pull request does not upload the same
       # report twice.
       - name: Upload ASH SARIF file
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         if: >-
           inputs.collect-sarif-report
           && github.event_name == 'pull_request'

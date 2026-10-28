@@ -3555,6 +3555,13 @@ def _unaliased(value: Any, path: Path) -> Any:
     arithmetic), so a document whose anchors multiply is refused at the
     bound's cost, not its own product's, and the rebuild keeps no count of
     its own.
+
+    A document nested past the interpreter's recursion limit can parse (a
+    parser that runs out of recursion on one is refused in ``parse_config_text``,
+    but not every parser does on every interpreter) and then run the rebuild
+    out of recursion. That is this file's document being too deep to read, so
+    it is refused here as an unparsed config (``unparsed_config_reason``), the
+    way ``parse_config_text`` words the parser's own RecursionError.
     """
     refuse_past_expansion_bound(value, describe_config_path(path))
 
@@ -3565,7 +3572,13 @@ def _unaliased(value: Any, path: Path) -> Any:
             return {key: rebuilt(entry) for key, entry in item.items()}
         return [rebuilt(entry) for entry in item]
 
-    return rebuilt(value)
+    unparsed: Optional[str] = None
+    try:
+        return rebuilt(value)
+    except RecursionError as exc:
+        unparsed = unparsed_config_reason(path, exc)
+    # Outside the handler (unparsed_config_reason).
+    raise ASHConfigUnparsedError(unparsed)
 
 
 def _expansion_refusal(subject: str, lead_in: str = "") -> ASHConfigSourceError:
