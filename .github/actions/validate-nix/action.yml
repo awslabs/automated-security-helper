@@ -249,7 +249,7 @@ runs:
     # cache is off: the Actions cache of a public repository is readable by anyone, and
     # .github/scripts/assert-publish-surfaces.py admits only the caches already reviewed.
     - name: "nix: install uv for the snapshot check"
-      uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
       with:
         version: "0.11.4"
         enable-cache: false
