@@ -508,6 +508,8 @@ jobs:
       statuses: write
     strategy:
       fail-fast: false
+      # cap the unit-test fan-out so one run leaves room on the shared runner pool
+      max-parallel: 40
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
@@ -592,6 +594,8 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
+      # run all four coverage jobs at once, one per OS family
+      max-parallel: 4
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
     steps:
@@ -668,6 +672,8 @@ jobs:
       cancel-in-progress: false
     strategy:
       fail-fast: false
+      # warm both architectures at once; each already has its own cache group
+      max-parallel: 2
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm]
     steps:
@@ -744,6 +750,8 @@ jobs:
     timeout-minutes: ${{ (matrix.oci-runner == 'podman' || matrix.oci-runner == 'finch') && 45 || 20 }}
     strategy:
       fail-fast: false
+      # cap the scan matrix so the container-runtime scan jobs do not crowd out other runs
+      max-parallel: 8
       matrix:
         # WHY THERE IS NO `platform` KEY HERE ANY MORE
         #
@@ -932,6 +940,8 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
+      # run both external-target scan jobs at once, one per OS
+      max-parallel: 2
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
@@ -1015,6 +1025,8 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
+      # run both sandbox escape jobs at once, one per OS
+      max-parallel: 2
       matrix:
         include:
           - os: ubuntu-latest
@@ -1094,6 +1106,8 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
+      # run both scanner parity jobs at once, one per OS
+      max-parallel: 2
       matrix:
         include:
           - os: ubuntu-latest
@@ -1267,6 +1281,8 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
+      # run both attribution jobs at once, one per OS
+      max-parallel: 2
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
@@ -1657,6 +1673,8 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
+      # run both converter integration jobs at once, one per OS
+      max-parallel: 2
       matrix:
         os: [macos-latest, windows-latest]
     steps:
@@ -1772,6 +1790,8 @@ jobs:
     timeout-minutes: ${{ ((matrix.method == 'podman' || matrix.method == 'finch' || matrix.method == 'nerdctl') && 45) || (matrix.method == 'bundle' && 30) || 20 }}
     strategy:
       fail-fast: false
+      # cap the install-validation fan-out so one run leaves room on the shared runner pool
+      max-parallel: 20
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
