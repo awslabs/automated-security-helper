@@ -146,6 +146,12 @@ class EnvironmentReference:
     origin: Optional[Tuple[Path, Tuple[PathSegment, ...]]] = dataclass_field(
         default=None, compare=False
     )
+    #: How many entries the innermost list the file wrote it in had, when it
+    #: wrote it in a list (as an entry, or inside a mapping that is one); None
+    #: otherwise.
+    length: Optional[int] = None
+    #: Where in ``path`` the index of that list entry sits; set with ``length``.
+    index_at: Optional[int] = None
 
     def moved_to_unknown_list(
         self, path: Tuple[PathSegment, ...]
