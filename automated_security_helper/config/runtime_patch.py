@@ -944,12 +944,15 @@ def config_document_denials(
     # compared as the model reads the whole document (validated, then dumped as
     # ``dump`` is), so a repeat in another serialization is not a change, while a
     # value the client changed still differs after validation. Read once, on the
-    # first leaf that needs it; a document the model refuses gets no exemption.
-    read: Optional[Tuple[AshConfig, Dict[str, Any]]] | bool = False
+    # first leaf that needs it (``read_tried``); a document the model refuses
+    # leaves ``read`` None and gets no exemption.
+    read: Optional[Tuple[AshConfig, Dict[str, Any]]] = None
+    read_tried = False
 
     def as_read(pointer: str) -> Tuple[bool, Any]:
-        nonlocal read
-        if read is False:
+        nonlocal read, read_tried
+        if not read_tried:
+            read_tried = True
             try:
                 validated = AshConfig.model_validate(document)
                 read = (
@@ -958,7 +961,7 @@ def config_document_denials(
                 )
             except Exception:  # noqa: BLE001 -- an unreadable copy is compared as written
                 read = None
-        if not read:
+        if read is None:
             return False, None
         return _trusted_value(read[0], read[1], pointer, plugin_keys)
 
