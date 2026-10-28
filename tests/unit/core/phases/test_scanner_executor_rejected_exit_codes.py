@@ -408,6 +408,10 @@ class TestASignalCauseIsAttributedOnlyWhenTheRunnerRecordedOne:
         assert scanner.scan_kept_flag is None, scanner.scan_kept_flag
         assert not scanner._exit_code_accepted()
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="the runner records no signal cause on Windows",
+    )
     @pytest.mark.parametrize("returncode", [-9, -15], ids=["SIGKILL", "SIGTERM"])
     def test_control_a_bare_negative_code_gets_the_unattributed_cause(
         self, plugin_context, returncode
@@ -430,6 +434,10 @@ class TestASignalCauseIsAttributedOnlyWhenTheRunnerRecordedOne:
         assert scanner.scan_post_run_error is not None
         assert scanner.scan_kept_flag is None, scanner.scan_kept_flag
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="the runner records no signal cause on Windows",
+    )
     @pytest.mark.parametrize("returncode", [-9, -15], ids=["SIGKILL", "SIGTERM"])
     def test_control_the_handler_path_keeps_the_cause_of_a_bare_negative_code(
         self, plugin_context, monkeypatch, returncode
