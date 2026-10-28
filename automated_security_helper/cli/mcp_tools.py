@@ -5439,8 +5439,20 @@ def _validated_document_denials(
         env_refused_for,
         environment_read_refusals,
     )
+    from automated_security_helper.config.operator_only_options import (
+        repository_settings_for_root,
+    )
+    from automated_security_helper.config.sandbox_grants import working_directory
 
-    rules = _session_client_rules(session_id)
+    # The rules' trusted default config is the file ASH_CONFIG names, read with
+    # the settings the validator's own load of it uses (it roots them at the
+    # working directory: check_config_file is given no source directory), so a
+    # value that load leaves out never makes the rules unreadable. With the
+    # working directory deleted the root is None and the read confines
+    # fail-closed.
+    rules = _session_client_rules(
+        session_id, repository_settings_for_root(working_directory())
+    )
     checked = (
         caller_is_remote(session_id)
         if config_content is not None

@@ -2517,6 +2517,9 @@ def _host_resolved_config(opts: ScanOptions) -> Tuple["AshConfig", bool]:
     """
     from automated_security_helper.config.ash_config import AshConfig
     from automated_security_helper.config.default_config import _ash_config_file
+    from automated_security_helper.config.operator_only_options import (
+        repository_settings_for_root,
+    )
     from automated_security_helper.config.operator_paths import (
         not_delivered_by_a_client,
     )
@@ -2538,6 +2541,13 @@ def _host_resolved_config(opts: ScanOptions) -> Tuple["AshConfig", bool]:
     )
     config_path = _scan_config_path(opts)
     if config_path is not None:
+        # As the scan loads the file: what a file inside the scanned tree, or
+        # inside any other checkout, writes for an option only the operator sets
+        # is left out first (_loaded_config_file), so a value the option refuses,
+        # which the scan ignores, does not hide the file's exit-code fields. The
+        # checkout walk is part of the load, so a walk that fails is a load that
+        # failed, and the readers answer None.
+        settings = repository_settings_for_root(Path(opts.source_dir))
         config = _load_with_confinement(
             config_path,
             opts.source_dir,
@@ -2545,6 +2555,8 @@ def _host_resolved_config(opts: ScanOptions) -> Tuple["AshConfig", bool]:
             log_failure=False,
             remote_client=opts.remote_client,
             session_id=getattr(opts.client_config_policy, "session_id", None),
+            confine=settings.confine,
+            repository_file=settings.is_repository_file,
         )
         from_file = True
     elif env_config is not None:
