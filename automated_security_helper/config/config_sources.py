@@ -4026,7 +4026,9 @@ def _placed_through_patch(
         if token is None:
             placed.append(reference)
         else:
-            placed.extend(reference.at(path) for path in found.get(token, ()))
+            placed.extend(
+                reference.moved_to_unknown_list(path) for path in found.get(token, ())
+            )
     return placed
 
 

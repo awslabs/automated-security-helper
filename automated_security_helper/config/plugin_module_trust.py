@@ -910,7 +910,7 @@ def _carry_trusted_module_references(
                     if pieces != [entry]:
                         moved = moved._replace(resolved=piece, environment_part=piece)
                 else:
-                    moved = reference.at(new_path)
+                    moved = reference.moved_to_unknown_list(new_path)
                     if pieces != [entry]:
                         moved = replace(moved, resolved=piece, value=piece)
                 carried.append(moved)
@@ -1078,7 +1078,9 @@ def _remap_module_reference_lists(
                 continue
             old = path[1]
             for index in new_indices.get(old, ()):
-                moved = reference.at(("ash_plugin_modules", index) + path[2:])
+                moved = reference.moved_to_unknown_list(
+                    ("ash_plugin_modules", index) + path[2:]
+                )
                 piece = piece_at(old, index)
                 if piece is not None:
                     moved = replace(moved, resolved=piece, value=piece)

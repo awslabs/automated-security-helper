@@ -140,9 +140,9 @@ class EnvironmentReference:
     value: str
     key: bool = False
     #: The file that wrote it, resolved, and the path it holds in that file's
-    #: own document, kept when ``at`` moves it: how the record of the
-    #: configuration (config_validator.environment_record_read) finds where
-    #: the reference it reads in the file ended up. Not compared.
+    #: own document, kept when ``moved_to_unknown_list`` moves it: how the
+    #: record of the configuration (config_validator.environment_record_read)
+    #: finds where the reference it reads in the file ended up. Not compared.
     origin: Optional[Tuple[Path, Tuple[PathSegment, ...]]] = dataclass_field(
         default=None, compare=False
     )
@@ -404,6 +404,9 @@ def mappings_with_written_reference_keys(
 
 
 def _normal(segment: PathSegment, exact_indices: bool = False) -> PathSegment:
+    if isinstance(segment, _AnyIndex):
+        # Already "any position": a reference at an unknown index keeps it.
+        return segment
     if isinstance(segment, int):
         return segment if exact_indices else _ANY_INDEX
     return segment.replace("-", "_").lower()
@@ -726,7 +729,7 @@ class _Index:
                     if key == _without_tag(reference.written):
                         key = reference.resolved
                         if placed is not None:
-                            placed.append(reference.at(where))
+                            placed.append(reference.moved_to_unknown_list(where))
                         break
                 spelled = key if isinstance(key, str) else str(key)
                 result[key] = self.fill(
@@ -742,7 +745,7 @@ class _Index:
             for reference in self.values.get(path, ()):
                 if item == _without_tag(reference.written):
                     if placed is not None:
-                        placed.append(reference.at(where))
+                        placed.append(reference.moved_to_unknown_list(where))
                     return reference.resolved
         return item
 
