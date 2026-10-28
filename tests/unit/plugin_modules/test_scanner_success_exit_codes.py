@@ -799,14 +799,19 @@ def test_a_target_the_sandbox_refused_does_not_report_the_previous_exit_code(
     plugin_context, monkeypatch
 ):
     """The sandbox refuses the converted target, so nothing runs on it."""
+    from automated_security_helper.core.enums import SandboxMode
     from automated_security_helper.core.phases import scanner_executor
-    from automated_security_helper.utils.sandbox import SandboxUnavailable
+    from automated_security_helper.utils.sandbox.scope import SandboxBackendUnavailable
 
     original_scope = scanner_executor.scanner_sandbox_scope
 
     def scope(plugin, context, target):
         if Path(target) == plugin_context.work_dir:
-            raise SandboxUnavailable("no backend for this target")
+            # No working backend under auto: the one refusal the executor grades
+            # MISSING (sandbox_refusal_grades_missing); any other is ERROR.
+            raise SandboxBackendUnavailable(
+                "no backend for this target", mode=SandboxMode.auto.value
+            )
         return original_scope(plugin, context, target)
 
     monkeypatch.setattr(scanner_executor, "scanner_sandbox_scope", scope)
@@ -820,7 +825,9 @@ def test_a_target_the_sandbox_refused_does_not_report_the_previous_exit_code(
 
     assert rows["source"].exit_code == 2
     assert rows["converted"].status == ScannerStatus.MISSING
-    assert rows["converted"].exit_code == 0, (
+    # scan() was never called on the refused target, so the row's exit code is
+    # unset (None), not the source run's 2 (scanner_executor: `scan_called`).
+    assert rows["converted"].exit_code is None, (
         "nothing ran on the refused target, and its row reports exit code "
         f"{rows['converted'].exit_code}, the source run's"
     )
@@ -1032,8 +1039,11 @@ def test_an_exit_code_held_from_an_earlier_target_is_not_reported_for_an_empty_o
     )
 
     row = rows["converted"]
-    assert row.exit_code == 0, (
+    # None: the row claims no exit code for a target on which no tool ran
+    # (scanner_executor, the carry-over guard before container.exit_code); 0 is
+    # a scanner that resets to 0 and tracks no target (detect-secrets).
+    assert row.exit_code in (None, 0), (
         f"{name} ran nothing on the empty tree, and its row reports exit code "
-        f"{row.exit_code}"
+        f"{row.exit_code}, the earlier target's"
     )
     assert row.status != ScannerStatus.ERROR, row.errors
