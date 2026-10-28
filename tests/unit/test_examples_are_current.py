@@ -104,15 +104,15 @@ def test_the_codebuild_example_installs_the_packaged_release():
     expected = f"v{_commitizen()['version']}"
     variables = _load(CODEBUILD)["env"]["variables"]
 
-    assert variables["ASH_VERSION"] == expected
+    assert variables["RELEASE_TAG"] == expected
     install = [c for c in _codebuild_commands() if "pip install" in c]
-    assert install == ['pip install "git+${ASH_REPO_CLONE_URL}@${ASH_VERSION}"'], (
+    assert install == ['pip install "git+${ASH_REPO_CLONE_URL}@${RELEASE_TAG}"'], (
         install
     )
     readme_rows = [
         line
         for line in CODEBUILD_README.read_text(encoding="utf-8").splitlines()
-        if line.startswith("| `ASH_VERSION`")
+        if line.startswith("| `RELEASE_TAG`")
     ]
     assert len(readme_rows) == 1 and f"`{expected}`" in readme_rows[0], readme_rows
 
@@ -136,8 +136,8 @@ def test_cz_bump_rewrites_the_codebuild_examples_pin(monkeypatch):
     pins = [
         (path, number)
         for path, marker in (
-            (CODEBUILD, "ASH_VERSION:"),
-            (CODEBUILD_README, "| `ASH_VERSION`"),
+            (CODEBUILD, "RELEASE_TAG:"),
+            (CODEBUILD_README, "| `RELEASE_TAG`"),
         )
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
         if marker in line

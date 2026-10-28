@@ -3,7 +3,7 @@ version: 0.2
 env:
   variables:
     # The ASH release to install. `cz bump` moves this to each new release.
-    ASH_VERSION: v3.7.0
+    RELEASE_TAG: v3.7.0
     ASH_MODE: container
     ASH_REPO_CLONE_URL: https://github.com/awslabs/automated-security-helper.git
     COLUMNS: '140'
@@ -11,8 +11,8 @@ env:
 phases:
   pre_build:
     commands:
-      - echo "Installing ASH ${ASH_VERSION}"
-      - pip install "git+${ASH_REPO_CLONE_URL}@${ASH_VERSION}"
+      - echo "Installing ASH ${RELEASE_TAG}"
+      - pip install "git+${ASH_REPO_CLONE_URL}@${RELEASE_TAG}"
   build:
     commands:
       # CodeBuild runs as root, which builds the ci stage (the image that runs as root).
