@@ -896,6 +896,11 @@ def main():
         description="Generate CLI reference documentation from Typer command definitions."
     )
     parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Do not write. Exit 1 with a diff if the page is stale.",
+    )
+    parser.add_argument(
         "--output",
         default=None,
         help=f"Output path, or '-' for stdout. Default: <docs root>/docs/content/reference/{PAGE}",
