@@ -597,6 +597,7 @@ logging.getLogger("ash").addHandler(handler)
 
 ### GitHub Actions
 
+<!-- doctest: config kind=github-actions runner=none reason="a workflow for the reader's own repository, which installs ASH from GitHub" -->
 ```yaml
 name: ASH Security Scan
 
@@ -633,6 +634,7 @@ jobs:
 
 ### GitLab CI
 
+<!-- doctest: config kind=gitlab-ci runner=none reason="a pipeline for the reader's own project, which installs ASH from GitHub" -->
 ```yaml
 ash-scan:
   image: python:3.10

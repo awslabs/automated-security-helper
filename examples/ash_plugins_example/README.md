@@ -72,7 +72,7 @@ under `converted/my-example-converter/`.
 
 Each class carries `@ash_converter_plugin`, `@ash_scanner_plugin` or
 `@ash_reporter_plugin`, which registers it when ASH imports the package. The
-`ASH_CONVERTERS`, `ASH_SCANNERS` and `ASH_REPORTERS` lists in `__init__.py` register
+three lists of converter, scanner and reporter classes in `__init__.py` register
 nothing; the loader reads them to report what the package provided.
 
 ### Converters
@@ -104,8 +104,8 @@ reads each file through `open_in_scanned_tree()` from
 
 ### Event handlers
 
-`ASH_EVENT_HANDLERS` maps an `AshEventType` to a list of callables, which ASH
-registers when it loads the package. Every handler receives keyword arguments,
+The event handlers dictionary in `__init__.py` maps an `AshEventType` to a list of
+callables, which ASH registers when it loads the package. Every handler receives keyword arguments,
 including `phase` and `plugin_context`.
 
 - The convert, scan, report and inspect phases each emit `<PHASE>_PHASE_START` and
@@ -124,6 +124,6 @@ including `phase` and `plugin_context`.
 ## More information
 
 The plugin pages of the ASH documentation are under
-[docs/content/docs/plugins](../../docs/content/docs/plugins/index.md), and the
+[docs/content/plugins](../../docs/content/plugins/index.md), and the
 configuration schema is
 [automated_security_helper/schemas/AshConfig.json](../../automated_security_helper/schemas/AshConfig.json).

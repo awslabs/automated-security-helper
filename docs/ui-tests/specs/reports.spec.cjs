@@ -4,7 +4,7 @@ const { test, expect } = require("@playwright/test");
 const AxeBuilder = require("@axe-core/playwright").default;
 const { pathToFileURL } = require("node:url");
 const path = require("node:path");
-const previews = process.env.ASH_UI_PREVIEWS || path.resolve(__dirname, "../.previews");
+const previews = process.env.DOCS_UI_PREVIEWS || path.resolve(__dirname, "../.previews");
 const reportUrl = (name) => pathToFileURL(path.join(previews, `${name}-report.html`)).href;
 
 for (const name of ["review", "empty", "workspace"]) {

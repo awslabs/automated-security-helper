@@ -22,7 +22,7 @@ The provided `buildspec.yml` configures AWS CodeBuild to:
 
 The buildspec's `env.variables` block sets four variables:
 
-| Variable             | Description                                | Default                                                    |
+| Name                 | Description                                | Set to                                                     |
 |----------------------|--------------------------------------------|------------------------------------------------------------|
 | `ASH_VERSION`        | The ASH release tag (or commit) to install | `v3.7.0`                                                   |
 | `ASH_MODE`           | The execution mode for ASH                 | `container`                                                |
@@ -32,7 +32,7 @@ The buildspec's `env.variables` block sets four variables:
 ## Phases
 
 ### Pre-Build
-- Installs ASH `ASH_VERSION` from `ASH_REPO_CLONE_URL` with pip
+- Installs the ASH release that the buildspec's version variable names, from the clone URL, with pip
 
 ### Build
 - Runs the scan in `ASH_MODE` with progress display disabled, writing results to `.ash/ash_output`

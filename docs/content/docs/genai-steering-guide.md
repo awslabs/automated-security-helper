@@ -103,7 +103,7 @@ ash get-genai-guide -o ~/Documents/ai-guides/ash-integration.md
 ```
 
 **Usage**: In your prompts, reference the guide:
-```
+```text
 Please read the ASH integration guide at ~/Documents/ai-guides/ash-integration.md 
 before processing these scan results.
 ```
@@ -133,7 +133,7 @@ ash get-genai-guide -o .cursor/ash-guide.md
 **Option 2: Project root** (for easy discovery):
 ```bash
 # Download to project root with clear name
-ash get-genai-guide -o ASH_INTEGRATION_GUIDE.md
+ash get-genai-guide -o ash-integration-guide.md
 ```
 
 **Usage**: Reference in `.cursorrules` or mention in prompts.
@@ -143,7 +143,7 @@ ash get-genai-guide -o ASH_INTEGRATION_GUIDE.md
 **Project root** (universal approach):
 ```bash
 # Download with descriptive name
-ash get-genai-guide -o ASH_GENAI_GUIDE.md
+ash get-genai-guide -o ash-genai-guide.md
 ```
 
 Then reference it in your AI tool's context or prompts.
@@ -281,6 +281,7 @@ else:
 - **Actionable Findings**: Total - Suppressed = findings requiring attention
 
 **Always Check**:
+<!-- doctest: config kind=ash-output model=automated_security_helper.models.asharp_model.AshAggregatedResults -->
 ```json
 {
   "metadata": {
@@ -297,7 +298,7 @@ else:
 
 ### Output Directory Structure
 
-```
+```text
 .ash/ash_output/
 ├── ash_aggregated_results.json    # PRIMARY: Complete scan results
 ├── ash.log                         # Scan execution log
@@ -374,9 +375,11 @@ grep -o '"critical": [0-9]*' ash_aggregated_results.json | head -1
 
 #### Strategy 3: Streaming JSON Parsers (For Large Files)
 
-**Python with ijson** (streaming parser):
+**Python with ijson** (streaming parser, installed separately with `pip install ijson`):
 ```python
-import ijson
+import importlib
+
+ijson = importlib.import_module("ijson")  # a third-party package, not part of ASH
 
 # Stream parse - memory efficient
 with open("ash_aggregated_results.json", "rb") as f:
@@ -420,7 +423,8 @@ for finding in findings:
 
 ### Schema Overview
 
-```json
+<!-- doctest: config kind=ash-output model=automated_security_helper.models.asharp_model.AshAggregatedResults -->
+```jsonc
 {
   "name": "ASH Scan 2026-02-28T10:10:46.211371",
   "description": "Aggregated security scan results",
@@ -467,6 +471,7 @@ for finding in findings:
 #### scanner_results
 Contains findings organized by scanner name:
 
+<!-- doctest: config kind=other reason="a simplified sketch of findings grouped by scanner, not the exact layout of the file" -->
 ```json
 {
   "scanner_results": {
@@ -655,6 +660,7 @@ The CycloneDX SBOM (`reports/ash.cdx.json`) provides a complete Software Bill of
 
 ### Schema Overview
 
+<!-- doctest: config kind=other reason="a CycloneDX software bill of materials, a standard format that the Syft scanner writes" -->
 ```json
 {
   "bomFormat": "CycloneDX",
@@ -930,6 +936,7 @@ Configuration for each scanner. Common options:
 ### Suppression Best Practices
 
 **1. Always Provide a Reason**:
+<!-- doctest: config kind=ash-fragment at=global_settings -->
 ```yaml
 suppressions:
   - path: 'src/utils.py'
@@ -938,21 +945,26 @@ suppressions:
 ```
 
 **2. Be Specific with Paths**:
+<!-- doctest: config kind=ash-fragment at=global_settings.suppressions -->
 ```yaml
 # Good - specific file
 - path: 'src/auth/login.py'
   rule_id: 'B201'
+  reason: 'Debug mode is only enabled in the local development server'
 
 # Good - specific directory
 - path: 'tests/**/*.py'
   rule_id: 'B101'
+  reason: 'assert is how the tests check results'
 
 # Avoid - too broad
 - path: '**/*.py'
   rule_id: 'B201'
+  reason: 'Too broad: this hides B201 in every Python file'
 ```
 
 **3. Use Line Numbers for Precision**:
+<!-- doctest: config kind=ash-fragment at=global_settings -->
 ```yaml
 suppressions:
   - path: 'src/app.py'
@@ -963,6 +975,7 @@ suppressions:
 ```
 
 **4. Set Expiration Dates for Temporary Suppressions**:
+<!-- doctest: config kind=ash-fragment at=global_settings -->
 ```yaml
 suppressions:
   - path: 'src/legacy/old_api.py'

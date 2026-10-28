@@ -33,7 +33,7 @@ From your project directory, choose an execution mode:
 <!-- doctest: illustrative reason="container mode needs a container runtime, and every mode runs a scan with all scanner tools" -->
 ```bash
 # Linux/macOS
-curl -sSf https://astral.sh/uv/install.sh | sh
+curl -LsSf https://astral.sh/uv/install.sh | sh
 alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
 
 # Windows PowerShell
@@ -86,6 +86,9 @@ ash --mode precommit
 - Secrets: detect-secrets
 - Dependencies and software inventory: Grype, npm audit, Syft
 
+A scan ends by printing the exit codes and the one it exits with:
+
+```text
 === ASH Exit Codes ===
   0: success
   1: scan errors / scanner failures
@@ -106,6 +109,7 @@ Run [locally](getting-started/local.md), integrate with [CI/CD](getting-started/
 
 ## Reports and next steps
 
+<!-- doctest: config kind=pre-commit -->
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper

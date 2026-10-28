@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 const { defineConfig } = require("@playwright/test");
 const path = require("node:path");
-const siteBase = process.env.ASH_UI_BASE_URL || "http://127.0.0.1:8849";
+const siteBase = process.env.DOCS_UI_BASE_URL || "http://127.0.0.1:8849";
 const siteUrl = siteBase.endsWith("/") ? siteBase : `${siteBase}/`;
 
 module.exports = defineConfig({
@@ -21,12 +21,12 @@ module.exports = defineConfig({
     reducedMotion: "reduce",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
-    launchOptions: process.env.ASH_UI_CHROME
-      ? { executablePath: process.env.ASH_UI_CHROME }
+    launchOptions: process.env.DOCS_UI_CHROME
+      ? { executablePath: process.env.DOCS_UI_CHROME }
       : {},
   },
-  webServer: process.env.ASH_UI_BASE_URL ? undefined : {
-    command: `${process.env.ASH_UI_PYTHON || "python3"} -m http.server 8849 --bind 127.0.0.1 --directory public`,
+  webServer: process.env.DOCS_UI_BASE_URL ? undefined : {
+    command: `${process.env.DOCS_UI_PYTHON || "python3"} -m http.server 8849 --bind 127.0.0.1 --directory public`,
     cwd: path.resolve(__dirname, "../.."),
     url: siteUrl,
     reuseExistingServer: !process.env.CI,

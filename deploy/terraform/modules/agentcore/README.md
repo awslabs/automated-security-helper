@@ -63,13 +63,12 @@ so there is nothing to gain by turning it off.
 In stateless mode ASH does not treat a client-supplied `Mcp-Session-Id` as a
 session identity unless the operator states that the platform in front issues and
 authenticates it (`--trust-upstream-session-id`); without that, source delivery and
-the scan registry tools refuse. AgentCore does issue it, so the module sets
-`ASH_MCP_TRUST_UPSTREAM_SESSION_ID=true` in stateless mode, which the launcher maps
-to that flag. The module also sets `ASH_MCP_TRUST_UPSTREAM_HOST_CHECK=true`, rather
-than relying on the launcher's default, so the launcher passes
-`--trust-upstream-host-check` when `mcp_allowed_host` is empty: Host is on
-AgentCore's restricted-header list, so the platform restricts what reaches the
-container and no allowlist can name it.
+the scan registry tools refuse. AgentCore does issue it, so in stateless mode the
+module has the container launcher start the server with
+`--trust-upstream-session-id`. The module also has the launcher pass
+`--trust-upstream-host-check` when `mcp_allowed_host` is empty, rather than relying
+on the launcher's default: Host is on AgentCore's restricted-header list, so the
+platform restricts what reaches the container and no allowlist can name it.
 
 ## Why the auth header is allowlisted automatically
 

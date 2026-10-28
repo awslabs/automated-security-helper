@@ -375,6 +375,7 @@ To create your own config file, you can:
    ```
 
 2. Or create a minimal config that only overrides what you need:
+   <!-- doctest: config kind=other reason="a ferret-scan configuration file, which ferret-scan reads, not ASH" -->
    ```yaml
    # my-ferret-config.yaml
    defaults:

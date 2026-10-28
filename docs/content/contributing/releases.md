@@ -144,7 +144,7 @@ request whose title starts with `chore(release):`, does the rest:
 ### The release App
 
 A pull request opened with the workflow's `GITHUB_TOKEN` does not start its own required checks
-(`ash / SAST, SCA, and IaC Scan`, `Validate PR title`, `required-checks`):
+("ash / SAST, SCA, and IaC Scan", `Validate PR title`, `required-checks`):
 GitHub creates the runs in an approval-required state, and a maintainer with write
 access has to select **Approve workflows to run** in the pull request's merge box. The
 release pull request says so in its description when that happens. To have the checks
