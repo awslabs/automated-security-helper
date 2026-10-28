@@ -971,9 +971,12 @@ class TestFallbackModels:
 class _RoutingRuntime:
     """converse() that errors for the primary model and answers for any other.
 
-    Throttling is a terminal error for try_call (no parameter to drop), so the
-    primary's call comes back as one "*Error ...*" string, the shape a report
-    would otherwise write into its sections.
+    ModelErrorException is a failure of the model itself that the reporter's
+    retries do not repeat (it is in bedrock_pipeline._MODEL_SPECIFIC_ERRORS
+    and not in aws_utils.RETRYABLE_EXCEPTIONS), so the primary's call comes
+    back as one "*Error ...*" string after a single call, the shape a report
+    would otherwise write into its sections. A throttle would first be
+    repeated on the same model, max_retries times.
     """
 
     def __init__(self, failing_model: str, answer: str = "fallback content"):
@@ -985,7 +988,7 @@ class _RoutingRuntime:
         self.models.append(kwargs["modelId"])
         if kwargs["modelId"] == self.failing_model:
             raise botocore.exceptions.ClientError(
-                {"Error": {"Code": "ThrottlingException", "Message": "slow down"}},
+                {"Error": {"Code": "ModelErrorException", "Message": "model failed"}},
                 "Converse",
             )
         return {
@@ -1397,7 +1400,10 @@ class TestTheFallbackWalkContract:
         """The control: a failure of the model itself walks on to the
         fallback (the Converse errors that name the model, its access, its
         quota or its limits)."""
-        reporter = make_reporter(context)
+        # No retries: a throttle is first repeated on the same model by the
+        # reporter's retries (bedrock_pipeline.BedrockModelClient.call); the
+        # retry itself is test_an_error_no_model_can_fix_is_not_walked's.
+        reporter = make_reporter(context, max_retries=0)
         self._chain(monkeypatch, {PRIMARY_MODEL: FALLBACK_ONE}, {FALLBACK_ONE})
         monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
         monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
@@ -1526,7 +1532,8 @@ class TestTheFallbackWalkContract:
         """The run's model stands for the run: when it fails in turn, the walk
         goes on from the next model after it, and does not call the configured
         model again, which already failed this run."""
-        reporter = make_reporter(context, enable_caching=False)
+        # No retries: the run model's throttle would first be repeated on it.
+        reporter = make_reporter(context, enable_caching=False, max_retries=0)
         runtime = self._run_model_then_fails(monkeypatch, second_fallback_answers=True)
 
         first = reporter._run_simple_report(runtime, sarif_model([]), [], [])
