@@ -88,7 +88,73 @@ ash --mode nix
   version
 - Always runs offline
 - Linux and macOS; on Windows, run it in WSL2
-- See [Nix mode](installation-guide.md#nix-mode)
+- See [Nix mode](../how-to/install.md#nix-mode)
+
+## Where ASH looks for a tool
+
+ASH looks up each program it starts, scanners and `uv` included, in this order:
+
+1. The directories on your `PATH`, in order. ASH uses only absolute entries: an empty
+   entry, `.`, or a relative directory is skipped, and a command is never found
+   through the current working directory. On Windows, ASH tries the names with
+   `.exe`, `.bat`, and `.cmd` before the bare name.
+2. ASH's bin directory: the directory in `ASH_BIN_PATH`, or `~/.ash/bin` if it is not
+   set or is empty. This is where `ash dependencies install` puts tools, so you do not
+   need to add it to `PATH`.
+3. `/usr/local/bin`, except on Windows.
+
+Only an executable file counts. In each of these directories, a file of the tool's name
+without the execute bit, or a directory of that name, is skipped and the search goes on;
+on Windows, the name's suffix decides instead. ASH remembers a path it finds, for the
+current `PATH` and `ASH_BIN_PATH`, and looks again when either changes, or when that
+file has been removed or has lost its execute bit.
+
+During a scan, a copy found inside the scanned directory is skipped, and the lookup
+goes on to the next one: see
+[Tools inside the scanned directory](#tools-inside-the-scanned-directory).
+
+## When a scanner shows MISSING
+
+MISSING means the scanner did not run: ASH did not find its tool, found the tool only
+inside the scanned directory (see
+[Tools inside the scanned directory](#tools-inside-the-scanned-directory)), the
+scanner's own dependency check failed, or the sandbox mode was `auto` and no sandbox
+backend works on this machine. (Under a backend you name that does not work, or a
+sandbox refusal of another kind, the scanner is ERROR instead.) The reason is in the
+scanner's `missing_reason` in `ash_aggregated_results.json`. A MISSING scanner makes
+the scan incomplete, and by default (`fail_on_incomplete_scanners`) an incomplete
+scan exits 1.
+
+For most scanners, `ash dependencies install` installs the tool. To install one
+scanner's tool, name the scanner, as in `ash dependencies install --tool grype`. Four
+scanners need more:
+
+- detect-secrets ships with ASH as one of its Python dependencies. Reinstall ASH.
+- cdk-nag runs in ASH's own Python and needs Node.js, which ASH does not install.
+  `ash dependencies install --tool cdk-nag` installs its Python packages.
+- npm-audit needs Node.js and npm, and yarn or pnpm to audit a `yarn.lock` or a
+  `pnpm-lock.yaml`. ASH installs none of them.
+- cfn-nag is a Ruby gem. It needs RubyGems and a C compiler (on Windows, a Ruby
+  DevKit) before `ash dependencies install --tool cfn-nag` can install it.
+
+If you do not need a scanner, leave it out, as in `ash --exclude-scanners npm-audit`.
+It is then recorded SKIPPED, which does not make the scan incomplete.
+
+## Platform limits
+
+- Windows: semgrep and opengrep are off by default. semgrep is SKIPPED even when you
+  turn it on, because it publishes no Windows build. cfn-nag needs a Ruby DevKit. On
+  Windows on arm64, grype, opengrep and trivy publish no build. ASH does not look for
+  tools in `/usr/local/bin`.
+- macOS: each release binary ASH downloads (actionlint, cfn-guard, gitleaks, grype,
+  opengrep, syft and trivy) has a pinned build for Intel and Apple silicon. cfn-nag
+  needs a C compiler, such as the one in the Xcode Command Line Tools.
+- Linux: each of those release binaries has a pinned build for x86-64 and arm64. ASH
+  downloads opengrep's glibc build on every Linux system, so on a musl-based
+  distribution such as Alpine it may not run.
+
+A SKIPPED scanner does not make the scan incomplete, so on Windows a scan does not
+fail for lacking semgrep and opengrep, as long as another selected scanner runs.
 
 ## Custom Plugins
 
@@ -494,7 +560,7 @@ accepted it and ran the scan without it.
 
 The call returns the aggregated results only when the scan's exit code is 0.
 Otherwise it ends the way `ash scan` does, by raising `SystemExit` with that code
-(see [Exit codes](cli-reference.md#exit-codes)): 2 for actionable findings while
+(see [Exit codes](../reference/exit-codes.md)): 2 for actionable findings while
 `fail_on_findings` is on, which is the default, and 1 for an incomplete scan, for
 example a selected scanner whose tool is not installed. That exit 1 is a
 `ScanIncompleteExit`, a `SystemExit` subclass whose `incompleteness` attribute names
