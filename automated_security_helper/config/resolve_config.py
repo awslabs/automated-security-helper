@@ -158,6 +158,7 @@ from automated_security_helper.config.sandbox_grants import (
     working_directory,
 )
 from automated_security_helper.config.config_validator import (
+    _string_leaves,
     describe_validation_error,
     environment_record_of_references,
     environment_record_read,
@@ -560,6 +561,28 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
     # attributes). Without them a run whose overrides were applied here, as to
     # the ASH_CONFIG configuration, printed and recorded those values.
     rebuilt.__pydantic_private__ = copy.deepcopy(config.__pydantic_private__)
+    # Each string an override's value holds joins the values a line that prints
+    # a section of this config hides (AshConfig._override_values). The value is
+    # the operator's, not the environment's, but it can be a credential, and
+    # get_plugin_config's debug line printed each reporter's section whole, an
+    # override's value in it (ash merge --debug, ash report --debug). Strings
+    # only: a bool or a number an override sets is no credential, and a short
+    # word such as "true" would be hidden wherever a line prints it. A second
+    # application (ash merge applies the overrides to each shard's record and
+    # replays them onto the trusted base) keeps the first's.
+    rebuilt._override_values = tuple(
+        dict.fromkeys(
+            (
+                *rebuilt._override_values,
+                *(
+                    leaf
+                    for _, value, _ in applied
+                    for leaf in _string_leaves(value)
+                    if leaf
+                ),
+            )
+        )
+    )
     # A model that already carries references (a second application) can
     # have its module list shortened here: the references it carried then
     # name entries the list no longer has.
@@ -2252,6 +2275,15 @@ def resolve_config(
             trusted=None,
             client_overrides=client_supplied_overrides,
         )
+    # What scanners consult before honoring an option that names code to run
+    # (utils/config_trust.py): the same trusted base, with the overrides replayed
+    # per section when a scanner asks.
+    record_provenance(
+        config,
+        in_tree=in_tree,
+        trusted=trusted.model_copy(deep=True),
+        config_overrides=config_overrides,
+    )
     # Only an override under `sandbox` can change the sandbox section, and replaying
     # the rest onto the defaults could fail where the config file supplied the
     # section they write into. Only the OPERATOR's overrides are replayed: an
@@ -4351,12 +4383,14 @@ def _resolve_config(
             # the default config.
             config_stat = stat_named_path(config_path)
             if isinstance(config_stat, StatProblem):
-                # A symbolic link loop or a denied stat is not a missing
-                # file: falling back to the default config would run the scan
-                # with settings the operator did not choose. Only a missing
-                # path keeps the documented fallback; everything else is
-                # refused as the path problem it is, named by the errno's code
-                # and the caller's own path text, never a value.
+                # Every stat problem is refused as the problem it is, a
+                # missing file included: falling back to the default config
+                # would run the scan with settings the operator did not
+                # choose, and with none of the named file's suppressions and
+                # ignore paths. Only the absence of any config file (above)
+                # resolves to the defaults. A refusal names the errno's code
+                # where it has one and the caller's own path text, never a
+                # value.
                 if config_stat.kind == LOOP:
                     raise ASHConfigValidationError(
                         f"Config file is a symbolic link loop: {config_path.as_posix()}"
@@ -4366,18 +4400,11 @@ def _resolve_config(
                         f"Config file cannot be read ({config_stat.code}): "
                         f"{config_path.as_posix()}"
                     ) from config_stat.cause()
-                # One line: the path is the caller's text.
-                ASH_LOGGER.warning(
-                    shown_on_one_line(
-                        f"Configuration file not found: {config_path.as_posix()}"
-                    ),
-                    extra=NO_MARKUP,
-                )
-                config = overlaid_fallback(config)
-                # Apply overrides to default config if provided
-                if config_overrides and config:
-                    return apply_config_overrides(config, config_overrides)
-                return config  # Return default config if specified file doesn't exist
+                # MISSING, the one kind left: the words `ash report`, a scan and
+                # named_config.py use.
+                raise ASHConfigFileNotFoundError(
+                    f"Configuration file not found: {config_path.as_posix()}"
+                ) from config_stat.cause()
 
             # The second route to the one landing below: a caller that ran
             # discovery itself and named the file it selected (workspace mode,

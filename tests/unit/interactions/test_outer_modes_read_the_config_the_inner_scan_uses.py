@@ -20,6 +20,7 @@ that refuses an unusable config before anything starts.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import List
 
@@ -142,6 +143,22 @@ def test_container_mode_hands_the_scan_inside_the_overridden_value(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     for name in ("docker", "podman", "finch", "nerdctl"):
+        if sys.platform == "win32":
+            # CreateProcess starts no shell script. ASH tries name.exe, name.bat and
+            # name.cmd before the bare name, so the stub is a .cmd that runs a
+            # Python script appending the same line.
+            script = bin_dir / f"{name}_stub.py"
+            script.write_text(
+                "import sys\n"
+                f"with open({str(runner_log)!r}, 'a', encoding='utf-8') as log:\n"
+                f"    log.write({name!r} + ' ' + ' '.join(sys.argv[1:]) + '\\n')\n"
+                "sys.exit(97)\n",
+                encoding="utf-8",
+            )
+            (bin_dir / f"{name}.cmd").write_text(
+                f'@"{sys.executable}" "{script}" %*\r\n', encoding="utf-8"
+            )
+            continue
         stub = bin_dir / name
         stub.write_text(
             f'#!/bin/sh\necho "{name} $*" >> "{runner_log}"\nexit 97\n',

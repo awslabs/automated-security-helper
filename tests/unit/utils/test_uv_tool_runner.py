@@ -35,6 +35,10 @@ from tests.utils.fake_tool_paths import fake_tool_path
 #: is reached, and the probe is never seen. Nothing is created at this path.
 UV_PATH = fake_tool_path("/opt/uv/bin/uv")
 
+#: Where the mocked uv lives. ASH refuses to spawn a program whose path is not
+#: anchored (a drive letter is needed on Windows), so /opt/uv/bin/uv gets one there.
+UV_PATH = os.path.abspath("/opt/uv/bin/uv")
+
 
 @pytest.fixture(autouse=True)
 def _unresolved_names_reach_the_mocked_spawn(monkeypatch):

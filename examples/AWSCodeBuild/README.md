@@ -20,9 +20,9 @@ The provided `buildspec.yml` configures AWS CodeBuild to:
 
 ## Configuration
 
-The buildspec includes the following environment variables:
+The buildspec's `env.variables` block sets four variables:
 
-| Variable             | Description                                | Default                                                    |
+| Name                 | Description                                | Set to                                                     |
 |----------------------|--------------------------------------------|------------------------------------------------------------|
 | `ASH_VERSION`        | The ASH release tag (or commit) to install | `v3.7.0`                                                   |
 | `ASH_MODE`           | The execution mode for ASH                 | `container`                                                |
@@ -32,7 +32,7 @@ The buildspec includes the following environment variables:
 ## Phases
 
 ### Pre-Build
-- Installs ASH `ASH_VERSION` from `ASH_REPO_CLONE_URL` with pip
+- Installs the ASH release that the buildspec's version variable names, from the clone URL, with pip
 
 ### Build
 - Runs the scan in `ASH_MODE` with progress display disabled, writing results to `.ash/ash_output`
@@ -61,6 +61,7 @@ The buildspec collects everything in `.ash/ash_output` as the build artifact, wi
 
 You can customize the ASH execution by modifying the `ash` command in the build phase. If you change `--output-dir`, change the artifact and report `base-directory` paths to match. For example:
 
+<!-- doctest: config kind=buildspec runner=none reason="an excerpt of examples/AWSCodeBuild/buildspec.yml; container mode needs a privileged CodeBuild project" -->
 ```yaml
 build:
   commands:

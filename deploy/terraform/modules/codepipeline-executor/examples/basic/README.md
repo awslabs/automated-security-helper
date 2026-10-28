@@ -3,8 +3,15 @@
 Builds the ASH image, then runs a pipeline that fans a scan out across 8 shards
 and merges the results into a single verdict.
 
+`ash_version` in `main.tf` names the ASH release this example comes from. Set it to
+a tag or commit whose ASH has `ash merge` and the `--shard-index` and `--shard-count`
+options of `ash scan`, which no release up to v3.7.1 has; with one that lacks them,
+each shard scans with every scanner and the Merge action fails. See
+[Which `AshVersion` to use](../../../../../README.md#which-ashversion-to-use).
+
 ## Run it
 
+<!-- doctest: illustrative reason="needs Terraform, network access and AWS credentials" -->
 ```console
 terraform init
 terraform plan -var 'codecommit_repository_arn=arn:aws:codecommit:<region>:<account>:<repo>'
@@ -14,6 +21,7 @@ terraform apply -var 'codecommit_repository_arn=arn:aws:codecommit:<region>:<acc
 Then build the image. The shard and merge actions use it as their CodeBuild
 environment image, so they cannot start until it exists:
 
+<!-- doctest: illustrative reason="needs an applied Terraform state" -->
 ```console
 terraform output -raw run_the_first_build
 ```
@@ -25,6 +33,7 @@ by hand) and the scan runs.
 
 The verdict is printed in the merge build's log, not in any shard's:
 
+<!-- doctest: illustrative reason="needs an applied Terraform state" -->
 ```console
 terraform output -raw where_the_verdict_is_printed
 ```

@@ -761,10 +761,7 @@ class TestTheDocumentedPythonExampleRuns:
                 "docs/content/docs/migration-guide.md.template",
             )
         ]
-        + [
-            (page, "### Can I use ASH programmatically?", _ACTIONABLE)
-            for page in ("docs/content/faq.md", "docs/content/faq.md.template")
-        ],
+        + [("docs/content/faq.md", "## Can I use ASH programmatically?", _ACTIONABLE)],
     )
     def test_the_example_runs_against_a_scan_with_findings(
         self, page, heading, printed, tmp_path, monkeypatch, capsys

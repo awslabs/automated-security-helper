@@ -35,7 +35,7 @@ class _Blockers:
         self.entered[plan] = threading.Event()
         self.release[plan] = threading.Event()
 
-    def __call__(self, plan, settings):
+    def __call__(self, plan, settings, **_kwargs):
         self.entered[plan].set()
         assert self.release[plan].wait(WAIT), "the test never released this scan"
         return None

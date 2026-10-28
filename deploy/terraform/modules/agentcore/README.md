@@ -63,13 +63,12 @@ so there is nothing to gain by turning it off.
 In stateless mode ASH does not treat a client-supplied `Mcp-Session-Id` as a
 session identity unless the operator states that the platform in front issues and
 authenticates it (`--trust-upstream-session-id`); without that, source delivery and
-the scan registry tools refuse. AgentCore does issue it, so the module sets
-`ASH_MCP_TRUST_UPSTREAM_SESSION_ID=true` in stateless mode, which the launcher maps
-to that flag. The module also sets `ASH_MCP_TRUST_UPSTREAM_HOST_CHECK=true`, rather
-than relying on the launcher's default, so the launcher passes
-`--trust-upstream-host-check` when `mcp_allowed_host` is empty: Host is on
-AgentCore's restricted-header list, so the platform restricts what reaches the
-container and no allowlist can name it.
+the scan registry tools refuse. AgentCore does issue it, so in stateless mode the
+module has the container launcher start the server with
+`--trust-upstream-session-id`. The module also has the launcher pass
+`--trust-upstream-host-check` when `mcp_allowed_host` is empty, rather than relying
+on the launcher's default: Host is on AgentCore's restricted-header list, so the
+platform restricts what reaches the container and no allowlist can name it.
 
 ## Why the auth header is allowlisted automatically
 
@@ -85,6 +84,7 @@ against the API's own pattern (`[A-Za-z][A-Za-z0-9_-]{0,255}`, max 20 entries).
 
 ## Variables
 
+<!-- doctest: options of=terraform:deploy/terraform/modules/agentcore complete -->
 | Variable | Contract | Type | Default | Notes |
 |---|---|---|---|---|
 | `container_image_uri` | — | `string` | *required* | Must be an arm64 image. |
@@ -94,11 +94,11 @@ against the API's own pattern (`[A-Za-z][A-Za-z0-9_-]{0,255}`, max 20 entries).
 | `mcp_auth_header_value` | `McpAuthHeaderValue` | `string` (sensitive) | `null` | Stored in Secrets Manager, read at container start. |
 | `mcp_allowed_host` | `McpAllowedHost` | `list(string)` | `[]` | Empty by design. See limitations. |
 | `ash_offline_mode` | `AshOfflineMode` | `bool` | `false` | Sets `ASH_OFFLINE`. Needs an offline-built image. |
-| `base_config_ssm_parameter_name` | `AshBaseConfigYaml` (indirect) | `string` | `null` | From the image module's output. |
+| `base_config_ssm_parameter_name` | `AshBaseConfigYaml` (indirect) | `string` | `null` | From the image module's output. A scan uses it only when the scanned directory has no config file and the client names none. |
 | `base_config_ssm_parameter_arn` | — | `string` | `null` | Scopes `ssm:GetParameter`. |
 | `name_prefix` | — | `string` | `"ash"` | Underscores only, no hyphens. |
 | `agent_runtime_name` | — | `string` | `null` | Defaults to `<name_prefix>_mcp`. |
-| `ecr_pull_resource_arns` | — `list(string)` | | `null` | Defaults to all repositories in this account and Region. |
+| `ecr_pull_resource_arns` | — | `list(string)` | `null` | Defaults to all repositories in this account and Region. |
 | `network_mode` | — | `string` | `"PUBLIC"` | `PUBLIC` or `VPC`. |
 | `vpc_subnet_ids` | — | `list(string)` | `[]` | Required for `VPC`. |
 | `vpc_security_group_ids` | — | `list(string)` | `[]` | Required for `VPC`. |

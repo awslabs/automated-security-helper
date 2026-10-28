@@ -225,7 +225,7 @@ import threading
 import types
 import typing
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePath
 from typing import (
     Any,
@@ -268,6 +268,7 @@ from automated_security_helper.config.plugin_section_names import (
 )
 from automated_security_helper.config.environment_record import (
     ENVIRONMENT_VALUE_SHOWN,
+    UNKNOWN_INDEX,
     EnvironmentReference,
     environment_references,
     referenced_name,
@@ -3554,6 +3555,13 @@ def _unaliased(value: Any, path: Path) -> Any:
     arithmetic), so a document whose anchors multiply is refused at the
     bound's cost, not its own product's, and the rebuild keeps no count of
     its own.
+
+    A document nested past the interpreter's recursion limit can parse (a
+    parser that runs out of recursion on one is refused in ``parse_config_text``,
+    but not every parser does on every interpreter) and then run the rebuild
+    out of recursion. That is this file's document being too deep to read, so
+    it is refused here as an unparsed config (``unparsed_config_reason``), the
+    way ``parse_config_text`` words the parser's own RecursionError.
     """
     refuse_past_expansion_bound(value, describe_config_path(path))
 
@@ -3564,7 +3572,13 @@ def _unaliased(value: Any, path: Path) -> Any:
             return {key: rebuilt(entry) for key, entry in item.items()}
         return [rebuilt(entry) for entry in item]
 
-    return rebuilt(value)
+    unparsed: Optional[str] = None
+    try:
+        return rebuilt(value)
+    except RecursionError as exc:
+        unparsed = unparsed_config_reason(path, exc)
+    # Outside the handler (unparsed_config_reason).
+    raise ASHConfigUnparsedError(unparsed)
 
 
 def _expansion_refusal(subject: str, lead_in: str = "") -> ASHConfigSourceError:
@@ -4023,9 +4037,11 @@ def _placed_references(
 
     One under ``extends`` names a base, which is not part of the merged
     configuration, and is left out. One in a ``patch`` operation's ``value`` is
-    moved to the operation's ``path``; a pointer ending in ``-`` (append) is a
-    list position like any other. Any other reference under ``patch`` sets no
-    value, and is left out too.
+    moved to the operation's ``path``. A digit in the pointer is that list index;
+    ``-`` (append) is an index the file cannot name, which the record reads as an
+    unknown index (``UNKNOWN_INDEX``). A list inside the operation's value keeps
+    the length it had there. Any other reference under ``patch`` sets no value,
+    and is left out too.
     """
     placed: List[EnvironmentReference] = []
     for reference in references:
@@ -4048,11 +4064,53 @@ def _placed_references(
             continue
         pointer = ops[index]["path"]
         segments: List[Any] = [
-            0 if segment == "-" or segment.isdigit() else _unescape(segment)
+            UNKNOWN_INDEX
+            if segment == "-"
+            else int(segment)
+            if segment.isdigit()
+            else _unescape(segment)
             for segment in pointer.split("/")[1:]
         ]
-        placed.append(reference.at((*segments, *reference.path[3:])))
+        placed.append(reference.rebase(3, tuple(segments)))
     return placed
+
+
+def _measured_in(
+    references: List["EnvironmentReference"], data: Any
+) -> List["EnvironmentReference"]:
+    """Each reference whose path ends at a digit index of a list the post-patch
+    document holds, with that list's length recorded, so the index is used; a
+    path the document does not hold stays as it is."""
+    measured: List[Any] = []
+    for reference in references:
+        place = None
+        if reference.length is None:
+            for position, segment in enumerate(reference.path):
+                if isinstance(segment, int):
+                    place = position
+        if place is None:
+            measured.append(reference)
+            continue
+        container: Any = data
+        for segment in reference.path[:place]:
+            if isinstance(container, dict) and segment in container:
+                container = container[segment]
+            else:
+                container = None
+                break
+        # ``place`` was found with isinstance(segment, int) above, so the
+        # segment is an int; the isinstance here is the narrowing mypy needs
+        # to admit the comparison, not a new condition.
+        index = reference.path[place]
+        if (
+            isinstance(index, int)
+            and isinstance(container, list)
+            and 0 <= index < len(container)
+        ):
+            measured.append(replace(reference, length=len(container), index_at=place))
+        else:
+            measured.append(reference)
+    return measured
 
 
 def _resolve(

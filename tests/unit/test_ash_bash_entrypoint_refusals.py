@@ -33,6 +33,16 @@ from pathlib import Path
 
 import pytest
 
+# The module is already skipped on Windows (pytestmark below), but later lines build
+# a name from bytes that are not UTF-8 and call os.uname() when the module is
+# imported, so the skip has to come first.
+if os.name == "nt":
+    pytest.skip(
+        "./ash is the POSIX entrypoint, and a file name that is not UTF-8 cannot "
+        "exist on NTFS (names are UTF-16)",
+        allow_module_level=True,
+    )
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ASH_SCRIPT = REPO_ROOT / "ash"
 

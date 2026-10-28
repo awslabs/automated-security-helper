@@ -32,7 +32,7 @@ import os
 import platform
 import re
 import shutil
-import subprocess
+import subprocess  # nosec B404 - runs the real gitleaks binary and ash CLI under test
 import sys
 from pathlib import Path
 
@@ -106,7 +106,7 @@ def _platform() -> str:
 
 def _version_of(binary: str) -> str | None:
     try:
-        out = subprocess.run(
+        out = subprocess.run(  # nosec B603 - fixed argv, asks the binary under test for its version
             [binary, "--version"], capture_output=True, text=True, timeout=30
         ).stdout
     except (OSError, subprocess.SubprocessError):
@@ -252,7 +252,7 @@ def test_the_trees_own_gitleaks_config_and_ignore_file_hide_nothing(
     source = _copy_fixture(tmp_path)
     # The positive control: gitleaks left to its own discovery honors both files.
     plain = tmp_path / "plain.sarif"
-    subprocess.run(
+    subprocess.run(  # nosec B603 B607 - control run of gitleaks by name, as a user would
         [
             "gitleaks",
             "dir",
@@ -340,7 +340,7 @@ def _plant_token(path: Path, line: int = 1) -> None:
 
 def _gitleaks_alone(cwd: Path, scan: str, report: Path, *extra: str) -> set:
     """``gitleaks dir`` run directly, for a control: its (rule, uri, line)s."""
-    subprocess.run(
+    subprocess.run(  # nosec B603 B607 - control run of gitleaks by name, as a user would
         [
             "gitleaks",
             "dir",
@@ -502,7 +502,7 @@ def test_an_entry_gitleaks_reads_differently_from_python_is_added_back(
     )
     # The control: gitleaks, reading the tree's file, hides the finding.
     alone = tmp_path / "alone.sarif"
-    subprocess.run(
+    subprocess.run(  # nosec B603 B607 - control run of gitleaks by name, as a user would
         [
             "gitleaks",
             "dir",
@@ -628,7 +628,7 @@ def _ash() -> str:
 def _run_ash(source: Path, output: Path, config: dict, env: dict, *extra: str):
     config_path = source.parent / "ash.yaml"
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
-    proc = subprocess.run(
+    proc = subprocess.run(  # nosec B603 - starts the real ash CLI under test, fixed argv
         [
             _ash(),
             "scan",

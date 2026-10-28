@@ -17,6 +17,7 @@ fails those tests instead.
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -52,9 +53,14 @@ def _installed_tools() -> set[str]:
     return tools
 
 
+#: `tests/integration` as a pytest argument of its own. The job's separate docs
+#: examples step runs `tests/integration/docs`, which is not this path.
+_SUITE_PATH = re.compile(r"tests/integration(?=[\s\\]|$)")
+
+
 def _suite_env() -> dict[str, str]:
     (step,) = [
-        s for s in _integration_steps() if "tests/integration" in (s.get("run") or "")
+        s for s in _integration_steps() if _SUITE_PATH.search(s.get("run") or "")
     ]
     return {key: str(value) for key, value in (step.get("env") or {}).items()}
 

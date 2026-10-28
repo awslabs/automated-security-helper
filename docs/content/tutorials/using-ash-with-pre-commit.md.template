@@ -18,6 +18,7 @@ The ASH repository is a [pre-commit](https://pre-commit.com/) hook repository. p
 
 Add the hook to `.pre-commit-config.yaml` in your repository:
 
+<!-- doctest: config kind=pre-commit -->
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
@@ -55,6 +56,7 @@ The finding is then reported as suppressed and no longer fails the hook.
 
 Exclude the two scanners that need it. They are then reported SKIPPED instead of MISSING, and the hook passes or fails on the other three:
 
+<!-- doctest: config kind=pre-commit -->
 ```yaml
       - id: ash
         args: [--exclude-scanners, cdk-nag, --exclude-scanners, npm-audit]
@@ -64,6 +66,7 @@ Exclude the two scanners that need it. They are then reported SKIPPED instead of
 
 `additional_dependencies` in your configuration replaces the hook's own list rather than adding to it. The `ash` hook's list is `.[cdk]`, which installs the `cdk` extra cdk-nag needs, so keep it in yours:
 
+<!-- doctest: config kind=pre-commit -->
 ```yaml
       - id: ash
         additional_dependencies: [".[cdk]", "your-package"]
@@ -81,6 +84,7 @@ The hook fails when ASH exits non-zero:
 
 `ash-full-scan` builds the ASH container image from the same source pre-commit installed, then scans your repository inside it with every scanner the image carries. It needs a container runtime on the host (finch, docker, nerdctl or podman, found in that order), and the first run takes several minutes to build the image.
 
+<!-- doctest: config kind=pre-commit -->
 ```yaml
       - id: ash-full-scan
         stages: [manual]

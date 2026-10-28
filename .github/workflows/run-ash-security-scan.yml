@@ -489,7 +489,7 @@ jobs:
             text="${text//$'\xc2'[$'\x80'-$'\x9f']/ }"
             text="${text//$'\xe2\x80'[$'\xa8\xa9']/ }"
             while [[ "${text}" == *::* ]]; do text="${text//::/: :}"; done
-            while [[ "${text}" == *'##['* ]]; do text="${text//'##['/'# #['}"; done
+            while [[ "${text}" == *'##['* ]]; do text="${text//'##['/# #[}"; done
             printf '%s' "${text}"
           }
           __wcs_clock() {
@@ -498,6 +498,12 @@ jobs:
             if [ -z "${__wcs_now}" ]; then
               __wcs_now=$((SECONDS * 1000000))
             fi
+          }
+          __wcs_last_bg() {
+            case "$-" in
+              *u*) set +u; printf '%s' "$!"; set -u ;;
+              *) printf '%s' "$!" ;;
+            esac
           }
           __wcs_end_group() {
             local __wcs_now="" __wcs_until=""
@@ -522,8 +528,8 @@ jobs:
             return 1
           }
           __wcs_on_signal() {
-            if [ -z "${__wcs_pid}" ] && [ "${!:-}" != "${__wcs_before}" ]; then
-              __wcs_pid="${!:-}"
+            if [ -z "${__wcs_pid}" ] && [ "$(__wcs_last_bg)" != "${__wcs_before}" ]; then
+              __wcs_pid="$(__wcs_last_bg)"
             fi
             if [ -n "${__wcs_pid}" ]; then
               kill -s "$1" -- "-${__wcs_pid}" 2>/dev/null || kill -s "$1" "${__wcs_pid}" 2>/dev/null || true
@@ -553,7 +559,7 @@ jobs:
               return 1
             fi
             local __wcs_out="" __wcs_var="" __wcs_file="" __wcs_token __wcs_status=0
-            local __wcs_pid="" __wcs_interrupted="" __wcs_open="" __wcs_left="" __wcs_before="${!:-}"
+            local __wcs_pid="" __wcs_interrupted="" __wcs_open="" __wcs_left="" __wcs_before="$(__wcs_last_bg)"
             case "${1:-}" in
               --stdout) __wcs_out="$2"; shift 2 ;;
               --capture) __wcs_var="$2"; shift 2 ;;
@@ -726,8 +732,9 @@ jobs:
       # workflow-level values for every later step. A full commit id is used as
       # given; a tag yields its commit, not the tag object. A name that is both a
       # branch and a tag on different commits, or that matches nothing, is refused,
-      # and so is an ash-repo that is not owner/name, since it is written into
-      # GITHUB_ENV.
+      # and so is an abbreviated commit id (7 to 39 hex digits) that is not the name
+      # of a branch or tag, and an ash-repo that is not owner/name, since it is
+      # written into GITHUB_ENV.
       #
       # Both values come from the resolve step above, so an empty input arrives
       # here as the workflow file's own commit, and the repository is already
@@ -782,8 +789,11 @@ jobs:
             elif [ "${UNIQUE}" -eq 1 ]; then
               COMMIT="${COMMITS[0]}"
             elif [[ "${ASH_VERSION}" =~ ^[0-9a-fA-F]{7,39}$ ]]; then
-              # An abbreviated commit id names one commit already; uv resolves it.
-              COMMIT="${ASH_VERSION}"
+              # 7 to 39 hex digits that name no branch or tag: an abbreviated commit
+              # id. It is not pinned, because it could name more than one commit by
+              # the time uv resolves it, so the job would not run one ASH throughout.
+              echo "::error::ash-version '$(one_line "${ASH_VERSION}")' is an abbreviated commit id and is not a branch or tag of $(one_line "${ASH_REPO}"). Give the full 40-character commit id."
+              exit 1
             else
               echo "::error::ash-version '$(one_line "${ASH_VERSION}")' is not a branch, tag or commit of $(one_line "${ASH_REPO}")."
               exit 1
@@ -2232,14 +2242,22 @@ jobs:
           uvx --from "${ASH_UVX_SOURCE}" ash \
             --output-dir "${ASH_OUTPUT_DIR}" report ${ASH_CONFIG:+--config "${ASH_CONFIG}"}
 
+      # The listing holds names the scanned repository chose: an extracted archive
+      # member keeps the name it had in the archive. The runner reads a line as a
+      # workflow command when it holds `##[` anywhere or starts with `::`, and tree
+      # prints both unchanged, so each line of the listing goes through one_line.
       - name: Update step summary
         if: (success() || failure()) && steps.inputs.outcome == 'success'
         shell: bash
         env:
           ASH_OUTPUT_DIR: ${{ steps.inputs.outputs.output_dir }}
         run: |-
+          . "${RUNNER_TEMP}/ash-one-line.sh"
           cat "${ASH_OUTPUT_DIR}/reports/ash.summary.md" >> "${GITHUB_STEP_SUMMARY}"
-          tree "${ASH_OUTPUT_DIR}"
+          tree "${ASH_OUTPUT_DIR}" | while IFS= read -r line || [ -n "${line}" ]; do
+            one_line "${line}"
+            printf '\n'
+          done
 
       # Only reports/ and the aggregated results, which are all the reporting job and
       # a SARIF upload read, plus their per-project copies when `ash-args` makes this a

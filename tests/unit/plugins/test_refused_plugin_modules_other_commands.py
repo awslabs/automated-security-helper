@@ -337,7 +337,8 @@ class TestConfigValidateRefusesWhatAScanRefuses:
             ["config", "validate", "--config", str(_config_file(tmp_path, REFUSED))]
         )
 
-        assert result.exit_code == 1, result.output
+        # The scan's own code for the refusal: validate exits with it.
+        assert result.exit_code == EXIT_INVALID_CONFIG, result.output
         assert REFUSED in result.output
         assert "Configuration is valid" not in result.output
         assert REFUSED not in sys.modules

@@ -3041,7 +3041,10 @@ def _scan_through_the_gate(
     except SystemExit as refusal:
         code = int(refusal.code or 0)
     shown = capsys.readouterr()
-    squeezed = re.sub(r"\s+", "", shown.out + shown.err)
+    # The console may write color escapes into a captured stream on one OS;
+    # the compare reads the words, not the styling.
+    plain = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", shown.out + shown.err)
+    squeezed = re.sub(r"\s+", "", plain)
     return code, squeezed, launcher.call_count, previous.exists()
 
 
@@ -3260,7 +3263,10 @@ def _workspace_container_scan(tmp_path: Path, monkeypatch, capsys, build: str, c
     except SystemExit as refusal:
         code = int(refusal.code or 0)
     shown = capsys.readouterr()
-    squeezed = re.sub(r"\s+", "", shown.out + shown.err)
+    # The console may write color escapes into a captured stream on one OS;
+    # the compare reads the words, not the styling.
+    plain = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", shown.out + shown.err)
+    squeezed = re.sub(r"\s+", "", plain)
     return code, squeezed, previous.exists()
 
 

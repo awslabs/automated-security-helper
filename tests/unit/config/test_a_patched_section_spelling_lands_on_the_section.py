@@ -1180,7 +1180,7 @@ def test_a_failed_test_ops_refusal_names_no_key_read_from_the_environment(
     from automated_security_helper.core.exceptions import ASHConfigSourceError
 
     canary = "ash-canary-7f3e-0123456789"
-    monkeypatch.setenv("ASH_TEST_PATCH_KEY", canary)
+    monkeypatch.setenv("ASH_TEST_PATCH_NAME", canary)
     config = tmp_path / "op" / "ash.yaml"
     config.parent.mkdir()
     config.write_text(
@@ -1189,7 +1189,7 @@ def test_a_failed_test_ops_refusal_names_no_key_read_from_the_environment(
         "  - op: add\n"
         "    path: /reporters\n"
         "    value:\n"
-        "      ${ASH_TEST_PATCH_KEY}:\n"
+        "      ${ASH_TEST_PATCH_NAME}:\n"
         "        enabled: false\n"
         "  - op: test\n"
         "    path: /reporters/Ash_Canary_7f3e_0123456789/enabled\n"

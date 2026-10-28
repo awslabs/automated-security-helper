@@ -83,7 +83,15 @@ def _context(tmp_path: Path, config: AshConfig) -> PluginContext:
     )
 
 
-@pytest.mark.parametrize("name", ["bwrap", "firejail", "landlock", "sandbox-exec"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param("bwrap", marks=pytest.mark.requires_userns),
+        "firejail",
+        "landlock",
+        "sandbox-exec",
+    ],
+)
 def test_the_directory_is_readable_and_not_writable(tmp_path: Path, name: str) -> None:
     backend = _require(name)
     context = _context(tmp_path, AshConfig())
@@ -132,6 +140,7 @@ def test_the_directory_is_readable_and_not_writable(tmp_path: Path, name: str) -
     assert not config.parent.exists()
 
 
+@pytest.mark.requires_userns
 def test_syft_reads_its_config_under_bwrap(tmp_path: Path) -> None:
     from automated_security_helper.config.path_trust import in_scanned_tree
     from automated_security_helper.core.phases.scanner_executor import ScannerExecutor

@@ -7171,8 +7171,14 @@ def _run_with_options(
     config_fail_on_findings: Optional[bool] = _resolve_config_fail_on_findings(
         opts, loaded=shared
     )
+    # Read from the file before the scan only where the answer cannot wait for the
+    # orchestrator's resolution. A local scan's results carry the config it
+    # actually resolved, which a client-delivered file is checked in; a pre-read
+    # here would let an unchecked read of the same file decide the gate.
     config_fail_on_incomplete_scanners: Optional[bool] = (
         _resolve_config_fail_on_incomplete_scanners(opts, loaded=shared)
+        if opts.mode != RunMode.local
+        else None
     )
     # Before any mode runs, so that whatever this run writes to reports/ash.sarif
     # (the local report phase, or the container's or nix's inner scan) shows as a

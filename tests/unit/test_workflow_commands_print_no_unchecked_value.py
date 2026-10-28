@@ -88,9 +88,14 @@ CHECKED = (
 CHECKED_HERE = (
     "checked for control characters and `##[` in this step, before it is printed"
 )
+CHECKED_DIGITS = (
+    "read from a file, and refused in this step unless it is digits only, before "
+    "it is printed"
+)
 FIXED_FORM = (
     "a value whose form the tool that reports it fixes: a container image id "
-    "(sha256:<hex>), a git mode or object type"
+    "(sha256:<hex>), a git object id, a random token printed by od as hex digits, "
+    "a git mode or object type"
 )
 #: The two judgments. Neither is allowed in a workflow other repositories call.
 OWN_TREE = (
@@ -231,6 +236,72 @@ ALLOWED: dict[tuple[str, str, str], dict[str, str]] = {
         "RELEASE_LINE": LITERAL,
     },
     (
+        ".github/workflows/ash-docs-ci-runners.yml",
+        "legs",
+        "Build the wheel under test",
+    ): {
+        # The number of files the `*.whl` glob matched.
+        "#wheels[@]": NUMBER,
+        # "${RUNNER_TEMP:?}/ash-wheel": the runner's temporary directory and a
+        # fixed name.
+        "wheel_dir": RUNNER,
+    },
+    (
+        ".github/workflows/ash-docs-ci-runners.yml",
+        "legs",
+        "Check the Jenkins agent's tools",
+    ): {
+        # The entries are the step's own strings and the names in its fixed
+        # `for tool in git node npm ruby gem cc make` list.
+        "missing[*]": LITERAL,
+    },
+    # Each step below that runs a command with workflow commands paused prints the
+    # pausing line with `token`: `od -An -N16 -tx1` writes the 16 random bytes as
+    # hex digit pairs, the step removes the spaces and the line feed, and it exits
+    # before that line unless 32 characters are left.
+    (
+        ".github/workflows/ash-docs-ci-runners.yml",
+        "legs",
+        "Install the leg's runner, tools and images",
+    ): {"token": FIXED_FORM},
+    (
+        ".github/workflows/ash-docs-ci-runners.yml",
+        "legs",
+        "Run the pages' pipelines",
+    ): {"token": FIXED_FORM},
+    (
+        ".github/workflows/ash-docs-ci-runners.yml",
+        "legs",
+        "Check that the pipelines can fail",
+    ): {"token": FIXED_FORM},
+    (
+        ".github/workflows/ash-docs-ci-runners.yml",
+        "legs",
+        "Stop recording image pulls",
+    ): {
+        # "${RUNNER_TEMP:?}/ci-runner-out": the runner's temporary directory and a
+        # fixed name.
+        "out": RUNNER,
+        # Read from the file the recording step wrote. The `case` before the two
+        # messages that print it exits unless it is non-empty and all digits.
+        "pid": CHECKED_DIGITS,
+    },
+    (
+        ".github/workflows/ash-docs-ci-runners.yml",
+        "legs",
+        "Check every image pull against the pins",
+    ): {"token": FIXED_FORM},
+    (
+        ".github/workflows/ash-docs-ci-runners.yml",
+        "legs",
+        "Check every block of the leg ran",
+    ): {"token": FIXED_FORM},
+    (
+        ".github/workflows/ash-docs-ci-runners.yml",
+        "legs",
+        "Check every control ran",
+    ): {"token": FIXED_FORM},
+    (
         ".github/workflows/ash-iac-drift.yml",
         "cdk-nag",
         "Account for a non-zero synth exit code neither check explained",
@@ -318,12 +389,27 @@ ALLOWED: dict[tuple[str, str, str], dict[str, str]] = {
         ".github/workflows/ash-tag-on-merge.yml",
         "tag-and-release",
         "Create tag and GitHub Release",
-    ): {"CURATED": OWN_TREE, "TAG": OWN_TREE},
+    ): {
+        "CURATED": OWN_TREE,
+        "TAG": OWN_TREE,
+        # `git ls-remote ... | tail -n1 | cut -f1`: a git object id of 40 hex
+        # digits, or empty, and the step prints it only on its non-empty arm.
+        "TAG_SHA": FIXED_FORM,
+        # The event payload's merge_commit_sha: a git object id of 40 hex digits.
+        "MERGE_SHA": FIXED_FORM,
+    },
     (
         ".github/workflows/ash-tag-on-merge.yml",
         "tag-and-release",
         "Update floating major tag",
-    ): {"VERSION": OWN_TREE},
+    ): {
+        "VERSION": OWN_TREE,
+        # "v" and the digits of a major that the step's version pattern matched.
+        "FLOATING": FIXED_FORM,
+        # A remote tag that packaging.version parsed: PEP 440 admits no control
+        # character, colon or bracket.
+        "NEWEST": FIXED_FORM,
+    },
     (
         ".github/workflows/ash-typescript-ci.yml",
         "typescript-tests",

@@ -6,8 +6,9 @@ client does, rather than calling the tool functions directly.
 ## How to run them
 
 These tests are gated. `tests/conftest.py` skips anything marked `integration` unless
-`--run-integration` is passed. Read the summary line:
+`pytest --run-integration` is run. Read the summary line:
 
+<!-- doctest: illustrative reason="runs in a checkout of this repository" -->
 ```bash
 # everything in this directory
 python -m pytest tests/integration/cli/ --run-integration
@@ -19,23 +20,25 @@ python -m pytest tests/integration/cli/test_mcp_scan_workflow.py --run-integrati
 Do not grep the output for `FAILED`. It appears as a parametrization value in green logs.
 Read the `short test summary info` block.
 
-### These tests do not run in CI
+### CI runs them with both flags
 
-CI runs the unit suite and does not pass `--run-integration`, so nothing in this directory
-executes there. A green CI run is not evidence that any of this passes. Verify locally.
-Enabling the suite in CI is a separate change.
+The integration suite job in `.github/workflows/ash-unified-ci.yml` runs `tests/integration`
+with `pytest --run-integration --run-slow`, so everything in this directory runs there,
+including tests that also carry the `slow` marker. A local run with only
+`pytest --run-integration` skips those.
 
 ### One flag, not two
 
 The conftest in this directory also adds the `slow` marker to any test whose **function
 name** contains `workflow`, `lifecycle` or `end_to_end`, and `tests/conftest.py` skips
-`slow` tests unless `--run-slow` is passed. A test that picks up both markers is silently
-skipped by a `--run-integration` run that reports green.
+`slow` tests unless `pytest --run-slow` is passed. A test that picks up both markers is
+silently skipped by a `pytest --run-integration` run that reports green.
 
 The MCP modules are named to avoid those three words for that reason, and
 `test_marker_gating.py` fails if a new test name reintroduces the problem. One test is
 exempted there with a reason: `test_file_based_tracking_workflow`, which is double-gated
-today and currently fails when it does run.
+today. The exemption's reason says the test fails when it runs, but it passes, so what
+is left is to rename the test and remove the exemption.
 
 ## What is here
 
@@ -45,14 +48,15 @@ A real `mcp.Client` connected to the real server object over the SDK's in-memory
 transport. Thirteen tests, no scan, about ten seconds.
 
 Covers the `initialize` handshake and server identity; `tools/list` against the full
-21-tool surface; the published input schemas, including that the injected `Context`
+22-tool surface; the published input schemas, including that the injected `Context`
 parameter is not exposed as a caller argument; a read-only `tools/call` round trip; the
 content-block shape of the one tool that returns a list rather than a dict; the
 convention that a domain failure comes back as a successful call carrying
 `success: False` while an unknown tool or a missing required argument comes back with
 `is_error: True`; `resources/list` and `resources/read` for all five resources, with a
 structural check on the generated config schema and an equality check of `ash://exit-codes`
-against `ASH_EXIT_CODES` and its `commands` entry against `ASH_EXIT_BAD_SELECTION`;
+against the exit-code table in `automated_security_helper/core/constants.py` and its
+`commands` entry against the bad-selection exit code defined beside it;
 `prompts/get` for both prompts including argument
 interpolation; and the `ASH_MCP_ALLOWED_ROOTS` scan-target policy in both directions.
 
@@ -70,8 +74,8 @@ inventory naming files that exist and parse, including counting SARIF results; r
 listing and the refusal to cancel a finished scan; the progress notification the server
 sends during the start call; the echoed session id; and the semantics of `is_complete`.
 
-One test is `xfail(strict=True)`: `filter_level="summary"` does not filter. The reason and
-the measurement are in that test's docstring.
+One test checks that `filter_level="summary"` applies the summary filter; its docstring
+records the measurement.
 
 ### `test_mcp_stdio_server.py`
 
@@ -85,14 +89,13 @@ its own stream); and that closing stdin ends the process with exit code 0.
 
 ### `test_mcp_file_tracking_integration.py`
 
-Pre-existing. One test, currently failing when it runs: it calls
-`mcp_get_scan_results(scan_id)` while that function's parameter is `output_dir`. Not
-touched by the modules above.
+Pre-existing. One test, which calls the MCP tool functions directly with a mocked scan
+process rather than through a client. Not touched by the modules above.
 
 ### `test_marker_gating.py`
 
-Three tests asserting that nothing in this directory needs `--run-slow` as well as
-`--run-integration`, that the keyword list it reads out of the conftest is still the one it
+Three tests asserting that nothing in this directory needs `pytest --run-slow` as well as
+`pytest --run-integration`, that the keyword list it reads out of the conftest is still the one it
 was written against, and that its exemption list has not gone stale.
 
 ### `conftest.py`

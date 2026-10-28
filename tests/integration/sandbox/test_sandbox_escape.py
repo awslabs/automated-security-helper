@@ -187,7 +187,7 @@ def _run_escape(
     *,
     online: bool = False,
     output_in_source: "str | None" = None,
-    passwd_home_files: "Dict[str, Path] | None" = None,
+    passwd_home_files: "Dict[str, Path] | None" = None,  # pragma: allowlist secret
 ) -> "tuple[Dict[str, str], Dict[str, str]]":
     """The probe's attempts, and what it found still working (``works``)."""
     outcomes, works, result = _scan(
@@ -226,7 +226,7 @@ def _scan(
     online: bool = False,
     output_in_source: "str | None" = None,
     plant: "Callable[[Path], None] | None" = None,
-    passwd_home_files: "Dict[str, Path] | None" = None,
+    passwd_home_files: "Dict[str, Path] | None" = None,  # pragma: allowlist secret
 ) -> "tuple[Dict[str, str] | None, Dict[str, str] | None, subprocess.CompletedProcess]":
     """Run the probe through a real scan.
 
@@ -736,6 +736,7 @@ def test_a_file_in_the_passwd_home_is_hidden_when_home_is_elsewhere(
     test properties, so a run's log shows where they went, and they are removed,
     with any directory made for them, whatever the outcome.
     """
+    from tests.utils import real_home_guard
     from tests.utils.throwaway_runner import passwd_home_write_refusal
 
     refusal = passwd_home_write_refusal()
@@ -755,25 +756,38 @@ def test_a_file_in_the_passwd_home_is_hidden_when_home_is_elsewhere(
     for attempt, path in planted.items():
         print(f"passwd-home file ({attempt}): {path}")
         record_property(attempt, str(path))
-    try:
-        for path in planted.values():
-            missing = [p for p in [path.parent, *path.parent.parents] if not p.exists()]
-            for directory in reversed(missing):
-                directory.mkdir()
-                made.append(directory)
-            path.write_text(CANARY)
-        outcomes, _works = _run_escape(
-            tmp_path, listeners, backend, passwd_home_files=planted
-        )
-    finally:
-        for path in planted.values():
-            path.unlink(missing_ok=True)
-        for directory in reversed(made):
-            # Left in place if something else has put a file there since.
-            try:
-                directory.rmdir()
-            except OSError:
-                pass
+    # The real-home guard (tests/utils/real_home_guard.py) watches the default
+    # XDG_DATA_HOME, which is where the second file goes, and would fail this test's
+    # teardown for the very writes it makes. It is told about exactly these files and
+    # the directories that do not exist yet; nothing else in the home is let through.
+    to_make = [
+        p
+        for path in planted.values()
+        for p in [path.parent, *path.parent.parents]
+        if not p.exists()
+    ]
+    with real_home_guard.allowing([*planted.values(), *to_make]):
+        try:
+            for path in planted.values():
+                missing = [
+                    p for p in [path.parent, *path.parent.parents] if not p.exists()
+                ]
+                for directory in reversed(missing):
+                    directory.mkdir()
+                    made.append(directory)
+                path.write_text(CANARY)
+            outcomes, _works = _run_escape(
+                tmp_path, listeners, backend, passwd_home_files=planted
+            )
+        finally:
+            for path in planted.values():
+                path.unlink(missing_ok=True)
+            for directory in reversed(made):
+                # Left in place if something else has put a file there since.
+                try:
+                    directory.rmdir()
+                except OSError:
+                    pass
 
     for attempt, path in planted.items():
         outcome = outcomes[attempt]

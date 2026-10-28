@@ -24,7 +24,7 @@ A unified source-of-truth (`agentic-coding/transpiler/_base/`) plus a config-dri
 | 16 | **Generic Skill ([agentskills.io](https://agentskills.io/specification))** | `agentic-coding/plugins/generic-skill/` | Drop `skills/<name>/` into any agentskills-compatible agent's skills directory. Natively consumed by Claude Code, Codex, OpenCode, Cline, Kiro. |
 | 17 | **Repository-root skill tree** | `skills/` (repository root, not under `plugins/`) | `npx skills add awslabs/automated-security-helper` |
 
-The `install.sh` scripts write to user-level files that other tools share, so none of them replaces one. For Windsurf, Cline and Gemini CLI the script adds or updates the `ash` entry under `mcpServers` and keeps every other server and setting, saving the previous file beside it as `<file>.ash-backup-<UTC time>` first, with the file's own permissions. When the config is a symlink, the backup goes beside the link, not into the directory it points to, and the file it points to is updated. It needs `python3`, and it changes nothing when the file is not plain JSON (a comment or a trailing comma is enough) or cannot be written; it prints the entry to add by hand instead. A file that starts with a UTF-8 byte order mark is read and keeps the mark. For Goose, the script appends the `ash` extension to `config.yaml` only when that file has no `extensions:` block, and otherwise prints the entry to add by hand; when the block already runs a different ASH version, it says which one and what to change the `--from` argument to. The Amazon Q script writes only ASH's own agent file, `ash.json`. Re-running any of them changes nothing once ASH is configured.
+The `install.sh` scripts write to user-level files that other tools share, so none of them replaces one. For Windsurf, Cline and Gemini CLI the script adds or updates the `ash` entry under `mcpServers` and keeps every other server and setting, saving the previous file beside it as `<file>.ash-backup-<UTC time>` first, with the file's own permissions. When the config is a symlink, the backup goes beside the link, not into the directory it points to, and the file it points to is updated. It needs `python3`, and it changes nothing when the file is not plain JSON (a comment or a trailing comma is enough) or cannot be written; it prints the entry to add by hand instead. A file that starts with a UTF-8 byte order mark is read and keeps the mark. For Goose, the script appends the `ash` extension to `config.yaml` only when that file has no `extensions:` block, and otherwise prints the entry to add by hand; when the block already runs a different ASH version, it says which one and what to change the `uvx --from` argument to. The Amazon Q script writes only ASH's own agent file, `ash.json`. Re-running any of them changes nothing once ASH is configured.
 
 Rows 16 and 17 hold the same skill content and differ only in where it lands. Row 17 is emitted at the repository root because [Vercel's `skills` CLI](https://github.com/vercel-labs/skills) looks for `skills/<name>/` there and does not search the rest of the tree, which is what makes the `owner/repo` shorthand above resolve. Row 16's copy stays inside the plugin tree for people assembling a custom integration who want the bare artifact and no repository layout imposed on them. Both are generated from `_base/`, so they cannot disagree.
 
@@ -49,7 +49,7 @@ Only one of the two ever runs, because GitHub reads workflows solely from the re
 
 Each backend is a class that subclasses `BaseBackend` and declares its layout via class-level constants (`PLUGIN_MANIFEST`, `MCP`, `SKILL`, `COMMANDS`, `AGENTS`, `INSTRUCTION_FILE`, `RULES_DIR`, `CUSTOM_MODES`, `CONFIG_FILE`, `MARKETPLACE`, `EXTENSION_MANIFEST`, `MCPB_BUNDLE`). Build behavior comes from `BaseBackend.build()`'s section-emitter dispatch; backends with multi-step builds opt into the `PHASES` machinery (setup/build/release stages with topo-sorted `depends_on`). Backends can also expose backend-specific Click subcommands via a `CLI_GROUP` class var, and override `smoke_test()` to confirm the generated package loads under the platform's CLI.
 
-```
+```text
 agentic-coding/
 ├── transpiler/                         # The build tool
 │   ├── pyproject.toml                  # Deps + the agentic-plugins, refresh-schemas, generate-models entry points
@@ -106,6 +106,7 @@ The transpiler reads `_base/` content and each backend's class vars, then dispat
 
 ## Development workflow
 
+<!-- doctest: illustrative reason="runs in a checkout of this repository" -->
 ```bash
 # 1. Install pre-commit hooks (one-time)
 pip install pre-commit
@@ -128,7 +129,7 @@ git commit -am "feat: improve scan workflow"
 
 The Click CLI surfaces five lifecycle commands. Each takes an optional backend NAME; without one, the command runs across all 17 backends:
 
-```bash
+```text
 agentic-plugins build [NAME]       # build platform plugin packages
 agentic-plugins check              # drift detection + output validation (CI gate)
 agentic-plugins setup [NAME]       # phase stage="setup" (refresh-time work)
@@ -148,6 +149,7 @@ The transpiler validates every generated file against its platform's spec via th
 
 To refresh the cached external schemas after upstream changes:
 
+<!-- doctest: illustrative reason="downloads the upstream schemas from the network" -->
 ```bash
 uv run --project agentic-coding/transpiler refresh-schemas
 git diff agentic-coding/transpiler/schemas/   # review what changed
@@ -159,6 +161,7 @@ too: `uv run --project agentic-coding/transpiler --extra refresh generate-models
 
 You can run validation independently of drift detection:
 
+<!-- doctest: illustrative reason="runs in a checkout of this repository" -->
 ```bash
 uv run --project agentic-coding/transpiler agentic-plugins check                  # drift + validation (CI gate)
 uv run --project agentic-coding/transpiler agentic-plugins check --validate-only  # validation alone

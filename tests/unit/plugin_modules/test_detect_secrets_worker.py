@@ -307,8 +307,8 @@ runpy.run_module(
 """
 
 
-def _spawn_pool_run(tmp_path, monkeypatch, refuse_env):
-    """Three files, so detect-secrets scans them in a pool; verify is false."""
+def _spawn_pool_run(tmp_path, monkeypatch, refuse_env, verify=False):
+    """Three files, so detect-secrets scans them in a pool."""
     from automated_security_helper.utils.detect_secrets_worker import REFUSE_HTTP_ENV
 
     scrub_cloud_credentials(monkeypatch)
@@ -346,7 +346,7 @@ def _spawn_pool_run(tmp_path, monkeypatch, refuse_env):
                     ],
                 },
                 "paths": paths,
-                "verify": False,
+                "verify": verify,
             }
         ),
         encoding="utf-8",
@@ -372,10 +372,22 @@ def test_spawned_pool_processes_send_no_request_either(tmp_path, monkeypatch):
     assert len(scanned) == 3, scanned
 
 
-def test_control_spawned_pool_processes_need_the_variable(tmp_path, monkeypatch):
-    """Control: without the variable only the worker's own process refuses, and the
-    spawned pool processes verify. This is what the variable is for."""
-    proxy, _ = _spawn_pool_run(tmp_path, monkeypatch, refuse_env=False)
+def test_spawned_pool_processes_refuse_without_a_variable_from_the_caller(
+    tmp_path, monkeypatch
+):
+    """A caller that starts the worker directly, with verify false and no
+    ASH_DETECT_SECRETS_REFUSE_HTTP in its environment, still gets a refusal in the
+    spawned pool processes: the worker sets the variable itself before it scans."""
+    proxy, scanned = _spawn_pool_run(tmp_path, monkeypatch, refuse_env=False)
+
+    assert proxy.external_requests() == [], proxy.requests
+    assert len(scanned) == 3, scanned
+
+
+def test_control_spawned_pool_processes_verify_when_the_scan_may(tmp_path, monkeypatch):
+    """Control: with verify true and no variable the spawned pool processes ask the
+    issuer, which shows the two runs above would have sent a request."""
+    proxy, _ = _spawn_pool_run(tmp_path, monkeypatch, refuse_env=False, verify=True)
 
     assert any(ISSUER_HOST in line for line in proxy.external_requests()), (
         proxy.requests
@@ -413,8 +425,98 @@ def test_the_scanner_starts_the_worker_with_the_refusal_unless_it_may_verify(
             verify=verify,
         )
 
-    env = seen["env"] or {}
-    assert (env.get(REFUSE_HTTP_ENV) == "1") is (not verify), seen["env"]
+    env = seen["env"]
+    assert isinstance(env, dict), env
+    assert (env.get(REFUSE_HTTP_ENV) == "1") is (not verify), env.get(REFUSE_HTTP_ENV)
+
+
+def test_a_verifying_worker_does_not_inherit_the_refusal_from_the_parent(
+    tmp_path, monkeypatch
+):
+    """With the variable set in the parent, the environment handed to a verify=True
+    worker does not carry it."""
+    from automated_security_helper.utils import subprocess_utils
+    from automated_security_helper.utils.detect_secrets_worker import REFUSE_HTTP_ENV
+
+    seen = {}
+
+    def record(command, *args, **kwargs):
+        seen["env"] = kwargs.get("env")
+        return {"returncode": 1, "stdout": "", "stderr": "not run"}
+
+    monkeypatch.setattr(subprocess_utils, "run_command_with_output_handling", record)
+    monkeypatch.setenv(REFUSE_HTTP_ENV, "1")
+    scanner = _scanner(tmp_path)
+    scanner._secrets_collection.root = str(tmp_path)
+    work = tmp_path / "work"
+    work.mkdir()
+    with pytest.raises(Exception):
+        scanner._scan_in_worker(
+            baseline=None,
+            scan_paths=[],
+            scan_settings_dict={"plugins_used": [{"name": "AWSKeyDetector"}]},
+            work_dir=work,
+            scan_timeout=None,
+            verify=True,
+        )
+
+    assert isinstance(seen["env"], dict), seen["env"]
+    assert REFUSE_HTTP_ENV not in seen["env"]
+
+
+def _in_process_run_request(tmp_path, verify):
+    src = tmp_path / "src"
+    src.mkdir()
+    return {
+        "root": str(src),
+        "baseline": None,
+        "settings": {"plugins_used": [{"name": "AWSKeyDetector"}]},
+        "paths": [],
+        "verify": verify,
+    }
+
+
+@pytest.mark.parametrize("preset", [None, "0", "1"], ids=["absent", "was-0", "was-1"])
+def test_run_leaves_the_refusal_variable_as_it_found_it(tmp_path, monkeypatch, preset):
+    """run() sets the variable for the pool it starts and puts it back afterwards."""
+    from automated_security_helper.utils import detect_secrets_worker
+    from automated_security_helper.utils.detect_secrets_worker import REFUSE_HTTP_ENV
+
+    # run() also replaces HTTPAdapter.send for the process; undo that after the test.
+    from requests.adapters import HTTPAdapter
+
+    monkeypatch.setattr(HTTPAdapter, "send", HTTPAdapter.send)
+    if preset is None:
+        monkeypatch.delenv(REFUSE_HTTP_ENV, raising=False)
+    else:
+        monkeypatch.setenv(REFUSE_HTTP_ENV, preset)
+
+    detect_secrets_worker.run(_in_process_run_request(tmp_path, verify=False))
+
+    assert os.environ.get(REFUSE_HTTP_ENV) == preset
+
+
+def test_run_sets_the_refusal_variable_while_the_pool_runs(tmp_path, monkeypatch):
+    """Control for the cell above: during the scan the variable is "1", so the
+    restore is not satisfied by run() never setting it."""
+    from automated_security_helper.utils import detect_secrets_worker
+    from automated_security_helper.utils.detect_secrets_worker import REFUSE_HTTP_ENV
+    from detect_secrets.core.secrets_collection import SecretsCollection
+    from requests.adapters import HTTPAdapter
+
+    monkeypatch.setattr(HTTPAdapter, "send", HTTPAdapter.send)
+    monkeypatch.delenv(REFUSE_HTTP_ENV, raising=False)
+    seen = {}
+
+    def scan_files(self, *paths):
+        seen["during"] = os.environ.get(REFUSE_HTTP_ENV)
+
+    monkeypatch.setattr(SecretsCollection, "scan_files", scan_files)
+
+    detect_secrets_worker.run(_in_process_run_request(tmp_path, verify=False))
+
+    assert seen["during"] == "1"
+    assert REFUSE_HTTP_ENV not in os.environ
 
 
 def test_importing_the_worker_module_in_ash_refuses_nothing(tmp_path):

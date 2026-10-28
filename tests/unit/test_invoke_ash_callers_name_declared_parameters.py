@@ -16,8 +16,9 @@ What this asserts
 -----------------
 1. Each ``-Name`` an ``Invoke-ASH`` call in .github/ or the docs passes is a parameter
    ``Invoke-ASH`` declares, or a common parameter ``[CmdletBinding()]`` adds, by its full
-   name. A prefix or a different name does not bind to a declared parameter here; it
-   falls into ``$AshArgs``.
+   name. PowerShell binds an unambiguous prefix of a declared name to that parameter, but
+   this test does not accept one: a call spells the full name. A name that is not a
+   declared one, and not a prefix of one, falls into ``$AshArgs``.
 2. The community-config leg passes ``-Config`` with a config file that exists.
 """
 

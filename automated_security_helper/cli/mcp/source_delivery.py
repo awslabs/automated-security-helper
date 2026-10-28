@@ -64,6 +64,7 @@ import signal
 import stat
 import subprocess  # nosec B404 - git is invoked as a subprocess; see _validate_clone_url
 import sys
+import threading
 import time
 import unicodedata
 import uuid
@@ -169,34 +170,83 @@ class SourceDeliveryBusyError(RuntimeError):
     """
 
 
+#: Worker threads the server runs clones (``set_source_git``) on, across all
+#: sessions. A clone beyond this many waits for a worker; scans do not share
+#: these, and neither do the chunk, finalize and clear tools, which have a pool of
+#: their own.
+CLONE_MAX_WORKERS = 8
+
+#: Worker threads the server runs the other three delivery tools on (a chunk, a
+#: finalize, a clear), across all sessions. Explicit rather than
+#: ``ThreadPoolExecutor``'s default, which depends on the host's CPU count: the
+#: default is 5-6 workers on a 1-2 vCPU container, and before Python 3.13
+#: ``os.cpu_count`` ignores cgroup CPU quotas, so a big host gets 32 whatever
+#: its container's quota. A finalize (a sha256 and an extraction) or a clear
+#: (an ``rmtree``) can hold a worker for seconds, so the size bounds how many
+#: of those one tenant's calls can queue another's chunk behind.
+DELIVERY_MAX_WORKERS = 8
+
 #: ``error_type`` the MCP tools return for :class:`SourceDeliveryBusyError`.
 SOURCE_DELIVERY_BUSY = "source_delivery_busy"
 
 
 @contextlib.contextmanager
-def _no_scan_running(session_id: str) -> Iterator[None]:
+def _no_scan_running(
+    session_id: str, *, removes_workspace: bool = True
+) -> Iterator[None]:
     """Hold the session's scan lock for a change to its tree, or refuse.
 
     Refused too for a scan that has started and not yet taken the lock
-    (``MCPSession.try_claim_scan``). Not blocking: a delivery is called on the
-    server's event loop, and waiting there for a scan to finish would stall
-    every other session. A session that ended while the change held the lock is
-    removed once it is released.
+    (``MCPSession.try_claim_scan``). Not blocking: a delivery runs on one of the
+    server's few delivery threads, and waiting there for a scan to finish would
+    hold the thread for the scan's length and queue other sessions' deliveries
+    behind it. A session that ended while the change held the lock is removed
+    once it is released.
+
+    ``removes_workspace`` is True for a change that deletes the session's whole
+    directory (``clear_source``). Such a change also excludes writes
+    (``MCPSession.try_begin_write``): it is refused while a chunk or a profile
+    binding is being written, and a write that comes meanwhile is refused. A
+    clone and a finalize pass False, so a write goes on beside them: a clone
+    replaces ``source/`` and its staging sibling and touches neither
+    ``incoming/`` nor ``config/``; a finalize replaces the same two and also
+    reads and removes its own upload's ``incoming/<id>.zip`` (it opens the zip
+    under the upload's lock (:func:`_upload_lock`), hashes and extracts the open
+    handle without the lock, and deletes the path under the lock again), so
+    only a chunk of that same upload waits for either step.
 
     Takes the in-memory session only: a change that is refused leaves no session
     directory, and each change that writes creates and marks the directory
     itself.
     """
     from automated_security_helper.cli.mcp.sessions import (
+        CHANGE_REFUSED_BY_CHANGE,
+        CHANGE_REFUSED_BY_WRITE,
         finish_ended_session,
         get_default_registry,
     )
 
     session = get_default_registry().session_for(session_id)
-    if not session.try_begin_change():
+    refused = session.try_begin_change(removes_workspace=removes_workspace)
+    if refused is not None:
+        # The message names what refused this attempt
+        # (MCPSession.try_begin_change says why), so a client is not told to
+        # wait for a scan that does not exist.
+        if refused == CHANGE_REFUSED_BY_WRITE:
+            raise SourceDeliveryBusyError(
+                "a chunk of an upload or a profile selection is being "
+                "written; change the delivered source after it finishes"
+            )
+        if refused == CHANGE_REFUSED_BY_CHANGE:
+            raise SourceDeliveryBusyError(
+                "another change to this session's source is in progress (a "
+                "delivery, a clear, the end of the session, or the removal "
+                "of an idle session); change the delivered source after it "
+                "finishes"
+            )
         raise SourceDeliveryBusyError(
-            "a scan of this session is running; change the delivered source after "
-            "it finishes"
+            "a scan of this session is running; change the delivered source "
+            "after it finishes"
         )
     try:
         yield
@@ -208,18 +258,26 @@ def _no_scan_running(session_id: str) -> Iterator[None]:
 _F = TypeVar("_F", bound=Callable[..., Any])
 
 
-def _while_no_scan_runs(function: _F) -> _F:
-    """Run a change to a session's tree under ``_no_scan_running`` for its session."""
+def _while_no_scan_runs(*, removes_workspace: bool = True) -> Callable[[_F], _F]:
+    """Run a change to a session's tree under ``_no_scan_running`` for its session.
 
-    signature = inspect.signature(function)
+    Used as ``@_while_no_scan_runs()`` for a change that deletes the session's
+    directory, and as ``@_while_no_scan_runs(removes_workspace=False)`` for one
+    that replaces ``source/`` only; see :func:`_no_scan_running`.
+    """
 
-    @functools.wraps(function)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        session_id = signature.bind(*args, **kwargs).arguments["session_id"]
-        with _no_scan_running(session_id):
-            return function(*args, **kwargs)
+    def decorate(function: _F) -> _F:
+        signature = inspect.signature(function)
 
-    return cast(_F, wrapper)
+        @functools.wraps(function)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            session_id = signature.bind(*args, **kwargs).arguments["session_id"]
+            with _no_scan_running(session_id, removes_workspace=removes_workspace):
+                return function(*args, **kwargs)
+
+        return cast(_F, wrapper)
+
+    return decorate
 
 
 def get_session_source_dir(session_id: str) -> Optional[Path]:
@@ -916,12 +974,160 @@ _GIT_ARGV: Tuple[str, ...] = (GIT_PROGRAM,)
 #: :class:`GitTimeoutError`.
 GIT_TIMEOUT_SECONDS = 600
 
+
+class CloneRefusedError(RuntimeError):
+    """A clone was stopped or refused; the partial tree is removed.
+
+    A subclass names its ``error_type``. ``_clone_into_session`` removes the
+    partial tree for every subclass, and ``mcp_set_source_git`` returns the
+    subclass's ``error_type``, so a new refusal type needs no other change.
+    """
+
+    error_type = "clone_refused"
+
+
 #: ``error_type`` the MCP tool returns for :class:`GitTimeoutError`.
 CLONE_TIMED_OUT = "clone_timed_out"
 
 
-class GitTimeoutError(RuntimeError):
+class GitTimeoutError(CloneRefusedError):
     """A git command of a delivery ran past ``GIT_TIMEOUT_SECONDS`` and was stopped."""
+
+    error_type = CLONE_TIMED_OUT
+
+
+#: Bytes a clone may grow the session's source directory to, the same limit the
+#: zip channel puts on the extracted tree. A command that passes it is stopped
+#: together with every process it started, and the delivery fails with
+#: :class:`CloneTooLargeError`.
+MAX_CLONE_BYTES = _MAX_EXTRACTED_BYTES
+
+#: Seconds between looks at the size of the tree a git command is writing.
+GIT_POLL_SECONDS = 0.5
+
+#: ``error_type`` the MCP tool returns for :class:`CloneTooLargeError`.
+CLONE_TOO_LARGE = "clone_too_large"
+
+
+class CloneTooLargeError(CloneRefusedError):
+    """A clone passed ``MAX_CLONE_BYTES`` or ``_MAX_FILES`` entries."""
+
+    error_type = CLONE_TOO_LARGE
+
+
+#: ``error_type`` the MCP tool returns for :class:`CloneTreeUnreadableError`.
+CLONE_TREE_UNREADABLE = "clone_tree_unreadable"
+
+
+class CloneTreeUnreadableError(CloneRefusedError):
+    """The tree a git command wrote could not be read once the command had exited."""
+
+    error_type = CLONE_TREE_UNREADABLE
+
+
+def _walk_failed(error: OSError) -> None:
+    """``os.walk`` error handler: only a path that is gone is tolerated."""
+
+    if not isinstance(error, FileNotFoundError):
+        raise error
+
+
+def _walk_failed_during_poll(error: OSError) -> None:
+    """``os.walk`` error handler for a poll of a tree git is still writing.
+
+    Tolerates only the two shapes git's own writing produces under the walk: a
+    path that is gone (``FileNotFoundError``, git removes its lock files) and a
+    directory that became a file (``NotADirectoryError``, a checkout replaces
+    one with the other). Any other error is raised, so the poll stops the
+    command instead of leaving the subtree uncounted: this poll is the only
+    size check that runs while git writes, and a subtree it cannot read
+    (``ENAMETOOLONG``, ``EACCES``, ``EMFILE``) would otherwise not count
+    toward the limits until the command exits.
+    """
+
+    if not isinstance(error, (FileNotFoundError, NotADirectoryError)):
+        raise error
+
+
+def _tree_extent(root: Path, *, running: bool = False) -> Tuple[int, int]:
+    """Bytes of the regular files under ``root`` and the count of its entries.
+
+    Links are not followed. A path that vanishes while the tree is walked (git
+    removes its lock files) is skipped, because what is left is still measured.
+
+    Args:
+        root: The directory to measure.
+        running: True for a poll while the command still writes into ``root``.
+            Git then changes the tree under the walk, so a path that vanished
+            (git removes its lock files) or a directory that became a file (a
+            checkout replaces one with the other) is skipped, and the figures
+            are a lower bound; the next poll and the check after the command
+            exits look again. Any other error is raised in both modes, because
+            a subtree that cannot be read must not count as empty: while the
+            command runs this walk is the only size check, and once it has
+            exited a tree that cannot be measured must not read as an empty
+            one.
+    """
+
+    onerror = _walk_failed_during_poll if running else _walk_failed
+    total = 0
+    entries = 0
+    for dirpath, dirnames, filenames in os.walk(
+        root, followlinks=False, onerror=onerror
+    ):
+        entries += len(dirnames) + len(filenames)
+        for name in filenames:
+            try:
+                total += os.lstat(os.path.join(dirpath, name)).st_size
+            except FileNotFoundError:
+                continue
+            except NotADirectoryError:
+                # A directory became a file under the walk: one of git's own
+                # rewrites while it runs, impossible on a still tree.
+                if not running:
+                    raise
+    return total, entries
+
+
+def _tree_bytes(root: Path) -> int:
+    """Bytes of the regular files under ``root``; see :func:`_tree_extent`."""
+
+    return _tree_extent(root)[0]
+
+
+def _refuse_oversized(grows_in: Optional[Path], *, running: bool = False) -> None:
+    """Raise :class:`CloneTooLargeError` when ``grows_in`` is past a clone limit.
+
+    The limits are ``MAX_CLONE_BYTES`` and the zip channel's ``_MAX_FILES``
+    entries. A tree that cannot be read is refused with
+    :class:`CloneTreeUnreadableError`, which is not a limit, whether the command
+    has exited or still runs: while it runs the refusal stops it, because this
+    poll is the only size check until it exits and an unreadable subtree must
+    not stay uncounted. Only a path git itself removed or rewrote under the
+    walk leaves a running poll's figures short; see :func:`_tree_extent`.
+
+    Args:
+        grows_in: The directory the command writes into, or None.
+        running: True when the command is still running, so that it is about to
+            be stopped; False when it has already exited.
+    """
+
+    if grows_in is None:
+        return
+    suffix = " and was stopped" if running else ""
+    try:
+        size, entries = _tree_extent(grows_in, running=running)
+    except OSError as exc:
+        raise CloneTreeUnreadableError(
+            f"the tree git wrote could not be read ({exc.strerror or exc}); "
+            f"the delivery was refused"
+        ) from exc
+    if size > MAX_CLONE_BYTES:
+        raise CloneTooLargeError(f"git wrote more than {MAX_CLONE_BYTES} bytes{suffix}")
+    if entries > _MAX_FILES:
+        raise CloneTooLargeError(
+            f"git wrote more than {_MAX_FILES} files and directories{suffix}"
+        )
 
 
 def _stop_process_group(process: "subprocess.Popen[str]") -> None:
@@ -940,7 +1146,7 @@ def _stop_process_group(process: "subprocess.Popen[str]") -> None:
 
 
 def _run_git(
-    cmd: List[str], *, env: Dict[str, str]
+    cmd: List[str], *, env: Dict[str, str], grows_in: Optional[Path] = None
 ) -> subprocess.CompletedProcess[str]:
     """Run one git command of a delivery, for at most ``GIT_TIMEOUT_SECONDS``.
 
@@ -954,6 +1160,9 @@ def _run_git(
 
     Raises:
         GitTimeoutError: when the command runs past the timeout.
+        CloneTooLargeError: when ``grows_in`` passes ``MAX_CLONE_BYTES``.
+        CloneTreeUnreadableError: when ``grows_in`` cannot be read after the
+            command exits.
     """
 
     # An if statement, not a conditional expression: mypy applies a platform
@@ -973,8 +1182,23 @@ def _run_git(
         env=env,
         **group,
     )
+    deadline = time.monotonic() + GIT_TIMEOUT_SECONDS
     try:
-        stdout, stderr = process.communicate(timeout=GIT_TIMEOUT_SECONDS)
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(cmd, GIT_TIMEOUT_SECONDS)
+            try:
+                stdout, stderr = process.communicate(
+                    timeout=min(GIT_POLL_SECONDS, remaining)
+                )
+                break
+            except subprocess.TimeoutExpired:
+                pass
+            # Stopped, with its helpers, by the handler below.
+            _refuse_oversized(grows_in, running=True)
+        # A command that finished inside one poll interval was not looked at yet.
+        _refuse_oversized(grows_in)
     except subprocess.TimeoutExpired:
         _stop_process_group(process)
         with contextlib.suppress(subprocess.TimeoutExpired):
@@ -1167,17 +1391,36 @@ _HOST_NAME = re.compile(r"[a-z0-9][a-z0-9.-]*")
 _SSH_AUTHORITY_REFUSED = frozenset("%?#[]")
 
 
+#: The port a clone url without one reaches, by scheme. The scp-like form is ssh
+#: and has no way to name a port.
+_DEFAULT_PORTS = {"https": 443, "ssh": 22}
+
+
 def remote_clone_host(url: str) -> str:
     """Return the host ``url`` makes git connect to, or raise if it is not allowed.
 
-    Accepts ``https://`` and ``ssh://`` URLs and the scp-like ``[user@]host:path``
-    form, the three ways git reaches a remote over https or ssh. The host is
-    returned lower-cased with any trailing dot removed, for comparison against
-    the operator's allowlist.
+    The host of :func:`remote_clone_endpoint`: lower-cased with any trailing dot
+    removed.
 
     Raises:
-        ValueError: for a local path or ``file://`` URL, any other scheme, or a
-            host this parser cannot state unambiguously.
+        ValueError: as :func:`remote_clone_endpoint`.
+    """
+
+    return remote_clone_endpoint(url)[1]
+
+
+def remote_clone_endpoint(url: str) -> tuple[str, str, int]:
+    """Return the ``(scheme, host, port)`` ``url`` makes git connect to.
+
+    Accepts ``https://`` and ``ssh://`` URLs and the scp-like ``[user@]host:path``
+    form, the three ways git reaches a remote over https or ssh. The scheme is
+    ``https`` or ``ssh`` (scp-like is ``ssh``), the host is lower-cased with any
+    trailing dot removed, and the port is the one the url names or its scheme's
+    default, for comparison against the operator's allowlist.
+
+    Raises:
+        ValueError: for a local path or ``file://`` URL, any other scheme, port 0,
+            or a host or port this parser cannot state unambiguously.
     """
 
     from urllib.parse import urlsplit
@@ -1208,33 +1451,84 @@ def remote_clone_host(url: str) -> str:
                 f"path; write the host and user plainly."
             )
         try:
-            host = urlsplit(url).hostname or ""
+            parts = urlsplit(url)
+            host = parts.hostname or ""
+            named_port = parts.port
         except ValueError:
             raise ValueError(
                 f"refusing a clone url whose host cannot be read: {url!r}"
             ) from None
+        if named_port == 0:
+            raise ValueError(f"refusing a clone url that names port 0: {url!r}")
+        port = _DEFAULT_PORTS[scheme] if named_port is None else named_port
     else:
+        scheme = "ssh"
+        port = _DEFAULT_PORTS[scheme]
         authority = url.split(":", 1)[0]
         host = authority.rsplit("@", 1)[-1]
     host = host.lower().rstrip(".")
     if not _HOST_NAME.fullmatch(host):
         raise ValueError(f"refusing a clone url whose host cannot be read: {url!r}")
-    return host
+    return scheme, host, port
 
 
-#: Hosts ``set_source_git`` may clone from, set by the operator. Comma- or
-#: whitespace-separated host names. Unset or empty means no remote is allowed.
+#: Where ``set_source_git`` may clone from, set by the operator. Comma- or
+#: whitespace-separated ``[scheme://]host[:port]`` entries. A bare host stands for
+#: its scheme's default port (https 443, ssh 22) on either scheme; ``host:port``
+#: names the port, and ``https://`` or ``ssh://`` the scheme. Unset or empty means
+#: no remote is allowed.
 ASH_MCP_GIT_ALLOWED_HOSTS_ENV = "ASH_MCP_GIT_ALLOWED_HOSTS"
 
 
-def git_allowed_hosts() -> frozenset[str]:
-    """The hosts the operator allows clones from, lower-cased; possibly none."""
+def _git_allowed_entries() -> list[tuple[Optional[str], str, Optional[int]]]:
+    """The operator's entries as ``(scheme, host, port)``, None where unnamed.
+
+    An entry this cannot read (another scheme, a port that is not a number from 1
+    to 65535, a host that is not a plain name) allows nothing.
+    """
 
     raw = os.environ.get(ASH_MCP_GIT_ALLOWED_HOSTS_ENV, "")
-    return frozenset(
-        entry.strip().lower().rstrip(".")
-        for entry in raw.replace(",", " ").split()
-        if entry.strip()
+    entries: list[tuple[Optional[str], str, Optional[int]]] = []
+    for text in raw.replace(",", " ").split():
+        scheme: Optional[str] = None
+        rest = text.strip().lower()
+        if "://" in rest:
+            scheme, rest = rest.split("://", 1)
+            if scheme not in _CLONE_SCHEMES:
+                continue
+        host, colon, port_text = rest.partition(":")
+        port: Optional[int] = None
+        if colon:
+            if not (port_text.isascii() and port_text.isdigit()):
+                continue
+            port = int(port_text)
+            if not 1 <= port <= 65535:
+                continue
+        host = host.rstrip(".")
+        if _HOST_NAME.fullmatch(host):
+            entries.append((scheme, host, port))
+    return entries
+
+
+def git_allowed_hosts() -> frozenset[str]:
+    """The host names the operator allows clones from, lower-cased; possibly none."""
+
+    return frozenset(host for _, host, _ in _git_allowed_entries())
+
+
+def clone_endpoint_allowed(scheme: str, host: str, port: int) -> bool:
+    """Whether an entry of the operator's list allows ``scheme``, ``host`` and ``port``.
+
+    The three come from :func:`remote_clone_endpoint`. An entry allows a clone when
+    its host is the url's, its scheme (if it names one) is the url's, and its port
+    (the scheme's default when it names none) is the url's.
+    """
+
+    return any(
+        entry_host == host
+        and entry_scheme in (None, scheme)
+        and (_DEFAULT_PORTS[scheme] if entry_port is None else entry_port) == port
+        for entry_scheme, entry_host, entry_port in _git_allowed_entries()
     )
 
 
@@ -1402,7 +1696,7 @@ def set_source_git(
     )
 
 
-@_while_no_scan_runs
+@_while_no_scan_runs(removes_workspace=False)
 def _clone_into_session(
     url: str,
     ref: Optional[str],
@@ -1818,6 +2112,20 @@ def _write_next_sequence(session_dir: Path, upload_id: str, value: int) -> None:
     _meta_path(session_dir, upload_id).write_text(str(value))
 
 
+#: Locks that serialize the chunks of one upload. An upload maps to one of a fixed
+#: number of locks by its (session, upload id), so the table never grows with the
+#: number of uploads; two uploads that share a lock only take turns.
+_UPLOAD_LOCK_STRIPES = 64
+_UPLOAD_LOCKS = tuple(threading.Lock() for _ in range(_UPLOAD_LOCK_STRIPES))
+
+
+def _upload_lock(session_id: str, upload_id: str) -> threading.Lock:
+    """The lock held while a chunk of this upload reads and moves its sequence."""
+
+    digest = hashlib.sha256(f"{session_id}\0{upload_id}".encode()).digest()
+    return _UPLOAD_LOCKS[digest[0] % _UPLOAD_LOCK_STRIPES]
+
+
 def set_source_zip_chunk(
     upload_id: str,
     sequence: int,
@@ -1844,13 +2152,16 @@ def set_source_zip_chunk(
     Raises:
         ValueError: on out-of-order sequence, oversize chunk, malformed b64
             payload, or duplicate ``last=True``.
-        sessions.SessionWorkspaceBusyError: while the TTL sweep removes the
-            session (``sessions.writing_session_state``). The upload is gone
-            then, so it is sent again from its first chunk.
+        sessions.SessionWorkspaceBusyError: while another request holds the
+            session's workspace (``sessions.writing_session_state``): the TTL
+            sweep, a ``clear_source``, or the end of the session. The hold can
+            end without removing the upload, so the chunk is sent again as it
+            is; only an out-of-order answer means the upload was removed, and
+            the upload is then sent again from its first chunk.
     """
     from automated_security_helper.cli.mcp.sessions import writing_session_state
 
-    with writing_session_state(session_id):
+    with writing_session_state(session_id), _upload_lock(session_id, upload_id):
         return _append_zip_chunk(
             upload_id,
             sequence,
@@ -1957,7 +2268,7 @@ def _validate_zip_member(name: str) -> None:
             raise ValueError(f"path traversal in zip: {name!r}")
 
 
-@_while_no_scan_runs
+@_while_no_scan_runs(removes_workspace=False)
 def set_source_zip_finalize(
     upload_id: str,
     expected_sha256: str,
@@ -1966,6 +2277,15 @@ def set_source_zip_finalize(
     session_id: str,
 ) -> Path:
     """Finalize a chunked upload: verify checksum and extract.
+
+    Holds the upload's lock (:func:`_upload_lock`) only to open the zip and to
+    remove its path afterwards, not while the zip is hashed and extracted: the
+    lock is one of 64 shared by every session, and holding it across up to the
+    size limit of work would starve the delivery pool. The checksum and the
+    extraction read one open handle, so the bytes extracted are exactly the bytes
+    hashed whatever happens to the path meanwhile, and the removal deletes the
+    path only while it still names the file that was read, so a zip a chunk
+    assembled over it meanwhile is kept; see :func:`_finalize_zip_upload`.
 
     Args:
         upload_id: Identifier matching the prior ``set_source_zip_chunk`` calls.
@@ -2006,6 +2326,64 @@ def set_source_zip_finalize(
             this is a client-side packaging error rather than corruption.
     """
 
+    return _finalize_zip_upload(
+        upload_id,
+        expected_sha256,
+        workspace_root=workspace_root,
+        session_id=session_id,
+    )
+
+
+class _ZipRefused(Exception):
+    """A finalized zip the finalize refuses before it extracts anything.
+
+    Raised inside the ``with`` that holds the zip open, so the zip is removed and
+    the refusal raised as a ``ValueError`` only after the handle is closed:
+    Windows does not delete a file that is open.
+    """
+
+
+@contextlib.contextmanager
+def _refusing_after_close(
+    handle: Any, remove_zip: Callable[[], None]
+) -> Iterator[None]:
+    """Hold ``handle`` open; on :class:`_ZipRefused`, close it, ``remove_zip()``, refuse."""
+
+    try:
+        with handle:
+            yield
+    except _ZipRefused as refused:
+        remove_zip()
+        raise ValueError(str(refused)) from None
+
+
+def _remove_zip_still_at(
+    final: Path, opened: os.stat_result, session_id: str, upload_id: str
+) -> None:
+    """Remove ``final`` if it still names the file ``opened`` describes.
+
+    Under the upload's lock, so no chunk of the upload assembles a zip over the
+    path between the comparison and the removal. A zip a chunk assembled over the
+    path while the finalize ran is a different file and is kept.
+    """
+
+    with _upload_lock(session_id, upload_id):
+        try:
+            if os.path.samestat(opened, final.stat()):
+                final.unlink(missing_ok=True)
+        except FileNotFoundError:
+            pass
+
+
+def _finalize_zip_upload(
+    upload_id: str,
+    expected_sha256: str,
+    *,
+    workspace_root: Optional[Path],
+    session_id: str,
+) -> Path:
+    """:func:`set_source_zip_finalize`: the work behind its docstring."""
+
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
     session_dir = _created_session_dir(root, session_id)
     final = _final_zip_path(session_dir, upload_id)
@@ -2013,7 +2391,7 @@ def set_source_zip_finalize(
         raise UploadNotFoundError(
             f"no finalized zip for upload_id={upload_id!r} "
             f"(did the last chunk arrive with last=True?)"
-        )
+        ) from None
 
     # Hard limit on the on-disk zip size.
     actual_size = final.stat().st_size
@@ -2133,7 +2511,7 @@ def set_source_zip_finalize(
 # ---------------------------------------------------------------------------
 
 
-@_while_no_scan_runs
+@_while_no_scan_runs()
 def clear_source(session_id: str, *, workspace_root: Optional[Path] = None) -> None:
     """Wipe the session workspace and forget any recorded ``source_dir``.
 
@@ -2143,7 +2521,9 @@ def clear_source(session_id: str, *, workspace_root: Optional[Path] = None) -> N
     recorded ``source_dir`` is forgotten whatever the delete leaves behind.
 
     Raises:
-        SourceDeliveryBusyError: while a scan of the session runs.
+        SourceDeliveryBusyError: while a scan of the session runs, or a chunk of
+            an upload or a profile selection is being written, because this
+            removes the directory they write into.
     """
 
     if not remove_session_workspace(session_id, workspace_root=workspace_root):

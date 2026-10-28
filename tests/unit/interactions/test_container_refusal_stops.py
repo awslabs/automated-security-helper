@@ -55,7 +55,7 @@ def runtime(monkeypatch, tmp_path) -> Dict[str, Any]:
     monkeypatch.setattr(
         rac, "_find_runner", lambda _name: "/nonexistent/ash-test/docker"
     )
-    monkeypatch.setattr(rac, "get_ash_revision", lambda: "LOCAL")
+    monkeypatch.setattr(rac, "get_ash_revision", lambda quiet=False: "LOCAL")
     monkeypatch.setattr(rac, "_find_dockerfile", lambda _rev: dockerfile)
 
     def fake_build(**_kwargs):

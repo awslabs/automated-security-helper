@@ -27,12 +27,11 @@ from pathlib import Path
 
 import pytest
 
-GUIDES = Path(__file__).resolve().parents[3] / "docs" / "content" / "docs" / "plugins"
+GUIDES = Path(__file__).resolve().parents[3] / "docs" / "content" / "plugins"
 PAGES = (
-    "converter-plugins.md",
-    "development-guide.md",
-    "reporter-plugins.md",
-    "scanner-plugins.md",
+    "write-a-converter.md",
+    "write-a-reporter.md",
+    "write-a-scanner.md",
 )
 PYTHON_BLOCK = re.compile(r"^```python\n(.*?)^```", re.DOTALL | re.MULTILINE)
 

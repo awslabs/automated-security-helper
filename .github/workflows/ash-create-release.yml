@@ -125,8 +125,8 @@ jobs:
       # `contents: write` and a GitHub App token, so nothing restored from a cache
       # entry may run in it: an entry is written by whatever ran earlier in the same
       # cache scope, not by this workflow. zizmor's cache-poisoning audit does not
-      # model workflow_dispatch as a release trigger, so it does not report this
-      # one; it is the same shape it reports in ash-repo-docs.yml.
+      # model workflow_dispatch as a release trigger, so it would not report a cache
+      # added here; ash-repo-docs.yml's deploy job has none for the same reason.
       - name: Install uv
         uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
         with:

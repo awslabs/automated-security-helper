@@ -202,11 +202,22 @@ CONFIG_INPUT_NOT_PERMITTED = "config_input_not_permitted"
 CONFIG_FIELD_DENIED = "config_field_denied"
 #: ``error_type`` for a client-delivered config whose policy cannot be established.
 CONFIG_POLICY_UNREADABLE = "config_policy_unreadable"
+#: ``error_type`` for a scan refused because the check of the config sources in
+#: its target could not finish (an unreadable entry, a link loop). The config is
+#: not known to be outside the permitted roots, so this is not
+#: ``CONFIG_INPUT_NOT_PERMITTED``.
+CONFIG_CHECK_FAILED = "config_check_failed"
 
 #: ``error_type`` of the refusal of a config file an MCP client delivered that
 #: reads from the environment, which such a file may not
 #: (``ASHConfigEnvNotResolvedError``).
 CONFIG_ENV_NOT_RESOLVED = "config_env_not_resolved"
+
+#: ``error_type`` of the refusal of a profile in which a value read from the
+#: environment is part of a longer string, which a session's copy would hold as
+#: the value (``EnvironmentValueInPath``). The message names the key path and the
+#: variable, never the value.
+ENV_VALUE_IN_LONGER_STRING = "environment_value_in_longer_string"
 
 #: ``error_type`` of the refusal of a config whose ``ash_plugin_modules`` a
 #: scan refuses (a module outside the plugin namespace, or one no installed
@@ -1096,8 +1107,15 @@ def _plugin_module_refusal(
     )
 
 
+class ConfigCheckFailedError(MCPResourceError):
+    """The check of a scan target's config sources could not finish."""
+
+
 def _config_refusal(error: MCPResourceError, operation: str) -> Dict[str, Any]:
     """The response for a config input outside the permitted roots.
+
+    A check that could not finish is ``CONFIG_CHECK_FAILED`` instead: it did not
+    find the config outside the roots, so the fix for that refusal does not apply.
 
     No ``context`` key, unlike ``create_error_response``: it would carry the
     resolved path, and the caller's own spelling in ``error`` already identifies
@@ -1282,6 +1300,8 @@ def _discovered_config_refusal(
     it finds (``validate_config_input``), before anything reads it, and the
     refusal names it as found. The scan's own resolution refuses it the same
     way (``config_sources.check_discovered_source``).
+
+    A check of the candidates that fails for any other reason is a refusal too.
     """
     from automated_security_helper.cli.mcp.sandbox import (
         config_base_gate,
@@ -1301,6 +1321,19 @@ def _discovered_config_refusal(
         check_discovery_candidates(target, permit)
     except ASHConfigInputNotPermittedError as exc:
         return config_chain_refusal(target, exc)
+    except Exception as exc:  # noqa: BLE001 -- a check that cannot finish refuses
+        # Not left to the scan: this check decides whether a source in the
+        # target may be read at all, so one that cannot finish stops the scan
+        # here, as a refusal the caller can read.
+        _logger.warning(f"Config sources not checked before the scan: {exc}")
+        return ConfigCheckFailedError(
+            f"The configuration found in {target.as_posix()} could not be checked "
+            f"against the permitted roots: {type(exc).__name__}",
+            context={
+                "directory_path": str(target),
+                "error_category": ErrorCategory.INVALID_PATH.value,
+            },
+        )
     try:
         # Under the gate again: a source can change after the check above.
         selected = discover_config_source(target, permit=permit).selected
@@ -1461,7 +1494,22 @@ def _client_config_denial(
         ASHConfigPolicyUnreadableError,
     )
 
-    rules = _session_client_rules(session_id)
+    try:
+        rules = _session_client_rules(session_id)
+    except Exception as exc:  # noqa: BLE001 -- rules that cannot be read refuse
+        # The scan reads the same rules and refuses on the same failure
+        # (``_run_scan_async``); refused here too, as a response the caller can
+        # read rather than an exception out of the tool.
+        _logger.warning(f"Session config rules not read before the scan: {exc}")
+        return {
+            "success": False,
+            "operation": operation,
+            "error": (
+                "The config could not be checked against this session's "
+                f"runtime-override policy: {exc}"
+            ),
+            "error_type": CONFIG_POLICY_UNREADABLE,
+        }
     permit_base = config_base_gate(session_id)
     # A named path the client chose is the client's wherever it is, as the scan
     # reads it (resolve_config's untrusted_config).
@@ -5083,7 +5131,12 @@ def _classify_validation_message(raw: str) -> Dict[str, Any]:
     if raw.startswith(ConfigValidator.ENV_NOT_RESOLVED_ERROR_PREFIX):
         return _config_problem("", raw, CONFIG_ENV_NOT_RESOLVED)
     # Also before the generic branches: the message quotes module names.
-    if raw.startswith(ConfigValidator.PLUGIN_MODULES_ERROR_PREFIX):
+    # The validator's module check (ConfigValidator._plugin_module_refusal)
+    # gives the loader's refusal as it is, which opens with the field's name
+    # ("ash_plugin_modules names ..."), not with this prefix.
+    if raw.startswith(
+        (ConfigValidator.PLUGIN_MODULES_ERROR_PREFIX, "ash_plugin_modules ")
+    ):
         return _config_problem("ash_plugin_modules", raw, "invalid_field")
     if raw.startswith(ConfigValidator.EXTENDS_ERROR_PREFIX):
         return _config_problem("", raw, "extends_error")
@@ -5696,9 +5749,12 @@ def mcp_select_profile(
     client's rules against the registered profile in ``config/`` as the trusted
     base (``resolve_session_trusted_config_path``).
 
-    Refused with ``error_type`` ``session_workspace_busy`` while the server
-    removes the session's workspace for being unused longer than its time to
-    live (``sessions.writing_session_state``); select the profile again then.
+    Refused with ``error_type`` ``session_workspace_busy`` while another
+    request holds the session's workspace (``sessions.writing_session_state``):
+    the server removing a session unused longer than its time to live,
+    ``clear_source``, or the end of the session; select the profile again once
+    the hold ends. A ``set_source_git`` or ``set_source_zip_finalize`` in
+    progress does not refuse it.
     """
     from automated_security_helper.cli.mcp.sessions import (
         SESSION_WORKSPACE_BUSY,
@@ -5996,12 +6052,27 @@ def _materialize_or_error(
     from automated_security_helper.cli.mcp.profile_registry import (
         materialize_session_binding,
     )
+    from automated_security_helper.config.environment_record import (
+        EnvironmentValueInPath,
+    )
     from automated_security_helper.core.resource_management.error_handling import (
         ErrorCategory,
     )
 
     try:
         materialized = materialize_session_binding(session_id, registered, patched)
+    except EnvironmentValueInPath as exc:
+        # Refused before any file is written (AshConfig.save builds the dump
+        # first), and the message holds no value.
+        return with_exit_code(
+            {
+                "success": False,
+                "error": raw_controls_on_one_line(str(exc)),
+                "error_type": ENV_VALUE_IN_LONGER_STRING,
+                "error_category": ErrorCategory.INVALID_FORMAT.value,
+            },
+            REFUSED_CONFIG_EXIT_CODE,
+        )
     except (OSError, RuntimeError) as exc:
         _logger.error(f"Could not materialize the session config: {exc}")
         return {
@@ -6289,6 +6360,7 @@ def mcp_set_source_git(
         INVALID_CLONE_DEPTH,
         SESSION_WORKSPACE_UNAVAILABLE,
         SOURCE_DELIVERY_BUSY,
+        CloneRefusedError,
         GitCommandError,
         GitTimeoutError,
         InvalidSessionIdError,
@@ -6298,9 +6370,10 @@ def mcp_set_source_git(
         _reject_option_like,
         _validate_clone_url,
         _validated_clone_depth,
+        clone_endpoint_allowed,
         git_allowed_hosts,
         local_clone_path,
-        remote_clone_host,
+        remote_clone_endpoint,
         set_source_git,
     )
 
@@ -6343,22 +6416,33 @@ def mcp_set_source_git(
         }
 
     try:
-        host = remote_clone_host(url)
+        scheme, host, port = remote_clone_endpoint(url)
     except ValueError as e:
         return {
             "success": False,
             "error": raw_controls_on_one_line(str(e)),
             "error_type": "clone_url_not_permitted",
         }
-    if host not in git_allowed_hosts():
-        return {
-            "success": False,
-            "error": raw_controls_on_one_line(
+    if not clone_endpoint_allowed(scheme, host, port):
+        if host in git_allowed_hosts():
+            where = (
+                f"Refusing to clone over {scheme} on port {port} from {host!r}: "
+                f"{ASH_MCP_GIT_ALLOWED_HOSTS_ENV} lists the host, but not for "
+                f"that scheme and port. An entry is [scheme://]host[:port], and a "
+                f"bare host stands for the default port (https 443, ssh 22). "
+            )
+        else:
+            where = (
                 f"Refusing to clone from {host!r}: it is not in "
                 f"{ASH_MCP_GIT_ALLOWED_HOSTS_ENV}, the hosts the operator lets "
                 f"this server clone from. The list is empty unless the operator "
-                f"sets it. Ask the operator to add the host, or deliver the tree "
-                f"with set_source_zip_chunk and set_source_zip_finalize."
+                f"sets it. "
+            )
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(
+                where + "Ask the operator to add the host, or deliver the tree "
+                "with set_source_zip_chunk and set_source_zip_finalize."
             ),
             "error_type": "clone_host_not_permitted",
         }
@@ -6393,6 +6477,15 @@ def mcp_set_source_git(
             "success": False,
             "error": raw_controls_on_one_line(str(e)),
             "error_type": CLONE_TIMED_OUT,
+        }
+    except CloneRefusedError as e:
+        # Every other clone refusal names its own error_type (a clone over the size
+        # limit, a tree that cannot be read), so it is returned as that type and
+        # not as a failed clone.
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(str(e)),
+            "error_type": e.error_type,
         }
     except SessionWorkspaceError as e:
         return refused(e, SESSION_WORKSPACE_UNAVAILABLE)

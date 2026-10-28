@@ -37,8 +37,11 @@ from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
 
 #: A file name that is not UTF-8: latin-1 bytes.
 ODD_BYTES = b"secr\xe9t.py"
-#: That name as Python lists it, with a lone surrogate.
-ODD = os.fsdecode(ODD_BYTES)
+#: That name as Python lists it, with a lone surrogate. Decoded with surrogateescape
+#: on every platform: os.fsdecode gives that on POSIX, but on Windows the filesystem
+#: encoding is UTF-8 with surrogatepass (PEP 529), so the lone 0xe9 would raise
+#: UnicodeDecodeError while a test module imports this one.
+ODD = ODD_BYTES.decode(sys.getfilesystemencoding(), "surrogateescape")
 #: That name in the record form: the surrogate as the six characters \udce9.
 RECORDED = "secr\\udce9t.py"
 #: The control: a plain name, which every decision below is also made for.

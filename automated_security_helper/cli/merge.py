@@ -327,6 +327,10 @@ from automated_security_helper.utils.display_text import (
     escape_controls_in,
     path_spellings,
 )
+from automated_security_helper.utils.error_text import (
+    config_environment_values,
+    text_without_values,
+)
 from automated_security_helper.utils.inner_run_outcome import without_run_records
 from automated_security_helper.utils.log import (
     ASH_LOGGER,
@@ -706,14 +710,15 @@ def _invalid_config_text(error: Exception) -> Text:
 def _invalid_config_lines(error: Exception) -> Text:
     """A configuration refusal of the merge itself, printed on its own lines.
 
-    For the refusals raised after the operator's file is loaded: the shards'
-    recorded configurations disagreeing on an exit-code setting
-    (verify_verdict_settings_agree) is written as a header, one line per
-    setting and the advice, so its line breaks are kept. As _refusal_text: the
-    values are already shown where the message is built, _shown_lines writes
-    only a raw control as its escape and breaks CI command forms, and the Text
-    reads no markup. _invalid_config_text is for the one-line refusal of the
-    --config load, whose newline can only be the path's.
+    For ShardSettingsDisagreeError only: the shards' recorded configurations
+    disagreeing on an exit-code setting (verify_verdict_settings_agree) is written
+    as a header, one line per setting and the advice, so its line breaks are
+    kept. As _refusal_text: the values are already shown where the message is
+    built, _shown_lines writes only a raw control as its escape and breaks CI
+    command forms, and the Text reads no markup. _invalid_config_text is for every
+    other configuration refusal, the --config load's and the ones raised after it:
+    each can quote a value the operator typed (a path, a --config-overrides
+    entry), and a newline in that value must not start a line of its own.
     """
     return Text(f"Invalid configuration: {_shown_lines(str(error))}", style="red")
 
@@ -2068,11 +2073,14 @@ def resolve_operator_config(config_path: Optional[str]) -> AshConfig:
     try:
         is_file = path.is_file()
     except OSError as exc:
-        # Path.is_file answers False for ENOENT, ENOTDIR, EBADF and ELOOP and
-        # re-raises every other stat error: a parent this user cannot search
-        # (EACCES), a name over the limit (ENAMETOOLONG). Such a file cannot be
-        # used, so it is refused with exit 3 in the read arm's words below,
-        # never a traceback.
+        # Before Python 3.14, Path.is_file answers False for ENOENT, ENOTDIR,
+        # EBADF and ELOOP and re-raises every other stat error: a parent this
+        # user cannot search (EACCES), a name over the limit (ENAMETOOLONG).
+        # Such a file cannot be used, so it is refused with exit 3 in the read
+        # arm's words below, never a traceback. From 3.14 it answers False for
+        # every OSError, so those two reach the "does not exist or is not a
+        # file" refusal after this handler instead: still exit 3, other words.
+        # (check_config_path asks os.stat, which reads all of them as one.)
         raise ASHConfigSourceError(
             f"--config {describe_config_path(path)} could not be read: "
             f"{escape_controls_in(exc, path_spellings(path))}"
@@ -2362,6 +2370,17 @@ def _decided_by_flags(cli_values: Optional[Dict[str, Optional[bool]]]) -> set[st
     return {key for key, value in (cli_values or {}).items() if value is not None}
 
 
+class ShardSettingsDisagreeError(ASHConfigValidationError):
+    """The shards' recorded configurations disagree on a setting the verdict reads.
+
+    The one configuration refusal of ``ash merge`` that is written on several
+    lines on purpose (a header, one line per setting, the advice), and printed on
+    them (``_invalid_config_lines``). Every other ``ASHConfigValidationError`` the
+    merge prints can quote a value the operator typed, a ``--config-overrides``
+    entry among them, so it is printed on one line (``_invalid_config_text``).
+    """
+
+
 def verify_verdict_settings_agree(
     loaded: Sequence[Tuple[Path, AshAggregatedResults]],
     cli_values: Optional[Dict[str, Optional[bool]]] = None,
@@ -2379,8 +2398,8 @@ def verify_verdict_settings_agree(
     ``merge_shard_results`` refuses it, naming it as one with no scan configuration.
 
     Raises:
-        ASHConfigValidationError: Naming each setting that differs and every
-            shard's value for it.
+        ShardSettingsDisagreeError: Naming each setting that differs and every
+            shard's value for it. An ``ASHConfigValidationError``.
     """
     decided = _decided_by_flags(cli_values)
     shards = []
@@ -2416,7 +2435,7 @@ def verify_verdict_settings_agree(
         for key in differing
         if key in VERDICT_FLAGS
     ]
-    raise ASHConfigValidationError(
+    raise ShardSettingsDisagreeError(
         "the shards' recorded configurations disagree on settings that decide the "
         "merged verdict:\n  " + "\n  ".join(lines) + "\nOne verdict covers the "
         "merged scan, so ash merge does not take one shard's value for the others. "
@@ -2489,12 +2508,18 @@ def warn_on_ignored_operator_verdict_settings(
         flag = ""
         if key in VERDICT_FLAGS and isinstance(value, bool):
             flag = f" or {VERDICT_FLAGS[key][0 if value else 1]}"
-        ASH_LOGGER.warning(
+        # Redacted with what the operator's config read from the environment:
+        # the line quotes the setting's value, which can hold one (an ignore
+        # path's reason read with !ENV, say).
+        message = (
             f"ash merge's --config sets {key} to {_shown_setting(value)}, and the "
             f"shards recorded {_shown_setting(shards.get(key))}. The verdict "
             "follows the shards' own configuration, so their value applies. To "
             "apply yours, pass "
             f"{_override_suggestion(key, value)}{flag}."
+        )
+        ASH_LOGGER.warning(
+            text_without_values(message, config_environment_values(trusted_config))
         )
 
 
@@ -2560,11 +2585,17 @@ def warn_on_unapplied_operator_settings(
                     (f"reporters.{section_key}.options.{option}", options[option])
                 )
         for key, value in unapplied:
-            ASH_LOGGER.warning(
+            # Redacted as the settings line above is: the hint quotes the
+            # option's value, which the operator's config can have read from
+            # the environment.
+            message = (
                 f"ash merge's --config sets {key}, which does not apply: the shards "
                 f"recorded no {section_key} section to take it, and --config supplies "
                 "values for what the shards recorded without adding to it. To apply "
                 f"it, {_apply_hint(key, value)}."
+            )
+            ASH_LOGGER.warning(
+                text_without_values(message, config_environment_values(trusted_config))
             )
 
 
@@ -2836,10 +2867,16 @@ def merge_command(
         confine_recorded_config(
             merged.ash_config, trusted_config, overrides, _base_results_file(loaded)
         )
-    except ASHConfigValidationError as exc:
+    except ShardSettingsDisagreeError as exc:
         # On its lines: the shard-disagreement refusal is deliberately
         # multi-line, and the one-line form wrote its breaks as \x0a.
         print(_invalid_config_lines(exc))
+        raise typer.Exit(3)
+    except ASHConfigValidationError as exc:
+        # On one line: every other refusal here can quote a value the operator
+        # typed (a --config-overrides entry), and a newline in it must not start
+        # a log line of its own.
+        print(_invalid_config_text(exc))
         raise typer.Exit(3)
     except ResultsPathError as exc:
         # As Text: the message quotes the operator's path, which can read as

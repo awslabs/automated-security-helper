@@ -5,22 +5,25 @@
 
 Why this exists
 ---------------
-``docs/content/docs/plugins/reporter-plugins.md`` teaches plugin authors with
-samples that read the results model, and three of its five failed when run: the
-S3 sample read ``model.scan_metadata``, the simple reporter ``model.project_name``
-and ``model.summary_stats.total_findings``, and the unit-test sample built its
-model with a ``project_name`` keyword the model ignores. Nothing ran them, so they
-went stale with the model and nobody noticed.
+``docs/content/plugins/write-a-reporter.md`` teaches plugin authors with samples
+that read the results model. The page it replaced, ``reporter-plugins.md``, had
+samples that failed when run, three of its five: the S3 sample read
+``model.scan_metadata``, the simple reporter ``model.project_name`` and
+``model.summary_stats.total_findings``, and the unit-test sample built its model
+with a ``project_name`` keyword the model ignores. Nothing ran them, so they went
+stale with the model and nobody noticed.
 
 Each block is run here in a fresh interpreter, appended to the blocks before it
 (the page reads as one module), against ``tests/test_data/outputs/
 ash_aggregated_results.json``. Each reporter class a block defines is given that
-model, and each ``test_*`` function a block defines is called. The S3 sample
+model, and each ``test_*`` function a block defines is called. The bucket sample
 uploads, so AWS is out of reach: fake credentials, no instance metadata, AWS
 config files that do not exist, ``boto3.Session`` replaced by a recorder and every
-botocore send refused.
+botocore send refused. The unit-test sample imports the page's plugin package by
+name, so ``acme_ash_plugins`` is a stand-in module that holds the reporter classes
+the blocks before it define.
 
-Each reporter's ``validate_plugin_dependencies()`` must return True. The S3
+Each reporter's ``validate_plugin_dependencies()`` must return True. The bucket
 sample must upload through the recorder and return its ``s3://`` URL, and with
 every AWS call failing it must return None, as ``s3_reporter`` does (it returned
 its error message, which ReportPhase would write as the report), and record both
@@ -44,7 +47,7 @@ import pytest
 from tests.utils.helpers import checkout_env
 
 REPO = Path(__file__).resolve().parents[3]
-PAGE = REPO / "docs" / "content" / "docs" / "plugins" / "reporter-plugins.md"
+PAGE = REPO / "docs" / "content" / "plugins" / "write-a-reporter.md"
 RESULTS = REPO / "tests" / "test_data" / "outputs" / "ash_aggregated_results.json"
 
 #: A Python fence at the start of a line: ```python, ```python3 or ```py, with or
@@ -73,7 +76,7 @@ PRELUDE = textwrap.dedent(
         AWS_CONFIG_FILE=os.path.join(os.getcwd(), "no-aws-config"),
         AWS_SHARED_CREDENTIALS_FILE=os.path.join(os.getcwd(), "no-aws-creds"),
         AWS_REGION="us-east-1",
-        ASH_S3_BUCKET_NAME="sample-bucket",
+        ACME_FINDINGS_BUCKET="sample-bucket",
     )
 
     import socket
@@ -134,12 +137,11 @@ PRELUDE = textwrap.dedent(
 
     boto3.Session = _Session
 
-    # The unit-test sample imports the page's reporter from the reader's package.
-    _package = types.ModuleType("my_ash_plugins")
-    _reporters = types.ModuleType("my_ash_plugins.reporters")
-    _package.reporters = _reporters
-    sys.modules["my_ash_plugins"] = _package
-    sys.modules["my_ash_plugins.reporters"] = _reporters
+    # The unit-test sample imports the page's plugin package by name. The package
+    # is not installed here, so this module stands in for it; _program sets the
+    # reporter classes the blocks before the sample define on it.
+    _package = types.ModuleType("acme_ash_plugins")
+    sys.modules["acme_ash_plugins"] = _package
     """
 )
 
@@ -188,18 +190,16 @@ RUNNER = textwrap.dedent(
 
 
 def _program(index: int) -> str:
-    body = []
-    for block in BLOCKS[: index + 1]:
-        for name in re.findall(
-            r"^from my_ash_plugins\.reporters import (\w+)", block, re.MULTILINE
-        ):
-            body.append(f"_reporters.{name} = {name}")
-        body.append(block)
+    body = BLOCKS[: index + 1]
+    defined = re.findall(
+        r"^class (\w+)\(ReporterPluginBase", "\n".join(body), re.MULTILINE
+    )
     block = BLOCKS[index]
     reporters = re.findall(r"^class (\w+)\(ReporterPluginBase", block, re.MULTILINE)
     tests = re.findall(r"^def (test_\w+)\(", block, re.MULTILINE)
     return "\n".join(
         [PRELUDE, *body]
+        + [f"_package.{name} = {name}" for name in defined]
         + [
             f"RESULTS = {str(RESULTS)!r}",
             f"NEW_REPORTERS = {reporters!r}",
@@ -236,8 +236,10 @@ def test_every_python_fence_is_a_sample():
 
 
 def test_the_page_has_its_samples():
-    assert len(BLOCKS) == 5
-    # The S3 sample, whose upload and error paths are checked.
+    # The findings-list plugin, its test, the bucket sample and the environment
+    # helper, in page order (write-a-reporter.md).
+    assert len(BLOCKS) == 4
+    # The bucket sample, whose upload and error paths are checked.
     assert [i for i, block in enumerate(BLOCKS) if _uses_aws(block)] == [2]
 
 
@@ -250,7 +252,7 @@ def test_the_sample_runs(index, tmp_path):
     # also fail on a warning in any library the child imports from source.
     with warnings.catch_warnings():
         warnings.simplefilter("error", SyntaxWarning)
-        compile(program, f"reporter-plugins.md block {index + 1}", "exec")
+        compile(program, f"write-a-reporter.md block {index + 1}", "exec")
     # The samples write files, so their home, config, cache and temp
     # directories are this test's, and any proxy they would use goes nowhere.
     home = tmp_path / "home"

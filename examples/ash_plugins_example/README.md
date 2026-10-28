@@ -23,6 +23,7 @@ scan with this package, so the code here is kept working.
 Install the package into the Python environment ASH runs in. ASH imports it by name,
 so it has to be importable there. From a checkout of the ASH repository:
 
+<!-- doctest: illustrative reason="installs into the virtual environment that runs ASH" -->
 ```bash
 # ASH installed with uv tool install: reinstall it with the package added
 uv tool install --with ./examples/ash_plugins_example git+https://github.com/awslabs/automated-security-helper.git
@@ -39,6 +40,7 @@ its git repository, and the PyPI project with that name is not published by ASH.
 ASH loads only its built-in plugins unless a plugin module is named. Name this one in
 any of three ways:
 
+<!-- doctest: illustrative reason="needs the example package installed" -->
 ```bash
 # On the command line
 ash --source-dir /path/to/code --ash-plugin-modules my_ash_plugins
@@ -70,7 +72,7 @@ under `converted/my-example-converter/`.
 
 Each class carries `@ash_converter_plugin`, `@ash_scanner_plugin` or
 `@ash_reporter_plugin`, which registers it when ASH imports the package. The
-`ASH_CONVERTERS`, `ASH_SCANNERS` and `ASH_REPORTERS` lists in `__init__.py` register
+three lists of converter, scanner and reporter classes in `__init__.py` register
 nothing; the loader reads them to report what the package provided.
 
 ### Converters
@@ -102,8 +104,8 @@ reads each file through `open_in_scanned_tree()` from
 
 ### Event handlers
 
-`ASH_EVENT_HANDLERS` maps an `AshEventType` to a list of callables, which ASH
-registers when it loads the package. Every handler receives keyword arguments,
+The event handlers dictionary in `__init__.py` maps an `AshEventType` to a list of
+callables, which ASH registers when it loads the package. Every handler receives keyword arguments,
 including `phase` and `plugin_context`.
 
 - The convert, scan, report and inspect phases each emit `<PHASE>_PHASE_START` and
@@ -122,6 +124,6 @@ including `phase` and `plugin_context`.
 ## More information
 
 The plugin pages of the ASH documentation are under
-[docs/content/docs/plugins](../../docs/content/docs/plugins/index.md), and the
+[docs/content/plugins](../../docs/content/plugins/index.md), and the
 configuration schema is
 [automated_security_helper/schemas/AshConfig.json](../../automated_security_helper/schemas/AshConfig.json).

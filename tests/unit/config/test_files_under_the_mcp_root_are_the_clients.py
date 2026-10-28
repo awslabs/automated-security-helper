@@ -20,6 +20,7 @@ import pytest
 import yaml
 
 from automated_security_helper.config.resolve_config import resolve_config
+from tests.utils.helpers import mark_git_checkout
 
 
 @pytest.fixture
@@ -34,7 +35,7 @@ def mcp_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _repo(tmp_path: Path, document: dict | None = None) -> Path:
     repo = tmp_path / "repo"
-    (repo / ".git").mkdir(parents=True)
+    mark_git_checkout(repo)
     if document is not None:
         (repo / ".ash").mkdir()
         (repo / ".ash" / ".ash.yaml").write_text(

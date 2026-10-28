@@ -62,7 +62,7 @@ the unused-suppressions report lists it). The global severity threshold is MEDIU
   exist. Resolved with `allow_missing_projects`, it is recorded as a skipped project
   with reason `error`.
 
-Both are run through `workspace.execution.execute_workspace` with only the per-project
+Both are run through `automated_security_helper.workspace.execution.execute_workspace` with only the per-project
 orchestrator replaced, so the unified results file is the one ASH writes.
 
 ## Changing the fixture

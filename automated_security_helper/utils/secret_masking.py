@@ -15,7 +15,7 @@ from typing import (
     Set,
     Tuple,
 )
-from urllib.parse import unquote
+from urllib.parse import quote, quote_plus, unquote
 
 from pydantic import BaseModel, ConfigDict
 
@@ -907,7 +907,8 @@ def _matched_values(result: Any) -> List[str]:
     semgrep and opengrep report a match by columns on its line: the key itself,
     or an assignment holding it, whose string literals are then the values. Only
     a single-line region with both columns and a snippet starting at the line's
-    first column is read.
+    first column is read; a snippet too short to hold the columns (the matched
+    text alone, say) is not.
     """
     values: List[str] = []
     for physical in _physical_locations_of(result):
@@ -930,6 +931,11 @@ def _matched_values(result: Any) -> List[str]:
         # line's, and read from ``MASKED_LINE`` they gave a piece of it, which
         # masking the results again then masked inside the masked line.
         if not lines or lines[0].strip() == MASKED_LINE:
+            continue
+        # The columns are the file line's. A snippet that does not reach the
+        # region's end does not start at column 1, and slicing it at these
+        # columns would read a fragment of the match.
+        if end - 1 > len(lines[0]):
             continue
         match = lines[0][start - 1 : end - 1].strip()
         literals = [found.group(2) for found in _STRING_LITERAL.finditer(match)]
@@ -1319,7 +1325,9 @@ def mask_secret_values_in_tree(
 
 
 #: How a value is written into the text formats reports use: as is, inside a JSON
-#: string, HTML or XML text and attributes, and doubled quotes (CSV, YAML).
+#: string, HTML or XML text and attributes, doubled quotes (CSV, YAML), a
+#: backslash-escaped single quote (shell and script strings) and percent-encoded
+#: (URLs, with a space as ``%20`` or ``+``).
 _TEXT_ENCODINGS: Tuple[Callable[[str], str], ...] = (
     lambda value: value,
     lambda value: json.dumps(value)[1:-1],
@@ -1327,15 +1335,19 @@ _TEXT_ENCODINGS: Tuple[Callable[[str], str], ...] = (
     lambda value: html.escape(value, quote=False),
     lambda value: value.replace('"', '""'),
     lambda value: value.replace("'", "''"),
+    lambda value: value.replace("\\", "\\\\").replace("'", "\\'"),
+    lambda value: quote(value, safe=""),
+    lambda value: quote_plus(value, safe=""),
 )
 
 
 def mask_secret_values_in_text(text: str, values: Iterable[str]) -> str:
-    """``text`` with each of ``values`` masked in every form a report writes it.
+    """``text`` with each of ``values`` masked in each of ``_TEXT_ENCODINGS``.
 
     For a rendered report that cannot be re-rendered from masked results: each
     value is matched as a whole token in each of ``_TEXT_ENCODINGS`` and replaced
-    by its masked form in the same encoding.
+    by its masked form in the same encoding. A form not listed there is not
+    masked.
     """
     replacements: Dict[str, str] = {}
     for value in values:

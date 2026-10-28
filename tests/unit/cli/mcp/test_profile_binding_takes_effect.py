@@ -308,8 +308,13 @@ class TestTheRecordedPathIsSpelledLikeThePlanSpellsPaths:
             def __init__(self):
                 self.saved_to = None
                 self.as_written = None
+                # A profile that read a value from the environment: only such a
+                # config is written as written (materialize_session_config).
+                self._environment_references = ("reference",)
 
-            def save(self, target, exclude_unset=False, as_written=False):
+            def save(
+                self, target, exclude_unset=False, as_written=False, env_tags=True
+            ):
                 self.saved_to = target
                 self.as_written = as_written
 

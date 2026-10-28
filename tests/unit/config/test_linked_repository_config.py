@@ -17,6 +17,7 @@ import pytest
 import yaml
 
 from automated_security_helper.config.resolve_config import resolve_config
+from tests.utils.helpers import mark_git_checkout
 
 
 @pytest.fixture(autouse=True)
@@ -42,7 +43,7 @@ def _host_file(tmp_path: Path, document: dict) -> Path:
 
 def _repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
-    (repo / ".git").mkdir(parents=True)
+    mark_git_checkout(repo)
     return repo
 
 

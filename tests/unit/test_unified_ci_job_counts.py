@@ -41,9 +41,10 @@ WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 UNIFIED_CI = WORKFLOWS / "ash-unified-ci.yml"
 IAC_DRIFT = WORKFLOWS / "ash-iac-drift.yml"
 
-#: The unit-test legs each publish one `PyTest - ...` check run from inside the job
-#: (mikepenz/action-junit-report), which is not a job of its own.
-JUNIT_JOB = "unit-test"
+#: The unit-test matrix is three jobs, one per runner pool, so each pool has its own
+#: max-parallel cap. The workflow's comments count the three as one family, "unit-test",
+#: which is also what every one of their check names starts with.
+UNIT_TEST_JOB_IDS = ("unit-test-linux", "unit-test-macos", "unit-test-windows")
 
 
 def _jobs(path: Path) -> dict[str, Any]:
@@ -118,6 +119,16 @@ def _one(pattern: str, text: str) -> re.Match:
 
 JOBS = _jobs(UNIFIED_CI)
 LEGS = {name: _legs(job) for name, job in JOBS.items()}
+#: The legs of the whole unit-test family, which the old single job counted by itself.
+#: Each leg publishes one `PyTest - ...` check run from inside the job
+#: (mikepenz/action-junit-report), which is not a job of its own, so this is also the
+#: number of those check runs.
+UNIT_TEST_LEGS = sum(LEGS[name] for name in UNIT_TEST_JOB_IDS)
+#: LEGS as the workflow's comments list it: the three unit-test jobs under one name.
+COMMENT_LEGS = {
+    **{name: n for name, n in LEGS.items() if name not in UNIT_TEST_JOB_IDS},
+    "unit-test": UNIT_TEST_LEGS,
+}
 ON_PUSH = sum(LEGS.values())
 ON_PULL_REQUEST = sum(n for name, n in LEGS.items() if not _push_only(JOBS[name]))
 COMMENTS = _comment_text(UNIFIED_CI)
@@ -131,18 +142,23 @@ class TestTheExpansion:
 
     def test_an_axis_product_less_its_excludes(self):
         # 25 OS and Python combinations, each split into 8 shards (tests/unit/test_unit_test_shards.py
-        # holds the shard axis itself to one list of eight).
-        assert LEGS["unit-test"] == 25 * 8
+        # holds the shard axis itself to one list of eight), cut into three jobs by OS:
+        # 2 Linux and 2 macOS images and 1 Windows image, each on 5 Python versions.
+        assert LEGS["unit-test-linux"] == 2 * 5 * 8
+        assert LEGS["unit-test-macos"] == 2 * 5 * 8
+        assert LEGS["unit-test-windows"] == 1 * 5 * 8
+        assert UNIT_TEST_LEGS == 25 * 8
 
     def test_no_matrix_is_past_githubs_limit_of_256_jobs(self):
         """GitHub rejects the workflow, not just the leg, past 256 jobs from one matrix.
 
-        unit-test is the closest: 25 OS and Python combinations times 8 shards is 200, and
-        one more Python version (240) fits where one more OS as well (288) does not.
+        The limit applies to each matrix, and the unit-test matrix is three of them. As
+        one job it was the closest, at 200 legs; its largest part is now 80, and the
+        family as a whole is still 200.
         """
         too_big = {name: legs for name, legs in LEGS.items() if legs > 256}
         assert not too_big, too_big
-        assert LEGS["unit-test"] <= 256
+        assert max(LEGS[name] for name in UNIT_TEST_JOB_IDS) <= 256
 
     def test_an_include_that_merges_adds_no_cell(self):
         job = {
@@ -171,7 +187,8 @@ class TestTheCommentsMatchTheWorkflow:
             for name, count in re.findall(r"([a-z][a-z0-9-]*) (\d+)", match.group(2))
         }
 
-        assert listed == LEGS
+        # The comment names the three unit-test jobs as the one family they split.
+        assert listed == COMMENT_LEGS
         assert int(match.group(1)) == ON_PUSH
 
     def test_the_cost_note_prices_both_runs_of_a_queued_merge(self):
@@ -197,7 +214,7 @@ class TestTheCommentsMatchTheWorkflow:
         )
         check_runs, jobs, junit = map(int, match.groups())
 
-        assert (jobs, junit) == (ON_PULL_REQUEST, LEGS[JUNIT_JOB])
+        assert (jobs, junit) == (ON_PULL_REQUEST, UNIT_TEST_LEGS)
         assert check_runs == jobs + junit
         assert re.search(
             rf"this workflow contributes {check_runs} check runs to a pull request",
@@ -225,5 +242,134 @@ class TestTheCommentsMatchTheWorkflow:
 
     def test_no_comment_still_states_a_superseded_total(self):
         """The figures this file replaced, so a merge that brings one back is seen."""
-        for stale in ("expands to 92 jobs", "contributes 117 check", "117 is this"):
+        for stale in (
+            "expands to 92 jobs",
+            "contributes 117 check",
+            "117 is this",
+            "expands to 280 jobs",
+            "contributes 478 check",
+            "478 is this",
+        ):
             assert stale not in COMMENTS
+
+
+SETUP_ASH = "./.github/actions/setup-ash"
+ENSURE_CACHE = "ensure-cache"
+SETUP_ASH_ACTION = REPO_ROOT / ".github" / "actions" / "setup-ash" / "action.yml"
+RUN_UNIT_TESTS_ACTION = (
+    REPO_ROOT / ".github" / "actions" / "run-unit-tests" / "action.yml"
+)
+#: Jobs that call setup-ash and do not wait for ensure-cache, each with the reason. The
+#: test below fails when an entry is no longer true, so the list cannot become stale.
+NOT_WAITING = {
+    "warm-image-layers": (
+        "push-only, off the critical path of its own cache, and its image layer cache "
+        "is a different cache with its own one-writer concurrency group"
+    ),
+}
+
+
+def _setup_ash_steps(job: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        step
+        for step in job.get("steps") or []
+        if str(step.get("uses", "")).startswith(SETUP_ASH)
+    ]
+
+
+def _needs(job: dict[str, Any]) -> list[str]:
+    needs = job.get("needs") or []
+    return [needs] if isinstance(needs, str) else list(needs)
+
+
+def _runner_images(job: dict[str, Any]) -> set[str]:
+    """The runner images a job runs on: its os axis, or the literal runs-on."""
+    runs_on = str(job["runs-on"])
+    if "matrix.os" in runs_on:
+        return {entry["os"] for entry in _cells(job)}
+    return {runs_on}
+
+
+SETUP_ASH_CALLERS = [
+    name for name, job in JOBS.items() if name != ENSURE_CACHE and _setup_ash_steps(job)
+]
+
+
+class TestEnsureCache:
+    """The one job that writes the uv cache, and the jobs that only read it.
+
+    The legs are derived from the callers, not typed twice: the key setup-uv builds is the
+    runner image plus a hash of the dependency files, so there is one leg for each distinct
+    image any setup-ash caller runs on.
+    """
+
+    def test_the_callers_are_found(self):
+        # Positive control: a scan that found none would pass every test below.
+        assert len(SETUP_ASH_CALLERS) >= 10, SETUP_ASH_CALLERS
+
+    def test_it_has_one_leg_per_runner_image_the_callers_use(self):
+        images = set().union(*(_runner_images(JOBS[n]) for n in SETUP_ASH_CALLERS))
+        job = JOBS[ENSURE_CACHE]
+        matrix = job["strategy"]["matrix"]
+        assert sorted(matrix) == ["os"], "a second axis would write a key twice"
+        assert sorted(matrix["os"]) == sorted(images)
+        assert LEGS[ENSURE_CACHE] == len(images)
+        assert job["strategy"]["max-parallel"] == len(images)
+
+    def test_every_caller_waits_for_it_except_the_named_ones(self):
+        for name in SETUP_ASH_CALLERS:
+            waits = ENSURE_CACHE in _needs(JOBS[name])
+            assert waits == (name not in NOT_WAITING), (
+                f"{name}: waits={waits}; NOT_WAITING names {sorted(NOT_WAITING)}"
+            )
+        assert set(NOT_WAITING) <= set(SETUP_ASH_CALLERS), "a stale NOT_WAITING entry"
+
+    def test_it_runs_on_every_event_and_reads_only_the_repository(self):
+        job = JOBS[ENSURE_CACHE]
+        assert "if" not in job, "a skipped ensure-cache would skip its dependents"
+        assert "needs" not in job
+        assert "continue-on-error" not in job
+        assert job["permissions"] == {"contents": "read"}
+        assert job["strategy"]["fail-fast"] is False
+        assert job["timeout-minutes"] == 15
+
+    def test_the_gate_waits_for_it(self):
+        assert ENSURE_CACHE in _needs(JOBS["required-checks"])
+
+    def test_only_it_asks_setup_ash_to_save(self):
+        savers = {
+            name: step["with"]["save-cache"]
+            for name, job in JOBS.items()
+            for step in _setup_ash_steps(job)
+            if "save-cache" in (step.get("with") or {})
+        }
+        assert savers == {ENSURE_CACHE: "true"}
+
+    def test_setup_ash_restores_only_unless_asked(self):
+        action = yaml.safe_load(SETUP_ASH_ACTION.read_text(encoding="utf-8"))
+        assert action["inputs"]["save-cache"]["default"] == "false"
+        uv = [s for s in action["runs"]["steps"] if s.get("id") == "setup-uv"]
+        assert len(uv) == 1
+        assert uv[0]["with"]["enable-cache"] is True
+        assert uv[0]["with"]["save-cache"] == "${{ inputs.save-cache }}"
+
+    def test_it_syncs_the_unit_test_extras_and_leaves_ash_out(self):
+        unit = yaml.safe_load(RUN_UNIT_TESTS_ACTION.read_text(encoding="utf-8"))
+        unit_syncs = [
+            str(s["run"])
+            for s in unit["runs"]["steps"]
+            if str(s.get("run", "")).strip().startswith("uv sync")
+        ]
+        assert len(unit_syncs) == 1, unit_syncs
+        ensure_syncs = [
+            str(s["run"])
+            for s in JOBS[ENSURE_CACHE]["steps"]
+            if "uv sync" in str(s.get("run", ""))
+        ]
+        assert len(ensure_syncs) == 1, ensure_syncs
+        ensure_extras = sorted(re.findall(r"--extra (\S+)", ensure_syncs[0]))
+        unit_extras = sorted(re.findall(r"--extra (\S+)", unit_syncs[0]))
+        assert ensure_extras == unit_extras
+        assert unit_extras, "the unit-test sync installs no extras to compare"
+        assert "--no-install-project" in ensure_syncs[0]
+        assert "--frozen" in ensure_syncs[0]

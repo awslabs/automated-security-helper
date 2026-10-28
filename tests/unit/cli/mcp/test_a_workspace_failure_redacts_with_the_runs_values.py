@@ -49,11 +49,11 @@ async def test_a_crashed_workspace_runs_entries_hide_a_project_config_value(
     environment is hidden in every one of them."""
     from automated_security_helper.cli.mcp import workspace as workspace_module
 
-    monkeypatch.setenv("ASH_WSNDL_TOKEN", SECRET)
+    monkeypatch.setenv("ASH_WSNDL_HELD", SECRET)
     workspace_file = _workspace(tmp_path, "api", "web")
     for name in ("api", "web"):
         (workspace_file.parent / name / ".ash.yaml").write_text(
-            "project_name: ${ASH_WSNDL_TOKEN:unset}\n", encoding="utf-8"
+            "project_name: ${ASH_WSNDL_HELD:unset}\n", encoding="utf-8"
         )
 
     def _execute(plan, settings, **kwargs):

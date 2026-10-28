@@ -17,10 +17,10 @@ What runs
 ---------
 Nothing from the transpiler. Each test builds a small tree in ``tmp_path`` whose
 ``transpiler`` package is a stub (``orchestrator.check_drift`` and
-``registry.BackendRegistry`` are a few lines each), links the interpreter running the
-tests as the tree's ``.venv/bin/python``, and runs the real script with ``bash`` and
-the tree as the working directory. No network, no install, nothing written outside
-``tmp_path``.
+``registry.BackendRegistry`` are a few lines each), plants a wrapper that runs the
+interpreter running the tests as the tree's ``.venv/bin/python``, and runs the real
+script with ``bash`` and the tree as the working directory. No network, no install,
+nothing written outside ``tmp_path``.
 """
 
 import os
@@ -31,6 +31,12 @@ import textwrap
 from pathlib import Path
 
 import pytest
+
+pytestmark = pytest.mark.skipif(
+    os.name == "nt",
+    reason="runs the kit's bash script against a POSIX tree layout; the workflow "
+    "runs it on Linux, and the bash first on a Windows runner's PATH is the WSL launcher",
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "check_agentic_plugins_drift.sh"
@@ -116,9 +122,12 @@ def _build_tree(
     _git(tree, "init", "--quiet")
     bin_dir = tree / ".venv" / "bin"
     bin_dir.mkdir(parents=True)
-    # The base interpreter: a venv interpreter linked from elsewhere would not find
-    # its own standard library through the link.
-    (bin_dir / "python").symlink_to(getattr(sys, "_base_executable", sys.executable))
+    # The interpreter running the tests, reached by its own path through a wrapper: a
+    # symlink would lose the pyvenv.cfg that sits beside the original path, and the
+    # venv's packages (tomli on 3.10) would not be importable under -I.
+    python = bin_dir / "python"
+    python.write_text(f"#!/bin/sh\nexec '{sys.executable}' \"$@\"\n")
+    python.chmod(0o755)
     _write(td / "_base" / "manifest.json", "{}\n")
     _write(td / "_base" / "skill.md", "stub\n")
     _write(td / "transpiler" / "__init__.py", "")
@@ -304,20 +313,20 @@ class TestUvLockShapesTheReaderMustSurvive:
         assert "pins jinja2 at both 2.0.0 and 3.1.6" in (res / "drift.err").read_text()
 
 
-def _poison_tomllib(tree: Path) -> None:
+def _poison_tomllib(tree: Path, *, block_tomli: bool = False) -> None:
     """Swap the tree interpreter for a wrapper that blocks ``import tomllib`` the way a
     3.10 interpreter does (``None`` in ``sys.modules`` makes the import raise
-    ImportError), leaving every other module alone."""
+    ImportError), leaving every other module alone. ``block_tomli`` blocks ``tomli``
+    too, because the venv on 3.10 carries a real one."""
     python = tree / ".venv" / "bin" / "python"
-    real = python.resolve()
-    python.unlink()
+    blocked = ("tomllib", "tomli") if block_tomli else ("tomllib",)
     python.write_text(
         "#!/bin/sh\n"
         "# Expects the exact call the drift script makes: -I -B -c <code> <td>.\n"
         '[ "$3" = -c ] || exit 97\n'
-        f"exec '{real}' -I -B -c \"import sys\n"
-        "sys.modules['tomllib'] = None\n"
-        '$4" "$5"\n'
+        f"exec '{sys.executable}' -I -B -c \"import sys\n"
+        + "".join(f"sys.modules['{name}'] = None\n" for name in blocked)
+        + '$4" "$5"\n'
     )
     python.chmod(0o755)
 
@@ -343,7 +352,7 @@ class TestASnippetImportFailureIsANamedFault:
 
     def test_a_missing_tomllib_without_tomli_is_a_named_fault(self, tmp_path):
         tree = _build_tree(tmp_path)
-        _poison_tomllib(tree)
+        _poison_tomllib(tree, block_tomli=True)
         proc, res = _run(tree)
         assert proc.returncode == 2, proc.stderr
         assert not (res / "rc.txt").exists()
@@ -440,7 +449,10 @@ class TestGitWarningsAreNotADirtyListing:
     if the dirty test read stderr too, the script would fault on every run in such an
     environment and name paths that are not dirty as the cause."""
 
-    @pytest.mark.skipif(os.geteuid() == 0, reason="root can read a chmod-0 file")
+    @pytest.mark.skipif(
+        getattr(os, "geteuid", lambda: -1)() == 0,
+        reason="root can read a chmod-0 file",
+    )
     def test_a_git_stderr_warning_with_a_clean_tree_is_not_a_fault(self, tmp_path):
         tree = _build_tree(tmp_path)
         unreadable = tmp_path / "excludes"

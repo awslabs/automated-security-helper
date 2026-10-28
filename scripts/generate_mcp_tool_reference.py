@@ -35,6 +35,15 @@ cheaper to maintain and worse to read. So the split is:
 * Derived from the registry, because this is what drifted: which tools exist,
   which resources exist, the counts, and each tool's parameter names, types,
   required/default status.
+* Derived from the tools' return statements (``scripts/_mcp_contract.py``): the
+  ``error_type`` values each tool can return, and the ``type`` of each entry of
+  ``validate_config``'s ``errors``. The pages that tell a client which error a
+  refusal carries are checked against the same values, and so are the example
+  responses, so a renamed literal or key fails the docs checks. Editorial text that
+  names a response key or an error type is printed only while the server returns it
+  (``returns_fields``, and a caveat given as a dict with ``needs``, ``needs_types``
+  or ``error_types``), so the page describes the tools at the commit it is generated
+  from and not a server that has more or fewer of them.
 * Editorial, held in ``TOOL_NOTES`` below: the intro override, the ``Returns:``
   example blocks, and the caveats. Per-parameter ``Notes`` text likewise.
 
@@ -42,6 +51,12 @@ A registered tool with no ``TOOL_NOTES`` entry is not an error -- its intro come
 from the docstring's first line, which is accurate and specific enough to publish
 (measured across all 21). What *is* an error is a ``TOOL_NOTES`` entry naming a
 tool that is not registered, because that is a stale note.
+
+The docs-site page
+------------------
+The same content is also written to docs/content/reference/mcp-tools.md, under the
+reference pages' common banner. Bold is dropped there because the docs' house
+style keeps bold out of running prose; the agent-facing file keeps it.
 
 Usage
 -----
@@ -68,11 +83,12 @@ import inspect
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-TARGET = (
-    REPO_ROOT
-    / "ash-agent-plugins/agentic-coding/transpiler/_base/references/tool-reference.md"
+#: The two files this script writes, relative to the docs tree (``--docs-root``).
+TARGET = Path(
+    "ash-agent-plugins/agentic-coding/transpiler/_base/references/tool-reference.md"
 )
+REFERENCE_PAGE = Path("docs/content/reference/mcp-tools.md")
+GENERATOR = "scripts/generate_mcp_tool_reference.py"
 
 NUMBER_WORDS = {
     1: "one",
@@ -109,19 +125,27 @@ def _spell(n: int) -> str:
 
 # Editorial content per tool. Every field is optional.
 #   intro     -- replaces the docstring's first line.
-#   params    -- per-parameter Notes column, and an optional default_display that
-#                overrides the schema default when the schema value is uninformative
-#                (e.g. `null` where the real behaviour is "current dir").
+#   params    -- per-parameter Notes column. The Default column is always the
+#                schema's default, because the docs checks compare it with the
+#                schema; what an unset parameter means goes in the notes.
 #   returns   -- a fenced example response block.
 #   caveats   -- paragraphs appended after the returns block, in order.
 TOOL_NOTES: dict[str, dict] = {
     "run_ash_scan": {
         "intro": (
-            "Starts a scan asynchronously. Returns a `scan_id` immediately — the scan "
-            "continues in the background regardless of MCP connection state."
+            "Starts a scan in the server process and returns a `scan_id` at once. The "
+            "scan stops if the server process exits; over stdio, that is when the "
+            "client disconnects."
         ),
         "params": {
-            "source_dir": {"default": "current dir", "notes": "Absolute path to scan"},
+            "source_dir": {
+                "notes": (
+                    "Absolute path to scan. When not set: the tree this session delivered "
+                    "with `set_source_git` or `set_source_zip_finalize`. With none "
+                    "delivered, a call with no session id (stdio) scans the server's "
+                    "working directory, and a call with a session id is refused"
+                )
+            },
             "severity_threshold": {
                 "default": "the config's",
                 "notes": (
@@ -138,12 +162,20 @@ TOOL_NOTES: dict[str, dict] = {
                     "environment, else the built-in defaults"
                 ),
             },
-            "clean_output": {"notes": "Wipe stale reports before starting"},
+            "clean_output": {
+                "notes": (
+                    "Set the previous scan's results in the output directory aside as "
+                    "soon as the scan is registered; with `false`, the scan's own set-up "
+                    "does it a moment later. Either way they are deleted once the scan "
+                    "has results of its own, and put back if it fails or is canceled. "
+                    "A refused call leaves the previous results as they were"
+                )
+            },
         },
         "pre_returns": (
             "Output reports are written to `<source_dir>/.ash/ash_output/` — there is no "
             "parameter to override this. Scanner selection, mode, and other tuning live in "
-            "`.ash/.ash.yaml`, not in tool arguments."
+            "the project's ASH config, not in tool arguments."
         ),
         "returns": """{
   "success": true,
@@ -176,6 +208,11 @@ TOOL_NOTES: dict[str, dict] = {
             (
                 "- `config_input_not_permitted`: `config_path`, or a base its `extends` "
                 "chain names, is outside the directories this session may read a config from.\n"
+                "- `config_check_failed`: the check of the config sources in the scan "
+                "target could not finish (an unreadable entry, a link loop), so the scan "
+                "was not started. The config was not found to be outside the permitted "
+                "roots -- that case is `config_input_not_permitted` -- so check the "
+                "config files in the target for unreadable entries and link loops.\n"
                 "- `config_field_denied`: a config file an MCP client delivered or named "
                 "sets a field the session's runtime-override policy denies. `error` names "
                 "each field and why.\n"
@@ -226,8 +263,9 @@ TOOL_NOTES: dict[str, dict] = {
     },
     "get_scan_progress": {
         "intro": (
-            "Poll progress every 5 seconds until complete. Keeps the MCP connection alive "
-            "while the scan runs."
+            "Poll progress every 5 seconds until `is_complete` is `true`, then read "
+            "`status`: `completed`, `incomplete`, `failed`, or `cancelled`. The scan "
+            "continues server-side independently of polling."
         ),
         "params": {"scan_id": {"notes": "From `run_ash_scan`"}},
         "returns": """{
@@ -264,16 +302,34 @@ TOOL_NOTES: dict[str, dict] = {
     }
   }
 }""",
+        # A caveat is a string, or a dict that is printed only when the server
+        # returns what it describes: "needs" are response keys, "needs_types"
+        # error types. "otherwise" is what is printed instead, when there is one.
         "caveats": [
+            {
+                "needs": ["finished_scanners", "scanner_status_counts"],
+                "text": (
+                    "There is no overall percentage field. To compute progress, use "
+                    "`finished_scanners / total_scanners`: `finished_scanners` counts every "
+                    "scanner that has ended, whatever its status, and `completed_scanners` "
+                    "only the ones that PASSED. `scanner_status_counts` splits them into "
+                    "`passed`, `failed` (FAILED or ERROR), `skipped` (MISSING or SKIPPED), "
+                    "`running`, and `pending`. **Guard against `total_scanners == 0`** during "
+                    "the pre-flight phase (before any scanner has registered). Show "
+                    '"initializing" or 0% when `total_scanners` is zero.'
+                ),
+                "otherwise": (
+                    "There is no overall percentage field. To compute progress, use "
+                    "`completed_scanners / total_scanners`: `completed_scanners` counts "
+                    "only the scanners whose progress status is completed, so it can "
+                    "stay below `total_scanners` when the scan ends with a scanner that "
+                    "failed or was skipped. **Guard against `total_scanners == 0`** "
+                    "during the pre-flight phase (before any scanner has registered). "
+                    'Show "initializing" or 0% when `total_scanners` is zero.'
+                ),
+            },
             (
-                "There is no overall percentage field. To compute progress, use "
-                "`finished_scanners / total_scanners`, which counts every scanner that "
-                "ended; `completed_scanners` counts those that PASSED only — but **guard against "
-                "`total_scanners == 0`** during the pre-flight phase (before any scanner has "
-                'registered). Show "initializing" or 0% when `total_scanners` is zero.'
-            ),
-            (
-                "There is no top-level `duration` field — derive elapsed time from "
+                "There is no top-level `duration` field; derive elapsed time from "
                 "`start_time` and `end_time` (or from current time while running)."
             ),
             (
@@ -299,7 +355,8 @@ TOOL_NOTES: dict[str, dict] = {
                 "bound. `incomplete_scanners` names each scanner and why, and "
                 "`stale_content_databases` each stale database. The "
                 "findings are real but partial, so read them, and do not report the target as "
-                "clean. `failed` means the run crashed or left no readable results. "
+                "clean. `failed` means the run crashed, left no readable results, or "
+                "ran past the server's `scan_timeout_seconds`. "
                 "`coverage_complete` is `null` while running and for `failed` or `cancelled`; "
                 "with `fail_on_incomplete_scanners: false` a scan is `completed` with "
                 "`coverage_complete: false` when scanners did not run."
@@ -327,10 +384,14 @@ TOOL_NOTES: dict[str, dict] = {
                 )
             },
             "filter_level": {"notes": "`full`, `summary`, `minimal`"},
-            "scanners": {"default": "all", "notes": "Comma-separated subset"},
+            "scanners": {
+                "notes": "Comma-separated subset; not set means every scanner"
+            },
             "severities": {
-                "default": "all",
-                "notes": "`critical,high,medium,low,info`",
+                "notes": (
+                    "Comma-separated subset of `critical,high,medium,low,info,suppressed`; "
+                    "not set means every severity"
+                ),
             },
             "actionable_only": {
                 "notes": (
@@ -343,7 +404,15 @@ TOOL_NOTES: dict[str, dict] = {
             },
         },
         "caveats": [
-            "Returns full or filtered findings depending on `filter_level`.",
+            (
+                "With `filter_level` `full`, `raw_results` is the aggregated results "
+                "document without its `sarif`, `cyclonedx`, and `ash_config` sections; "
+                "`summary` returns the metadata and the counts by severity and by scanner, "
+                "and `minimal` the status. Individual findings are in the report files: "
+                "`get_scan_result_paths` lists them, and the `flat-json` reporter, which "
+                "is enabled by default, writes `reports/ash.flat.json` under "
+                "`output_dir`."
+            ),
             (
                 "`status` is `completed` or `incomplete`, decided by the same rule as the scan's "
                 "exit code, with `coverage_complete` and `incomplete_scanners` as in "
@@ -372,37 +441,61 @@ TOOL_NOTES: dict[str, dict] = {
     },
     "cancel_scan": {
         "intro": (
-            "Stop a running scan. The scanner running at the time is stopped, no further "
-            "scanner starts, and no reports or results file are written after the cancel."
+            "Stops a running scan. The scanner tool running at the time is stopped with "
+            "every process it started (SIGTERM, then SIGKILL after 10 seconds). The "
+            "scan halts at its next cancel check, and no further scanner, phase, or "
+            "reporter starts, so a scan canceled before its report phase writes no "
+            "reports. Work that is not waiting on a child process, such as a scanner "
+            "parsing its tool's output, can still finish and write under `scanners/` "
+            "or `converted/`, but `ash_aggregated_results.json` is not written after "
+            "the cancel. When the output directory held a previous scan's results, "
+            "they are put back in place of every result the canceled scan wrote; its "
+            "log, `ash.log`, stays, and an `ash.log.jsonl` already there is left as it "
+            "was. With no previous results, what the scan wrote before it stopped "
+            "stays, except that a cancel during the report phase removes the reports "
+            "that phase wrote. `reports/ash.unused-suppressions.md`, which its "
+            "reporter writes on its own, stays even then."
         ),
-        "params": {"scan_id": {"notes": "The scan to stop"}},
+        "params": {"scan_id": {"notes": "The scan to cancel"}},
         "caveats": [
             (
-                "Returns `success: true` and `status: cancelled`. A scan that already "
-                "finished cannot be cancelled: `success` is `false` and `status` is the "
-                "status it finished with."
-            ),
-            (
-                "The status is `cancelled` at once, while the scan takes up to about 10 "
-                "seconds to stop and put the previous results back. Until then a new "
-                "`run_ash_scan` of the same directory is refused as still stopping, with "
-                "`error_type: MCPResourceError` and `error_category: resource_exhausted` "
-                "(see `run_ash_scan`); retry after a few seconds."
+                "Returns `success`, `status`, and `message`. The status is `cancelled` "
+                "at once. A running scan stops within about 10 seconds; one still "
+                "waiting for another scan of its session stops when that scan ends. "
+                "Until it has stopped, `run_ash_scan` refuses another scan of the same "
+                "directory as still stopping, and the scan counts against "
+                "`max_concurrent_scans`. A scan that has already ended is not changed, "
+                "and the response has `success: false` and the scan's status. For a "
+                "`run_ash_workspace_scan`, `cancel_scan` takes one project's scan id and "
+                "stops that project, which ends `failed`; the other projects carry on."
             ),
         ],
     },
     "check_installation": {
         "intro": (
-            "Report whether ASH can scan: its version, and for each built-in scanner whether "
-            "its tool is available. Run before the first scan in a session if you're unsure "
-            "of the install state. Each scanner's check may run its tool, so the call takes "
-            "seconds."
+            "Reports whether ASH can scan: its version and, for each built-in scanner, "
+            "whether its tool can run. Enabled means enabled in ASH's defaults: the "
+            "call reads no project's config and checks no plugin scanner. It runs each "
+            "scanner's dependency check, which can start the tool, so it takes several "
+            "seconds, and it installs and downloads nothing. The tool of a scanner "
+            "that ASH installs with uv is installed when `uv tool list` lists it, or "
+            "when its executable is on `PATH` or in a directory ASH also searches, "
+            "such as `~/.ash/bin`. A scanner whose tool is not, when the server is "
+            "online and has uv, is listed in `installs_on_first_scan`, because the "
+            "first scan installs it with uv, which needs network access. Offline, or "
+            "without uv, it is listed in `missing_dependencies`. Offline, semgrep is "
+            "also missing when it has no rules cache."
         ),
         "no_params_sentence": (
-            "No parameters. Returns `installed` (at least one enabled scanner can run), "
-            "`ready` (all of them can), `version`, `scanners` (name, enabled, "
-            "`dependencies_satisfied`, version) and the enabled scanners in "
-            "`missing_dependencies` and `undetermined_dependencies`."
+            "No parameters. Returns `installed` (at least one enabled scanner can run, "
+            "or will once the first scan installs its tool), `ready` (every enabled "
+            "scanner can run or will), `version`, `scanners` (each scanner's `name`, "
+            "`enabled`, `dependencies_satisfied`, `installs_on_first_scan`, and "
+            "`version`), `installs_on_first_scan`, `missing_dependencies` and "
+            "`undetermined_dependencies` (the enabled scanners whose tool is missing "
+            "and that a scan cannot install, or whose check could not run), and "
+            "`ash_command_available` (whether an `ash` executable is on `PATH`, which "
+            "the server does not need)."
         ),
     },
     "set_source_zip_chunk": {
@@ -436,16 +529,17 @@ TOOL_NOTES: dict[str, dict] = {
     },
     "set_source_git": {
         "params": {
-            "url": {
+            "url": {"notes": "Repository URL"},
+            "ref": {
                 "notes": (
-                    "Repository URL: `https://`, `ssh://` or `user@host:path`, on a "
-                    "host the operator listed in `ASH_MCP_GIT_ALLOWED_HOSTS`"
+                    "Branch, tag, or commit; not set means the remote's default branch"
                 )
             },
-            "ref": {"default": "default branch", "notes": "Branch, tag, or commit"},
             "ssh_key_id": {
-                "default": "none",
-                "notes": "Must be omitted: the server registers no ssh keys",
+                "notes": (
+                    "Leave it out: the server registers no SSH keys, so any value is "
+                    "refused"
+                ),
             },
             "depth": {"notes": "Clone depth, a whole number of commits from 1 to 1000"},
         },
@@ -542,32 +636,6 @@ TOOL_NOTES: dict[str, dict] = {
             ),
         ],
     },
-    "validate_config": {
-        "caveats": [
-            (
-                "Each error is `{field, message, type}`. A remote caller's "
-                "`config_content` counts as the client's config, and so does a "
-                "`config_path` that a client delivered or that is outside the directories "
-                "`ASH_MCP_ALLOWED_CONFIG_ROOTS` names, unless it is a profile file the "
-                "server wrote in the calling session's `config/` directory. "
-                "On stdio, `config_content` is the caller's own, because the caller "
-                "started the server. Besides schema and parse errors, `type` can be "
-                "`config_input_not_permitted` (a `config_path` this session may not "
-                "read), `config_policy_unreadable` (the session's runtime-override policy "
-                "cannot be established for the client's config), "
-                "`denied_by_runtime_policy` (a field of the client's config that policy "
-                "denies, named in `field`, with the message `<field> may not be set by a "
-                "config an MCP client delivers: <reason>`), or `config_env_not_resolved`. "
-                "A `${VAR}` or `${VAR:default}` reference at the start of a plain value, "
-                "or an `!ENV` tag, is an error of type `config_env_not_resolved` "
-                "anywhere in a remote caller's client config, and for a stdio caller "
-                "only in a file a client delivered. A policy check that cannot finish on "
-                "the client's config makes it invalid, with an error of type "
-                "`validation_error` that starts `The config could not be checked against "
-                "this session's runtime-override policy`."
-            ),
-        ],
-    },
     "list_scanners": {
         "no_params_sentence": (
             "No parameters. Returns one entry per registered scanner with its config name, "
@@ -581,6 +649,28 @@ TOOL_NOTES: dict[str, dict] = {
             "client cannot register one; an empty list means the operator registered none."
         ),
     },
+    "resolve_ash_workspace": {
+        "caveats": [
+            (
+                "A workspace policy file, named or found in the workspace file's "
+                "directory or its `.ash` directory, is used only when it is in a "
+                "directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names; any other refuses the "
+                "workspace with exit code 4, or with exit code 3 when a client "
+                "delivered it and it sets a field the server's policy denies."
+            ),
+        ],
+    },
+    "run_ash_workspace_scan": {
+        "caveats": [
+            (
+                "A workspace policy file, named or found in the workspace file's "
+                "directory or its `.ash` directory, is used only when it is in a "
+                "directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names; any other refuses the "
+                "workspace with exit code 4, or with exit code 3 when a client "
+                "delivered it and it sets a field the server's policy denies."
+            ),
+        ],
+    },
     "clear_source": {
         "no_params_sentence": (
             "No parameters. Deletes this session's delivered source tree and workspace."
@@ -591,6 +681,22 @@ TOOL_NOTES: dict[str, dict] = {
                 "`error_type: source_delivery_busy`. Clear again once the scan ends. Entries "
                 "the server cannot delete (files another account owns) stay on disk; the "
                 "session's delivered source is forgotten either way."
+            ),
+        ],
+    },
+    "validate_config": {
+        "caveats": [
+            (
+                "`config_content` counts as the client's config, and so does a "
+                "`config_path` that a client delivered or that is outside the "
+                "directories `ASH_MCP_ALLOWED_CONFIG_ROOTS` names and its session's "
+                "`config/` directory. Each field such a config may not set under the "
+                "server's runtime-override policy is an error of type "
+                "`denied_by_runtime_policy`, and a policy the server cannot read is one "
+                "error of type `config_policy_unreadable`; for `config_content`, both "
+                "only when a remote client calls. A `${VAR}` or `${VAR:default}` "
+                "reference at the start of a plain value, or an `!ENV` tag, in such a "
+                "config is an error of type `config_env_not_resolved`."
             ),
         ],
     },
@@ -620,23 +726,23 @@ def _type_name(schema: dict) -> str:
     return str(declared or "any")
 
 
-def _default_display(
-    name: str, schema: dict, required: bool, override: str | None
-) -> str:
-    if override is not None:
-        return override
+def _default_display(schema: dict, required: bool) -> str:
+    """The schema's default as the docs checks read it: a phrase or one JSON span."""
+    import json
+
     if required:
         return "*required*"
     if "default" not in schema:
         return ""
     value = schema["default"]
     if value is None:
-        return "`null`"
-    if isinstance(value, bool):
-        return f"`{str(value).lower()}`"
-    if isinstance(value, str):
-        return f'`"{value}"`'
-    return f"`{value}`"
+        return "not set"
+    return f"`{json.dumps(value)}`"
+
+
+#: The docs checks compare each tool's parameter table with the tool's input schema.
+def _options_marker(tool: str) -> str:
+    return f"<!-- doctest: options of=mcp.{tool} -->"
 
 
 def _docstring_arg_notes(func) -> dict[str, str]:
@@ -678,7 +784,66 @@ def _docstring_arg_notes(func) -> dict[str, str]:
     return {k: v.replace("|", r"\|") for k, v in found.items()}
 
 
-def _render_tool(name: str, description: str, schema: dict, func) -> list[str]:
+def _response_keys(contract, wanted: set[str]) -> set[str]:
+    """The keys of the one response dict the tool's return statements build that
+    carries the most of ``wanted``.
+
+    Read by ``scripts/_mcp_contract.py``. One dict rather than the union of all of
+    them, because the docs checks hold an example to a single response: an example
+    with keys from a refusal and from a success would pass no check. Without a
+    contract (a tool the reader did not find) every wanted key counts as present.
+    """
+    if contract is None:
+        return set(wanted)
+    best: set[str] = set()
+    score = -1
+    for variant in contract.response.dicts():
+        keys = {key for key, _ in variant.keys}
+        hits = len(keys & wanted)
+        if hits > score or (hits == score and len(keys) > len(best)):
+            best, score = keys, hits
+    return best
+
+
+def _conditional_caveat(
+    caveat: dict, have: set[str], types: set[str] | None
+) -> str | None:
+    """The text of a caveat given as a dict, or None when it is not printed.
+
+    * ``needs``: response keys; all must be in ``have``, else ``otherwise`` is
+      printed when there is one.
+    * ``needs_types``: error types; all must be among the tool's, else nothing.
+    * ``error_types``: (type, note) pairs, a paragraph naming those the tool
+      returns, each followed by its note in parentheses; ``untyped`` is added after
+      it while none of ``untyped_unless`` is returned.
+    """
+    if not all(key in have for key in caveat.get("needs", [])):
+        return caveat.get("otherwise")
+    if types is not None and not set(caveat.get("needs_types", [])) <= types:
+        return None
+    if "error_types" in caveat:
+        named = [
+            f"`{kind}`" + (f" ({note})" if note else "")
+            for kind, note in caveat["error_types"]
+            if types is None or kind in types
+        ]
+        if not named:
+            return None
+        if len(named) > 1:
+            listed = f"{', '.join(named[:-1])}, or {named[-1]}"
+        else:
+            listed = named[0]
+        text = f"{caveat['lead']} {listed}."
+        absent = types is None or not set(caveat.get("untyped_unless", [])) & types
+        if caveat.get("untyped") and absent:
+            text = f"{text} {caveat['untyped']}"
+        return text
+    return caveat["text"]
+
+
+def _render_tool(
+    name: str, description: str, schema: dict, func, contract=None
+) -> list[str]:
     notes = TOOL_NOTES.get(name, {})
     doc_notes = _docstring_arg_notes(func)
     lines = [f"## {name}", ""]
@@ -699,9 +864,7 @@ def _render_tool(name: str, description: str, schema: dict, func) -> list[str]:
         # Match the existing convention: a Default column only when at least one
         # parameter has a default worth showing.
         defaults = {
-            key: _default_display(
-                key, spec, key in required, param_notes.get(key, {}).get("default")
-            )
+            key: _default_display(spec, key in required)
             for key, spec in properties.items()
         }
         # The document's existing convention: a Default column appears only when
@@ -709,6 +872,7 @@ def _render_tool(name: str, description: str, schema: dict, func) -> list[str]:
         # required renders as a three-column table, so "*required*" alone does not
         # earn the column.
         show_default = any(v for v in defaults.values() if v != "*required*")
+        lines.append(_options_marker(name))
         if show_default:
             lines += [
                 "| Param | Type | Default | Notes |",
@@ -729,21 +893,206 @@ def _render_tool(name: str, description: str, schema: dict, func) -> list[str]:
     if notes.get("pre_returns"):
         lines += [notes["pre_returns"], ""]
 
-    if notes.get("returns"):
-        lines += ["Returns:", "```json", notes["returns"], "```", ""]
+    caveats = notes.get("caveats", [])
+    fields = notes.get("returns_fields")
+    wanted = {key for key, _ in fields or []}
+    for caveat in caveats:
+        if isinstance(caveat, dict):
+            wanted.update(caveat.get("needs", []))
+    have = _response_keys(contract, wanted)
+    types = None if contract is None else set(contract.error_types)
 
-    for caveat in notes.get("caveats", []):
+    returns = notes.get("returns")
+    if fields:
+        kept = [text for key, text in fields if key in have]
+        returns = "{\n" + ",\n".join(kept) + "\n}" if kept else None
+    if returns:
+        lines += ["Returns:", "```json", returns, "```", ""]
+
+    for caveat in caveats:
+        if isinstance(caveat, dict):
+            caveat = _conditional_caveat(caveat, have, types)
+            if caveat is None:
+                continue
         lines += [caveat, ""]
+
+    if contract is not None:
+        lines += _error_lines(contract)
 
     return lines
 
 
+def _error_lines(contract) -> list[str]:
+    """What the tool's return statements say a failure carries.
+
+    Read by ``scripts/_mcp_contract.py``, which records ``type(e).__name__`` as
+    "the class name of an exception" rather than as a value.
+    """
+    lines = []
+    for lead, values, class_name in (
+        (
+            "On failure, `error_type` is",
+            contract.error_types,
+            contract.error_class_name,
+        ),
+        (
+            "Each entry of `errors` has a `type` that is",
+            contract.entry_types,
+            contract.entry_class_name,
+        ),
+    ):
+        named = [f"`{value}`" for value in values]
+        if len(named) > 1:
+            listed = f"one of {', '.join(named[:-1])} and {named[-1]}"
+        else:
+            listed = "".join(named)
+        if class_name:
+            other = "the class name of an exception"
+            listed = f"{listed}, or {other}" if listed else other
+        if listed:
+            lines += [f"{lead} {listed}.", ""]
+    return lines
+
+
+def _tool_contracts(tools) -> dict:
+    """Each registered tool's contract, read from the source of the package it documents.
+
+    A registered tool with no ``@mcp.tool`` function the reader finds, or an
+    ``error_type`` it cannot read, stops the run: the page would otherwise list
+    fewer errors than the server returns, with nothing to say so.
+    """
+    import automated_security_helper
+
+    from _mcp_contract import tool_contracts
+
+    package = Path(automated_security_helper.__file__).resolve().parent
+    contracts = tool_contracts(package)
+    registered = {t.name for t in tools}
+    problems = [
+        f"{name} is registered but no @mcp.tool function defines it"
+        for name in sorted(registered - set(contracts))
+    ]
+    for name in sorted(registered & set(contracts)):
+        contract = contracts[name]
+        for site in (*contract.error_types_unread, *contract.entry_types_unread):
+            problems.append(f"{name}: an error type at {site} cannot be read")
+    if problems:
+        raise SystemExit(
+            "ERROR: the MCP tools' error types cannot all be listed:\n  "
+            + "\n  ".join(problems)
+        )
+    return contracts
+
+
 def render() -> str:
+    """The agent-facing tool-reference.md."""
+    header, body = _render_parts()
+    return "\n".join(header + _adapt_markdown(body, strip_bold=False))
+
+
+def render_reference_page() -> str:
+    """docs/content/reference/mcp-tools.md: the same body under the reference banner."""
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _reference_docs import banner, generated_note
+
+    _header, body = _render_parts()
+    lines = banner(GENERATOR, "the MCP server's registered tools and resources")
+    lines += [
+        "# MCP tools reference",
+        "",
+        generated_note(
+            GENERATOR,
+            "the tools and resources the ASH MCP server registers, with editorial notes "
+            "kept in the generator",
+        ),
+        "",
+    ]
+    return "\n".join(_adapt_markdown(lines + body, strip_bold=True))
+
+
+def _response_marker(tool: str) -> str:
+    """The marker on a response example: the docs checks compare its keys with the
+    keys the tool's return statements build (see the doctest contract's "Config
+    blocks")."""
+    return f"<!-- doctest: config kind=mcp-response of=mcp.{tool} -->"
+
+
+def _adapt_markdown(lines: list[str], strip_bold: bool) -> list[str]:
+    """Make the response examples pass the docs checks, and on the docs site drop bold.
+
+    * A ```json response example that does not parse as JSON (``bool``, ``[...]``
+      placeholders) becomes a ```text block, because the docs checks parse every
+      JSON block. Either way it gets the marker naming the tool whose response it
+      is, under whose ``## <tool>`` heading it sits. Both files get this: the docs
+      checks read the agent-facing file and every copy the transpiler makes of it.
+    * With ``strip_bold``, no bold in running prose (the docs site's house style).
+      Bold that wraps a code span is unwrapped too; ``**`` inside a code span or a
+      fence is left alone. The agent-facing file keeps its bold. Table cells also
+      get ``<`` and ``>`` outside code spans escaped there.
+    """
+    import json
+    import re
+
+    out: list[str] = []
+    tool = None
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        heading = re.match(r"^## ([a-z][a-z0-9_]*)$", line)
+        if heading:
+            tool = heading.group(1)
+        if line.strip() == "```json":
+            end = i + 1
+            while end < len(lines) and lines[end].strip() != "```":
+                end += 1
+            block = lines[i + 1 : end]
+            try:
+                json.loads("\n".join(block))
+                parsed = True
+            except ValueError:
+                parsed = False
+            if out and out[-1] != "":
+                out.append("")
+            if tool is None:
+                raise SystemExit(
+                    "ERROR: a response example is not under a '## <tool>' heading, so "
+                    "the docs checks could not tell which tool's keys it shows."
+                )
+            out += [_response_marker(tool), "```json" if parsed else "```text"]
+            out += block
+            out.append("```")
+            i = end + 1
+            continue
+        if line.startswith("```") or not strip_bold:
+            out.append(line)
+            i += 1
+            continue
+        spans: list[str] = []
+
+        def hide(match):
+            spans.append(match.group(0))
+            return f"\x00{len(spans) - 1}\x00"
+
+        hidden = re.sub(r"`[^`]*`", hide, line)
+        hidden = hidden.replace("**", "")
+        if hidden.startswith("|"):
+            # Notes taken from docstrings say things like "Defaults to <cwd>/...",
+            # which python-markdown would pass through as an HTML tag and the
+            # browser would drop. The agent-facing file is read as text and keeps it.
+            hidden = hidden.replace("<", "&lt;").replace(">", "&gt;")
+        out.append(re.sub(r"\x00(\d+)\x00", lambda m: spans[int(m.group(1))], hidden))
+        i += 1
+    return out
+
+
+def _render_parts() -> tuple[list[str], list[str]]:
     from automated_security_helper.cli import mcp_server
 
     tools = asyncio.run(mcp_server.mcp.list_tools())
     resources = asyncio.run(mcp_server.mcp.list_resources())
 
+    contracts = _tool_contracts(tools)
     stale_notes = sorted(set(TOOL_NOTES) - {t.name for t in tools})
     if stale_notes:
         raise SystemExit(
@@ -777,6 +1126,9 @@ def render() -> str:
         "     generator (prose and caveats live in its TOOL_NOTES table) and re-run it,",
         "     then `agentic-plugins build` to propagate to every plugin backend. -->",
         "",
+    ]
+    header_length = len(lines)
+    lines += [
         (
             f"The ASH MCP server exposes {_spell(len(tools))} tools and "
             f"{_spell(len(resources))} resources."
@@ -790,6 +1142,7 @@ def render() -> str:
             tool.description or "",
             tool.input_schema or {},
             getattr(mcp_server, tool.name),
+            contracts[tool.name],
         )
 
     lines += ["## Resources", ""]
@@ -813,7 +1166,7 @@ def render() -> str:
         "",
     ]
 
-    return "\n".join(lines)
+    return lines[:header_length], lines[header_length:]
 
 
 def main() -> int:
@@ -821,44 +1174,86 @@ def main() -> int:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Do not write. Exit non-zero with a diff if the file is stale.",
+        help="Do not write. Exit non-zero with a diff if either file is stale.",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--output",
+        default=None,
+        help=(
+            "Write (or with --check, compare) only the docs-site page, at this path "
+            "('-' for stdout), and leave the agent-facing file alone."
+        ),
+    )
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _reference_docs import (
+        add_docs_root_argument,
+        prepare_environment,
+        refuse_check_to_stdout,
+        write_or_check,
+    )
 
-    expected = render()
-    actual = TARGET.read_text(encoding="utf-8") if TARGET.exists() else ""
+    add_docs_root_argument(parser)
+    args = parser.parse_args()
+    refuse_check_to_stdout(parser, args)
+
+    docs_root = Path(args.docs_root).resolve()
+    prepare_environment(docs_root)
+    if args.output:
+        page = render_reference_page()
+        if args.output == "-":
+            sys.stdout.write(page)
+            return 0
+        return write_or_check(Path(args.output), page, args.check, GENERATOR)
+    status = 0
+    for target, expected, after in (
+        (
+            docs_root / TARGET,
+            render(),
+            (
+                "Then propagate: uv run --project "
+                "ash-agent-plugins/agentic-coding/transpiler agentic-plugins build"
+            ),
+        ),
+        (docs_root / REFERENCE_PAGE, render_reference_page(), ""),
+    ):
+        status |= _write_or_check(target, expected, args.check, after, docs_root)
+    return status
+
+
+def _write_or_check(
+    target: Path, expected: str, check: bool, after: str, docs_root: Path
+) -> int:
+    actual = target.read_text(encoding="utf-8") if target.exists() else ""
+    rel = target.relative_to(docs_root)
 
     if expected == actual:
-        if args.check:
-            print(f"{TARGET.relative_to(REPO_ROOT)} is up to date.", file=sys.stderr)
+        if check:
+            print(f"{rel} is up to date.", file=sys.stderr)
         return 0
 
-    if args.check:
+    if check:
         print(
-            f"{TARGET.relative_to(REPO_ROOT)} is stale relative to the MCP registry.\n"
+            f"{rel} is stale relative to the MCP registry.\n"
             f"Regenerate with: uv run python scripts/generate_mcp_tool_reference.py\n"
-            f"Then propagate: uv run --project "
-            f"ash-agent-plugins/agentic-coding/transpiler agentic-plugins build\n",
+            + (f"{after}\n" if after else ""),
             file=sys.stderr,
         )
         sys.stderr.writelines(
             difflib.unified_diff(
                 actual.splitlines(keepends=True),
                 expected.splitlines(keepends=True),
-                fromfile="tool-reference.md (on disk)",
-                tofile="tool-reference.md (regenerated)",
+                fromfile=f"{rel.name} (on disk)",
+                tofile=f"{rel.name} (regenerated)",
                 n=1,
             )
         )
         return 1
 
-    TARGET.write_text(expected, encoding="utf-8")
-    print(f"Wrote {TARGET.relative_to(REPO_ROOT)}", file=sys.stderr)
-    print(
-        "Now run: uv run --project ash-agent-plugins/agentic-coding/transpiler "
-        "agentic-plugins build",
-        file=sys.stderr,
-    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(expected, encoding="utf-8")
+    print(f"Wrote {rel}", file=sys.stderr)
+    if after:
+        print(f"Now run: {after.removeprefix('Then propagate: ')}", file=sys.stderr)
     return 0
 
 

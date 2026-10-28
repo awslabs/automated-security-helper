@@ -82,6 +82,7 @@ from typing import TYPE_CHECKING, Any, Dict, Iterator, Mapping, Optional, cast
 from automated_security_helper.utils.terminal_text import raw_controls_on_one_line
 
 if TYPE_CHECKING:
+    from automated_security_helper.cli.mcp.http_sessions import HttpCaller
     from mcp.server.mcpserver import Context as SdkContext
 
 # Lowercase because HTTP header names are case-insensitive and this is compared
@@ -101,6 +102,13 @@ SESSION_IDENTITY_REQUIRED = "session_identity_required"
 
 #: Set while the caller is the local client; see :func:`serving_local_client`.
 _LOCAL_CLIENT: ContextVar[bool] = ContextVar("ash_mcp_local_client", default=False)
+
+#: Set by :func:`resolve_caller_session_id` for the call it resolves: the caller
+#: has no identity because its request names a protocol version outside the
+#: ``initialize`` handshake versions. :func:`session_identity_refusal` reads it.
+_PROTOCOL_VERSION_IS_CAUSE: ContextVar[bool] = ContextVar(
+    "ash_mcp_protocol_version_is_cause", default=False
+)
 
 
 @contextlib.contextmanager
@@ -188,8 +196,8 @@ def resolve_session_id(headers: Optional[Mapping[str, str]]) -> str:
             single directory, per :func:`validate_path_component` -- it contains a path
             separator, is a relative-path component, carries a control character
             or a character with path meaning such as a drive-specifying ``:``,
-            or exceeds ``session_paths.MAX_COMPONENT_LEN``. Refused rather than sanitized:
-            see the module docstring.
+            or exceeds ``session_paths.MAX_COMPONENT_LEN``. Refused rather than
+            sanitized: see the module docstring.
 
     No headers at all (``None``, or a mapping with no entries) has no request
     behind it, so it is the default session with local trust, matching the
@@ -336,6 +344,9 @@ def resolve_caller_session_id(ctx: object) -> str:
         DEFAULT_SESSION_ID,
     )
 
+    # Every resolution states its own cause, so one request's does not reach
+    # the next one's refusal.
+    _PROTOCOL_VERSION_IS_CAUSE.set(False)
     sdk_context = _as_sdk_context(ctx)
     if sdk_context is None:
         return resolve_session_id(getattr(ctx, "headers", None))
@@ -350,6 +361,9 @@ def resolve_caller_session_id(ctx: object) -> str:
 
     caller = caller_of(getattr(request, "scope", None))
     if caller is None or caller.session_id is None:
+        _PROTOCOL_VERSION_IS_CAUSE.set(
+            caller is not None and caller.protocol_version_is_cause
+        )
         return UNIDENTIFIED_SESSION_ID
     candidate = caller.session_id.strip()
     if not candidate:
@@ -358,29 +372,80 @@ def resolve_caller_session_id(ctx: object) -> str:
     return validate_path_component(candidate, MCP_SESSION_ID_HEADER)
 
 
+def _caller_behind(ctx: object) -> Optional["HttpCaller"]:
+    """The :class:`HttpCaller` stamped on the request behind ``ctx``, or None.
+
+    Read from the request's own scope, so it is a fact about one request and
+    nothing else: no resolution order, no task-local state. A ``ctx`` that
+    carries no request -- a stand-in, a Context used outside a request -- has
+    no stamp.
+    """
+
+    from automated_security_helper.cli.mcp.http_sessions import caller_of
+
+    try:
+        request = getattr(getattr(ctx, "request_context", None), "request", None)
+    except ValueError:
+        # A Context used outside a request has no transport behind it.
+        return None
+    return caller_of(getattr(request, "scope", None))
+
+
 def session_identity_refusal(
-    session_id: str, operation: str
+    session_id: str, operation: str, ctx: object = None
 ) -> Optional[Dict[str, Any]]:
     """The refusal a session-dependent tool returns for an unidentified caller.
 
     Returns None when ``session_id`` names a session, or is None: only the
     :data:`UNIDENTIFIED_SESSION_ID` sentinel is refused.
+
+    ``ctx`` is the refused call's context. Whether the protocol version is the
+    cause, and which server mode the advice holds on, are read from the stamp
+    on the request behind it, so the text depends only on the request being
+    refused, never on whichever resolution ran last in the same task. A
+    refusal built without ``ctx`` -- an id another tool resolved and passed
+    down -- claims no cause and gives the mode-less advice.
     """
 
     if session_id != UNIDENTIFIED_SESSION_ID:
         return None
+    from automated_security_helper.cli.mcp.http_sessions import MODE_STATEFUL
+
+    caller = _caller_behind(ctx) if ctx is not None else None
+    protocol_sentence = (
+        "This request names a newer protocol version, and a request that does "
+        "names no session, whatever Mcp-Session-Id it sends, so a session tool "
+        "needs a handshake Mcp-Protocol-Version: send the protocol version the "
+        "initialize handshake negotiated. "
+        if caller is not None and caller.protocol_version_is_cause
+        else ""
+    )
+    if caller is not None and caller.server_mode == MODE_STATEFUL:
+        # The server already issues sessions, so operator advice to change the
+        # mode would be noise; what works here is in the caller's hands.
+        error = (
+            f"{operation} needs a session, and this call carries none the server "
+            f"issued. An Mcp-Session-Id header the server did not issue does not "
+            f"name one. {protocol_sentence}"
+            f"Open a session with initialize at a handshake protocol version and "
+            f"send the Mcp-Session-Id it returns with that version."
+        )
+    else:
+        error = (
+            f"{operation} needs a session, and this call carries none the server "
+            f"issued. A stateless streamable-HTTP server issues no session, and an "
+            f"Mcp-Session-Id header the server did not issue does not name one. "
+            f"{protocol_sentence}"
+            f"To serve sessions at all, use a stateful server (without "
+            f"--stateless-http), or, when a platform in front of ASH issues and "
+            f"authenticates Mcp-Session-Id, start a stateless server with "
+            f"--trust-upstream-session-id."
+        )
     return {
         "success": False,
         "operation": operation,
         "error_type": SESSION_IDENTITY_REQUIRED,
-        "error": raw_controls_on_one_line(
-            f"{operation} needs a session, and this call carries none the server "
-            f"issued. A stateless streamable-HTTP server issues no session, and an "
-            f"Mcp-Session-Id header the server did not issue does not name one. "
-            f"Use a stateful server (without --stateless-http), or, when a "
-            f"platform in front of ASH issues and authenticates Mcp-Session-Id, "
-            f"start the server with --trust-upstream-session-id."
-        ),
+        "error": raw_controls_on_one_line(error),
     }
 
 

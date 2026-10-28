@@ -760,6 +760,53 @@ class TestScope:
         assert result.returncode == SPAWN_FAILURE_RETURNCODE
         assert "shell" in result.stderr
 
+    def test_a_backend_that_fails_while_planning_starts_nothing(
+        self, tmp_path, monkeypatch
+    ):
+        """plan() raising RecursionError (a deep or looping directory layout) is
+        reported as a command that could not start, or raised, by every spawn
+        helper: no process starts, sandboxed or not."""
+        import subprocess
+
+        from automated_security_helper.utils import subprocess_utils
+
+        class Exploding:
+            name = "exploding"
+
+            def plan(self, argv, env, policy):
+                raise RecursionError("maximum recursion depth exceeded")
+
+        started = []
+
+        def record(*args, **kwargs):
+            started.append(args)
+            raise AssertionError("a process was started")
+
+        monkeypatch.setattr(subprocess, "run", record)
+        monkeypatch.setattr(subprocess, "Popen", record)
+        scope = scope_module.SandboxScope(
+            backend=Exploding(),  # type: ignore[arg-type]
+            scanner_name="grype",
+            requirements=SandboxRequirements(),
+            source_dir=tmp_path,
+            output_dir=tmp_path,
+            results_dir=tmp_path / "r",
+            scan_target=None,
+            offline=True,
+        )
+        true = "/usr/bin/true"
+        with sandbox_scope(scope):
+            result = subprocess_utils.run_command([true])
+            streamed = subprocess_utils.run_command_stream_output([true])
+            with pytest.raises(RecursionError):
+                subprocess_utils.spawn_run([true])
+            with pytest.raises(RecursionError):
+                subprocess_utils.create_process_with_pipes([true])
+
+        assert result.returncode == subprocess_utils.SPAWN_FAILURE_RETURNCODE
+        assert streamed == subprocess_utils.SPAWN_FAILURE_RETURNCODE
+        assert started == []
+
 
 class TestPolicyEdges:
     """Symlinked results directories, tool prefixes under home, and the env filter."""
@@ -1206,6 +1253,170 @@ class TestTheBackendsHideADirectoryAHomeLinksTo:
         assert f"--blacklist={_as_argv(linked.elsewhere / 'bin')}" not in argv
         assert f"--blacklist={_as_argv(linked.elsewhere)}" not in argv
 
+    def test_firejail_hides_a_directory_a_link_inside_it_names(
+        self, layout, linked, tmp_path
+    ):
+        """~/.local/extra -> /persist/other: a link beside the way to the tool's
+        bin names a directory of the user's too, and firejail shows it."""
+        other = tmp_path / "persist" / "other"
+        (other / "keyrings").mkdir(parents=True)
+        (linked.elsewhere / "extra").symlink_to(other)
+
+        argv = self._firejail(_policy(layout, argv0=str(linked.tool)), linked.tool)
+
+        assert f"--blacklist={_as_argv(other)}" in argv
+        assert f"--blacklist={_as_argv(linked.elsewhere / 'bin')}" not in argv
+        assert f"--blacklist={_as_argv(linked.elsewhere)}" not in argv
+
+    def test_firejail_ends_for_links_that_lead_back(self, layout, linked, tmp_path):
+        other = tmp_path / "persist" / "other"
+        other.mkdir(parents=True)
+        (linked.elsewhere / "extra").symlink_to(other)
+        (other / "back").symlink_to(linked.elsewhere)
+
+        argv = self._firejail(_policy(layout, argv0=str(linked.tool)), linked.tool)
+
+        assert f"--blacklist={_as_argv(other)}" in argv
+
+    def test_firejail_leaves_a_link_to_a_system_directory_inside_it(
+        self, layout, linked
+    ):
+        (linked.elsewhere / "system").symlink_to("/usr")
+
+        argv = self._firejail(_policy(layout, argv0=str(linked.tool)), linked.tool)
+
+        assert f"--blacklist={_as_argv('/usr')}" not in argv
+        assert f"--blacklist={_as_argv(linked.elsewhere / 'share')}" in argv
+
+    def test_firejail_hides_a_directory_a_link_inside_a_hidden_entry_names(
+        self, layout, linked, tmp_path
+    ):
+        """~/.local/share/extra -> /persist/other: share is blacklisted whole, and
+        what a link inside it names is a directory of the user's too."""
+        other = tmp_path / "persist" / "other"
+        (other / "keyrings").mkdir(parents=True)
+        (linked.elsewhere / "share" / "extra").symlink_to(other)
+
+        argv = self._firejail(_policy(layout, argv0=str(linked.tool)), linked.tool)
+
+        assert f"--blacklist={_as_argv(linked.elsewhere / 'share')}" in argv
+        assert f"--blacklist={_as_argv(other)}" in argv
+
+    def test_firejail_hides_a_directory_a_link_inside_an_ungranted_target_names(
+        self, layout, linked, tmp_path
+    ):
+        """The policy grants nothing inside ~/.local's target, so the target is
+        blacklisted whole; a link at its top still names another directory."""
+        other = tmp_path / "persist" / "other"
+        (other / "keyrings").mkdir(parents=True)
+        (linked.elsewhere / "extra").symlink_to(other)
+
+        argv = self._firejail(_policy(layout, argv0="/usr/bin/true"))
+
+        assert f"--blacklist={_as_argv(linked.elsewhere)}" in argv
+        assert f"--blacklist={_as_argv(other)}" in argv
+
+    def test_firejail_follows_a_link_below_the_first_directory_level(
+        self, layout, linked, tmp_path
+    ):
+        """The tool sits at ~/.local/a/b/bin; the link is in ~/.local/a, beside
+        the way to it and one level down."""
+        other = tmp_path / "persist" / "other"
+        (other / "keyrings").mkdir(parents=True)
+        tool = linked.elsewhere / "a" / "b" / "bin" / "tool"
+        tool.parent.mkdir(parents=True)
+        tool.write_bytes(b"\x7fELF")
+        tool.chmod(0o755)
+        (linked.elsewhere / "a" / "extra").symlink_to(other)
+
+        argv = self._firejail(
+            _policy(layout, argv0=str(linked.home / ".local/a/b/bin/tool")),
+            linked.home / ".local/a/b/bin/tool",
+        )
+
+        assert f"--blacklist={_as_argv(other)}" in argv
+        assert f"--blacklist={_as_argv(linked.elsewhere / 'a' / 'b')}" not in argv
+
+    def test_firejail_hides_the_other_entries_of_a_directory_above_the_target(
+        self, layout, linked, tmp_path
+    ):
+        """~/.local/up -> /persist (which holds me/.local): the rest of /persist is
+        the user's, and the way to the tool's bin stays."""
+        persist = tmp_path / "persist"
+        (persist / "other" / "keyrings").mkdir(parents=True)
+        (linked.elsewhere / "up").symlink_to(persist)
+
+        argv = self._firejail(_policy(layout, argv0=str(linked.tool)), linked.tool)
+
+        assert f"--blacklist={_as_argv(persist / 'other')}" in argv
+        assert f"--blacklist={_as_argv(persist)}" not in argv
+        assert f"--blacklist={_as_argv(persist / 'me')}" not in argv
+        assert f"--blacklist={_as_argv(linked.elsewhere / 'bin')}" not in argv
+
+    def test_firejail_ends_for_two_linked_directories_that_both_hold_grants(
+        self, layout, linked, tmp_path
+    ):
+        """Each links to the other and the policy grants a path in each."""
+        other = tmp_path / "persist" / "other"
+        (other / "data").mkdir(parents=True)
+        (other / "junk").mkdir()
+        (linked.elsewhere / "extra").symlink_to(other)
+        (other / "back").symlink_to(linked.elsewhere)
+
+        argv = self._firejail(
+            _policy(
+                layout, argv0=str(linked.tool), extra_read_paths=[str(other / "data")]
+            ),
+            linked.tool,
+        )
+
+        assert f"--blacklist={_as_argv(other / 'junk')}" in argv
+        assert f"--blacklist={_as_argv(other / 'data')}" not in argv
+        assert f"--blacklist={_as_argv(other)}" not in argv
+        assert f"--blacklist={_as_argv(linked.elsewhere / 'share')}" in argv
+
+    def test_firejail_leaves_a_link_to_a_home_directory_inside_it_to_the_home(
+        self, layout, linked
+    ):
+        """~/.local/mine -> ~/.ssh: a home is handled as a home, and is not hidden
+        a second time as the directory a link names."""
+        (linked.elsewhere / "mine").symlink_to(linked.home / ".ssh")
+
+        argv = self._firejail(_policy(layout, argv0=str(linked.tool)), linked.tool)
+
+        assert f"--blacklist={_as_argv(linked.home / '.ssh')}" not in argv
+        assert f"--blacklist={_as_argv(linked.elsewhere / 'share')}" in argv
+
+    def test_firejail_hides_a_file_a_link_at_the_top_of_a_home_names(
+        self, layout, linked, tmp_path
+    ):
+        """~/.netrc -> /persist/me/netrc: a file of the user's outside the home."""
+        netrc = tmp_path / "persist" / "me" / "netrc"
+        netrc.write_text("machine example login me password x\n")
+        (linked.home / ".netrc").symlink_to(netrc)
+
+        argv = self._firejail(_policy(layout, argv0=str(linked.tool)), linked.tool)
+
+        assert f"--blacklist={_as_argv(netrc)}" in argv
+
+    def test_sandbox_exec_denies_a_file_a_link_at_the_top_of_a_home_names(
+        self, layout, linked, tmp_path
+    ):
+        netrc = tmp_path / "persist" / "me" / "netrc"
+        netrc.write_text("machine example login me password x\n")
+        (linked.home / ".netrc").symlink_to(netrc)
+
+        at, lines, allowed = self._sbpl_after_deny(
+            _policy(layout, argv0="/usr/bin/true"), tmp_path, netrc
+        )
+
+        read_everywhere = lines.index('(allow file-read* (subpath "/"))')
+        assert read_everywhere < at
+        # No allow after the deny covers the file or a directory above it.
+        real = Path(_as_argv(netrc))
+        covering = [p for p in allowed if Path(p) == real or Path(p) in real.parents]
+        assert not covering, covering
+
     def test_firejail_keeps_a_scanned_tree_kept_in_a_linked_directory(
         self, layout, tmp_path, fake_tmp
     ):
@@ -1234,6 +1445,61 @@ class TestTheBackendsHideADirectoryAHomeLinksTo:
         for shown in (code, repo, output):
             assert _as_argv(shown) not in blacklisted, shown
 
+    def test_firejail_leaves_a_file_a_link_names_inside_the_scanned_tree(
+        self, layout, stand_in_tmp, tmp_path
+    ):
+        """~/.gitconfig -> /persist/dotfiles/gitconfig, with /persist/dotfiles the
+        tree being scanned: the policy grants that tree, and the file in it is
+        read like the rest of it, not blacklisted."""
+        repo = tmp_path / "persist" / "dotfiles"
+        output = repo / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        config = repo / "gitconfig"
+        config.write_text("[user]\n\tname = me\n")
+        (layout.home / ".gitconfig").symlink_to(config)
+
+        policy = _policy(
+            layout,
+            argv0="/usr/bin/true",
+            source_dir=repo,
+            output_dir=output,
+            results_dir=output / "scanners" / "grype",
+            scan_target=repo,
+            cwd=repo,
+        )
+        blacklisted = self._blacklisted(self._firejail(policy))
+
+        inside = [
+            b
+            for b in blacklisted
+            if b == _as_argv(repo) or b.startswith(_as_argv(repo) + "/")
+        ]
+        assert not inside, inside
+
+    def test_firejail_still_hides_a_file_a_link_names_beside_the_scanned_tree(
+        self, layout, stand_in_tmp, tmp_path
+    ):
+        """The control: a file outside the granted tree is hidden as before."""
+        repo = tmp_path / "persist" / "dotfiles"
+        output = repo / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        netrc = tmp_path / "persist" / "netrc"
+        netrc.write_text("machine example login me password x\n")
+        (layout.home / ".netrc").symlink_to(netrc)
+
+        policy = _policy(
+            layout,
+            argv0="/usr/bin/true",
+            source_dir=repo,
+            output_dir=output,
+            results_dir=output / "scanners" / "grype",
+            scan_target=repo,
+            cwd=repo,
+        )
+        blacklisted = self._blacklisted(self._firejail(policy))
+
+        assert _as_argv(netrc) in blacklisted
+
     def test_a_link_to_a_system_directory_is_not_hidden(self, layout, tmp_path):
         (layout.home / "u").symlink_to("/usr")
         policy = _policy(layout, argv0="/usr/bin/true")
@@ -1245,6 +1511,116 @@ class TestTheBackendsHideADirectoryAHomeLinksTo:
         ]
         argv = self._firejail(policy)
         assert f"--blacklist={_as_argv('/usr')}" not in argv
+
+    @pytest.fixture
+    def stand_in_tmp(self, tmp_path, monkeypatch):
+        """Stand in for /tmp, so the tests neither depend on nor write the real one."""
+        root = tmp_path / "stand-in-tmp"
+        root.mkdir()
+        monkeypatch.setattr(backends_module, "_TMP_ROOT", root, raising=False)
+        return root
+
+    @pytest.fixture
+    def stand_in_pseudo_fs(self, tmp_path, monkeypatch):
+        """Stand in for /dev/shm and /run: a few entries, not the real ones."""
+        shm = tmp_path / "stand-in-shm"
+        run = tmp_path / "stand-in-run"
+        for root in (shm, run):
+            root.mkdir()
+            (root / "segment").write_text("x")
+        monkeypatch.setattr(
+            policy_module, "_PSEUDO_FS_ROOTS", (shm, run), raising=False
+        )
+        return SimpleNamespace(shm=shm, run=run)
+
+    @staticmethod
+    def _blacklisted(argv):
+        return [a.split("=", 1)[1] for a in argv if a.startswith("--blacklist=")]
+
+    def test_firejail_leaves_tmp_alone_for_a_link_inside_a_hidden_directory(
+        self, layout, stand_in_tmp, tmp_path
+    ):
+        """~/data -> /persist/other, which holds a link into /tmp: /tmp is covered
+        by --private-tmp, so what the link names there is not blacklisted, however
+        few or many entries it has."""
+        other = tmp_path / "persist" / "other"
+        other.mkdir(parents=True)
+        scratch = stand_in_tmp / "scratch"
+        scratch.mkdir()
+        for name in ("a", "b", "c"):
+            (scratch / name).write_text("x")
+        (other / "scratch").symlink_to(scratch)
+        (layout.home / "data").symlink_to(other)
+
+        blacklisted = self._blacklisted(self._firejail(_policy(layout)))
+
+        assert _as_argv(other) in blacklisted
+        under_tmp = [
+            b
+            for b in blacklisted
+            if b == _as_argv(stand_in_tmp) or b.startswith(_as_argv(stand_in_tmp) + "/")
+        ]
+        assert not under_tmp, under_tmp
+
+    def test_firejail_does_not_hide_shared_memory_a_home_link_names(
+        self, layout, stand_in_tmp, stand_in_pseudo_fs
+    ):
+        (layout.home / ".shm").symlink_to(stand_in_pseudo_fs.shm)
+        (layout.home / ".run").symlink_to(stand_in_pseudo_fs.run)
+
+        blacklisted = self._blacklisted(self._firejail(_policy(layout)))
+
+        for root in (stand_in_pseudo_fs.shm, stand_in_pseudo_fs.run):
+            hidden = [
+                b
+                for b in blacklisted
+                if b == _as_argv(root) or b.startswith(_as_argv(root) + "/")
+            ]
+            assert not hidden, (root, hidden)
+
+    def test_firejail_keeps_shared_memory_a_nested_link_names(
+        self, layout, stand_in_tmp, stand_in_pseudo_fs, tmp_path
+    ):
+        """The control sits beside it: the directory the link is in is still hidden."""
+        other = tmp_path / "persist" / "other"
+        other.mkdir(parents=True)
+        (other / "shm").symlink_to(stand_in_pseudo_fs.shm)
+        (layout.home / "data").symlink_to(other)
+
+        blacklisted = self._blacklisted(self._firejail(_policy(layout)))
+
+        assert _as_argv(other) in blacklisted
+        assert _as_argv(stand_in_pseudo_fs.shm) not in blacklisted
+
+    def test_sandbox_exec_does_not_deny_shared_memory_a_home_link_names(
+        self, layout, stand_in_tmp, stand_in_pseudo_fs, tmp_path
+    ):
+        (layout.home / ".shm").symlink_to(stand_in_pseudo_fs.shm)
+
+        profile = SandboxExecBackend().profile(_policy(layout), tmp_path / "ptmp")
+
+        assert _as_argv(stand_in_pseudo_fs.shm) not in profile
+
+    def test_the_breadth_rules_agree_on_a_link_into_shared_memory(
+        self, layout, stand_in_pseudo_fs, tmp_path
+    ):
+        """The breadth checks read the same list of links as the backends: a link
+        into shared memory or the runtime directory names no directory of the
+        user's, so a path at it is not refused as holding part of the home. A link
+        to a directory of the user's beside it still counts."""
+        persist = tmp_path / "persist-data"
+        persist.mkdir()
+        (layout.home / ".shm").symlink_to(stand_in_pseudo_fs.shm)
+        (layout.home / ".run").symlink_to(stand_in_pseudo_fs.run)
+        (layout.home / ".data").symlink_to(persist)
+        homes = [Path(os.path.realpath(layout.home))]
+
+        targets = policy_module._home_link_targets(homes)
+
+        assert targets == [Path(os.path.realpath(persist))]
+        for root in (stand_in_pseudo_fs.shm, stand_in_pseudo_fs.run):
+            assert not policy_module._broader_than_a_tool(root, homes)
+        assert policy_module._broader_than_a_tool(persist, homes)
 
 
 class TestHomeElsewhereThanThePasswdEntry:
@@ -3122,6 +3498,11 @@ def test_the_uv_dispatch_sets_the_record_context_around_the_run(tmp_path):
         _plugin_log=lambda *a, **k: None,
         _uv_run_failure=None,
         _uv_response=lambda result, results_dir: result,
+        # The dispatch also reads the interpreter request (empty when unset)
+        # and, in its error arms, the after-the-start response (None when the
+        # launch started no child).
+        _uv_python_kwargs=dict,
+        _uv_failure_after_the_start=lambda *a, **k: None,
     )
 
     with mock_patch(

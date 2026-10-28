@@ -26,6 +26,16 @@ import pytest
 
 from automated_security_helper.utils.get_scan_set import scan_set
 
+# The module is already skipped on Windows (pytestmark below), but NON_UTF8_NAMES
+# further down decodes bytes that are not UTF-8 when the module is imported, so the
+# skip has to come first.
+if os.name == "nt":
+    pytest.skip(
+        "Windows does not allow a tab, or a trailing space, in a file name, and a "
+        "name that is not UTF-8 cannot exist on NTFS (names are UTF-16)",
+        allow_module_level=True,
+    )
+
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32",
     reason="Windows does not allow a tab, or a trailing space, in a file name",

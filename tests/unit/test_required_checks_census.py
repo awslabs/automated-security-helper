@@ -37,7 +37,8 @@ step's text rather than by executing it.
 
 Since the gate stopped taking a runner when every dependency succeeded, the census in
 ``TestTheGateCoversItsWorkflow`` is also the one that runs on a green pull request: this
-file runs in every unit-test leg, and unit-test is in the gate's ``needs``.
+file runs in every unit-test leg, and the three unit-test jobs are in the gate's
+``needs``.
 """
 
 from __future__ import annotations
@@ -45,6 +46,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +59,10 @@ UNIFIED_CI = WORKFLOWS / "ash-unified-ci.yml"
 CENSUS_SCRIPT = REPO_ROOT / ".github" / "scripts" / "assert-required-checks-census.py"
 
 GATE_JOB = "required-checks"
+
+# The unit-test matrix is three jobs, one per runner pool, so each pool has its own
+# max-parallel cap. The gate waits for every one of them.
+UNIT_TEST_JOB_IDS = ("unit-test-linux", "unit-test-macos", "unit-test-windows")
 
 # The floor exists so a workflow that lost its jobs -- or a scanner that stopped finding
 # them -- cannot satisfy the agreement tests by finding nothing on both sides.
@@ -224,6 +230,247 @@ class TestTheGateCoversItsWorkflow:
             UNIFIED_CI.read_text(encoding="utf-8"), GATE_JOB, results
         )
         assert any(p == f"{needs[0]}: skipped" for p in problems), problems
+
+
+#: The two job-level conditions that keep a gated job running after a dependency failed.
+_STATUS_CONDITIONS = ("${{!cancelled()}}", "${{always()}}")
+
+
+def _jobs_skippable_unseen(jobs: dict[str, Any], gated: list[str]) -> list[str]:
+    """Gated jobs that can be skipped without the run being cancelled or a gated job failing.
+
+    A job with `needs:` and no status function is skipped when a dependency fails or is
+    skipped. That is harmless when the gate sees the dependency's own result, which
+    holds for a gated job that is created on every run: it has no `if:` and no `needs:`
+    of its own, so it can only succeed, fail or be cancelled, and the gate runs on the
+    last two. ensure-cache is that kind of dependency. Any other dependency is not
+    enough: an ungated one reports to nobody, one with an `if:` can be skipped quietly,
+    and one with `needs:` of its own can be skipped by a failure the gate never reads.
+    Those jobs have to run under `!cancelled()` or `always()` themselves.
+    """
+
+    def always_runs(name: str) -> bool:
+        job = jobs.get(name) or {}
+        return name in gated and not job.get("if") and not job.get("needs")
+
+    bad = []
+    for name in gated:
+        job = jobs[name]
+        condition = re.sub(r"\s+", "", str(job.get("if", "")))
+        needs = job.get("needs") or []
+        needs = [needs] if isinstance(needs, str) else list(needs)
+        if condition in _STATUS_CONDITIONS:
+            continue
+        if not condition and all(always_runs(dep) for dep in needs):
+            continue
+        bad.append(f"  {name}: needs={job.get('needs')} if={condition!r}")
+    return bad
+
+
+#: Jobs that carry the docs gates, and the commands that are the gate in each: lint
+#: runs scripts/verify_docs_freshness.py, integration-test runs the docs examples, and
+#: build-docs runs the strict site build and the versioned-site check. Each must run on
+#: every pull request, be in required-checks' needs, and report its own exit status.
+#: The census above lets a gated job carry `${{ !cancelled() }}` or `${{ always() }}`;
+#: these may carry no job-level `if:` at all, so no edit can turn them off for pull
+#: requests.
+_UNCONDITIONAL_JOBS: dict[str, tuple[str, ...]] = {
+    "lint": ("scripts/verify_docs_freshness.py",),
+    "integration-test": ("tests/integration/docs",),
+    "build-docs": ("mkdocs build", "scripts/docs_versions.py check"),
+}
+#: (job, command) for every docs gate, for the parametrized tests below.
+_GATE_COMMANDS = [
+    (job, command)
+    for job, commands in _UNCONDITIONAL_JOBS.items()
+    for command in commands
+]
+#: The one step-level condition a docs step may carry: it still runs after an earlier
+#: step failed, and only a cancelled run skips it.
+_STEP_CONDITION_ALLOWED = "${{!cancelled()}}"
+#: Shell control operators. One on the line that runs a gate command hands the step's
+#: exit status to another command: `cmd || true` and `cmd; true` always pass.
+_CONTROL_OPERATORS = frozenset({"|", "||", "&", "&&", ";", ";;", "|&"})
+
+
+def _word(command: str) -> str:
+    """``command`` as a whole word, so ``--ignore=tests/integration/docs`` is not it."""
+    return rf"(?:^|\s){re.escape(command)}(?:\s|$)"
+
+
+def _runs(step: dict, command: str) -> bool:
+    """Whether ``command`` is an argument of the step's `run:`."""
+    return re.search(_word(command), str(step.get("run", ""))) is not None
+
+
+def _step_problems(job: str, step: dict, command: str) -> list[str]:
+    """Why a step that runs ``command`` could pass, or be skipped, when it fails."""
+    where = f"{job}: the step running {command}"
+    problems = []
+    condition = re.sub(r"\s+", "", str(step.get("if", "")))
+    if condition not in ("", _STEP_CONDITION_ALLOWED):
+        problems.append(f"{where} has if: {step['if']!r}")
+    if step.get("continue-on-error") not in (None, False):
+        problems.append(f"{where} has continue-on-error: {step['continue-on-error']!r}")
+    shell = step.get("shell")
+    if isinstance(shell, str) and "{0}" in shell and "-e" not in shell.split():
+        problems.append(f"{where} runs under shell {shell!r}, which has no -e")
+    lines = re.sub(r"\\\n", " ", str(step.get("run", ""))).splitlines()
+    for index, line in enumerate(lines):
+        if not re.search(_word(command), line):
+            continue
+        if any(
+            re.match(r"\s*set\s+(\+e\b|\+o\s+errexit\b)", earlier)
+            for earlier in lines[:index]
+        ):
+            problems.append(f"{where} turns errexit off before it")
+        lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        operators = sorted(set(lexer) & _CONTROL_OPERATORS)
+        if operators:
+            problems.append(
+                f"{where} hands its exit status to another command with "
+                f"{' '.join(operators)}"
+            )
+    return problems
+
+
+def _ways_to_skip(text: str) -> list[str]:
+    """Each way a docs gate could be skipped, or pass while its command fails."""
+    jobs = yaml.safe_load(text)["jobs"]
+    gate_needs = jobs.get(GATE_JOB, {}).get("needs") or []
+    gate_needs = [gate_needs] if isinstance(gate_needs, str) else gate_needs
+    problems = []
+    for name, commands in _UNCONDITIONAL_JOBS.items():
+        if name not in jobs:
+            problems.append(f"{name}: the job is gone")
+            continue
+        job = jobs[name]
+        if name not in gate_needs:
+            problems.append(f"{name}: not in {GATE_JOB}'s needs")
+        if "if" in job:
+            problems.append(f"{name}: job-level if: {job['if']!r}")
+        if job.get("continue-on-error") not in (None, False):
+            problems.append(
+                f"{name}: job-level continue-on-error: {job['continue-on-error']!r}"
+            )
+        for command in commands:
+            steps = [s for s in job.get("steps", []) if _runs(s, command)]
+            if not steps:
+                problems.append(f"{name}: no step runs {command}")
+            for step in steps:
+                problems += _step_problems(name, step, command)
+    return problems
+
+
+def _with_gate_step(job: str, command: str, change) -> list[str]:
+    """The census of the real workflow with ``change`` applied to one docs step."""
+    data = yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))
+    steps = [s for s in data["jobs"][job]["steps"] if _runs(s, command)]
+    assert steps, f"no step in {job} runs {command}; this fixture is stale"
+    for step in steps:
+        change(step)
+    return _ways_to_skip(yaml.safe_dump(data))
+
+
+class TestTheDocsGatesRunOnEveryPullRequest:
+    def test_the_docs_gates_cannot_be_skipped(self):
+        problems = _ways_to_skip(UNIFIED_CI.read_text(encoding="utf-8"))
+        assert not problems, (
+            "a docs gate in ash-unified-ci.yml can be skipped, or pass while it fails. "
+            "GitHub reports a skipped job as a success, so the required-checks gate "
+            "would pass without it:\n" + "\n".join(f"  - {p}" for p in problems)
+        )
+
+    @pytest.mark.parametrize("job", sorted(_UNCONDITIONAL_JOBS))
+    def test_a_job_level_if_is_caught(self, job):
+        text = UNIFIED_CI.read_text(encoding="utf-8")
+        key = f"\n  {job}:\n"
+        assert text.count(key) == 1, (
+            f"the {job} job's key was not found; fixture is stale"
+        )
+        drifted = text.replace(
+            key, key + "    if: github.event_name != 'pull_request'\n", 1
+        )
+        assert _ways_to_skip(drifted) == [
+            f"{job}: job-level if: \"github.event_name != 'pull_request'\""
+        ]
+
+    @pytest.mark.parametrize("job", sorted(_UNCONDITIONAL_JOBS))
+    def test_continue_on_error_on_a_docs_job_is_caught(self, job):
+        text = UNIFIED_CI.read_text(encoding="utf-8")
+        key = f"\n  {job}:\n"
+        drifted = text.replace(key, key + "    continue-on-error: true\n", 1)
+        assert drifted != text, f"the {job} job's key was not found; fixture is stale"
+        assert _ways_to_skip(drifted) == [f"{job}: job-level continue-on-error: True"]
+
+    @pytest.mark.parametrize("job", sorted(_UNCONDITIONAL_JOBS))
+    def test_a_docs_job_dropped_from_the_gate_is_caught(self, job):
+        data = yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))
+        data["jobs"][GATE_JOB]["needs"].remove(job)
+        assert _ways_to_skip(yaml.safe_dump(data)) == [
+            f"{job}: not in {GATE_JOB}'s needs"
+        ]
+
+    @pytest.mark.parametrize("job,command", _GATE_COMMANDS)
+    def test_a_skippable_docs_step_is_caught(self, job, command):
+        problems = _with_gate_step(
+            job, command, lambda s: s.update({"if": "github.event_name == 'push'"})
+        )
+        assert problems == [
+            f"{job}: the step running {command} has if: \"github.event_name == 'push'\""
+        ]
+
+    @pytest.mark.parametrize("job,command", _GATE_COMMANDS)
+    def test_continue_on_error_on_a_docs_step_is_caught(self, job, command):
+        problems = _with_gate_step(
+            job, command, lambda s: s.update({"continue-on-error": True})
+        )
+        assert problems == [
+            f"{job}: the step running {command} has continue-on-error: True"
+        ]
+
+    @pytest.mark.parametrize("suffix", ["|| true", "; true", "| tee docs.log", "&"])
+    @pytest.mark.parametrize("job,command", _GATE_COMMANDS)
+    def test_an_exit_status_handed_to_another_command_is_caught(
+        self, job, command, suffix
+    ):
+        def append(step):
+            step["run"] = step["run"].rstrip("\n") + f" {suffix}\n"
+
+        problems = _with_gate_step(job, command, append)
+        assert len(problems) == 1, problems
+        assert problems[0].startswith(
+            f"{job}: the step running {command} hands its exit status to another "
+            f"command with {suffix.split()[0]}"
+        ), problems
+
+    @pytest.mark.parametrize("job,command", _GATE_COMMANDS)
+    def test_errexit_turned_off_is_caught(self, job, command):
+        def prepend(step):
+            step["run"] = "set +e\n" + step["run"]
+
+        assert _with_gate_step(job, command, prepend) == [
+            f"{job}: the step running {command} turns errexit off before it"
+        ]
+
+    @pytest.mark.parametrize("job,command", _GATE_COMMANDS)
+    def test_an_operator_on_another_line_is_not_reported(self, job, command):
+        """The control: `echo start || true` on its own line leaves the gate's status."""
+
+        def prepend(step):
+            step["run"] = "echo start || true\n" + step["run"]
+
+        assert _with_gate_step(job, command, prepend) == []
+
+    @pytest.mark.parametrize("job,command", _GATE_COMMANDS)
+    def test_a_removed_docs_step_is_caught(self, job, command):
+        data = yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))
+        data["jobs"][job]["steps"] = [
+            s for s in data["jobs"][job]["steps"] if not _runs(s, command)
+        ]
+        problems = _ways_to_skip(yaml.safe_dump(data))
+        assert f"{job}: no step runs {command}" in problems, problems
 
 
 class TestTheScriptRefusesToPassVacuously:
@@ -424,20 +671,50 @@ class TestTheGateActuallyRunsTheScript:
         A job with `needs:` and no status function is skipped whenever a dependency
         fails or is skipped -- and if that dependency is ungated, the gate would see
         neither. So every gated job with `needs` must run under `!cancelled()` or
-        `always()`, and no gated job may carry any other job-level `if:`.
+        `always()`, and no gated job may carry any other job-level `if:`. The one
+        exception is a job that waits only for gated jobs that run on every run and
+        have no `needs` of their own (ensure-cache): its failure is in the gate's
+        `needs`, so the skip that follows it is not unseen.
         """
         data = yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))
-        bad = []
-        for name in _needs_of(UNIFIED_CI, GATE_JOB):
-            job = data["jobs"][name]
-            condition = re.sub(r"\s+", "", str(job.get("if", "")))
-            if job.get("needs") or condition:
-                if condition not in ("${{!cancelled()}}", "${{always()}}"):
-                    bad.append(f"  {name}: needs={job.get('needs')} if={condition!r}")
+        bad = _jobs_skippable_unseen(data["jobs"], _needs_of(UNIFIED_CI, GATE_JOB))
         assert not bad, (
             "these gated jobs can be skipped without the run being cancelled, which "
             "the gate's condition cannot see:\n" + "\n".join(bad)
         )
+
+    def test_a_job_that_waits_on_an_always_running_gated_job_may_skip_with_it(self):
+        jobs = {"base": {}, "leaf": {"needs": ["base"]}}
+        assert _jobs_skippable_unseen(jobs, ["base", "leaf"]) == []
+
+    def test_a_job_that_waits_on_an_ungated_job_is_caught(self):
+        jobs = {
+            "warm": {"if": "github.event_name == 'push'"},
+            "leaf": {"needs": ["warm"]},
+        }
+        assert _jobs_skippable_unseen(jobs, ["leaf"]) == [
+            "  leaf: needs=['warm'] if=''"
+        ]
+
+    def test_a_job_that_waits_on_a_conditional_gated_job_is_caught(self):
+        jobs = {
+            "base": {"if": "${{ github.event_name == 'push' }}"},
+            "leaf": {"needs": ["base"]},
+        }
+        problems = _jobs_skippable_unseen(jobs, ["base", "leaf"])
+        assert any(p.startswith("  leaf:") for p in problems), problems
+
+    def test_a_job_that_waits_on_a_job_with_needs_of_its_own_is_caught(self):
+        jobs = {"a": {}, "b": {"needs": ["a"]}, "c": {"needs": ["b"]}}
+        problems = _jobs_skippable_unseen(jobs, ["a", "b", "c"])
+        assert [p.strip().split(":")[0] for p in problems] == ["c"], problems
+
+    def test_a_status_function_keeps_a_job_with_any_dependency_running(self):
+        jobs = {
+            "warm": {"if": "github.event_name == 'push'"},
+            "leaf": {"needs": ["warm"], "if": "${{ !cancelled() }}"},
+        }
+        assert _jobs_skippable_unseen(jobs, ["leaf"]) == []
 
     def test_unit_test_carries_the_census_to_the_gate(self):
         """The drift half of the census reaches the gate through unit-test.
@@ -445,9 +722,11 @@ class TestTheGateActuallyRunsTheScript:
         When every dependency succeeds the gate does not run, so the script's census
         is not taken on a runner. TestTheGateCoversItsWorkflow takes it instead, and it
         only gates a merge because this file is collected by the unit-test legs and
-        unit-test is in the gate's `needs`.
+        the three unit-test jobs are in the gate's `needs`.
         """
-        assert "unit-test" in _needs_of(UNIFIED_CI, GATE_JOB)
+        needs = _needs_of(UNIFIED_CI, GATE_JOB)
+        missing = [job_id for job_id in UNIT_TEST_JOB_IDS if job_id not in needs]
+        assert not missing, f"{GATE_JOB} does not wait for {missing}"
         assert Path(__file__).resolve().is_relative_to(REPO_ROOT / "tests" / "unit")
 
     def test_the_old_count_literal_is_gone(self):

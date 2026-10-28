@@ -11,6 +11,7 @@ from pathlib import Path
 
 from . import backends as _backends_pkg  # noqa: F401  triggers registration
 from .core import BuildContext, Manifest, OutputAnchors, resolve_output_dir
+from .emitters import link_references, references_in_page
 from .jinja_renderer import render
 from .registry import BackendRegistry
 
@@ -70,19 +71,31 @@ def _references_concatenated() -> str:
     )
 
 
-def render_universal_agents_md(out_root: Path) -> None:
-    """The repo-root AGENTS.md read natively by 9+ platforms.
-    Top-level artifact, not a per-backend output — emitted by the orchestrator."""
+def _universal_agents_md() -> str:
+    """The content of the universal AGENTS.md, for both the build and the drift check.
+
+    The references are appended, so the skill body's links to them become links
+    to their headings in the same file.
+    """
     m = _load_manifest()
-    rendered = render(
+    return render(
         "shared/AGENTS.md.j2",
         display_name=m.display_name,
         description=m.description,
-        skill_body=(BASE_DIR / "skill.md").read_text(),
+        skill_body=link_references(
+            (BASE_DIR / "skill.md").read_text(),
+            BASE_DIR,
+            references_in_page(BASE_DIR),
+        ),
         references=_references_concatenated(),
     )
+
+
+def render_universal_agents_md(out_root: Path) -> None:
+    """The repo-root AGENTS.md read natively by 9+ platforms.
+    Top-level artifact, not a per-backend output — emitted by the orchestrator."""
     out_root.mkdir(parents=True, exist_ok=True)
-    (out_root / "AGENTS.md").write_text(rendered)
+    (out_root / "AGENTS.md").write_text(_universal_agents_md())
 
 
 def build_one(backend_name: str, anchors: OutputAnchors | None = None) -> None:
@@ -165,14 +178,7 @@ def check_drift(anchors: OutputAnchors | None = None) -> int:
     out_root = anchors.plugins
 
     # Universal AGENTS.md
-    m = _load_manifest()
-    expected_agents = render(
-        "shared/AGENTS.md.j2",
-        display_name=m.display_name,
-        description=m.description,
-        skill_body=(BASE_DIR / "skill.md").read_text(),
-        references=_references_concatenated(),
-    ).encode("utf-8")
+    expected_agents = _universal_agents_md().encode("utf-8")
     on_disk_agents = (
         (out_root / "AGENTS.md").read_bytes()
         if (out_root / "AGENTS.md").exists()

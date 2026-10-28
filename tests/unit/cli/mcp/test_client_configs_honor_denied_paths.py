@@ -816,7 +816,9 @@ def test_a_clients_runtime_override_turning_one_off_is_accepted_and_ignored(
 
     assert not isinstance(config, Exception), config
     assert _enabled_under(config, reporter) is True
-    assert _warned(ash_log, f"reporters.{reporter}.enabled")
+    # The client's value is named when select_profile drops it
+    # (runtime_patch._without_turn_offs), so the copy the scan reads holds none.
+    assert _warned(ash_log, f"/reporters/{reporter}/enabled")
 
 
 #: A setting of each off-host reporter that config/reporter_trust.py does not
@@ -1535,7 +1537,7 @@ def test_delivery_is_refused_while_a_workspace_scan_of_the_session_runs(
     )
     attempts: List[Any] = []
 
-    def deliver_during_the_scan(plan: Any, settings: Any) -> Any:
+    def deliver_during_the_scan(plan: Any, settings: Any, **_kwargs: Any) -> Any:
         try:
             _upload({"ash.yaml": "project_name: swapped\n"})
             attempts.append("delivered")
@@ -1616,7 +1618,7 @@ def test_a_waiting_workspace_scan_sets_offline_only_once_it_holds_the_lock(
     monkeypatch.setattr(
         workspace_module,
         "execute_workspace",
-        lambda plan, settings: seen.append(os.environ.get("ASH_OFFLINE")),
+        lambda plan, settings, **_kwargs: seen.append(os.environ.get("ASH_OFFLINE")),
     )
     lock = get_default_registry().get_or_create(SESSION).lock
     lock.acquire()
@@ -1696,7 +1698,12 @@ def test_a_broken_default_config_refuses_only_a_delivered_config_and_never_hangs
         mcp_tools.mcp_scan_directory(str(source), config_path=None, session_id=SESSION)
     )
     assert refused["success"] is False, refused
-    assert refused["error_type"] == "config_policy_unreadable", refused
+    # The server limits are read from the operator's config before any check of
+    # the delivered file, so a broken one refuses the scan as a config error,
+    # exit 3 (mcp_scan_directory's _resource_limits read;
+    # TestOneUnreadableOperatorConfigAnswersOneCategory).
+    assert refused["exit_code"] == 3, refused
+    assert refused["error"].startswith("The configuration cannot be loaded"), refused
 
     # Called directly, the scan's entry is closed rather than left PENDING.
     target = _server["target"]

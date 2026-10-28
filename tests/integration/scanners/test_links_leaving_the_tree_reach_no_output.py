@@ -23,8 +23,8 @@ test is skipped with its status and what it lacks, so the run's report lists it.
 
 Tools the test can use when the environment provides them, none required: the
 grype and trivy databases (``GRYPE_DB_CACHE_DIR`` naming grype's ``db`` directory,
-``TRIVY_CACHE_DIR``), and the scanner binaries on ``PATH``. semgrep and opengrep
-get an offline rule cache the test writes.
+``TRIVY_CACHE_DIR``), the cfn-guard rules directory (``ASH_CFN_GUARD_RULES_DIR``), and
+the scanner binaries on ``PATH``. semgrep and opengrep get an offline rule cache the test writes.
 """
 
 from __future__ import annotations
@@ -43,6 +43,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.gitleaks_fixture import fabricated_tokens
 from tests.utils.helpers import importing_this_checkout
 
 pytestmark = [
@@ -97,6 +98,31 @@ resource "aws_s3_bucket" "b" {{
   acl    = "public-read"
 }}
 """
+
+#: An in-tree workflow that actionlint (an unknown runner label) and zizmor (the issue
+#: title expanded into a ``run:`` script) each report.
+WORKFLOW = """name: real
+on:
+  issues:
+    types: [opened]
+jobs:
+  greet:
+    runs-on: not-a-runner-label
+    steps:
+      - run: echo "${{ github.event.issue.title }}"
+"""
+
+#: The template cfn-lint and cfn-guard report known positives on (their own
+#: integration tests' fixture), copied into the tree.
+CFN_FIXTURE_TEMPLATE = (
+    Path(__file__).resolve().parents[2]
+    / "test_data"
+    / "scanners"
+    / "cfn_lint_guard"
+    / "repo"
+    / "templates"
+    / "insecure.yaml"
+)
 
 SHELL_TRUE_RULE = """rules:
   - id: links-e2e-shell-true
@@ -179,6 +205,16 @@ def _build(base: Path) -> Path:
         INSECURE_BUCKET.format(name="in-tree-bucket"), encoding="utf-8"
     )
     (tree / "requirements.txt").write_text("django==1.2\n", encoding="utf-8")
+    workflows = tree / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "real.yml").write_text(WORKFLOW, encoding="utf-8")
+    shutil.copy(CFN_FIXTURE_TEMPLATE, tree / "templates" / "insecure.yaml")
+    # A fabricated token gitleaks reports (see tests/utils/gitleaks_fixture.py).
+    (tree / "deploy.cfg").write_text(
+        f"url = https://x:{fabricated_tokens()['settings_github_pat']}"
+        "@github.com/o/r.git\n",
+        encoding="utf-8",
+    )
     (tree / "settings.yml").write_text(
         f"aws_access_key_id: {IN_TREE_KEY}\n", encoding="utf-8"
     )
@@ -376,8 +412,12 @@ class Control:
 
 #: One for every registered scanner. The in-tree findings were measured with
 #: bandit 1.9.4, checkov 3.3.26, detect-secrets, semgrep 1.180.0, opengrep 1.30.2,
-#: cfn-nag, cdk-nag, grype 0.120.1, trivy 0.75.0 and syft 1.54.1; ferret-scan's
-#: has not been measured.
+#: cfn-nag, cdk-nag, grype 0.120.1, trivy 0.75.0 and syft 1.54.1; ferret-scan's,
+#: actionlint's, cfn-lint's, cfn-guard's, gitleaks's, trivy's and zizmor's have not
+#: been measured in this scan. The last six read the findings their own integration
+#: tests record on the same fixtures (tests/integration/scanners/
+#: test_actionlint_real_binary.py, test_cfn_lint_and_cfn_guard_real.py,
+#: test_gitleaks_real_binary.py and test_zizmor_real_binary.py).
 CONTROLS = {
     "bandit": Control(commands=("bandit",), in_tree="real.py"),
     "checkov": Control(commands=("checkov",), in_tree="real.tf"),
@@ -396,6 +436,22 @@ CONTROLS = {
     ),
     "syft": Control(commands=("syft",), sbom_package="django"),
     "ferret-scan": Control(commands=("ferret-scan",)),
+    "actionlint": Control(
+        commands=("actionlint",), in_tree=".github/workflows/real.yml"
+    ),
+    "zizmor": Control(commands=("zizmor",), in_tree=".github/workflows/real.yml"),
+    "cfn-lint": Control(commands=("cfn-lint",), in_tree="templates/insecure.yaml"),
+    # cfn-guard reads its rules from ASH_CFN_GUARD_RULES_DIR, or from beside
+    # ASH_BIN_PATH, which this scan points at an empty directory of its own.
+    "cfn-guard": Control(
+        commands=("cfn-guard",),
+        database="ASH_CFN_GUARD_RULES_DIR",
+        in_tree="templates/insecure.yaml",
+    ),
+    "gitleaks": Control(commands=("gitleaks",), in_tree="deploy.cfg"),
+    "trivy": Control(
+        commands=("trivy",), database="TRIVY_CACHE_DIR", in_tree="requirements.txt"
+    ),
     "npm-audit": Control(
         offline="npm audit asks the package registry, which an offline scan does "
         "not reach"
@@ -428,6 +484,10 @@ def _why_it_cannot_run(control: Control) -> str | None:
     path = os.pathsep.join(
         [os.environ.get("PATH", ""), str(Path(sys.executable).parent)]
     )
+    # PATH only, because that is all the scan can see: it runs with a home of its own,
+    # so a uv tool a test installed under this session's private home (which `uv tool
+    # list` shows here) is not one the scan finds, and the scanner records MISSING.
+    # CI installs the uv tools the suite needs before it starts, onto PATH.
     missing = [
         command for command in control.commands if not shutil.which(command, path=path)
     ]

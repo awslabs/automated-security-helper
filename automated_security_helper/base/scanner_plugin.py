@@ -1423,10 +1423,6 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         override this method directly and leave _execute_scan unimplemented, and
         start it with the same ``exit_code`` reset as this one.
         """
-        # The reset the attribute's declaration promises: a scan that never
-        # reaches its tool reports no exit code, not the 0 the field starts
-        # at or the previous target's code.
-        self.exit_code = None
         if global_ignore_paths is None:
             global_ignore_paths = []
 
@@ -1465,6 +1461,14 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # Whether the tool was started, so a failure before it (a refusal while
         # resolving the arguments) is not described with an exit code it never had.
         tool_started = False
+
+        # The reset the attribute's declaration promises: a scan that never
+        # reaches its tool reports no exit code, not the 0 the field starts
+        # at or the previous target's code. Here and not at the top: the early
+        # returns above (an empty tree, missing dependencies) are a clean skip
+        # that keeps the 0 set at the top, which the invocation record reads
+        # through _exit_code_accepted.
+        self.exit_code = None
 
         try:
             final_args, results_file, subprocess_env = self._execute_scan(

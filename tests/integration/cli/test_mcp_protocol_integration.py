@@ -156,8 +156,9 @@ async def test_every_expected_tool_is_reachable_over_tools_list(ash_mcp_client) 
     )
     assert not added, (
         f"These tools are served but not listed in EXPECTED_TOOLS: {sorted(added)}. "
-        "Add them here and to README's MCP tools table -- "
-        "tests/unit/cli/mcp/test_tool_surface_parity.py enforces the table."
+        "Add them here and regenerate docs/content/reference/mcp-tools.md with "
+        "scripts/generate_mcp_tool_reference.py -- "
+        "tests/unit/cli/mcp/test_tool_surface_parity.py enforces that page."
     )
 
 

@@ -2,17 +2,28 @@ name: Bug Report
 description: Report a bug in ASH
 labels: ["bug"]
 body:
-  - type: dropdown
+  - type: input
     id: version
     attributes:
       label: ASH Version
-      description: Which version of ASH are you using?
-      options:
-        - v3.4.x
-        - v3.3.x
-        - Other
+      description: Run `ash --version` and paste the version.
+      placeholder: "3.7.0"
     validations:
       required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where did this happen?
+      options:
+        - Scan or CLI
+        - Installation or dependencies
+        - Terminal findings explorer
+        - HTML report
+        - Markdown report or GitHub summary
+        - MCP or an AI coding assistant
+        - Documentation
+        - Other
 
   - type: dropdown
     id: os
@@ -22,6 +33,7 @@ body:
         - Linux
         - macOS
         - Windows
+        - Other
     validations:
       required: true
 
@@ -35,6 +47,8 @@ body:
         - pipx
         - container
         - homebrew
+        - source checkout
+        - Other
     validations:
       required: true
 
@@ -50,7 +64,7 @@ body:
     id: steps
     attributes:
       label: Steps to Reproduce
-      description: Minimal steps to reproduce the behavior.
+      description: Include the command or interaction, execution mode, and relevant configuration.
       placeholder: |
         1. Run `ash ...`
         2. Observe ...
@@ -73,5 +87,5 @@ body:
     id: logs
     attributes:
       label: Relevant Log Output
-      description: Paste any relevant log output here.
+      description: Include the relevant error and its surrounding lines. For a visual issue, include the theme and viewport or terminal size.
       render: shell

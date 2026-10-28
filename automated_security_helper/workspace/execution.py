@@ -333,6 +333,7 @@ from automated_security_helper.core.exceptions import (
 from automated_security_helper.core.unified_metrics import recorded_error
 from automated_security_helper.models.core import IgnoreFileExclusions
 from automated_security_helper.models.workspace import (
+    SCANNER_EXIT_CODE_UNRECORDED,
     ProjectRunStatus,
     SkippedProjectReason,
     WorkspaceExitCode,
@@ -372,6 +373,7 @@ from automated_security_helper.workspace.aggregation import (
     has_finding_at_min_severity,
     incomplete_converters_for_project,
     inputs_not_scanned_for_project,
+    rewrite_workspace_block,
     stale_content_databases_for_project,
 )
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
@@ -380,8 +382,10 @@ from automated_security_helper.workspace.policy import (
     normalise_scanner_name,
 )
 from automated_security_helper.workspace.reporting import (
+    MANIFEST_FILENAME,
     WorkspaceReportOutcome,
     emit_workspace_reports,
+    exit_code_after_report_step,
     refuse_linked_workspace_report_paths,
     unsupported_reporter_names,
 )
@@ -703,7 +707,7 @@ def prewarm_plugin_registry(plan: WorkspacePlan, settings: ProjectScanSettings) 
                     record=record,
                     values=environment_values,
                 )
-                discover_plugins(plugin_modules=operator, shown=shown)
+                discover_plugins(plugin_modules=operator, shown=shown, failed=record)
             # A module only the projects name is imported as an untrusted config's,
             # like ScanExecutionEngine imports one, so that a later scan in this
             # process that does not load it is not offered what it registered. The
@@ -720,7 +724,9 @@ def prewarm_plugin_registry(plan: WorkspacePlan, settings: ProjectScanSettings) 
                         record=record,
                         values=environment_values,
                     )
-                    discover_plugins(plugin_modules=[module_name], shown=shown)
+                    discover_plugins(
+                        plugin_modules=[module_name], shown=shown, failed=record
+                    )
             # The scan prints str(error), so the environment remedy for an entry
             # only ASH_PLUGIN_MODULES contributed is built into the message here.
             # The run's option list is `operator`; the projects' entries are the
@@ -1364,6 +1370,7 @@ def _scan_one_project(
         ceiling_unreachable_findings=unreachable,
         ignore_file_exclusions=_ignore_file_exclusions_of(results),
     )
+    outcome.carry_scanner_exit_codes(_scanner_exit_codes(results))
     return _ProjectRun(
         outcome=outcome,
         run=run,
@@ -1846,6 +1853,32 @@ def _scanner_statuses(results: Any) -> Dict[str, str]:
     return statuses
 
 
+def _scanner_exit_codes(results: Any) -> Dict[str, Optional[int]]:
+    """Per-scanner exit code for one project, from the rows the statuses come from.
+
+    A row carries a code only when the scanner produced a target report that said
+    what its tool exited with; otherwise ``exit_code`` was never set and its
+    ``model_fields_set`` does not name it, which is how a recorded 0 is told from the
+    field's default. A row with no recorded integer reads
+    ``SCANNER_EXIT_CODE_UNRECORDED``, except a SKIPPED one: SKIPPED is a complete,
+    operator-chosen outcome, so its entry reads what the row itself dumps for
+    ``exit_code`` (nothing, which the rollup writes as null) and never claims the
+    run did not finish.
+    """
+    statuses = _scanner_statuses(results)
+    codes: Dict[str, Optional[int]] = {}
+    for name, info in (getattr(results, "scanner_results", None) or {}).items():
+        recorded = getattr(info, "exit_code", None)
+        was_set = "exit_code" in getattr(info, "model_fields_set", ())
+        if was_set and isinstance(recorded, int) and not isinstance(recorded, bool):
+            codes[str(name)] = recorded
+        elif statuses.get(str(name)) == "SKIPPED":
+            codes[str(name)] = None
+        else:
+            codes[str(name)] = SCANNER_EXIT_CODE_UNRECORDED
+    return codes
+
+
 #: The tools' own output in a project's output tree, which output-formats.md says
 #: is not masked: what each scanner wrote, and the converted copies of the source.
 _TOOL_OUTPUT_DIRS = frozenset({"scanners", ASH_WORK_DIR_NAME})
@@ -1981,7 +2014,9 @@ def execute_workspace(
             shutdown. None, as the CLI passes, for none.
 
     Returns:
-        The unified results path, the process exit code, and the payload.
+        The unified results path, the process exit code, and the payload. A run
+        whose projects gave exit 0 or 2 gives exit 1 when the report step left a
+        report or the manifest unwritten; the results file then records 1 too.
 
     Raises:
         WorkspaceDefinitionError: When an enabled reporter declares itself
@@ -2192,6 +2227,23 @@ def execute_workspace(
             reporter_classes=reporter_classes,
             plugin_modules=workspace_plugin_modules(plan, settings),
         )
+        # After the results file, so the file is restamped when this changes the
+        # answer: it records "the process status this run exited with", and a
+        # failed report step is part of what that status answers for.
+        reported_exit_code = exit_code_after_report_step(exit_code, report_outcome)
+        if reported_exit_code != exit_code:
+            ASH_LOGGER.error(
+                "The workspace report step did not write everything it owed, so "
+                f"the run exits {reported_exit_code} rather than {exit_code}. "
+                f"See {MANIFEST_FILENAME} in the reports directory."
+            )
+            exit_code = reported_exit_code
+            payload = payload.model_copy(update={"exit_code": exit_code})
+            if not rewrite_workspace_block(results_path, payload):
+                ASH_LOGGER.warning(
+                    f"Could not record exit code {exit_code} in {results_path}; "
+                    "the file still holds the code the projects alone gave."
+                )
 
     return WorkspaceRunResult(
         results_path=results_path,

@@ -242,9 +242,16 @@ class _PastTheCheck(Exception):
 @needs_symlinks
 @pytest.mark.parametrize("mode", MODES, ids=lambda m: m.value)
 def test_run_ash_scan_refuses_before_the_logger_or_the_clean_up(
-    layout, mode, monkeypatch
+    layout, mode, monkeypatch, capsys
 ):
-    """The logger opens ash.log there, and container and nix mode rmtree reports/."""
+    """The logger opens ash.log there, and container and nix mode rmtree reports/.
+
+    Container mode checks the inputs it would mount first
+    (run_ash_scan._refuse_container_inputs), so its refusal is the container
+    check's own exit 3 with the message on standard error; the other modes raise
+    OutputDirRefusedExit. Either way the exit is 3, the link is named, and the
+    logger and the clean-up are never reached.
+    """
     from automated_security_helper.interactions import run_ash_scan
 
     def past(*_args, **_kwargs):
@@ -254,7 +261,7 @@ def test_run_ash_scan_refuses_before_the_logger_or_the_clean_up(
     monkeypatch.setattr(run_ash_scan, "_discard_prior_run_artifacts", past)
     monkeypatch.setattr(run_ash_scan, "print", lambda *a, **k: None)
 
-    with pytest.raises(run_ash_scan.OutputDirRefusedExit) as exited:
+    with pytest.raises(SystemExit) as exited:
         run_ash_scan.run_ash_scan(
             source_dir=layout.tree,
             output_dir=_linked_output(layout),
@@ -262,7 +269,14 @@ def test_run_ash_scan_refuses_before_the_logger_or_the_clean_up(
             show_summary=False,
         )
 
-    assert "out-link is a symlink" in exited.value.found
+    assert exited.value.code == 3
+    if mode != RunMode.container:
+        assert isinstance(exited.value, run_ash_scan.OutputDirRefusedExit)
+    if isinstance(exited.value, run_ash_scan.OutputDirRefusedExit):
+        named = exited.value.found
+    else:
+        named = capsys.readouterr().err
+    assert "out-link is a symlink" in named
 
 
 @needs_symlinks

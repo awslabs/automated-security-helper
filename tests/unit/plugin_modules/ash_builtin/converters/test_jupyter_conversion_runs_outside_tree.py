@@ -55,7 +55,11 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_con
     JupyterConverter,
     JupyterConverterConfig,
 )
-from automated_security_helper.utils import subprocess_utils, uv_tool_runner
+from automated_security_helper.utils import (
+    pre_installed_tool,
+    subprocess_utils,
+    uv_tool_runner,
+)
 from automated_security_helper.utils.normalizers import get_normalized_filename
 from tests.unit.converters.nbconvert_stand_in import (
     accept_stand_in_nbconvert,
@@ -67,6 +71,9 @@ from tests.unit.converters.nbconvert_stand_in import (
 PROBE_EXPORTER = "ashprobe_exporter.ProbeExporter"
 NBCONVERT = "jupyter-nbconvert"
 WINDOWS = sys.platform == "win32"
+#: The pre-installed tool check's own probe runner, read at import, before any
+#: test's tool guard answers it without a process (stub_tool_probes).
+REAL_PRE_INSTALLED_RUN = pre_installed_tool._run
 
 
 def notebook(language: str | None, exporter: str | None, code: str = "x = 1\n"):
@@ -612,9 +619,10 @@ class TestTheVersionProbe:
         """Record the verification's probe: verify_pre_installed_tool runs
         ``<copy> --version`` through pre_installed_tool's own spawn_run. The
         environment check that follows it (the interpreter beside the copy, uv's
-        dry run) is stubbed as satisfied, so only the probe is observed."""
-        from automated_security_helper.utils import pre_installed_tool
-
+        dry run) is stubbed as satisfied, so only the probe is observed. The unit
+        tests' tool guard answers the probe runner itself for this module
+        (tests/unit/conftest.py, stub_tool_probes), so the real runner is put
+        back first and its spawn is what is recorded."""
         calls: list[dict] = []
 
         def run(argv, *args, **kwargs):
@@ -622,6 +630,7 @@ class TestTheVersionProbe:
             return subprocess.CompletedProcess(argv, 0, "7.17.1\n", "")
 
         pre_installed_tool.reset_pre_installed_tool_cache()
+        monkeypatch.setattr(pre_installed_tool, "_run", REAL_PRE_INSTALLED_RUN)
         monkeypatch.setattr(pre_installed_tool, "spawn_run", run)
         monkeypatch.setattr(
             pre_installed_tool,

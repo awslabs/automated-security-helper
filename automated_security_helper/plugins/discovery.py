@@ -3,7 +3,7 @@
 
 import importlib
 import importlib.util
-from typing import List, Mapping, Optional
+from typing import Iterable, List, Mapping, Optional
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -83,6 +83,7 @@ def _is_top_level_package(name: str, label: Optional[str] = None) -> bool:
 def discover_plugins(
     plugin_modules: List[str] | None = None,
     shown: Optional[Mapping[str, str]] = None,
+    failed: Iterable[str] = (),
 ):
     """Import the top-level plugin packages *plugin_modules* names.
 
@@ -95,6 +96,15 @@ def discover_plugins(
     ``shown`` maps a name to how a log line names it, for a name a config read
     from the environment (``plugin_module_trust.shown_module_names``); any other
     name is named as it is.
+
+    ``failed`` names the modules the run's loader already failed to import or
+    register (the keys of the run's ``PluginLoadRecord``). They are not imported
+    again: the loader recorded the failure with the run's env-read values
+    redacted, removed the module from ``sys.modules`` and undid what it
+    registered, so a second import would run the failing body again, log the
+    error's text with nothing to redact it by, and, for a module whose
+    declarations were what failed, register its plugins again. The run refuses
+    such a module on its record (``refuse_failed_plugin_imports``).
     """
     from automated_security_helper.plugins.loader import (
         _is_allowed_module_path,
@@ -110,11 +120,18 @@ def discover_plugins(
     # does, so it runs under the same scope: a package whose body registers a
     # plugin and then raises is registered here with these names recorded.
     masked_scope = masked_module_scope(labels)
+    already_failed = set(failed)
     discovered = {"converters": [], "scanners": [], "reporters": []}
 
     # Look for top-level packages named by plugin_modules
     for name in dict.fromkeys(plugin_modules):
         label = labels.get(name, name)
+        if name in already_failed:
+            ASH_LOGGER.debug(
+                f"Not importing plugin package {label} again: its import or "
+                "registration failed earlier in this run"
+            )
+            continue
         if not _is_allowed_module_path(name):
             ASH_LOGGER.warning(
                 f"Skipping module with unexpected namespace: {label}. "

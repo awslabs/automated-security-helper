@@ -297,9 +297,12 @@ class ScanExecutionEngine:
                     record=run_record,
                     values=config_environment_values(self._context.config),
                 )
-                # Discover plugins from specified modules
+                # Discover plugins from specified modules, past the ones the
+                # loader already failed (refused below on the record).
                 discover_plugins(
-                    plugin_modules=operator_plugin_modules, shown=shown or None
+                    plugin_modules=operator_plugin_modules,
+                    shown=shown or None,
+                    failed=run_record,
                 )
             for module_name in untrusted_plugin_modules:
                 with ash_plugin_manager.untrusted_import(module_name):
@@ -309,7 +312,11 @@ class ScanExecutionEngine:
                         record=run_record,
                         values=config_environment_values(self._context.config),
                     )
-                    discover_plugins(plugin_modules=[module_name], shown=shown or None)
+                    discover_plugins(
+                        plugin_modules=[module_name],
+                        shown=shown or None,
+                        failed=run_record,
+                    )
             # A configured module that failed to import refuses the scan, as a
             # misnamed one does above: the run has none of the plugins the
             # operator asked for.

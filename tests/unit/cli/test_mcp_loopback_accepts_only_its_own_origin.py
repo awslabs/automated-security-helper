@@ -205,6 +205,7 @@ def test_a_refused_bind_with_port_0_binds_nothing(monkeypatch) -> None:
     )
 
     with pytest.raises(typer.Exit) as excinfo:
+        # Binding all interfaces is the non-loopback case this test refuses.
         mcp_command(
             ctx=_Ctx(),
             transport="streamable-http",

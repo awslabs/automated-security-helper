@@ -202,7 +202,7 @@ def docs_example_jobs() -> Iterator[tuple[str, str, list]]:
     for path in sorted(sources):
         text = path.read_text(encoding="utf-8")
         for line, job_id, steps in yaml_example_jobs(text):
-            yield f"{path.relative_to(REPO_ROOT)}:{line}", job_id, steps
+            yield f"{path.relative_to(REPO_ROOT).as_posix()}:{line}", job_id, steps
 
 
 #: Docs-shaped examples the reader must find and flag: an upload with no `if:` after an

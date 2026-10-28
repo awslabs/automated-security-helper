@@ -14,6 +14,7 @@ file not found" with exit 1.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict
 
 import pytest
@@ -28,6 +29,20 @@ from tests.utils.helpers import mark_git_checkout
 
 FLAG = rac.CONFIG_FROM_SCANNED_REPOSITORY_FLAG
 OTHER_FLAG = "--config-file-from-another-checkout"
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _words(output: str) -> str:
+    """The console output as plain words.
+
+    The log is written through rich, which on some hosts (a Windows runner) styles
+    the text with color codes and wraps each message at the console width, with
+    the log's time and level columns as padding on every wrapped line. A phrase
+    that is one line on a wide console is several there, so the assertions read
+    the words with the codes removed and the whitespace collapsed.
+    """
+    return " ".join(_ANSI.sub("", output).split())
 
 
 @pytest.fixture(autouse=True)
@@ -67,13 +82,6 @@ def _scan(*args: str):
     return CliRunner().invoke(
         app, ["scan", "--mode", "container", "--no-build", "--no-progress", *args]
     )
-
-
-def _words(output: str) -> str:
-    """The output with its line breaks folded into spaces: the console wraps the log
-    line at its width, and the break can fall inside a phrase or between a flag's
-    neighbors."""
-    return " ".join(output.split())
 
 
 def test_the_mark_an_older_image_does_not_know(container, tmp_path):

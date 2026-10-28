@@ -66,6 +66,7 @@ ROOT_OWNED = (
 
 #: Left out of the search for files every user may write: the kernel's and the
 #: runner's filesystems, and the sticky scratch directories with what is in them.
+#: These are paths inside the image under test; nothing is opened under them here.
 PRUNED = ("/proc", "/sys", "/dev", "/tmp", "/var/tmp", "/run/lock")  # nosec B108
 
 
