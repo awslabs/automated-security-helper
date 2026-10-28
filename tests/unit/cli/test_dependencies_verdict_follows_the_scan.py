@@ -96,10 +96,14 @@ def test_a_scanner_the_scan_skips_on_this_platform_does_not_fail_it(
     run, out = _install(monkeypatch, WINDOWS_AMD64, {"semgrep"})
     assert "semgrep" not in _failure_line(out), out
     assert run.exit_code == 0, out
-    assert (
-        "Not available on this platform: semgrep (semgrep publishes no Windows build)"
-        in out
-    ), out
+    # One sorted line names every scanner the platform lacks (GuardDog is another
+    # on Windows), so semgrep's entry is read anywhere after the label. The line is
+    # longer now and the panel wraps it between its border characters, so the box
+    # drawing is read as whitespace before the entry is looked for.
+    assert "Not available on this platform:" in out, out
+    skipped = out.split("Not available on this platform:", 1)[1]
+    skipped = " ".join(re.sub(r"[^\x20-\x7e]", " ", skipped).split())
+    assert "semgrep (semgrep publishes no Windows build)" in skipped, out
     assert _status_of(run.output, "semgrep") == "NOT AVAILABLE ON THIS PLATFORM", out
 
 
