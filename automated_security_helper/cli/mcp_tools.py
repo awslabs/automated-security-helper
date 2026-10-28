@@ -5034,7 +5034,12 @@ def _classify_validation_message(raw: str) -> Dict[str, Any]:
     if raw.startswith(ConfigValidator.ENV_NOT_RESOLVED_ERROR_PREFIX):
         return _config_problem("", raw, CONFIG_ENV_NOT_RESOLVED)
     # Also before the generic branches: the message quotes module names.
-    if raw.startswith(ConfigValidator.PLUGIN_MODULES_ERROR_PREFIX):
+    # The validator's module check (ConfigValidator._plugin_module_refusal)
+    # gives the loader's refusal as it is, which opens with the field's name
+    # ("ash_plugin_modules names ..."), not with this prefix.
+    if raw.startswith(
+        (ConfigValidator.PLUGIN_MODULES_ERROR_PREFIX, "ash_plugin_modules ")
+    ):
         return _config_problem("ash_plugin_modules", raw, "invalid_field")
     if raw.startswith(ConfigValidator.EXTENDS_ERROR_PREFIX):
         return _config_problem("", raw, "extends_error")
