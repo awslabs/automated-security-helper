@@ -360,14 +360,6 @@ def test_each_scanners_link_handling_holds(tmp_path, monkeypatch, name):
         monkeypatch.setattr(
             _trivy_scanner_base, "prepare_content_db", lambda *args, **kwargs: None
         )
-    if name == "trivy-repo":
-        from automated_security_helper.plugin_modules.ash_trivy_plugins import (
-            trivy_repo_scanner,
-        )
-
-        monkeypatch.setattr(
-            trivy_repo_scanner, "sandboxed_online", lambda offline: False
-        )
     source = _tree(tmp_path, HANDLING_FILES, HANDLING_LINKS)
     module, scanner = _scanner_for(name, source, tmp_path)
     handling = LINK_HANDLING[name]
@@ -645,7 +637,6 @@ def test_trivy_is_given_each_link_leaving_its_target_without_a_comma(
     monkeypatch.setattr(
         _trivy_scanner_base, "prepare_content_db", lambda *args, **kwargs: None
     )
-    monkeypatch.setattr(trivy_repo_scanner, "sandboxed_online", lambda offline: False)
     source = _tree(
         tmp_path,
         FILES,
