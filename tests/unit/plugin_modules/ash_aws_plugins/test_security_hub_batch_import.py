@@ -4487,6 +4487,19 @@ def _not_in_a_checkout(path: Path) -> Path:
     return path
 
 
+def _operator_config_root(monkeypatch, root: Path) -> None:
+    """Set *root* aside as a directory the operator keeps config in.
+
+    A path an MCP client names is the client's unless it is under
+    ASH_MCP_ALLOWED_CONFIG_ROOTS (cli/mcp/sandbox.client_named_config_is_untrusted),
+    and the default client rules refuse a client's file that sets this
+    reporter's section before get_config answers for it. These tests are about
+    what get_config shows for a file the operator named, so the operator sets
+    the directory aside; the client's refusal is held elsewhere
+    (tests/unit/cli/mcp/test_client_configs_honor_denied_paths.py)."""
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(root))
+
+
 def _get_config_from_elsewhere(tmp_path, monkeypatch, config: Path) -> dict[str, Any]:
     from automated_security_helper.cli.mcp_tools import mcp_get_config
 
@@ -4494,6 +4507,7 @@ def _get_config_from_elsewhere(tmp_path, monkeypatch, config: Path) -> dict[str,
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
+    _operator_config_root(monkeypatch, tmp_path)
     return mcp_get_config(config_path=str(config))
 
 
@@ -4645,6 +4659,7 @@ def test_get_config_does_not_judge_a_named_file_by_ash_configs_checkout(
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
     monkeypatch.setenv("ASH_CONFIG", str(ash_config))
+    _operator_config_root(monkeypatch, tmp_path)
 
     options = _security_hub_options(mcp_get_config(config_path=str(named)))
 
@@ -4662,6 +4677,7 @@ def test_get_config_shows_the_operators_value_where_the_target_holds_the_file(
     mark_git_checkout(checkout)
     monkeypatch.chdir(checkout)
     monkeypatch.setenv("ASH_CONFIG", str(_operator_file(tmp_path, "operator-scope")))
+    _operator_config_root(monkeypatch, tmp_path)
 
     options = _security_hub_options(
         mcp_get_config(config_path=str(checkout / ".ash" / ".ash.yaml"))
