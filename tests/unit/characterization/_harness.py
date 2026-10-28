@@ -3022,6 +3022,27 @@ def process_limit_skip_summary() -> Optional[str]:
     )
 
 
+def _process_limit_to_restore(original_soft: int, held_hard: int) -> tuple[int, int]:
+    """The ``(soft, hard)`` pair to set once ``no_new_processes()`` is done, given the
+    soft limit the process had and the hard limit the kernel kept after the lowering
+    write.
+
+    The hard limit stays at ``held_hard``: an unprivileged process may lower it but
+    never raise it, so asking for the original back is refused. The soft limit goes
+    back to what it was, limited to ``held_hard`` (a soft limit above the hard one is
+    refused too). ``resource.RLIM_INFINITY`` counts as larger than every number, on
+    either limit; it reads as -1 on Linux, where a plain comparison would not say so.
+    """
+    import resource
+
+    unlimited = resource.RLIM_INFINITY
+    if held_hard != unlimited and (
+        original_soft == unlimited or original_soft > held_hard
+    ):
+        return held_hard, held_hard
+    return original_soft, held_hard
+
+
 @contextlib.contextmanager
 def no_new_processes() -> Iterator[None]:
     """Make every fork and clone fail with EAGAIN inside the block.
@@ -3033,16 +3054,25 @@ def no_new_processes() -> Iterator[None]:
     CAP_SYS_RESOURCE or CAP_SYS_ADMIN, and there it is no safety net at all, so the
     test is skipped instead (see ``require_process_limit``), unless the run opted in
     with ``UNPROTECTED_PROCESS_LIMIT_ENV``, when the block runs without that net.
+
+    The restore is made against the limit the kernel kept, which is read again after
+    the lowering write, because the kernel may lower the hard limit when the soft
+    limit is set (macOS holds it to the per-user cap) and a process cannot raise it
+    back.
     """
     import resource
 
     require_process_limit()
     soft, hard = resource.getrlimit(resource.RLIMIT_NPROC)
     resource.setrlimit(resource.RLIMIT_NPROC, (1, hard))
+    held_hard = hard
     try:
+        _, held_hard = resource.getrlimit(resource.RLIMIT_NPROC)
         yield
     finally:
-        resource.setrlimit(resource.RLIMIT_NPROC, (soft, hard))
+        resource.setrlimit(
+            resource.RLIMIT_NPROC, _process_limit_to_restore(soft, held_hard)
+        )
 
 
 def take_violations() -> List[str]:
