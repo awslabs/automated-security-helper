@@ -42,29 +42,4 @@ The MCP server always runs scans in local mode: on the server's own machine, wit
 
 Pass `output_directory` as `output_dir` to these tools:
 
-```
-get_scan_progress(scan_id="<uuid>")
-```
-
-Stop polling when `is_complete` is `true`. It is `true` for every ending: `status` is then one of `completed | incomplete | failed | cancelled`, and `results_available` says whether `get_scan_results` can read the results (`completed` and `incomplete`). Typical scans take 30-120 seconds.
-
-For progress display, use `finished_scanners / total_scanners` (`completed_scanners` counts only scanners that PASSED) — but check `total_scanners > 0` first (it's zero during pre-flight before any scanner registers; show "initializing" in that case). The response also includes `severity_counts` and per-scanner breakdown to surface in user-facing updates.
-
-The scan itself runs server-side regardless of polling cadence — polling is for progress visibility, not for keeping the scan alive.
-
-### Step 3 — Fetch results with the right filter
-
-Once the scan is complete, call `get_scan_results`. Match the filter to the user's intent.
-
-| User goal | Filter combination |
-|-----------|-------------------|
-| "How bad is it?" | `filter_level="summary"` + `actionable_only=True` |
-| "Show me the critical issues" | `filter_level="full"` + `severities="critical,high"` |
-| "Audit Bandit only" | `scanners="bandit"` + `filter_level="full"` |
-| "Generate exec summary" | Use `get_scan_result_paths`, then read `ash.summary.md` |
-
-```
-get_scan_results(
-    output_dir="/absolute/path/to/project/.ash/ash_output",
-
 [... see prompt files for details]

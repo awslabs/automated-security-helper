@@ -78,7 +78,7 @@ For HTML/SARIF/CSV reports, prefer `get_scan_result_paths` and read the files di
 
 ## Tool inventory
 
-For full parameter details, see [tool-reference.md](references/tool-reference.md).
+For full parameter details, see [tool-reference.md](02-tool-reference.md).
 
 - `run_ash_scan` — Start a scan asynchronously
 - `get_scan_progress` — Poll progress (call every 5s)
@@ -103,6 +103,6 @@ For result-time filtering by scanner:
 
 ## When something goes wrong
 
-See [troubleshooting.md](references/troubleshooting.md) for the common failures: connection timeouts, empty results, stuck scans, container/Docker issues, suppression rules not applying.
+See [troubleshooting.md](02-troubleshooting.md) for the common failures: connection timeouts, empty results, stuck scans, container/Docker issues, suppression rules not applying.
 
 The fast checks: scan never starts → run `check_installation` first. Scan returns no findings → ask for `filter_level="full"` with `actionable_only=True`, which is the only response with a `findings` list, and widen `severities`. The list holds the actionable findings only, those at or above the scan's severity threshold and not suppressed; the files `get_scan_result_paths` names have the rest. Stale progress visibility → you weren't polling every 5 seconds.
