@@ -786,10 +786,7 @@ ENV ASH_GROUP=${ASH_GROUP}
 
 ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
 # Pinned as in the core stage: this user's uv tool directory starts empty, so the
-# Python tools are installed again here and would otherwise float. The same community
-# modules are loaded for it; an ARG does not reach a stage built FROM another, so it
-# is declared again (a unit test keeps the two equal).
-ARG ASH_COMMUNITY_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_actionlint_plugins,automated_security_helper.plugin_modules.ash_cfn_plugins,automated_security_helper.plugin_modules.ash_gitleaks_plugins,automated_security_helper.plugin_modules.ash_zizmor_plugins"
+# Python tools are installed again here and would otherwise float.
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     uv_tmp="$(mktemp -d)" && \
     { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 ASH_OFFLINE=NO \

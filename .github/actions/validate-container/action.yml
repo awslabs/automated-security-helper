@@ -635,12 +635,6 @@ runs:
           --output-dir /tmp/ash-selftest/output \
           --simple \
           --fail-on-incomplete-scanners \
-          --ash-plugin-modules automated_security_helper.plugin_modules.ash_actionlint_plugins \
-          --ash-plugin-modules automated_security_helper.plugin_modules.ash_cfn_plugins \
-          --ash-plugin-modules automated_security_helper.plugin_modules.ash_gitleaks_plugins \
-          --ash-plugin-modules automated_security_helper.plugin_modules.ash_trivy_plugins \
-          --ash-plugin-modules automated_security_helper.plugin_modules.ash_zizmor_plugins \
-          --config-overrides 'scanners.trivy.enabled=true' \
           --phases scan \
           --phases report
         rc=$?

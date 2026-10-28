@@ -98,11 +98,6 @@ runs:
           --mode nix \
           --source-dir /tmp/ash-nix-selftest \
           --output-dir /tmp/ash-nix-selftest/output \
-          --ash-plugin-modules automated_security_helper.plugin_modules.ash_actionlint_plugins \
-          --ash-plugin-modules automated_security_helper.plugin_modules.ash_cfn_plugins \
-          --ash-plugin-modules automated_security_helper.plugin_modules.ash_gitleaks_plugins \
-          --ash-plugin-modules automated_security_helper.plugin_modules.ash_zizmor_plugins \
-          --config-overrides 'scanners.cfn-guard.enabled=false' \
           --simple
         rc=$?
         set -e
