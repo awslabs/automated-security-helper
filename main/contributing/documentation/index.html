@@ -1,0 +1,5390 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Security scanning for code, infrastructure, secrets, and dependencies.">
+      
+      
+      
+        <link rel="canonical" href="https://awslabs.github.io/automated-security-helper/latest/contributing/documentation/">
+      
+      
+        <link rel="prev" href="../testing/">
+      
+      
+        <link rel="next" href="../../developer-guide/interface-design/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="data:,">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Documentation - ASH - Automated Security Helper</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/ash.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  
+  <!-- Phosphor SVG icon license:
+  MIT License
+
+Copyright (c) 2023 Phosphor Icons
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+  -->
+  <meta name="theme-color" content="#0f141a">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Documentation · ASH">
+  <meta property="og:description" content="Security scanning for code, infrastructure, secrets, and dependencies.">
+  <link rel="preload" href="../../assets/fonts/open-sans.woff2" as="font" type="font/woff2" crossorigin>
+  <noscript>
+    <style>
+      .ash-search-trigger, .ash-menu-toggle, .ash-motion-toggle, .ash-copy,
+       .ash-tabs, .ash-mode-picker, .ash-filter, [data-ash-run], [data-scan-controls],
+       [data-ash-drawer], [data-ash-handbook] { display: none !important; }
+      .ash-install-panel[hidden] { display: block !important; margin-top: 1.5rem; }
+       @media (max-width: 960px) {
+        .ash-header { position: relative; height: auto; }
+      }
+    </style>
+  </noscript>
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#test-the-documentation" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+        <aside class="md-banner">
+          <div class="md-banner__inner md-grid md-typeset">
+            
+            <span data-ash-notice="unreleased">
+      These docs describe the main branch, which is not released yet, so a feature
+      described here may not be in the latest release.
+      The install commands in this version of the docs install
+      <code>main</code>, not a release.
+      <a href="../../..">Read the docs for the latest release</a>
+      to install a release.
+    </span>
+          </div>
+          
+        </aside>
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+<a class="ash-skip" href="#main-content">Skip to content</a>
+<header class="md-header ash-header" data-md-component="header">
+  <nav class="ash-header__inner md-grid" aria-label="Main navigation">
+    <a class="ash-brand" href="../.." aria-label="ASH home" data-md-component="logo">
+      <span class="ash-brand__name">ASH<span class="ash-brand__subtitle">Automated Security Helper</span></span>
+    </a>
+    <div class="ash-header__links">
+      <a href="../.." >Overview</a>
+      <a href="../../docs/quick-start-guide/" aria-current="true">Documentation</a>
+      <a href="../..#scanners">Scanners</a>
+      <a href="../../integrations/" >Integrations</a>
+    </div>
+    <div class="ash-sr-only md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">ASH - Automated Security Helper</div>
+        <div class="md-header__topic" data-md-component="header-topic">Documentation</div>
+      </div>
+    </div>
+    <div class="ash-header__actions">
+      
+        <button class="ash-handbook-toggle" type="button" data-ash-handbook aria-label="Browse all documentation" aria-haspopup="dialog" aria-controls="ash-handbook" aria-expanded="false" disabled><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232,50H160a38,38,0,0,0-32,17.55A38,38,0,0,0,96,50H24a6,6,0,0,0-6,6V200a6,6,0,0,0,6,6H96a26,26,0,0,1,26,26,6,6,0,0,0,12,0,26,26,0,0,1,26-26h72a6,6,0,0,0,6-6V56A6,6,0,0,0,232,50ZM96,194H30V62H96a26,26,0,0,1,26,26V204.31A37.86,37.86,0,0,0,96,194Zm130,0H160a37.87,37.87,0,0,0-26,10.32V88a26,26,0,0,1,26-26h66ZM160,90h40a6,6,0,0,1,0,12H160a6,6,0,0,1,0-12Zm46,38a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,128Zm0,32a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,160Z"/></svg></span><span>Contents</span></button>
+      
+      <button class="ash-search-trigger" type="button" data-ash-search aria-label="Search documentation" aria-haspopup="dialog" aria-controls="ash-search-dialog" aria-expanded="false" disabled>
+        <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M228.24,219.76l-51.38-51.38a86.15,86.15,0,1,0-8.48,8.48l51.38,51.38a6,6,0,0,0,8.48-8.48ZM38,112a74,74,0,1,1,74,74A74.09,74.09,0,0,1,38,112Z"/></svg></span><span>Search docs</span><kbd data-ash-shortcut>⌘ K</kbd>
+      </button>
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M122,40V16a6,6,0,0,1,12,0V40a6,6,0,0,1-12,0Zm68,88a62,62,0,1,1-62-62A62.07,62.07,0,0,1,190,128Zm-12,0a50,50,0,1,0-50,50A50.06,50.06,0,0,0,178,128ZM59.76,68.24a6,6,0,1,0,8.48-8.48l-16-16a6,6,0,0,0-8.48,8.48Zm0,119.52-16,16a6,6,0,1,0,8.48,8.48l16-16a6,6,0,1,0-8.48-8.48ZM192,70a6,6,0,0,0,4.24-1.76l16-16a6,6,0,0,0-8.48-8.48l-16,16A6,6,0,0,0,192,70Zm4.24,117.76a6,6,0,0,0-8.48,8.48l16,16a6,6,0,0,0,8.48-8.48ZM46,128a6,6,0,0,0-6-6H16a6,6,0,0,0,0,12H40A6,6,0,0,0,46,128Zm82,82a6,6,0,0,0-6,6v24a6,6,0,0,0,12,0V216A6,6,0,0,0,128,210Zm112-88H216a6,6,0,0,0,0,12h24a6,6,0,0,0,0-12Z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232.13,143.64a6,6,0,0,0-6-1.49A90.07,90.07,0,0,1,113.86,29.85a6,6,0,0,0-7.49-7.48A102.88,102.88,0,0,0,54.48,58.68,102,102,0,0,0,197.32,201.52a102.88,102.88,0,0,0,36.31-51.89A6,6,0,0,0,232.13,143.64Zm-42,48.29a90,90,0,0,1-126-126A90.9,90.9,0,0,1,99.65,37.66,102.06,102.06,0,0,0,218.34,156.35,90.9,90.9,0,0,1,190.1,191.93Z"/></svg>
+      </label>
+    
+  
+</form>
+        <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+      
+      <template data-ash-theme-icons>
+        <span data-color-scheme="default"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M122,40V16a6,6,0,0,1,12,0V40a6,6,0,0,1-12,0Zm68,88a62,62,0,1,1-62-62A62.07,62.07,0,0,1,190,128Zm-12,0a50,50,0,1,0-50,50A50.06,50.06,0,0,0,178,128ZM59.76,68.24a6,6,0,1,0,8.48-8.48l-16-16a6,6,0,0,0-8.48,8.48Zm0,119.52-16,16a6,6,0,1,0,8.48,8.48l16-16a6,6,0,1,0-8.48-8.48ZM192,70a6,6,0,0,0,4.24-1.76l16-16a6,6,0,0,0-8.48-8.48l-16,16A6,6,0,0,0,192,70Zm4.24,117.76a6,6,0,0,0-8.48,8.48l16,16a6,6,0,0,0,8.48-8.48ZM46,128a6,6,0,0,0-6-6H16a6,6,0,0,0,0,12H40A6,6,0,0,0,46,128Zm82,82a6,6,0,0,0-6,6v24a6,6,0,0,0,12,0V216A6,6,0,0,0,128,210Zm112-88H216a6,6,0,0,0,0,12h24a6,6,0,0,0,0-12Z"/></svg></span></span>
+        <span data-color-scheme="slate"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232.13,143.64a6,6,0,0,0-6-1.49A90.07,90.07,0,0,1,113.86,29.85a6,6,0,0,0-7.49-7.48A102.88,102.88,0,0,0,54.48,58.68,102,102,0,0,0,197.32,201.52a102.88,102.88,0,0,0,36.31-51.89A6,6,0,0,0,232.13,143.64Zm-42,48.29a90,90,0,0,1-126-126A90.9,90.9,0,0,1,99.65,37.66,102.06,102.06,0,0,0,218.34,156.35,90.9,90.9,0,0,1,190.1,191.93Z"/></svg></span></span>
+      </template>
+      <a class="ash-github" href="https://github.com/awslabs/automated-security-helper" aria-label="ASH on GitHub">
+        <span>GitHub</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span>
+      </a>
+      <button class="ash-menu-toggle" type="button" aria-label="Open navigation" aria-haspopup="dialog" aria-expanded="false" aria-controls="ash-mobile-menu" data-ash-menu disabled>
+        <span class="ash-menu-glyph" aria-hidden="true"><i></i><i></i></span>
+      </button>
+    </div>
+    
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M228.24,219.76l-51.38-51.38a86.15,86.15,0,1,0-8.48,8.48l51.38,51.38a6,6,0,0,0,8.48-8.48ZM38,112a74,74,0,1,1,74,74A74.09,74.09,0,0,1,38,112Z"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M222,128a6,6,0,0,1-6,6H54.49l61.75,61.76a6,6,0,1,1-8.48,8.48l-72-72a6,6,0,0,1,0-8.48l72-72a6,6,0,0,1,8.48,8.48L54.49,122H216A6,6,0,0,1,222,128Z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,195.76a6,6,0,1,1-8.48,8.48L128,136.49,60.24,204.24a6,6,0,0,1-8.48-8.48L119.51,128,51.76,60.24a6,6,0,0,1,8.48-8.48L128,119.51l67.76-67.75a6,6,0,0,1,8.48,8.48L136.49,128Z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+  </nav>
+  <dialog class="ash-mobile-menu" id="ash-mobile-menu" aria-label="Site navigation" hidden>
+    <div class="ash-mobile-menu__heading"><p class="ash-mobile-menu__eyebrow">Navigation</p><button type="button" data-ash-menu-close aria-label="Close navigation"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,195.76a6,6,0,1,1-8.48,8.48L128,136.49,60.24,204.24a6,6,0,0,1-8.48-8.48L119.51,128,51.76,60.24a6,6,0,0,1,8.48-8.48L128,119.51l67.76-67.75a6,6,0,0,1,8.48,8.48L136.49,128Z"/></svg></span></button></div>
+    <a href="../..">Overview <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../../docs/quick-start-guide/">Documentation <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../..#scanners">Scanners <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../../integrations/">Integrations <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="https://github.com/awslabs/automated-security-helper">GitHub <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    
+      <button type="button" data-ash-drawer>Browse all documentation <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232,50H160a38,38,0,0,0-32,17.55A38,38,0,0,0,96,50H24a6,6,0,0,0-6,6V200a6,6,0,0,0,6,6H96a26,26,0,0,1,26,26,6,6,0,0,0,12,0,26,26,0,0,1,26-26h72a6,6,0,0,0,6-6V56A6,6,0,0,0,232,50ZM96,194H30V62H96a26,26,0,0,1,26,26V204.31A37.86,37.86,0,0,0,96,194Zm130,0H160a37.87,37.87,0,0,0-26,10.32V88a26,26,0,0,1,26-26h66ZM160,90h40a6,6,0,0,1,0,12H160a6,6,0,0,1,0-12Zm46,38a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,128Zm0,32a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,160Z"/></svg></span></button>
+    
+  </dialog>
+  <noscript>
+    <nav class="ash-static-navigation" aria-label="Site navigation">
+      <a href="../..">Overview</a>
+      <a href="../../docs/quick-start-guide/">Documentation</a>
+      <a href="../..#scanners">Scanners</a>
+      <a href="../../integrations/">Integrations</a>
+      <a href="https://github.com/awslabs/automated-security-helper">GitHub</a>
+    </nav>
+  </noscript>
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ASH - Automated Security Helper" class="md-nav__button md-logo" aria-label="ASH - Automated Security Helper" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ASH - Automated Security Helper
+  </label>
+  
+    <div class="md-nav__source">
+      
+<a href="https://github.com/awslabs/automated-security-helper" title="ASH on GitHub" class="md-source" aria-label="ASH on GitHub">
+  <span class="ash-icon md-source__icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M230,64a30,30,0,1,0-36,29.4V112a10,10,0,0,1-10,10H96a21.84,21.84,0,0,0-10,2.42v-31a30,30,0,1,0-12,0v69.2a30,30,0,1,0,12,0V144a10,10,0,0,1,10-10h88a22,22,0,0,0,22-22V93.4A30.05,30.05,0,0,0,230,64ZM62,64A18,18,0,1,1,80,82,18,18,0,0,1,62,64ZM98,192a18,18,0,1,1-18-18A18,18,0,0,1,98,192ZM200,82a18,18,0,1,1,18-18A18,18,0,0,1,200,82Z"/></svg></span>
+  <span class="md-source__repository">ASH on GitHub</span>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../getting-started/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_2" id="__nav_2_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/local/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan on your machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add ASH to CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connect an AI agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/platform-teams/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roll out across repositories
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install ASH
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/advanced-usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Manage scanner tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/configure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configure ASH
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/choose-scanners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose scanners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/set-the-gate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Set the gate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/suppress-findings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Suppress findings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/read-results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read scan results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/export-reports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/scanner-sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enable the scanner sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/run-in-a-container/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run in a container
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/run-offline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run offline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose an integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/pre-commit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run ASH with pre-commit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_14" id="__nav_3_14_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CI systems
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    CI systems
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/ci/github-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub Actions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/ci/gitlab-ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitLab CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/ci/other-ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Other CI systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/scale-large-repos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scale to large repositories
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/mcp-server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run the MCP server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/agent-plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install an agent plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/genai-steering-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH GenAI integration guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/deploy-on-aws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deploy on AWS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/troubleshoot/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshoot
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/migrate-from-v2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migrate from v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/how-ash-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How ASH works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/trust-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration trust model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/scanning-untrusted-code/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanning untrusted code
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanner sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/content-databases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Content databases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/suppressions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Suppressions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../reference/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_5" id="__nav_5_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/environment-variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/scanners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/reporters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/converters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Converters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/mcp-tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/exit-codes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exit codes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/output-files/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Output files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/coverage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coverage by language
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/python-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../plugins/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugins
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Plugins
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_2" id="__nav_6_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Built-in scanner pages
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Built-in scanner pages
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/actionlint/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    actionlint
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/cfn-lint-and-cfn-guard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cfn-lint and cfn-guard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/gitleaks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/trivy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trivy filesystem scanner (trivy)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/zizmor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    zizmor (GitHub Actions)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_3" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../docs/plugins/community/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Community plugins
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6_3" id="__nav_6_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Community plugins
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/ferret-scan-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH Ferret Scan Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/snyk-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH Snyk Code Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/snyk-plugin-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Snyk Plugin CI/CD Setup Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/trivy-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trivy Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/aws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS reporters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-scanner/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a scanner plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-reporter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a reporter plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-converter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a converter plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/event-subscribers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Subscribe to scan events
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contributing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#how-blocks-are-classified" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How blocks are classified
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#markers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Markers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Markers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#shell-and-python-blocks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shell and Python blocks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#output-samples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output samples
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#config-blocks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config blocks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#saving-a-block-as-a-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Saving a block as a file
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ci-pipelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CI pipelines
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#option-tables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option tables
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#commands-options-and-variables-in-prose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Commands, options, and variables in prose
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#file-and-scanner-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File and scanner names
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#links-and-pages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Links and pages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#docs-links-in-the-ash-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docs links in the ASH source
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run-the-checks-locally" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run the checks locally
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Run the checks locally">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#check-docs-against-another-checkouts-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Check docs against another checkout's code
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run-the-ci-examples-with-their-runners" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run the CI examples with their runners
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Run the CI examples with their runners">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-a-run-is-set-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How a run is set up
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-a-run-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a run checks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-runs-do-not-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the runs do not check
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#versioned-docs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Versioned docs
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Versioned docs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#previewing-the-versions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Previewing the versions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-versions-check-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the versions check does
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-a-failure-means" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a failure means
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What a failure means">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#markers_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        markers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cli
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#env" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        env
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        config
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#python" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        python
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        options
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        files
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scanners" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scanners
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#code-links" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        code-links
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#links-nav-redirects-and-site" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        links, nav, redirects, and site
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#templates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        templates
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#add-a-generated-reference-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Add a generated reference page
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/interface-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interface design system
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/interface-review/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interaction surface inventory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/high-end-design-review/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design & UX review
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../releases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#how-blocks-are-classified" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How blocks are classified
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#markers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Markers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Markers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#shell-and-python-blocks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shell and Python blocks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#output-samples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output samples
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#config-blocks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config blocks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#saving-a-block-as-a-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Saving a block as a file
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ci-pipelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CI pipelines
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#option-tables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option tables
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#commands-options-and-variables-in-prose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Commands, options, and variables in prose
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#file-and-scanner-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File and scanner names
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#links-and-pages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Links and pages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#docs-links-in-the-ash-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docs links in the ASH source
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run-the-checks-locally" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run the checks locally
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Run the checks locally">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#check-docs-against-another-checkouts-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Check docs against another checkout's code
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run-the-ci-examples-with-their-runners" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run the CI examples with their runners
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Run the CI examples with their runners">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-a-run-is-set-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How a run is set up
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-a-run-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a run checks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-runs-do-not-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the runs do not check
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#versioned-docs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Versioned docs
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Versioned docs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#previewing-the-versions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Previewing the versions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-versions-check-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the versions check does
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-a-failure-means" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a failure means
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What a failure means">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#markers_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        markers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cli
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#env" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        env
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        config
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#python" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        python
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        options
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        files
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scanners" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scanners
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#code-links" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        code-links
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#links-nav-redirects-and-site" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        links, nav, redirects, and site
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#templates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        templates
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#add-a-generated-reference-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Add a generated reference page
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+  <nav class="md-path" aria-label="Navigation" >
+    <ol class="md-path__list">
+      
+        
+  
+  
+    <li class="md-path__item">
+      <a href="../.." class="md-path__link">
+        
+  <span class="md-ellipsis">
+    Home
+  </span>
+
+      </a>
+    </li>
+  
+
+      
+      
+        
+  
+  
+    
+    
+      <li class="md-path__item">
+        <a href="../" class="md-path__link">
+          
+  <span class="md-ellipsis">
+    Contributing
+  </span>
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ol>
+  </nav>
+
+              
+              <article class="md-content__inner md-typeset">
+                
+  <div class="ash-doc-label">Documentation</div>
+  <div id="main-content" tabindex="-1">
+    
+
+
+  
+  
+
+
+<h1 id="test-the-documentation">Test the documentation<a class="headerlink" href="#test-the-documentation" title="Permanent link">&para;</a></h1>
+<p>Every command, config file, environment variable, link, and page in these docs is
+checked against the code. A docs change that names an option ASH does not have, a
+config key ASH ignores, or a page that no longer exists fails CI. This page explains
+how the checks decide what a code block is, how to mark a block that cannot be checked
+the usual way, how to run the checks yourself, and what each failure means.</p>
+<p>There are three layers:</p>
+<ul>
+<li>Static checks, in the <code>lint</code> job. They read every Markdown file in the repository
+  and compare it with the code: the CLI, the config models, the environment variables
+  ASH reads, the navigation, and the link targets. They also check the docs URLs and
+  paths that ASH's own source names. They run in about ten seconds.</li>
+<li>The docs-example runner, in the <code>integration-test</code> job. It runs every runnable
+  shell and Python block, page by page, and fails when a block exits with the wrong
+  code.</li>
+<li>The site build, in the <code>build-docs</code> job. It runs <code>mkdocs build --strict</code> with link
+  and anchor validation, then publishes the site as versions to a throwaway branch with
+  the network blocked, and checks what readers of each version would see (see
+  <a href="#versioned-docs">Versioned docs</a>).</li>
+</ul>
+<p>All three jobs are in the Unified CI workflow and run on every pull request and merge
+queue entry. The <code>required-checks</code> gate depends on each of them, so a failure in any
+layer blocks the merge. The "Docs Deploy" workflow, <code>ash-repo-docs.yml</code>, only publishes
+the site, after a push to <code>main</code> and for each release tag.</p>
+<h2 id="how-blocks-are-classified">How blocks are classified<a class="headerlink" href="#how-blocks-are-classified" title="Permanent link">&para;</a></h2>
+<p>A fenced code block is checked according to its language. A fence with no language is
+an error, because a command in it would escape every check. Use <code>text</code> for output
+samples.</p>
+<table>
+<thead>
+<tr>
+<th>Language</th>
+<th>Unmarked, it is</th>
+<th>Checked</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bash</code>, <code>sh</code>, <code>shell</code>, <code>console</code></td>
+<td><code>run</code></td>
+<td>executed by the runner; every <code>ash</code> line parsed</td>
+</tr>
+<tr>
+<td><code>zsh</code>, <code>fish</code>, <code>powershell</code>, <code>pwsh</code>, <code>ps1</code>, <code>cmd</code>, <code>bat</code></td>
+<td>an error</td>
+<td>must be marked <code>illustrative</code></td>
+</tr>
+<tr>
+<td><code>yaml</code>, <code>yml</code>, <code>json</code>, <code>jsonc</code>, <code>toml</code></td>
+<td><code>config kind=ash</code></td>
+<td>parsed, and validated as an ASH config</td>
+</tr>
+<tr>
+<td><code>python</code>, <code>py</code></td>
+<td><code>run</code></td>
+<td>executed by the runner; must parse; imports must resolve</td>
+</tr>
+<tr>
+<td><code>dockerfile</code></td>
+<td>not executed</td>
+<td><code>ash</code> in <code>RUN</code>, <code>CMD</code>, and <code>ENTRYPOINT</code> lines parsed</td>
+</tr>
+<tr>
+<td><code>groovy</code></td>
+<td>an error</td>
+<td>must be marked <code>config kind=jenkinsfile</code> (see <a href="#ci-pipelines">CI pipelines</a>); <code>ash</code> in its <code>sh</code> steps parsed</td>
+</tr>
+<tr>
+<td><code>jenkinsfile</code>, <code>Jenkinsfile</code></td>
+<td>an error, marked or not</td>
+<td>nothing; fence a Jenkinsfile as <code>groovy</code></td>
+</tr>
+<tr>
+<td>anything else (<code>text</code>, <code>mermaid</code>, <code>diff</code>, ...)</td>
+<td>not executed</td>
+<td>nothing</td>
+</tr>
+</tbody>
+</table>
+<p>In a <code>console</code> block, only the lines that start with a <code>$</code> prompt (and their
+continuation lines) are commands. Everything else is output.</p>
+<h2 id="markers">Markers<a class="headerlink" href="#markers" title="Permanent link">&para;</a></h2>
+<p>A marker is an HTML comment on the line directly above the opening fence. It does not
+render on the site.</p>
+<div class="language-markdown highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>&lt;!-- doctest: illustrative reason=&quot;needs Docker&quot; --&gt;
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="sb">```bash</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>ash<span class="w"> </span>--mode<span class="w"> </span>container<span class="w"> </span>--source-dir<span class="w"> </span>.
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="sb">```</span>
+</span></code></pre></div>
+<p>A blank line between the marker and the fence is an error, as is a marker with no
+block after it, so a marker cannot end up governing a different block after an edit.
+Values with spaces go in double quotes. Unknown modes and keys are errors.</p>
+<h3 id="shell-and-python-blocks">Shell and Python blocks<a class="headerlink" href="#shell-and-python-blocks" title="Permanent link">&para;</a></h3>
+<p><code>run</code> is the default. Use the marker only to change how the block runs.</p>
+<table>
+<thead>
+<tr>
+<th>Marker</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;!-- doctest: run expect-exit=2 --&gt;</code></td>
+<td>the block must exit with code 2</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: run expect-exit=nonzero --&gt;</code></td>
+<td>the block must fail, with a code other than 126 or 127 (a command not executable or not found)</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: run expect-exit=any --&gt;</code></td>
+<td>the exit code is not checked, so an <a href="#output-samples">output sample</a> must directly follow the block</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: run timeout=300 --&gt;</code></td>
+<td>allow 300 seconds instead of 60</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: run env="ASH_OFFLINE=YES,LANG=C" --&gt;</code></td>
+<td>set these variables for this block only</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: run fixture=empty --&gt;</code></td>
+<td>start a new session in another fixture project</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: run fresh --&gt;</code></td>
+<td>start a new session in the default fixture</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: illustrative reason="needs AWS credentials" --&gt;</code></td>
+<td>do not run the block</td>
+</tr>
+</tbody>
+</table>
+<p><code>illustrative</code> needs a reason a reader would accept, such as "needs Docker", "installs
+from the network", "needs AWS credentials", "Windows only", or "runs in CI". "TODO",
+"TBD", and "n/a" are rejected, and so is a reason that names no cause, such as "example"
+or "illustrative example only". An illustrative block is still checked statically: its
+<code>ash</code> lines must parse, and a Python block must still parse and import.</p>
+<p>The runner treats a page as one session, the way a reader follows a tutorial:</p>
+<ul>
+<li>Blocks run in order, in one copy of a fixture project. The default fixture is
+  <code>sample-project</code>, a small git repository with a hardcoded password that
+  detect-secrets reports without network access. Fixtures live in
+  <a href="https://github.com/awslabs/automated-security-helper/tree/main/tests/test_data/docs_fixtures"><code>tests/test_data/docs_fixtures</code></a>.</li>
+<li>Files, the working directory, and shell variables carry from one shell block to the
+  next. Shell blocks run under <code>set -e</code>, so a block stops at its first failing command.</li>
+<li>A Python block runs in a fresh interpreter in the session's directory and
+  environment, with that directory on its import path. It cannot change the session,
+  except through <code>save-as</code> (below).</li>
+<li><code>HOME</code> is private to the session, <code>ash</code> is the one in the project's virtual
+  environment, and downloads fail at once: every proxy variable points at a port that
+  refuses connections, and uv, pip, and npm run offline. A block that needs the network
+  must be <code>illustrative</code>. This is not a sandbox: a program that ignores the proxy
+  variables can still connect, and blocks run as you, so run the examples only on docs
+  you trust.</li>
+</ul>
+<p>This block runs in CI. The default fixture has one finding, so the scan exits with 2:</p>
+<!-- doctest: run expect-exit=2 -->
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--offline<span class="w"> </span>--no-progress
+</span></code></pre></div>
+<h3 id="output-samples">Output samples<a class="headerlink" href="#output-samples" title="Permanent link">&para;</a></h3>
+<p>A <code>text</code> block marked <code>output</code> directly after a block the runner runs is a sample of
+that block's output. Prose may sit between the two:</p>
+<div class="language-markdown highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="sb">```bash</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>ls<span class="w"> </span>.ash/ash_output/reports
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="sb">```</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>The scan wrote one report:
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>&lt;!-- doctest: output --&gt;
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="sb">```text</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>ash.sarif
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="sb">```</span>
+</span></code></pre></div>
+<p>The runner compares the sample with what the block printed, stdout and stderr
+together, whatever exit code the block expects. The CLI check does not read the
+sample's <code>ash</code> lines as commands. Both texts are normalized first:</p>
+<ul>
+<li>ANSI escape codes are removed, and Rich's box-drawing characters become spaces, so a
+  table row reads as its cells;</li>
+<li>durations (<code>46ms</code>, <code>1.23s</code>, <code>3 seconds</code>), clock times (<code>0:00:03</code>), and timestamps
+  (<code>2026-10-11T12:00:01Z</code>) become <code>&lt;time&gt;</code>;</li>
+<li>the session's project directory reads as <code>.</code>, with the paths under it relative, and
+  its <code>HOME</code> as <code>~</code>;</li>
+<li>each run of whitespace becomes one space, and blank lines are dropped.</li>
+</ul>
+<p>Then every line of the sample, other than a line that is only <code>...</code>, must appear in a
+line of the output, in order, starting and ending at word boundaries. <code>...</code> inside a
+line stands for any text there, so <code>detect-secrets ... PASSED</code> matches a table row. The
+output is rendered 100 columns wide, the way Rich lays out a table in the runner.</p>
+<p>A block marked <code>output</code> anywhere else is an error: as the first block on a page, after
+an <code>illustrative</code> block, after a block that is only saved, after a config block, or
+after another sample. Nothing printed it there, so the marker would only hide its <code>ash</code>
+lines from the CLI check. <code>tests/unit/test_docs_corpus_census.py</code> counts the samples the
+runner compares, so a sample it stops comparing fails the unit suite.</p>
+<h3 id="config-blocks">Config blocks<a class="headerlink" href="#config-blocks" title="Permanent link">&para;</a></h3>
+<p>An unmarked config block must be a complete ASH config. Mark any other file with its
+kind.</p>
+<table>
+<thead>
+<tr>
+<th>Marker</th>
+<th>The block is</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;!-- doctest: config kind=ash-fragment at=scanners.bandit --&gt;</code></td>
+<td>the value of one key of an ASH config</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: config kind=pyproject --&gt;</code></td>
+<td>a <code>pyproject.toml</code> whose <code>[tool.ash]</code> table is an ASH config</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: config kind=ash-invalid reason="severity is uppercase" --&gt;</code></td>
+<td>a config ASH must reject</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: config kind=github-actions --&gt;</code></td>
+<td>a GitHub Actions workflow</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: config kind=gitlab-ci --&gt;</code></td>
+<td>a GitLab CI file</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: config kind=buildspec --&gt;</code></td>
+<td>an AWS CodeBuild buildspec</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: config kind=azure-pipelines --&gt;</code></td>
+<td>an Azure Pipelines file</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: config kind=jenkins --&gt;</code></td>
+<td>a YAML Jenkins definition</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: config kind=jenkinsfile --&gt;</code></td>
+<td>a declarative <code>Jenkinsfile</code>, on a <code>groovy</code> block</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: config kind=circleci --&gt;</code></td>
+<td>a CircleCI <code>config.yml</code></td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: config kind=docker-compose --&gt;</code></td>
+<td>a Compose file</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: config kind=pre-commit --&gt;</code></td>
+<td>a <code>.pre-commit-config.yaml</code></td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: config kind=mcp-client --&gt;</code></td>
+<td>an MCP client configuration</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: config kind=ash-output model=automated_security_helper.models.asharp_model.AshAggregatedResults.scanner_results --&gt;</code></td>
+<td>part of a file ASH writes; <code>model=</code> names its output model as <code>&lt;module&gt;.&lt;Model&gt;</code>, then any fields below it</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: config kind=mcp-response of=mcp.run_ash_scan --&gt;</code></td>
+<td>an example of an MCP tool's response, in a <code>json</code> block or a <code>text</code> block with placeholders</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: config kind=other reason="an IAM policy" --&gt;</code></td>
+<td>any other file</td>
+</tr>
+</tbody>
+</table>
+<p>Every kind must parse in its language. ASH configs are read with ASH's own reader and
+validated by its models, which refuse an option a plugin does not declare. Any key ASH
+would accept and never read is an error too: a scan ignores an unknown top-level key, so
+a reader who copied one would see it do nothing. Commands in the <code>run</code>, <code>command</code>,
+<code>script</code>, and <code>commands</code> keys of CI files, in the <code>sh</code> steps of a Jenkinsfile, and the
+command of an MCP server entry, get the same checks as a shell block. A <code>pre-commit</code>
+block must use hook IDs that
+<a href="https://github.com/awslabs/automated-security-helper/blob/main/.pre-commit-hooks.yaml"><code>.pre-commit-hooks.yaml</code></a>
+defines. An <code>mcp-response</code> example must be one response the tool named by <code>of</code> returns:
+every key it shows, nested ones included where the code spells the value out, must be a
+key of one dict the tool's return statements build. A key written as a placeholder,
+such as <code>"&lt;scanner_name&gt;"</code>, stands for any key.</p>
+<p>An <code>ash-output</code> block is validated against the model <code>model=</code> names, which must be one
+of ASH's own. Every key the block shows must be a field the model declares, even where
+the model accepts extra keys, because a renamed key in a sample is a key ASH does not
+write. SARIF's property bags are the exception: they take any key.</p>
+<h3 id="saving-a-block-as-a-file">Saving a block as a file<a class="headerlink" href="#saving-a-block-as-a-file" title="Permanent link">&para;</a></h3>
+<p>A tutorial often shows a file and then a command that uses it. With <code>save-as=&lt;path&gt;</code>,
+the runner writes the block, exactly as shown, to that path in the page's project
+before the blocks after it run. Missing directories are created. <code>save-as</code> works on
+any block: Python, shell, config, Dockerfile, or text.</p>
+<div class="language-markdown highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>&lt;!-- doctest: save-as=my_plugins/greeting.py --&gt;
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="sb">```python</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="k">def</span><span class="w"> </span><span class="nf">hello</span><span class="p">():</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="k">return</span> <span class="s2">&quot;hi&quot;</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="sb">```</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="sb">```python</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="kn">from</span><span class="w"> </span><span class="nn">my_plugins.greeting</span><span class="w"> </span><span class="kn">import</span> <span class="n">hello</span>
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="nb">print</span><span class="p">(</span><span class="n">hello</span><span class="p">())</span>
+</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="sb">```</span>
+</span></code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Marker</th>
+<th>What the runner does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;!-- doctest: save-as=my_plugins/greeting.py --&gt;</code></td>
+<td>saves the block and does not run it</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: run save-as=tools/check.py --&gt;</code></td>
+<td>saves the block, then runs it; a Python block runs from the saved file, so <code>__file__</code> is that path</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: config kind=github-actions save-as=.github/workflows/ash.yml --&gt;</code></td>
+<td>saves the block, which is still validated as its kind</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: save-as=.ash/.ash.yaml --&gt;</code> on a YAML block</td>
+<td>saves the block, which is still validated as a complete ASH config</td>
+</tr>
+</tbody>
+</table>
+<p>The path is relative to the root of the page's fixture project, whatever directory
+earlier blocks changed to. An absolute path, a path containing <code>..</code>, and a path that
+goes through a symbolic link are refused, and the block fails; the static check
+reports the first two before CI runs. A marker without a mode may carry nothing but
+<code>save-as</code>. An <code>illustrative</code> block is never run or saved, so <code>illustrative</code> with
+<code>save-as</code> is an error: use a marker without a mode to save a block that must not run,
+such as a PowerShell script.</p>
+<p>The python check knows which modules a page saves. <code>save-as=my_plugins/scanner.py</code>
+makes <code>my_plugins</code> and <code>my_plugins.scanner</code> importable by every Python block of the
+page, a name imported from a saved module must be defined in it, and a relative
+import in a saved package resolves within that package.</p>
+<h3 id="ci-pipelines">CI pipelines<a class="headerlink" href="#ci-pipelines" title="Permanent link">&para;</a></h3>
+<p>A block of kind <code>github-actions</code>, <code>gitlab-ci</code>, <code>buildspec</code>, <code>jenkinsfile</code>, or <code>circleci</code>
+is a pipeline, which the Docs CI Runners workflow runs under its CI system's own runner
+(see <a href="#run-the-ci-examples-with-their-runners">Run the CI examples with their runners</a>).
+Its marker says how:</p>
+<table>
+<thead>
+<tr>
+<th>Marker</th>
+<th>The block is</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;!-- doctest: config kind=github-actions --&gt;</code></td>
+<td>a complete pipeline; its runner runs it, and ASH must exit 2 in it</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: config kind=github-actions save-as=.github/workflows/ash.yml --&gt;</code></td>
+<td>a complete pipeline that later blocks on the page may extend; it still runs on its own</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: config kind=github-actions extends=.github/workflows/ash.yml --&gt;</code></td>
+<td>a fragment, run merged into the pipeline that the nearest block above it saved at that path</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: config kind=gitlab-ci extends=.gitlab-ci.yml event=merge_request --&gt;</code></td>
+<td>a pipeline run for the event it names</td>
+</tr>
+<tr>
+<td><code>&lt;!-- doctest: config kind=circleci runner=none reason="uses a private orb" --&gt;</code></td>
+<td>a pipeline no runner runs; the static checks still read it</td>
+</tr>
+</tbody>
+</table>
+<p>The keys follow these rules:</p>
+<ul>
+<li><code>extends=</code> is valid on <code>github-actions</code> and <code>gitlab-ci</code> blocks, the kinds with a merge
+  rule. It must name a block above it on the page, saved with <code>save-as=</code> at that path,
+  of the same kind, and a fragment cannot also carry <code>save-as=</code>.</li>
+<li><code>event=</code> takes <code>pull_request</code> or <code>push</code> on a <code>github-actions</code> block, and <code>push</code> or
+  <code>merge_request</code> on a <code>gitlab-ci</code> block; the other kinds take no event. Without it, a
+  GitHub workflow runs for <code>pull_request</code> when its <code>on:</code> lists that event, and for
+  <code>push</code> otherwise, and a GitLab pipeline runs for <code>push</code>.</li>
+<li><code>runner=</code> takes only <code>none</code>, and then needs a <code>reason=</code> that follows the
+  <code>illustrative</code> rules. <code>reason=</code> goes with <code>runner=none</code> only.</li>
+<li><code>azure-pipelines</code> blocks and YAML <code>jenkins</code> blocks have no runner. They take none of
+  these keys and get the static checks only.</li>
+<li>A <code>groovy</code> block must be marked <code>config kind=jenkinsfile</code>, with <code>runner=none</code> and a
+  reason when no runner can run it. An unmarked <code>groovy</code> block, or one marked only with
+  <code>save-as=</code>, is an error, so a Jenkinsfile cannot drop out of the runs. So is a block
+  fenced <code>jenkinsfile</code> or <code>Jenkinsfile</code>, whatever its marker: fence it as <code>groovy</code>.</li>
+</ul>
+<p>A fragment is merged into the pipeline it extends by its kind's rule:</p>
+<ul>
+<li><code>gitlab-ci</code>: as GitLab merges an included file, with the fragment as the including
+  file. Mappings merge at any depth and the fragment's value wins; anything else, such
+  as a <code>script:</code> or <code>rules:</code> list, is replaced by the fragment's.</li>
+<li><code>github-actions</code>, a mapping of jobs: the jobs are added to the saved workflow, and a
+  job with the ID of a saved one replaces it whole.</li>
+<li><code>github-actions</code>, a list of steps: a named step replaces the saved job's step with
+  the same <code>name</code>, and an unnamed one the step that uses the same action, whatever its
+  <code>@</code> ref. A step with no counterpart goes right before the next fragment step that
+  replaces one, or right after the last replaced step.</li>
+</ul>
+<p>The static checks merge each fragment the same way and report one that does not merge,
+such as a list of steps none of which replaces a saved step, or one whose steps match
+steps in more than one job. Whether a block scans only the changed files is read from
+the pipeline, not the marker: an <code>ash</code> command with <code>--changed-files-only</code>, or a call
+of <code>run-ash-security-scan.yml</code> with its <code>changed-files-only</code> input set to <code>true</code>.
+<code>tests/unit/test_docs_ci_runner_census.py</code> compares the blocks each runner leg runs
+with an exact list, and checks that every CI block is run by a leg, marked
+<code>runner=none</code>, or of a kind with no runner, so a block that stops running fails the
+unit suite.</p>
+<h3 id="option-tables">Option tables<a class="headerlink" href="#option-tables" title="Permanent link">&para;</a></h3>
+<p>A table that documents options, keys, or parameters carries a marker naming the section
+it documents, on the line directly above its header row:</p>
+<div class="language-markdown highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>&lt;!-- doctest: options of=scanners.bandit --&gt;
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>| Option | Type | Default | Description |
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>|--------|------|---------|-------------|
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>| <span class="sb">`confidence_level`</span> | string | <span class="sb">`all`</span> | Lowest confidence bandit reports |
+</span></code></pre></div>
+<p>Every row's first code span must be a key of that section, and its Default cell must
+state the default the code has. A column headed Defaults to, If not passed, If not set,
+or If unset is a Default column too. Any other column whose header says it holds
+defaults is an error, because nothing compares it.</p>
+<p>A table without a marker is an error, so a new table cannot skip the check, when both
+of these hold:</p>
+<ul>
+<li>its first header cell is Option, Key, Field, Setting, Argument, Param, Parameter, or
+  Prop, or it has a column of defaults;</li>
+<li>most of its rows name a key: of the ASH config model, of an <code>ash</code> command, of an MCP
+  tool, or of a section in the code tree (a Python function's parameters, a Terraform
+  module's variables, an action's or workflow's inputs, the Dockerfile's build
+  arguments, a CloudFormation template's parameters, or a TypeScript interface's
+  properties). A name close to a key counts, so a table of misspelled keys still needs
+  its marker.</li>
+</ul>
+<p>A table of other things, such as a list of defenses that are on or off by default,
+needs no marker. A table headed Variable or Environment variable whose rows are mostly
+upper-case names is checked as environment variables instead: each name must be one ASH
+reads, and each Default cell must say what the
+<a href="../../reference/environment-variables/">environment variable reference</a> says.</p>
+<p>A row can name several keys when its first cell is only a list of code spans
+(<code>`quiet`, `simple`, and `debug`</code>). Its Default cell then holds one value for all of
+them, or one code span per key in the same order (<code>`False`, `"origin/main"`</code>). A
+key written with a value (<code>`--build-target ci`</code>) is checked as the key alone.</p>
+<p>Add <code>complete</code> to the marker when the table lists every key of its section, as in
+<code>&lt;!-- doctest: options of=scanners complete --&gt;</code> above a table of every scanner ASH
+ships. Each key of the section that no row names is then an error. <code>--help</code>, a hidden option, and the options ASH reads from every
+scanner need no row.</p>
+<table>
+<thead>
+<tr>
+<th><code>of=</code></th>
+<th>The rows are</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scanners.bandit</code>, <code>reporters.sarif</code>, <code>converters.archive</code></td>
+<td>that plugin's options (the same as adding <code>.options</code>)</td>
+</tr>
+<tr>
+<td><code>scanners.*</code></td>
+<td>the keys every scanner entry has (<code>name</code>, <code>enabled</code>, <code>options</code>)</td>
+</tr>
+<tr>
+<td><code>scanners</code>, <code>reporters</code>, <code>converters</code></td>
+<td>the plugins of that section, by name, built-in and community ones; a column headed Enabled by default or On by default is compared with each plugin's <code>enabled</code> default</td>
+</tr>
+<tr>
+<td><code>config</code></td>
+<td>the top-level keys of an ASH config</td>
+</tr>
+<tr>
+<td><code>global_settings</code>, <code>sandbox</code>, <code>global_settings.suppressions</code>, ...</td>
+<td>the keys under that config path; a path through a list means one item of it</td>
+</tr>
+<tr>
+<td><code>workspace-policy</code>, <code>workspace-policy.workspace</code>, ...</td>
+<td>keys of the workspace policy file</td>
+</tr>
+<tr>
+<td><code>cli</code>, <code>cli.scan</code>, <code>cli.config.get</code>, ...</td>
+<td>the options and arguments of that <code>ash</code> command</td>
+</tr>
+<tr>
+<td><code>mcp.run_ash_scan</code>, ...</td>
+<td>the parameters of that MCP tool, from the input schema the server lists</td>
+</tr>
+<tr>
+<td><code>python.automated_security_helper.interactions.run_ash_scan.run_ash_scan</code></td>
+<td>the parameters of a Python function, a class's <code>__init__</code> (<code>python.&lt;module&gt;.&lt;Class&gt;</code>) or a method (<code>python.&lt;module&gt;.&lt;Class&gt;.&lt;method&gt;</code>), read from the source without importing it</td>
+</tr>
+<tr>
+<td><code>dockerfile</code></td>
+<td>the build arguments of the shipped <code>Dockerfile</code>, with the defaults its <code>ARG</code> lines give</td>
+</tr>
+<tr>
+<td><code>cloudformation:deploy/cdk/templates</code></td>
+<td>the Parameters of one CloudFormation template, or of every template in a directory</td>
+</tr>
+<tr>
+<td><code>github-inputs:.github/workflows/run-ash-security-scan.yml</code></td>
+<td>the inputs of a GitHub Action (its <code>action.yml</code> or the directory holding one) or of a workflow (<code>workflow_call</code> and <code>workflow_dispatch</code>)</td>
+</tr>
+<tr>
+<td><code>typescript:deploy/cdk-constructs/src/ash-scan-step.ts:ASHScanStepProps</code></td>
+<td>the properties of a TypeScript interface; one without <code>?</code> is required, and the default is its JSDoc <code>@default</code> (an <code>@default - words</code> default is prose and is not compared)</td>
+</tr>
+<tr>
+<td><code>terraform:deploy/terraform/modules/fargate</code></td>
+<td>the variables of a Terraform module: every <code>variable</code> block in the directory's <code>.tf</code> files; one without a default is required, and one whose default is not a literal has no default to compare</td>
+</tr>
+</tbody>
+</table>
+<p>Python, Dockerfile, CloudFormation, GitHub, TypeScript, and Terraform sections are read from the code tree, the
+checkout of the installed ASH (see <a href="#check-docs-against-another-checkouts-code">Check docs against another checkout's
+code</a>).</p>
+<p>A Default cell is one of:</p>
+<ul>
+<li>a value in one code span, read as YAML: <code>`true`</code>, <code>`1800`</code>, <code>`[]`</code>,
+  <code>`null`</code>, <code>`ash-scan`</code>, or <code>`"&gt;=1.7.0,&lt;2.0.0"`</code> for a string that YAML would
+  read as something else. A path under the repository or home directory starts
+  <code>&lt;repository&gt;/</code> or <code>~/</code>;</li>
+<li><code>from `ENV_NAME`, else `VALUE`</code> (one or more <code>from</code> parts) for a default ASH reads
+  from the environment; <code>VALUE</code> is the default when the variable is unset;</li>
+<li><code>`VALUE` on Linux and macOS; `VALUE` on Windows</code> for a default that depends on the
+  platform;</li>
+<li>one of the phrases <code>required</code>, <code>see the section</code> (the key is a nested section),
+  <code>computed at run time</code>, or <code>depends on the platform</code>, and for <code>ash</code> options <code>off</code>,
+  <code>on</code>, or <code>not set</code>. <code>empty</code> means an empty string or list. A phrase may be set in
+  emphasis (<code>*required*</code>).</li>
+</ul>
+<p>A bare word such as <code>true</code> or <code>None</code> is read the same way; anything else is reported.</p>
+<p>Defaults of a <code>python.</code> section are read as Python, not YAML: write <code>`None`</code>,
+<code>`False`</code>, <code>`"low"`</code>, or <code>`ExecutionStrategy.PARALLEL`</code>. A literal is compared
+by value and anything else by its source text, and a string may also be written without
+quotes (<code>`t3.medium`</code>). Dockerfile, CloudFormation, GitHub, and TypeScript defaults
+are compared as written, so <code>`NO`</code> is the string NO, not false. A default that is a
+member of an enum or class may be written by the member alone: <code>`PIP`</code> for
+<code>ASHInstallMode.PIP</code>, <code>`PARALLEL`</code> for <code>ExecutionStrategy.PARALLEL</code>.</p>
+<h3 id="commands-options-and-variables-in-prose">Commands, options, and variables in prose<a class="headerlink" href="#commands-options-and-variables-in-prose" title="Permanent link">&para;</a></h3>
+<p>An inline code span that starts with <code>ash</code>, or with a wrapper that runs it (<code>uvx</code>,
+<code>pipx run</code>, <code>uv run</code>, <code>docker run</code>), is checked like a command. A span that is only an
+option must be an option of some <code>ash</code> command, so write another program's option with
+the program: <code>pytest --run-integration</code>, not the bare option. On a generated reference
+page, a row a plugin's code wrote names the program even for an option ASH also has,
+because there a bare <code>--config</code> could be either. That covers the rows of a plugin's
+options table and the environment variables whose purpose is quoted from a plugin
+module. Write <code>zizmor --config</code>, and <code>ash --config</code> for ASH's own.</p>
+<p>Every <code>ASH_*</code> name anywhere on a page must be a variable ASH reads. So must every name
+in the first column of a table headed "Variable" or "Environment variable". Write a
+family as <code>ASH_MCP_*</code>; at least one variable ASH reads must start with the prefix.</p>
+<p>An inline code span that is a dotted config path starting with a top-level config key
+(<code>scanners.bandit.options.severity_threshold</code>, <code>global_settings.suppressions</code>,
+<code>sandbox.mode</code>, also with a value after it, as in <code>scanners.bandit.enabled=false</code>) must
+resolve in ASH's config models, community plugins included when this ASH has them. Use
+<code>*</code> or <code>&lt;name&gt;</code> for a plugin name that is not fixed: <code>scanners.&lt;name&gt;.enabled</code>.</p>
+<p>Two more kinds of name are accepted. A build argument, declared with <code>ARG</code> in the
+Dockerfile ASH ships or passed by ASH as <code>--build-arg NAME=...</code> (as it passes the
+image name to a custom Containerfile), is documented like any variable. A variable
+only the test suite reads or CI sets (in <code>tests/</code>, or in an <code>env:</code> block under
+<code>.github/</code>) is accepted on contributor pages (the pages under
+<code>docs/content/contributing/</code>, the repository's <code>CONTRIBUTING.md</code>, and its
+<code>DEVELOPMENT.md</code>) and reported anywhere else, because a user cannot use it. Running
+the checks with <code>scripts/verify_docs_freshness.py --verbose</code> prints which of these
+sets each accepted name matched.</p>
+<p>One kind of read is not in the read set: a config value that starts with a reference
+such as <code>${NAME:default}</code> or <code>${NAME}</code>, which ASH's config loader replaces with the
+environment variable for any name its rule allows (every <code>ASH_*</code> name, and three AWS
+ones). When the variable is not set, <code>${NAME:default}</code> becomes <code>default</code>, and a scan
+refuses a config whose <code>${NAME}</code> has no default, with exit 3. A name that one of the
+page's ASH config blocks references either way counts as read everywhere on the page,
+so the page can set the variable its own config uses.</p>
+<h3 id="file-and-scanner-names">File and scanner names<a class="headerlink" href="#file-and-scanner-names" title="Permanent link">&para;</a></h3>
+<p>An inline code span that names a file <code>ash.&lt;name&gt;</code>, alone or at the end of a path, or
+<code>reports/&lt;name&gt;</code>, must name a file ASH writes. That is the report of a registered
+reporter (<code>ash.&lt;extension&gt;</code>), a file a reporter's code writes beside its report (the S3
+reporter's <code>reports/s3-report.json</code>), a file name a reporter's options default to, a
+file name held by a constant in ASH's package whose name says it is one (ending in
+<code>_FILE</code>, <code>_FILES</code>, <code>_FILENAME</code>, and the like), or a file the repository ships
+(<code>Formula/ash.rb</code>). The report of a reporter a Python block on the
+same page declares counts on that page. So does the report of a plugin package in this
+repository, such as the example plugin package, on a page in the package's project
+directory or a page that names the package. A placeholder, as in
+<code>reports/ash.&lt;extension&gt;</code>, is not checked.</p>
+<p>In a table, every item of a column headed Scanner, Scanners, Built-in scanners,
+Community plugins, or Community scanners must be one scanner ASH ships, built in or a
+community plugin as the header says. A note in parentheses after a name is ignored. Any other item of several
+words is an error, because nothing can check it: write
+<code>semgrep, opengrep (as far as their rules cover the language)</code>, and put longer notes in
+another column.</p>
+<h3 id="links-and-pages">Links and pages<a class="headerlink" href="#links-and-pages" title="Permanent link">&para;</a></h3>
+<ul>
+<li>A relative link must reach an existing file, and its <code>#anchor</code> an existing heading
+  or <code>id</code>. On site pages, anchors are computed the way mkdocs computes them; in files
+  GitHub renders (<code>README.md</code>, <code>CONTRIBUTING.md</code>), the way GitHub does.</li>
+<li>A page under <code>docs/content</code> may only link to files under <code>docs/content</code>, because
+  mkdocs cannot publish anything else. Link to other repository files with their
+  GitHub URL, <code>https://github.com/awslabs/automated-security-helper/blob/main/&lt;path&gt;</code>;
+  the path must exist.</li>
+<li>Every page is reachable from a <code>.nav.yml</code>, or matches a pattern in <code>not_in_nav</code> in
+  <code>mkdocs.yml</code> with a comment saying why. A <code>.nav.yml</code> entry may be a page, a
+  directory (which then uses its own <code>.nav.yml</code>, or lists everything in it), or a glob
+  such as <code>docs/plugins/community/*.md</code>. The check runs awesome-nav's own resolver, so
+  a glob means what it means in the build, including that it only picks up pages no
+  other entry already took. A glob that matches nothing is an error. A glob with
+  options is written <code>- glob: "&lt;pattern&gt;"</code> with at least one option beside it; on its
+  own, <code>- glob: "&lt;pattern&gt;"</code> is a titled link to a page named by the pattern.</li>
+<li>When you move or rename a page, add the old path to
+  <a href="https://github.com/awslabs/automated-security-helper/blob/main/docs/redirects.yml"><code>docs/redirects.yml</code></a>.
+  The site build writes a page at the old URL that forwards readers to the new one,
+  keeping the <code>#anchor</code> they followed, so that anchor must exist on the new page.</li>
+</ul>
+<h3 id="docs-links-in-the-ash-source">Docs links in the ASH source<a class="headerlink" href="#docs-links-in-the-ash-source" title="Permanent link">&para;</a></h3>
+<p>ASH itself names docs pages: help text and error messages point at the site, <code>ash
+get-genai-guide</code> fetches a docs file from GitHub by path, and some messages name a
+heading. The static checks read every string in the package source (docstrings
+excepted) and require that:</p>
+<ul>
+<li>a URL on the site reaches a page, directly or through a redirect, and its <code>#anchor</code>
+  exists on the page it ends at;</li>
+<li>a raw or blob GitHub URL to a docs file names a file that exists. A redirect does not
+  help here, because fetching the file does not follow it; when a page moves, the code
+  must change too;</li>
+<li>a GitHub URL to any other repository file names a file that exists;</li>
+<li>a docs path (<code>docs/content/...md</code>) exists, and a heading the text quotes beside it
+  (<code>'Some heading' in docs/content/page.md</code>) is a heading on that page.</li>
+</ul>
+<p>An f-string is read with each placeholder replaced by the constant it names. A URL
+whose path depends on anything else cannot be checked, and is reported as such.</p>
+<h2 id="run-the-checks-locally">Run the checks locally<a class="headerlink" href="#run-the-checks-locally" title="Permanent link">&para;</a></h2>
+<p>Run these from a checkout of the repository.</p>
+<!-- doctest: illustrative reason="runs in a checkout of this repository" -->
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Every static check, as the lint job runs them</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/verify_docs_freshness.py
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># The examples of one page, through the runner</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/integration/docs/test_docs_examples.py<span class="w"> </span>--run-integration<span class="w"> </span>-n<span class="w"> </span><span class="m">0</span><span class="w"> </span>-k<span class="w"> </span>getting-started
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="c1"># The site, as the docs job builds it</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>uv<span class="w"> </span>run<span class="w"> </span>mkdocs<span class="w"> </span>build<span class="w"> </span>--clean<span class="w"> </span>--strict
+</span></code></pre></div>
+<p><code>verify_docs_freshness.py</code> prints PASS or FAIL for each check, with the findings under
+each failing one, and exits 1 when any check fails. A check that raises did not run:
+it prints ERROR with the error, and the script exits 2. Several checks list files with
+git, so run the script in a git checkout rather than an extracted copy of one. The
+expression in
+<code>pytest -k getting-started</code> selects pages by path, so it runs every
+page whose path contains <code>getting-started</code>. To check that the runner and the checks
+themselves still catch what they should:</p>
+<!-- doctest: illustrative reason="runs in a checkout of this repository" -->
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/unit/test_docs_checks_can_fail.py<span class="w"> </span>tests/unit/test_docs_freshness_gate_can_fail.py
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/integration/docs/test_docs_runner_can_fail.py<span class="w"> </span>--run-integration<span class="w"> </span>-n<span class="w"> </span><span class="m">0</span>
+</span></code></pre></div>
+<h3 id="check-docs-against-another-checkouts-code">Check docs against another checkout's code<a class="headerlink" href="#check-docs-against-another-checkouts-code" title="Permanent link">&para;</a></h3>
+<p>Docs written for code that is not on main yet are checked against a checkout that has
+it, while the pages stay in their own checkout. Run the checks with the code
+checkout's interpreter and name the docs checkout. Every ASH import, the CLI, the
+config models, and the environment variables come from the interpreter's ASH; every
+page, the nav, <code>mkdocs.yml</code>, the redirect map, and the fixtures come from the docs
+checkout. Both commands print which package and which docs root they used.</p>
+<!-- doctest: illustrative reason="needs two checkouts of this repository" -->
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nv">CODE</span><span class="o">=</span>../code-checkout
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nv">DOCS</span><span class="o">=</span><span class="nv">$PWD</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="s2">&quot;</span><span class="nv">$CODE</span><span class="s2">/.venv/bin/python&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DOCS</span><span class="s2">/scripts/verify_docs_freshness.py&quot;</span><span class="w"> </span>--docs-root<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DOCS</span><span class="s2">&quot;</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="s2">&quot;</span><span class="nv">$CODE</span><span class="s2">/.venv/bin/pytest&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DOCS</span><span class="s2">/tests/integration/docs&quot;</span><span class="w"> </span>--run-integration<span class="w"> </span>-n<span class="w"> </span><span class="m">0</span><span class="w"> </span>--docs-root<span class="o">=</span><span class="s2">&quot;</span><span class="nv">$DOCS</span><span class="s2">&quot;</span>
+</span></code></pre></div>
+<p>Use the code checkout's <code>pytest</code> rather than <code>python -m pytest</code> from the docs
+checkout: <code>python -m</code> puts the current directory first on the import path, and the
+docs checkout's copy of the package would then be the one imported. Pass the option to
+pytest as one word, <code>pytest --docs-root=&lt;checkout&gt;</code>: pytest reads a separate value as
+a test path before the option is registered, and when the tests and the docs come from
+different checkouts it then loads both checkouts' <code>tests/conftest.py</code> and stops with
+"option names {'--run-slow'} already added".</p>
+<p>The reference page generators take the same two checkouts: each documents the ASH its
+interpreter imports, and compares its page in the docs checkout with what it generates
+(<code>generate_cli_docs.py --docs-root "$DOCS" --check</code>). Run them from any directory; each
+prints the package it documents.</p>
+<!-- doctest: illustrative reason="needs two checkouts of this repository" -->
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nv">CODE</span><span class="o">=</span>../code-checkout
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nv">DOCS</span><span class="o">=</span><span class="nv">$PWD</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="k">for</span><span class="w"> </span>page<span class="w"> </span><span class="k">in</span><span class="w"> </span>cli_docs<span class="w"> </span>config_reference<span class="w"> </span>converter_reference<span class="w"> </span>env_var_reference<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">    </span>mcp_tool_reference<span class="w"> </span>reporter_docs<span class="w"> </span>scanner_reference<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">  </span><span class="s2">&quot;</span><span class="nv">$CODE</span><span class="s2">/.venv/bin/python&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DOCS</span><span class="s2">/scripts/generate_</span><span class="nv">$page</span><span class="s2">.py&quot;</span><span class="w"> </span>--docs-root<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DOCS</span><span class="s2">&quot;</span><span class="w"> </span>--check
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="k">done</span>
+</span></code></pre></div>
+<p>Without the check option, each rewrites its page instead. The MCP tools generator also
+writes the agent plugins' tool reference, so after rewriting it, copy that into every
+plugin from the docs checkout:</p>
+<!-- doctest: illustrative reason="needs a checkout of this repository" -->
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DOCS</span><span class="s2">/ash-agent-plugins&quot;</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>uv<span class="w"> </span>run<span class="w"> </span>--project<span class="w"> </span>agentic-coding/transpiler<span class="w"> </span>agentic-plugins<span class="w"> </span>build
+</span></code></pre></div>
+<p>A generator's run is offline and leaves the home directory alone: uv and pip may not
+reach an index, every proxy variable points at a local port that refuses connections,
+and uv's and the XDG cache, data, and config directories are temporary ones that are
+removed when it exits. Building the scanner plugins asks each tool for its version, and
+online that used to install the tools into the home directory.</p>
+<h2 id="run-the-ci-examples-with-their-runners">Run the CI examples with their runners<a class="headerlink" href="#run-the-ci-examples-with-their-runners" title="Permanent link">&para;</a></h2>
+<p>The pipelines on the CI pages also run, each under its CI system's own local runner, in
+the Docs CI Runners workflow,
+<a href="https://github.com/awslabs/automated-security-helper/blob/main/.github/workflows/ash-docs-ci-runners.yml"><code>ash-docs-ci-runners.yml</code></a>.
+It runs on a pull request that changes a path its <code>paths</code> filter lists, such as a CI
+page or its template, the harness and its pins, the fixture, or the install, scan, and
+report code the runs check. It also runs from the Actions tab, for every leg, or the legs
+of the runner its <code>legs</code> input names. A required check that does not run blocks the
+merge, so this path-filtered workflow is not a required check, and <code>required-checks</code>,
+which stands for the jobs of the "ASH - Unified CI" workflow, does not cover it.</p>
+<p>Each leg of its matrix is one runner on one page, and runs every block of that page the
+runner can run:</p>
+<table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>Runner</th>
+<th>Legs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>github-actions</code></td>
+<td>nektos/act, which runs each job on the hosted runner itself</td>
+<td><code>act</code>, one for each page whose GitHub Actions blocks it runs</td>
+</tr>
+<tr>
+<td><code>gitlab-ci</code></td>
+<td>gitlab-ci-local, which runs each job in its <code>image:</code></td>
+<td><code>gitlab-ci-local</code></td>
+</tr>
+<tr>
+<td><code>jenkinsfile</code></td>
+<td>Jenkinsfile Runner</td>
+<td><code>jenkinsfile-runner-lts</code>, on the LTS core of Jenkins pinned in <code>runners.toml</code>, and <code>jenkinsfile-runner-bundled</code>, on the core the Jenkinsfile Runner release is built against</td>
+</tr>
+<tr>
+<td><code>buildspec</code></td>
+<td>the AWS CodeBuild local agent</td>
+<td><code>codebuild-agent</code></td>
+</tr>
+<tr>
+<td><code>circleci</code></td>
+<td>the CircleCI CLI: <code>circleci config validate</code> and <code>circleci config process</code>, then <code>circleci local execute</code></td>
+<td><code>circleci</code></td>
+</tr>
+<tr>
+<td><code>azure-pipelines</code>, YAML <code>jenkins</code></td>
+<td>none; these blocks get the static checks only</td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+<p>The core that Jenkinsfile Runner's release is built against is past its upstream support
+period. Its leg runs only on a GitHub-hosted runner's throwaway VM, with no listener and
+no credentials.</p>
+<h3 id="how-a-run-is-set-up">How a run is set up<a class="headerlink" href="#how-a-run-is-set-up" title="Permanent link">&para;</a></h3>
+<p>Each block a leg runs is one test of <code>tests/integration/docs/test_docs_ci_runners.py</code>,
+from the census in <code>scripts/docs_checks.py</code>. For each one:</p>
+<ul>
+<li>The block, merged into the pipeline it extends if it is a fragment, is committed as
+  the pipeline file of a new git repository made from the default fixture,
+  <code>sample-project</code>, with a bare repository holding <code>main</code> as its <code>origin</code>. For a pull
+  request or merge request event, a branch adds one commit with <code>changed.py</code>, whose one
+  finding is a <code>subprocess.call</code> with <code>shell=True</code> (bandit B602).</li>
+<li>The leg checks out the pull request's head commit, not the merge commit (on a
+  dispatch, the commit it was dispatched on), and builds its wheel. In the block's
+  install line, the release becomes that wheel, which gitlab-ci-local and
+  <code>circleci local execute</code> mount into the job's container. The CodeBuild agent cannot
+  mount it, and a wheel in the source would be scanned, so there the install line names
+  the head commit, which pip installs with git. A call of ASH's reusable workflows
+  becomes a call of the pull request's own copy in the fixture, with <code>ash-version</code> set
+  to the head commit. A GitLab job on ASH's own image,
+  <code>registry.example.com/security/automated-security-helper:ci</code>, runs on the image the
+  run builds under that name from the checkout's <code>Dockerfile</code> (the <code>ci</code> target).</li>
+<li>Each rewrite is an exact replacement, or an insertion at a place read from the
+  pipeline (its parsed YAML, or a Jenkinsfile's <code>sh</code> script), whose count is recorded.
+  A block the rewrites cannot follow fails its test: one with none of the install forms
+  they know, or one that could still get ASH from somewhere else, such as another
+  install of Python packages, another reference to ASH's repository, or an image of ASH
+  the run does not build. So an edit to an install line cannot quietly test the
+  release. The install checks read the pipeline's commands as written, so a command
+  assembled at run time from variables is not seen.</li>
+<li>After each install, the rewrite adds a command that prints the installed
+  distribution's <code>direct_url.json</code>. In a job on the image the run builds, it adds one
+  right before the first command that runs ASH, which prints from inside the image a
+  one-line record of the installed ASH: its version, its <code>direct_url.json</code> if it has
+  one, the number of its package files and one SHA256 of their paths and SHA256s, and
+  the SHA256 of its <code>METADATA</code> and <code>entry_points.txt</code>. The fixture's copy of
+  <code>run-ash-security-scan.yml</code> gets one counted step, right after its one
+  <code>uvx --reinstall</code> step (the scan), that prints the record of the ASH the scan ran,
+  even when the scan failed; the repository's own workflow is not changed.</li>
+<li>Each runner starts with an environment built from nothing: a new, empty home
+  directory, a <code>PATH</code> of the directory that holds the runner, then a fixed system
+  <code>PATH</code>, <code>LANG</code>, the tool download cache of its pytest session (the runs and the
+  controls each have their own), and only the variables that runner needs. An <code>ash</code>
+  that records that it ran is first on the test process's own <code>PATH</code>, and the session
+  fails if any pipeline reached it.</li>
+<li>Each launch has a time limit, the matrix row's <code>launch_timeout</code>. While the runner
+  runs, the test process is the child subreaper of what it starts, so a process whose
+  parent ends stays below the test process, and the runner's environment holds a
+  marker of that launch's own, which the processes it starts inherit unless they clear
+  their environment. When the runner ends, or runs out of time, the processes in its
+  process group, those the launch started below the test process, and those whose
+  environment holds the marker get SIGTERM, and those still running after a short
+  grace SIGKILL. Then the containers the Docker daemon gained while the runner ran are
+  removed, before the next block runs. If any of them is left, the test fails. A
+  process that another service starts for the run, and that gets neither the marker
+  nor a new container, is not found.</li>
+<li>Each Jenkins home stays in pytest's work directory, outside the output directory the
+  workflow uploads; only the build's log, <code>build.xml</code>, JUnit record, and archive are
+  copied out.</li>
+<li>The runners and tools are pinned by SHA256 and the images by digest, in
+  <code>tests/integration/docs/ci_runners/runners.toml</code> and the Jenkins plugin lists beside
+  it, and every image the leg pulls is checked against those digests and the images the
+  run builds.</li>
+</ul>
+<h3 id="what-a-run-checks">What a run checks<a class="headerlink" href="#what-a-run-checks" title="Permanent link">&para;</a></h3>
+<p>Every runnable block expects ASH to exit 2 on the fixture's findings. A test passes only
+when its run shows all of these:</p>
+<ul>
+<li>the runner's own result: the jobs that gate on findings fail under act,
+  gitlab-ci-local exits non-zero and the exit code its gate job reads is 2, the build
+  fails under Jenkinsfile Runner and <code>circleci local execute</code>, and the BUILD phase
+  fails under the CodeBuild agent;</li>
+<li>ASH's verdict line in the log, such as
+  <code>ERROR (2) Exiting due to 3 actionable findings found in ASH scan</code>, with the count the
+  fixture plants: two findings in <code>app.py</code>, one more in <code>changed.py</code> on a pull request
+  or merge request branch, and only that one for a scan of the changed files;</li>
+<li>the reports where the page says the pipeline keeps them: act's artifact store, the
+  GitLab job's artifacts, the Jenkins build's archive and JUnit record, the CodeBuild
+  agent's artifact and report directories, and for CircleCI a copy that the rewrite
+  adds as the job's last step, because <code>circleci local execute</code> discards the project
+  directory when the job ends;</li>
+<li>the actionable findings by file in <code>ash_aggregated_results.json</code>;</li>
+<li>under act, what the stubs recorded: the SARIF file each upload was given (on the
+  sharded example only the last upload's, which must be the SARIF the merge step
+  wrote), the check run the reusable scan workflow publishes, with one failed test per
+  actionable finding, and, for a pull request, its comment; and each step that stops
+  workflow commands printing its resume token;</li>
+<li>which ASH ran. Each printed <code>direct_url.json</code> must name the wheel the leg built, with
+  its SHA256, or the head commit of the base repository, one for each print in each run
+  of its job, and the wheel file must still have that SHA256 after the run. No line of
+  the log may show ASH downloaded from a package index: a <code>pypi.org</code> or
+  <code>files.pythonhosted.org</code> URL that names it, a <code>Downloading</code> line for it, or uv's
+  <code>+ automated-security-helper==</code> line for a copy that came from neither a file nor a
+  git URL. The job on the image the run builds is checked by its own record instead:
+  its version, its package files (less bytecode and the revision file that each build
+  writes for itself), its <code>METADATA</code>, and its entry points must match those of the
+  wheel built from the same checkout, a <code>direct_url.json</code> in it must name a local file
+  with that wheel's name, and the runner's log must name the image the run built, as
+  its build recorded it.</li>
+</ul>
+<p>After the runs, <code>tests/integration/docs/ci_runners/check_junit.py</code> checks that the leg
+ran one test for each block the census gives it, and skipped none. The negative
+controls in <code>tests/integration/docs/test_docs_ci_runners_can_fail.py</code> run the first
+block of each leg, page, and install mechanism, the wheel or a git commit, with an
+install that cannot succeed: a wheel path that does not exist, or a commit no
+repository has. In each, the job's script must start, a line it prints must name the
+broken input with the installer's refusal of it, and the run must fail with no verdict
+line, so a pipeline that fails for another reason is not taken for one that ran the
+ASH under test. The job on the image the run builds installs nothing, so it has no
+control. One more control checks that the outer <code>ash</code> never ran, and
+<code>check_junit.py --controls</code> checks that every control ran.</p>
+<p>The runs start containers that are given the Docker socket, as the CodeBuild agent and
+<code>circleci local execute</code> do, so the tests refuse to run anywhere but a GitHub-hosted
+runner unless <code>DOCTEST_CI_RUNNERS_ANYWHERE=1</code> is set. The refusal is an error, not a
+skip. Set the variable only on a machine you can throw away, whose Docker daemon
+nothing else uses: each launch removes every container the daemon gained while it
+ran. A launch also needs Linux's child subreaper and <code>/proc</code>, and is refused before it
+starts on a host without them. Unless pytest is started with <code>pytest --run-ci-runners</code>,
+it deselects these tests, so the unit and integration jobs never run them. Listing the
+tests starts no runner, and shows which blocks each leg runs:</p>
+<!-- doctest: illustrative reason="runs in a checkout of this repository" -->
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/integration/docs/test_docs_ci_runners.py<span class="w"> </span>--run-integration<span class="w"> </span>--run-ci-runners<span class="w"> </span>--collect-only<span class="w"> </span>-q<span class="w"> </span>-n<span class="w"> </span><span class="m">0</span>
+</span></code></pre></div>
+<h3 id="what-the-runs-do-not-check">What the runs do not check<a class="headerlink" href="#what-the-runs-do-not-check" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Job permissions and GitHub's services. act gets no token, and the actions that write
+  to GitHub (code scanning uploads, pull request comments, and check runs) are replaced
+  by stubs that record what they were given.</li>
+<li>What GitLab, GitHub, and CodeBuild do with the reports, such as GitLab's merge request
+  widget or a CodeBuild report group. The runs read the files the jobs keep.</li>
+<li>Other Jenkins agents. The Jenkinsfile runs on Jenkinsfile Runner's built-in node,
+  which an init hook labels <code>linux</code>, on the hosted runner itself.</li>
+<li>Other CodeBuild images and container mode. The agent runs the pinned
+  <code>aws/codebuild/amazonlinux-x86_64-standard:5.0</code> build image, and is given neither the
+  host's AWS credentials nor privileged mode.</li>
+<li>CircleCI's cache and its uploads. The runs check nothing about <code>restore_cache</code>,
+  <code>save_cache</code>, <code>store_test_results</code>, or <code>store_artifacts</code>.</li>
+</ul>
+<h2 id="versioned-docs">Versioned docs<a class="headerlink" href="#versioned-docs" title="Permanent link">&para;</a></h2>
+<p>The site is published as versions with <a href="https://github.com/jimporter/mike">mike</a>. Each
+version is a directory of the <code>gh-pages</code> branch, and <code>versions.json</code> at the root of the
+branch lists them for the version selector in the site header.</p>
+<ul>
+<li>Every push to <code>main</code> publishes the version <code>main</code>, titled "main (unreleased)". Its
+  pages say that they describe unreleased code, and link to the latest release. Its
+  <a href="../releases/#version-pinned-pages">version-pinned pages</a> are built from their
+  templates with <code>main</code> for the version, so their install commands install <code>main</code>
+  (<code>@main</code>, <code>git clone --branch main</code>, <code>rev: main</code>), and the notice says so. Where a
+  template needs the release number itself, as in a sample of <code>ash --version</code> output,
+  it writes <code>{{RELEASE}}</code>, which stays the current release number. The static checks
+  report <code>{{RELEASE}}</code> written as the ref of an install command anywhere but a table
+  row or a <code>text</code> block, so the <code>main</code> version cannot install a release.</li>
+<li>Every release tag <code>vX.Y.Z</code> publishes the version <code>X.Y.Z</code> (see
+  <a href="../releases/#the-documentation-site">Releases and versions</a>). The newest release also
+  gets the <code>latest</code> alias. <code>latest/</code> is a full copy of it rather than a redirect, and
+  every version names its <code>latest/</code> page as the canonical one for search engines. A
+  patch release for an older line is published without moving <code>latest</code>.</li>
+<li>A page of a release that is not the latest shows a notice saying so, with a link to
+  the latest release.</li>
+<li>Any other tag, such as the floating <code>v3</code> or a prerelease, publishes nothing.</li>
+</ul>
+<p>The deploy also manages the root of the branch. The root <code>index.html</code> redirects to
+<code>latest/</code>, or to <code>main/</code> until a release has been published, and every page path of
+that version has a redirect at the root that keeps the <code>#anchor</code>. So
+<code>/how-to/install/#install-from-main</code> still works, and so does an old page path that
+<code>docs/redirects.yml</code> maps, through the redirect the build writes for it. Everything
+else at the root is removed on each deploy, except <code>.nojekyll</code>, <code>CNAME</code>, and
+<code>versions.json</code>. To keep another file there, add it to <code>ROOT_KEEP</code> in
+<a href="https://github.com/awslabs/automated-security-helper/blob/main/scripts/docs_versions.py"><code>scripts/docs_versions.py</code></a>.</p>
+<p>That script does all of the publishing. The workflows never run <code>mkdocs gh-deploy</code>,
+which replaces the whole branch with one unversioned build and so would delete every
+version; the site check in the lint job fails if one does. <code>strict: true</code> in
+<code>mkdocs.yml</code> makes every build strict, including the ones mike runs. To preview a page
+that still has warnings, use <code>mkdocs serve --no-strict</code>.</p>
+<h3 id="previewing-the-versions">Previewing the versions<a class="headerlink" href="#previewing-the-versions" title="Permanent link">&para;</a></h3>
+<p><code>mkdocs serve</code> shows one version. To see the version selector and the notices,
+publish to a local branch and serve that. Unless it is told to push, the deploy only
+commits to the branch it is given, and a branch other than <code>gh-pages</code> keeps the
+preview apart from the real site:</p>
+<!-- doctest: illustrative reason="runs in a checkout of this repository and starts a server" -->
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/docs_versions.py<span class="w"> </span>deploy<span class="w"> </span>--ref<span class="w"> </span>refs/tags/v0.0.1<span class="w"> </span>--branch<span class="w"> </span>docs-preview
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/docs_versions.py<span class="w"> </span>deploy<span class="w"> </span>--ref<span class="w"> </span>refs/heads/main<span class="w"> </span>--branch<span class="w"> </span>docs-preview
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>uv<span class="w"> </span>run<span class="w"> </span>mike<span class="w"> </span>serve<span class="w"> </span>--branch<span class="w"> </span>docs-preview<span class="w">   </span><span class="c1"># http://localhost:8000/, stop with Ctrl+C</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>git<span class="w"> </span>branch<span class="w"> </span>-D<span class="w"> </span>docs-preview
+</span></code></pre></div>
+<p>The ref only names the version: both commands publish the docs in your working tree.</p>
+<h3 id="what-the-versions-check-does">What the versions check does<a class="headerlink" href="#what-the-versions-check-does" title="Permanent link">&para;</a></h3>
+<p>The <code>build-docs</code> job runs <code>uv run python scripts/docs_versions.py check</code>. It
+publishes 0.0.1, then 0.0.0, then <code>main</code> to a throwaway branch of the checkout, with
+every proxy pointing at a port that refuses connections, so a build that needs the
+network fails. Before publishing it puts stand-ins for an unversioned site at the root
+of the branch: a stylesheet, a sitemap, a page no version has, and an old page from
+<code>docs/redirects.yml</code>. The check fails unless:</p>
+<ul>
+<li><code>mike list</code> and <code>versions.json</code> show the three versions, with <code>latest</code> on 0.0.1 only,
+  because 0.0.0 is older;</li>
+<li>every page of every version configures the version selector and loads the theme
+  script that reads <code>versions.json</code>;</li>
+<li>every page of a release carries the outdated notice, every page of <code>main</code> carries the
+  unreleased one, and no page carries the other;</li>
+<li><code>latest/</code> is a copy of 0.0.1, and the other versions name <code>latest/</code> as canonical;</li>
+<li>the version-pinned pages of each release pin that release and no other. On <code>main</code>,
+  outside tables and <code>text</code> blocks, they pin no release, and every install-command form
+  that a page uses in 0.0.1 names <code>main</code> on that page, from <code>@main</code> to
+  <code>refs/heads/main</code>. The committed pages pin the current version, which is neither 0.0.1
+  nor 0.0.0, so this fails unless every build rendered the pages from their templates;</li>
+<li>the root redirects every page of <code>latest/</code>, the old page redirects to its place under
+  <code>latest/</code>, and the stand-ins are gone.</li>
+</ul>
+<p>It deletes the branch afterwards and never pushes. It prints how many versions, pages,
+and redirects it checked. <code>tests/unit/test_docs_versions.py</code> plants each defect the
+check exists for (a missing setting in <code>mkdocs.yml</code>, a template without the notices,
+aliases that are not copies, a root left unversioned, an older release that takes
+<code>latest</code>, pinned pages left as committed) on a small site, and requires the check to
+report it.</p>
+<h2 id="what-a-failure-means">What a failure means<a class="headerlink" href="#what-a-failure-means" title="Permanent link">&para;</a></h2>
+<p>Each static finding is one line: the file and line, the check in brackets, and the
+problem. Runner failures name the page, the line of the block, the command, the exit
+code, and the end of the output. A refused <code>save-as</code> reports <code>save-as refused</code> and the
+reason instead of an exit code. An output sample that does not match reports the first
+sample line the output lacks, as <code>'&lt;line&gt;' is not in the output of the block at line
+&lt;N&gt;</code>, with the end of the output.</p>
+<h3 id="markers_1"><code>markers</code><a class="headerlink" href="#markers_1" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Message contains</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>has no language</td>
+<td>name the language; use <code>text</code> for output</td>
+</tr>
+<tr>
+<td>cannot run in the docs job</td>
+<td>mark the Windows, zsh, or fish block <code>illustrative</code> with a reason</td>
+</tr>
+<tr>
+<td>a blank line separates this marker</td>
+<td>delete the blank line under the marker</td>
+</tr>
+<tr>
+<td>not directly followed by a fenced code block</td>
+<td>move the marker to the line above its fence, or delete it</td>
+</tr>
+<tr>
+<td>unknown mode, is not a key of</td>
+<td>use a mode and key from the tables above</td>
+</tr>
+<tr>
+<td>needs reason=, is a placeholder</td>
+<td>say why the block cannot run</td>
+</tr>
+<tr>
+<td>names no directory</td>
+<td>use a fixture from <code>tests/test_data/docs_fixtures</code></td>
+</tr>
+<tr>
+<td>is not a relative path, leaves the page's project</td>
+<td>give <code>save-as</code> a path inside the project, without <code>..</code></td>
+</tr>
+<tr>
+<td>never saves it</td>
+<td>drop <code>illustrative</code> to save the block without running it, or drop <code>save-as</code></td>
+</tr>
+<tr>
+<td>may only carry save-as</td>
+<td>name a mode for the other keys</td>
+</tr>
+<tr>
+<td>never closed</td>
+<td>close the fence; everything after it was read as code</td>
+</tr>
+<tr>
+<td>marked output but follows no run block</td>
+<td>put the sample directly after the block whose output it shows, or drop the marker</td>
+</tr>
+<tr>
+<td>expect-exit=any checks nothing about the block</td>
+<td>give the exit code the block ends with, or put an output sample directly after it</td>
+</tr>
+<tr>
+<td>config kind=ash-output needs model=</td>
+<td>name the output model the block is part of</td>
+</tr>
+<tr>
+<td>drops out of the runner census, a groovy block takes config kind=jenkinsfile</td>
+<td>mark the <code>groovy</code> block <code>config kind=jenkinsfile</code>, with <code>runner=none</code> and a reason when no runner can run it; fence a <code>jenkinsfile</code> block as <code>groovy</code> first</td>
+</tr>
+<tr>
+<td>config kind=jenkinsfile is a groovy block</td>
+<td>fence a declarative Jenkinsfile as <code>groovy</code>; mark a YAML Jenkins definition <code>config kind=jenkins</code></td>
+</tr>
+<tr>
+<td>has no runner, has no merge rule, takes no event=, is not an event of</td>
+<td>use the key only on a kind that takes it (see <a href="#ci-pipelines">CI pipelines</a>)</td>
+</tr>
+<tr>
+<td>names no earlier block on this page saved with, can extend only a block of its own kind, cannot also be saved</td>
+<td>point <code>extends=</code> at a block above it, of its own kind, saved with <code>save-as=</code> at that path</td>
+</tr>
+<tr>
+<td>runner= takes only none, runner=none needs reason=, reason= goes with runner=none</td>
+<td>mark a block no runner can run <code>runner=none reason="..."</code>, and give <code>reason=</code> only there</td>
+</tr>
+</tbody>
+</table>
+<h3 id="cli"><code>cli</code><a class="headerlink" href="#cli" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Message contains</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>is not an option of</td>
+<td>the option does not exist on that command; the message suggests the nearest one</td>
+</tr>
+<tr>
+<td>has no subcommand</td>
+<td>the command does not exist; check the spelling, or an option's value that reads as a command</td>
+</tr>
+<tr>
+<td>is a flag and takes no value</td>
+<td>drop the <code>=value</code></td>
+</tr>
+<tr>
+<td>needs a value</td>
+<td>give the option a value</td>
+</tr>
+<tr>
+<td>takes no positional arguments</td>
+<td>pass the path with an option such as the source-directory option</td>
+</tr>
+<tr>
+<td>is not an option of any ash command</td>
+<td>another program's option: put the program in the code span</td>
+</tr>
+<tr>
+<td>a plugin's code wrote this row</td>
+<td>put the program in the span, or write <code>ash --config</code> for ASH's own; the page is generated, so change the text in the plugin's code</td>
+</tr>
+<tr>
+<td>placeholder</td>
+<td>a run block cannot contain <code>&lt;placeholder&gt;</code>; use a real value or mark it <code>illustrative</code></td>
+</tr>
+<tr>
+<td><code>no __main__</code></td>
+<td>that module cannot be run with <code>python -m</code></td>
+</tr>
+<tr>
+<td>names no action, has no input</td>
+<td>a GitHub Actions <code>uses:</code> of this repository names a path or input that does not exist</td>
+</tr>
+</tbody>
+</table>
+<h3 id="env"><code>env</code><a class="headerlink" href="#env" title="Permanent link">&para;</a></h3>
+<p><code>is read only by the test suite or CI</code> means the name is real but only contributors
+can use it: move it to a contributor page. Otherwise the name is not one ASH reads,
+nor a build argument. Check the spelling against the
+<a href="../../reference/environment-variables/">environment variable reference</a>, or delete it if the
+variable was removed. If ASH builds the name at runtime, the finding says how many
+lookups could not be resolved; make the lookup a literal or a module constant.</p>
+<h3 id="config"><code>config</code><a class="headerlink" href="#config" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Message contains</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>is not a field of ... ASH accepts it and never reads it</td>
+<td>the key does nothing; use the field the model declares</td>
+</tr>
+<tr>
+<td>ships no scanner (or reporter, converter) named</td>
+<td>the plugin is not built in; load it with <code>ash_plugin_modules</code> in the same block, or mark the block <code>config kind=other</code></td>
+</tr>
+<tr>
+<td>this is not an ASH config</td>
+<td>mark the block with its kind</td>
+</tr>
+<tr>
+<td>does not parse</td>
+<td>fix the syntax; JSON with comments is <code>jsonc</code></td>
+</tr>
+<tr>
+<td>ASH accepts this one</td>
+<td>an <code>ash-invalid</code> block validated; make it fail for the reason it states</td>
+</tr>
+<tr>
+<td>no step of the fragment replaces, more than one job, no longer parses</td>
+<td>the fragment does not merge into the pipeline it extends; see the merge rules in <a href="#ci-pipelines">CI pipelines</a></td>
+</tr>
+<tr>
+<td>any other text</td>
+<td>the model's own validation error, with the path of the key</td>
+</tr>
+</tbody>
+</table>
+<h3 id="python"><code>python</code><a class="headerlink" href="#python" title="Permanent link">&para;</a></h3>
+<p><code>does not parse</code> gives the line of the syntax error. <code>no such module</code> and <code>has no
+name</code> mean an import does not resolve in the project's environment: the module was
+renamed or removed, or the block needs an extra that is not installed. When the module
+is one the page saves, <code>has no name ... the page saves</code> means the saved block does not
+define that name, and <code>no such module</code> means no block saves it. <code>cannot run outside a
+package</code> and <code>goes above the top-level package</code> are relative imports with no package
+to resolve in: save the block inside one with <code>save-as=&lt;package&gt;/&lt;module&gt;.py</code>.</p>
+<h3 id="options"><code>options</code><a class="headerlink" href="#options" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Message contains</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>documents options or keys but names no section</td>
+<td>add <code>&lt;!-- doctest: options of=&lt;section&gt; --&gt;</code> above the table</td>
+</tr>
+<tr>
+<td>is not a key of</td>
+<td>the row names an option the section does not have; the message suggests the nearest</td>
+</tr>
+<tr>
+<td>says ..., but the default is</td>
+<td>the code's default changed; state the one in the message</td>
+</tr>
+<tr>
+<td>says required, but the default is / but the key is required</td>
+<td>the key does (or does not) have a default</td>
+</tr>
+<tr>
+<td>is not a value or a recognized phrase</td>
+<td>write the default in one code span, and move any explanation to another column</td>
+</tr>
+<tr>
+<td>the MCP server has no tool, defines no function or class, no module, is not in the code tree, declares no inputs</td>
+<td>the <code>of=</code> names nothing in the code; the message says which part</td>
+</tr>
+<tr>
+<td>has no key, ships no scanner named</td>
+<td>a dotted config path in a code span does not exist</td>
+</tr>
+<tr>
+<td>needs of= / an options marker goes on the line directly above a table</td>
+<td>fix the marker</td>
+</tr>
+<tr>
+<td>that no row names; the marker says the table is complete</td>
+<td>add a row for the key, or drop <code>complete</code></td>
+</tr>
+<tr>
+<td>states defaults, but it is not compared</td>
+<td>head the column Default, or Enabled by default for whether each plugin is on</td>
+</tr>
+</tbody>
+</table>
+<h3 id="files"><code>files</code><a class="headerlink" href="#files" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Message contains</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>which no reporter ASH registers writes</td>
+<td>the file name is misspelled or the reporter's extension changed; the message suggests the nearest name</td>
+</tr>
+<tr>
+<td>ASH writes no reports/</td>
+<td>name a report or a file a reporter writes beside it; a plugin example's report only on a page that documents the plugin</td>
+</tr>
+</tbody>
+</table>
+<h3 id="scanners"><code>scanners</code><a class="headerlink" href="#scanners" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Message contains</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>is not a scanner ASH ships</td>
+<td>fix the name; the message suggests the nearest one</td>
+</tr>
+<tr>
+<td>is a community plugin, not a built-in scanner (or the reverse)</td>
+<td>move the name to the column for its kind</td>
+</tr>
+<tr>
+<td>is not one scanner name</td>
+<td>list scanner names in the column, with any note in parentheses</td>
+</tr>
+</tbody>
+</table>
+<h3 id="code-links"><code>code-links</code><a class="headerlink" href="#code-links" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Message contains</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>no page on the site serves this URL</td>
+<td>a page the code links to moved; add a redirect, or change the URL in the code</td>
+</tr>
+<tr>
+<td>has no anchor</td>
+<td>the heading the URL points at was renamed; restore the heading or change the URL</td>
+</tr>
+<tr>
+<td>does not exist in the docs</td>
+<td>the docs file the code names moved or was removed; change the code</td>
+</tr>
+<tr>
+<td>a fetch of the file does not follow it</td>
+<td>the code fetches a docs file that moved; change the path in the code</td>
+</tr>
+<tr>
+<td>that page has no such heading</td>
+<td>the code quotes a heading that was renamed</td>
+</tr>
+<tr>
+<td>is built at runtime</td>
+<td>the URL's path is not a constant; write it as a literal so it can be checked</td>
+</tr>
+</tbody>
+</table>
+<h3 id="links-nav-redirects-and-site"><code>links</code>, <code>nav</code>, <code>redirects</code>, and <code>site</code><a class="headerlink" href="#links-nav-redirects-and-site" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Message contains</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>does not exist</td>
+<td>fix the path</td>
+</tr>
+<tr>
+<td>has no heading or anchor</td>
+<td>fix the anchor; heading IDs change when a heading is reworded</td>
+</tr>
+<tr>
+<td>mkdocs cannot serve</td>
+<td>link to the GitHub URL the message gives</td>
+</tr>
+<tr>
+<td>links to a directory</td>
+<td>link to the page in it</td>
+</tr>
+<tr>
+<td>no page on the site serves this URL</td>
+<td>the page moved; update the link or add a redirect</td>
+</tr>
+<tr>
+<td>no reader can reach it</td>
+<td>add the page to a <code>.nav.yml</code>, or to <code>not_in_nav</code> with a reason</td>
+</tr>
+<tr>
+<td>doesn't match any files or directories</td>
+<td>a nav entry or glob reaches no page that is not already listed elsewhere</td>
+</tr>
+<tr>
+<td>nav entry ... names no page</td>
+<td>a titled nav entry points at a page that does not exist</td>
+</tr>
+<tr>
+<td>still exists, which is not a page, itself redirected</td>
+<td>fix the entry in <code>docs/redirects.yml</code></td>
+</tr>
+<tr>
+<td>must be 'warn', does not pass --strict, hooks does not list</td>
+<td><code>mkdocs.yml</code> or the <code>build-docs</code> job lost a strict-build setting; restore it</td>
+</tr>
+<tr>
+<td>the versioned site needs, the mike plugin is not listed</td>
+<td><code>mkdocs.yml</code> lost a setting the <a href="#versioned-docs">versioned site</a> depends on; restore it</td>
+</tr>
+<tr>
+<td>replaces the whole gh-pages branch</td>
+<td>a workflow runs <code>mkdocs gh-deploy</code>; publish with <code>scripts/docs_versions.py deploy</code> instead</td>
+</tr>
+<tr>
+<td>scripts/docs_versions.py deploy (or check) is not run, does not start</td>
+<td>the docs workflow lost the step that publishes the versions, the <code>build-docs</code> job lost the step that checks them, or the tag workflow no longer starts the docs deploy for a release</td>
+</tr>
+<tr>
+<td>the workflow that builds the docs does not exist, the docs workflow does not exist</td>
+<td><code>ash-unified-ci.yml</code> or <code>ash-repo-docs.yml</code> was renamed or removed; the checks read the build from the first and the deploy from the second</td>
+</tr>
+</tbody>
+</table>
+<h3 id="templates"><code>templates</code><a class="headerlink" href="#templates" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Message contains</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>is the ref of an install command</td>
+<td>a template writes <code>{{RELEASE}}</code> where a command names the ASH it installs; use <code>v{{VERSION}}</code> there, or move the release number to a table or a <code>text</code> sample (see <a href="../releases/#version-pinned-pages">Version-pinned pages</a>)</td>
+</tr>
+<tr>
+<td>nothing was checked</td>
+<td>the template manager lists no target with a template</td>
+</tr>
+</tbody>
+</table>
+<h2 id="add-a-generated-reference-page">Add a generated reference page<a class="headerlink" href="#add-a-generated-reference-page" title="Permanent link">&para;</a></h2>
+<p>A reference page that restates the code (a list of options, variables, scanners, or
+tools) is generated, never written by hand. To add one:</p>
+<ol>
+<li>Write <code>scripts/generate_&lt;name&gt;.py</code>. It renders the page from the code (the click
+   tree, a pydantic model, or the plugin registry) and writes it under
+   <code>docs/content/reference/</code>. Run as <code>generate_&lt;name&gt;.py --check</code>, it writes nothing,
+   compares what it would write with the committed file, prints a diff, and exits
+   non-zero if they differ.
+   <a href="https://github.com/awslabs/automated-security-helper/blob/main/scripts/generate_reporter_docs.py"><code>scripts/generate_reporter_docs.py</code></a>
+   is a complete example: it writes the whole page, accepts
+   <code>generate_reporter_docs.py --check --docs-root &lt;dir&gt;</code>, and keeps its hand-written
+   columns in a table, <code>REPORTER_DOCS</code>, that it requires to cover every registered
+   reporter.</li>
+<li>Start the page with a banner that says <code>Generated by scripts/generate_&lt;name&gt;.py</code> and
+   gives the command that regenerates it, <code>uv run python scripts/generate_&lt;name&gt;.py</code>,
+   so a reader who wants to change it knows not to edit it.</li>
+<li>Add the script and its page to <code>REFERENCE_PAGES</code> in
+   <a href="https://github.com/awslabs/automated-security-helper/blob/main/tests/unit/test_generated_docs_freshness.py"><code>tests/unit/test_generated_docs_freshness.py</code></a>.
+   That one entry runs <code>generate_&lt;name&gt;.py --check</code> in the unit suite, so the suite fails
+   when the code changes and the page does not, and checks the banner in the page's
+   first 600 characters.</li>
+<li>Add the page to <code>GOLDEN</code> in
+   <a href="https://github.com/awslabs/automated-security-helper/blob/main/.github/scripts/check-snapshot-trailers.py"><code>.github/scripts/check-snapshot-trailers.py</code></a>,
+   so a commit that changes it needs a <code>Snapshot-Update:</code> trailer.</li>
+<li>Add the page to <code>.nav.yml</code>. The static checks then cover it like any other page.</li>
+</ol>
+<p>The implementation of all of this is in
+<a href="https://github.com/awslabs/automated-security-helper/blob/main/scripts/docs_checks.py"><code>scripts/docs_checks.py</code></a>
+and
+<a href="https://github.com/awslabs/automated-security-helper/blob/main/tests/integration/docs/docs_runner.py"><code>tests/integration/docs/docs_runner.py</code></a>.
+Page paths the checks depend on are constants at the top of <code>docs_checks.py</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,116.24a6,6,0,0,1-8.48,0L134,54.49V216a6,6,0,0,1-12,0V54.49L60.24,116.24a6,6,0,0,1-8.48-8.48l72-72a6,6,0,0,1,8.48,0l72,72A6,6,0,0,1,204.24,116.24Z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+  
+    
+
+<nav class="ash-pagination" aria-label="Previous and next documentation pages">
+  <div class="ash-wrap ash-pagination__inner">
+    
+    <a href="../testing/" rel="prev">
+      <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M222,128a6,6,0,0,1-6,6H54.49l61.75,61.76a6,6,0,1,1-8.48,8.48l-72-72a6,6,0,0,1,0-8.48l72-72a6,6,0,0,1,8.48,8.48L54.49,122H216A6,6,0,0,1,222,128Z"/></svg></span><span><span class="ash-pagination__direction">PREVIOUS</span>Testing</span>
+    </a>
+    
+    
+    <a class="ash-pagination__next" href="../../developer-guide/interface-design/" rel="next">
+      <span><span class="ash-pagination__direction">NEXT</span>Interface design system</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M220.24,132.24l-72,72a6,6,0,0,1-8.48-8.48L201.51,134H40a6,6,0,0,1,0-12H201.51L139.76,60.24a6,6,0,0,1,8.48-8.48l72,72A6,6,0,0,1,220.24,132.24Z"/></svg></span>
+    </a>
+    
+  </div>
+</nav>
+
+  
+  <footer class="ash-footer">
+    <div class="ash-wrap ash-footer__top">
+      <div>
+        <a class="ash-brand" href="../.." aria-label="ASH home">
+          <span class="ash-brand__name">ASH<span class="ash-brand__subtitle">Automated Security Helper</span></span>
+        </a>
+      </div>
+      <div class="ash-footer__links">
+        <div><span>Documentation</span><a href="../../getting-started/local/">Quick start</a><a href="../../how-to/configure/">Configuration</a><a href="../../reference/cli/">CLI reference</a></div>
+        <div><span>Integrations</span><a href="../../reference/scanners/">Scanners</a><a href="../../getting-started/ci/">CI/CD integration</a><a href="../../plugins/">Plugin development</a></div>
+        <div><span>Project</span><a href="https://github.com/awslabs/automated-security-helper">GitHub <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a><a href="../">Contribute</a><a href="https://github.com/awslabs/automated-security-helper/issues">Get help <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a></div>
+      </div>
+    </div>
+    <div class="ash-wrap ash-footer__bottom">
+      <span class="ash-footer-credit">Build with <span class="ash-footer-heart" role="img" aria-label="love">&lt;3</span> at Amazon Web Services</span>
+      <div><button class="ash-motion-toggle" type="button" data-ash-motion aria-pressed="false"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M128,26A102,102,0,1,0,230,128,102.12,102.12,0,0,0,128,26Zm0,192a90,90,0,1,1,90-90A90.1,90.1,0,0,1,128,218ZM110,96v64a6,6,0,0,1-12,0V96a6,6,0,0,1,12,0Zm48,0v64a6,6,0,0,1-12,0V96a6,6,0,0,1,12,0Z"/></svg></span> <span>Pause motion</span></button><a href="https://github.com/awslabs/automated-security-helper/blob/main/LICENSE">License</a><a href="../#security-issue-notifications">Security</a></div>
+    </div>
+    <div class="ash-wrap ash-footer__copyright">&copy; Amazon Web Services, Inc. or its affiliates. All rights reserved.</div>
+  </footer>
+  <div class="ash-toast" role="status" aria-live="polite" aria-atomic="true" data-ash-toast></div>
+
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.indexes", "navigation.path", "navigation.top", "navigation.footer", "toc.follow", "content.tabs.link", "search.share", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate", "content.code.select"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../assets/javascripts/ash.js"></script>
+      
+    
+  </body>
+</html>

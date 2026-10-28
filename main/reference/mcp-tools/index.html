@@ -1,0 +1,4398 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Security scanning for code, infrastructure, secrets, and dependencies.">
+      
+      
+      
+        <link rel="canonical" href="https://awslabs.github.io/automated-security-helper/latest/reference/mcp-tools/">
+      
+      
+        <link rel="prev" href="../converters/">
+      
+      
+        <link rel="next" href="../exit-codes/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="data:,">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>MCP tools - ASH - Automated Security Helper</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/ash.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  
+  <!-- Phosphor SVG icon license:
+  MIT License
+
+Copyright (c) 2023 Phosphor Icons
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+  -->
+  <meta name="theme-color" content="#0f141a">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="MCP tools · ASH">
+  <meta property="og:description" content="Security scanning for code, infrastructure, secrets, and dependencies.">
+  <link rel="preload" href="../../assets/fonts/open-sans.woff2" as="font" type="font/woff2" crossorigin>
+  <noscript>
+    <style>
+      .ash-search-trigger, .ash-menu-toggle, .ash-motion-toggle, .ash-copy,
+       .ash-tabs, .ash-mode-picker, .ash-filter, [data-ash-run], [data-scan-controls],
+       [data-ash-drawer], [data-ash-handbook] { display: none !important; }
+      .ash-install-panel[hidden] { display: block !important; margin-top: 1.5rem; }
+       @media (max-width: 960px) {
+        .ash-header { position: relative; height: auto; }
+      }
+    </style>
+  </noscript>
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#mcp-tools-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+        <aside class="md-banner">
+          <div class="md-banner__inner md-grid md-typeset">
+            
+            <span data-ash-notice="unreleased">
+      These docs describe the main branch, which is not released yet, so a feature
+      described here may not be in the latest release.
+      The install commands in this version of the docs install
+      <code>main</code>, not a release.
+      <a href="../../..">Read the docs for the latest release</a>
+      to install a release.
+    </span>
+          </div>
+          
+        </aside>
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+<a class="ash-skip" href="#main-content">Skip to content</a>
+<header class="md-header ash-header" data-md-component="header">
+  <nav class="ash-header__inner md-grid" aria-label="Main navigation">
+    <a class="ash-brand" href="../.." aria-label="ASH home" data-md-component="logo">
+      <span class="ash-brand__name">ASH<span class="ash-brand__subtitle">Automated Security Helper</span></span>
+    </a>
+    <div class="ash-header__links">
+      <a href="../.." >Overview</a>
+      <a href="../../docs/quick-start-guide/" aria-current="true">Documentation</a>
+      <a href="../..#scanners">Scanners</a>
+      <a href="../../integrations/" >Integrations</a>
+    </div>
+    <div class="ash-sr-only md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">ASH - Automated Security Helper</div>
+        <div class="md-header__topic" data-md-component="header-topic">MCP tools</div>
+      </div>
+    </div>
+    <div class="ash-header__actions">
+      
+        <button class="ash-handbook-toggle" type="button" data-ash-handbook aria-label="Browse all documentation" aria-haspopup="dialog" aria-controls="ash-handbook" aria-expanded="false" disabled><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232,50H160a38,38,0,0,0-32,17.55A38,38,0,0,0,96,50H24a6,6,0,0,0-6,6V200a6,6,0,0,0,6,6H96a26,26,0,0,1,26,26,6,6,0,0,0,12,0,26,26,0,0,1,26-26h72a6,6,0,0,0,6-6V56A6,6,0,0,0,232,50ZM96,194H30V62H96a26,26,0,0,1,26,26V204.31A37.86,37.86,0,0,0,96,194Zm130,0H160a37.87,37.87,0,0,0-26,10.32V88a26,26,0,0,1,26-26h66ZM160,90h40a6,6,0,0,1,0,12H160a6,6,0,0,1,0-12Zm46,38a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,128Zm0,32a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,160Z"/></svg></span><span>Contents</span></button>
+      
+      <button class="ash-search-trigger" type="button" data-ash-search aria-label="Search documentation" aria-haspopup="dialog" aria-controls="ash-search-dialog" aria-expanded="false" disabled>
+        <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M228.24,219.76l-51.38-51.38a86.15,86.15,0,1,0-8.48,8.48l51.38,51.38a6,6,0,0,0,8.48-8.48ZM38,112a74,74,0,1,1,74,74A74.09,74.09,0,0,1,38,112Z"/></svg></span><span>Search docs</span><kbd data-ash-shortcut>⌘ K</kbd>
+      </button>
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M122,40V16a6,6,0,0,1,12,0V40a6,6,0,0,1-12,0Zm68,88a62,62,0,1,1-62-62A62.07,62.07,0,0,1,190,128Zm-12,0a50,50,0,1,0-50,50A50.06,50.06,0,0,0,178,128ZM59.76,68.24a6,6,0,1,0,8.48-8.48l-16-16a6,6,0,0,0-8.48,8.48Zm0,119.52-16,16a6,6,0,1,0,8.48,8.48l16-16a6,6,0,1,0-8.48-8.48ZM192,70a6,6,0,0,0,4.24-1.76l16-16a6,6,0,0,0-8.48-8.48l-16,16A6,6,0,0,0,192,70Zm4.24,117.76a6,6,0,0,0-8.48,8.48l16,16a6,6,0,0,0,8.48-8.48ZM46,128a6,6,0,0,0-6-6H16a6,6,0,0,0,0,12H40A6,6,0,0,0,46,128Zm82,82a6,6,0,0,0-6,6v24a6,6,0,0,0,12,0V216A6,6,0,0,0,128,210Zm112-88H216a6,6,0,0,0,0,12h24a6,6,0,0,0,0-12Z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232.13,143.64a6,6,0,0,0-6-1.49A90.07,90.07,0,0,1,113.86,29.85a6,6,0,0,0-7.49-7.48A102.88,102.88,0,0,0,54.48,58.68,102,102,0,0,0,197.32,201.52a102.88,102.88,0,0,0,36.31-51.89A6,6,0,0,0,232.13,143.64Zm-42,48.29a90,90,0,0,1-126-126A90.9,90.9,0,0,1,99.65,37.66,102.06,102.06,0,0,0,218.34,156.35,90.9,90.9,0,0,1,190.1,191.93Z"/></svg>
+      </label>
+    
+  
+</form>
+        <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+      
+      <template data-ash-theme-icons>
+        <span data-color-scheme="default"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M122,40V16a6,6,0,0,1,12,0V40a6,6,0,0,1-12,0Zm68,88a62,62,0,1,1-62-62A62.07,62.07,0,0,1,190,128Zm-12,0a50,50,0,1,0-50,50A50.06,50.06,0,0,0,178,128ZM59.76,68.24a6,6,0,1,0,8.48-8.48l-16-16a6,6,0,0,0-8.48,8.48Zm0,119.52-16,16a6,6,0,1,0,8.48,8.48l16-16a6,6,0,1,0-8.48-8.48ZM192,70a6,6,0,0,0,4.24-1.76l16-16a6,6,0,0,0-8.48-8.48l-16,16A6,6,0,0,0,192,70Zm4.24,117.76a6,6,0,0,0-8.48,8.48l16,16a6,6,0,0,0,8.48-8.48ZM46,128a6,6,0,0,0-6-6H16a6,6,0,0,0,0,12H40A6,6,0,0,0,46,128Zm82,82a6,6,0,0,0-6,6v24a6,6,0,0,0,12,0V216A6,6,0,0,0,128,210Zm112-88H216a6,6,0,0,0,0,12h24a6,6,0,0,0,0-12Z"/></svg></span></span>
+        <span data-color-scheme="slate"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232.13,143.64a6,6,0,0,0-6-1.49A90.07,90.07,0,0,1,113.86,29.85a6,6,0,0,0-7.49-7.48A102.88,102.88,0,0,0,54.48,58.68,102,102,0,0,0,197.32,201.52a102.88,102.88,0,0,0,36.31-51.89A6,6,0,0,0,232.13,143.64Zm-42,48.29a90,90,0,0,1-126-126A90.9,90.9,0,0,1,99.65,37.66,102.06,102.06,0,0,0,218.34,156.35,90.9,90.9,0,0,1,190.1,191.93Z"/></svg></span></span>
+      </template>
+      <a class="ash-github" href="https://github.com/awslabs/automated-security-helper" aria-label="ASH on GitHub">
+        <span>GitHub</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span>
+      </a>
+      <button class="ash-menu-toggle" type="button" aria-label="Open navigation" aria-haspopup="dialog" aria-expanded="false" aria-controls="ash-mobile-menu" data-ash-menu disabled>
+        <span class="ash-menu-glyph" aria-hidden="true"><i></i><i></i></span>
+      </button>
+    </div>
+    
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M228.24,219.76l-51.38-51.38a86.15,86.15,0,1,0-8.48,8.48l51.38,51.38a6,6,0,0,0,8.48-8.48ZM38,112a74,74,0,1,1,74,74A74.09,74.09,0,0,1,38,112Z"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M222,128a6,6,0,0,1-6,6H54.49l61.75,61.76a6,6,0,1,1-8.48,8.48l-72-72a6,6,0,0,1,0-8.48l72-72a6,6,0,0,1,8.48,8.48L54.49,122H216A6,6,0,0,1,222,128Z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,195.76a6,6,0,1,1-8.48,8.48L128,136.49,60.24,204.24a6,6,0,0,1-8.48-8.48L119.51,128,51.76,60.24a6,6,0,0,1,8.48-8.48L128,119.51l67.76-67.75a6,6,0,0,1,8.48,8.48L136.49,128Z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+  </nav>
+  <dialog class="ash-mobile-menu" id="ash-mobile-menu" aria-label="Site navigation" hidden>
+    <div class="ash-mobile-menu__heading"><p class="ash-mobile-menu__eyebrow">Navigation</p><button type="button" data-ash-menu-close aria-label="Close navigation"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,195.76a6,6,0,1,1-8.48,8.48L128,136.49,60.24,204.24a6,6,0,0,1-8.48-8.48L119.51,128,51.76,60.24a6,6,0,0,1,8.48-8.48L128,119.51l67.76-67.75a6,6,0,0,1,8.48,8.48L136.49,128Z"/></svg></span></button></div>
+    <a href="../..">Overview <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../../docs/quick-start-guide/">Documentation <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../..#scanners">Scanners <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../../integrations/">Integrations <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="https://github.com/awslabs/automated-security-helper">GitHub <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    
+      <button type="button" data-ash-drawer>Browse all documentation <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232,50H160a38,38,0,0,0-32,17.55A38,38,0,0,0,96,50H24a6,6,0,0,0-6,6V200a6,6,0,0,0,6,6H96a26,26,0,0,1,26,26,6,6,0,0,0,12,0,26,26,0,0,1,26-26h72a6,6,0,0,0,6-6V56A6,6,0,0,0,232,50ZM96,194H30V62H96a26,26,0,0,1,26,26V204.31A37.86,37.86,0,0,0,96,194Zm130,0H160a37.87,37.87,0,0,0-26,10.32V88a26,26,0,0,1,26-26h66ZM160,90h40a6,6,0,0,1,0,12H160a6,6,0,0,1,0-12Zm46,38a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,128Zm0,32a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,160Z"/></svg></span></button>
+    
+  </dialog>
+  <noscript>
+    <nav class="ash-static-navigation" aria-label="Site navigation">
+      <a href="../..">Overview</a>
+      <a href="../../docs/quick-start-guide/">Documentation</a>
+      <a href="../..#scanners">Scanners</a>
+      <a href="../../integrations/">Integrations</a>
+      <a href="https://github.com/awslabs/automated-security-helper">GitHub</a>
+    </nav>
+  </noscript>
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ASH - Automated Security Helper" class="md-nav__button md-logo" aria-label="ASH - Automated Security Helper" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ASH - Automated Security Helper
+  </label>
+  
+    <div class="md-nav__source">
+      
+<a href="https://github.com/awslabs/automated-security-helper" title="ASH on GitHub" class="md-source" aria-label="ASH on GitHub">
+  <span class="ash-icon md-source__icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M230,64a30,30,0,1,0-36,29.4V112a10,10,0,0,1-10,10H96a21.84,21.84,0,0,0-10,2.42v-31a30,30,0,1,0-12,0v69.2a30,30,0,1,0,12,0V144a10,10,0,0,1,10-10h88a22,22,0,0,0,22-22V93.4A30.05,30.05,0,0,0,230,64ZM62,64A18,18,0,1,1,80,82,18,18,0,0,1,62,64ZM98,192a18,18,0,1,1-18-18A18,18,0,0,1,98,192ZM200,82a18,18,0,1,1,18-18A18,18,0,0,1,200,82Z"/></svg></span>
+  <span class="md-source__repository">ASH on GitHub</span>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../getting-started/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_2" id="__nav_2_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/local/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan on your machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add ASH to CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connect an AI agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/platform-teams/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roll out across repositories
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install ASH
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/advanced-usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Manage scanner tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/configure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configure ASH
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/choose-scanners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose scanners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/set-the-gate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Set the gate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/suppress-findings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Suppress findings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/read-results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read scan results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/export-reports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/scanner-sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enable the scanner sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/run-in-a-container/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run in a container
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/run-offline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run offline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose an integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/pre-commit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run ASH with pre-commit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_14" id="__nav_3_14_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CI systems
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    CI systems
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/ci/github-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub Actions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/ci/gitlab-ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitLab CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/ci/other-ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Other CI systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/scale-large-repos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scale to large repositories
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/mcp-server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run the MCP server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/agent-plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install an agent plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/genai-steering-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH GenAI integration guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/deploy-on-aws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deploy on AWS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/troubleshoot/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshoot
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/migrate-from-v2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migrate from v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/how-ash-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How ASH works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/trust-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration trust model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/scanning-untrusted-code/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanning untrusted code
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanner sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/content-databases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Content databases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/suppressions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Suppressions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_5" id="__nav_5_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment-variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scanners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reporters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../converters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Converters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP tools
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#run_ash_scan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        run_ash_scan
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#get_scan_progress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_scan_progress
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#get_scan_results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_scan_results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#get_scan_summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_scan_summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#get_scan_result_paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_scan_result_paths
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#list_active_scans" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_active_scans
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cancel_scan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cancel_scan
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#check_installation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        check_installation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#clear_source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        clear_source
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diff_scan_results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        diff_scan_results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#explain_finding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        explain_finding
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#get_config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_config
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#list_profiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_profiles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#list_scanners" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_scanners
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#resolve_ash_workspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        resolve_ash_workspace
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run_ash_workspace_scan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        run_ash_workspace_scan
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#select_profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        select_profile
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#set_source_git" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        set_source_git
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#set_source_zip_chunk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        set_source_zip_chunk
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#set_source_zip_finalize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        set_source_zip_finalize
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#suggest_suppression" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        suggest_suppression
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validate_config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        validate_config
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#resources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resources
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#severity-levels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Severity levels
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../exit-codes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exit codes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../output-files/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Output files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../coverage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coverage by language
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../python-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../plugins/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugins
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Plugins
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_2" id="__nav_6_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Built-in scanner pages
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Built-in scanner pages
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/actionlint/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    actionlint
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/cfn-lint-and-cfn-guard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cfn-lint and cfn-guard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/gitleaks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/trivy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trivy filesystem scanner (trivy)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/zizmor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    zizmor (GitHub Actions)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_3" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../docs/plugins/community/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Community plugins
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6_3" id="__nav_6_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Community plugins
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/ferret-scan-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH Ferret Scan Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/snyk-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH Snyk Code Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/snyk-plugin-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Snyk Plugin CI/CD Setup Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/trivy-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trivy Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/aws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS reporters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-scanner/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a scanner plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-reporter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a reporter plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-converter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a converter plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/event-subscribers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Subscribe to scan events
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../contributing/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contributing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/documentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/interface-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interface design system
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/interface-review/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interaction surface inventory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/high-end-design-review/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design & UX review
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/releases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#run_ash_scan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        run_ash_scan
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#get_scan_progress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_scan_progress
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#get_scan_results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_scan_results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#get_scan_summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_scan_summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#get_scan_result_paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_scan_result_paths
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#list_active_scans" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_active_scans
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cancel_scan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cancel_scan
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#check_installation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        check_installation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#clear_source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        clear_source
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diff_scan_results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        diff_scan_results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#explain_finding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        explain_finding
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#get_config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_config
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#list_profiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_profiles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#list_scanners" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_scanners
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#resolve_ash_workspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        resolve_ash_workspace
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run_ash_workspace_scan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        run_ash_workspace_scan
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#select_profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        select_profile
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#set_source_git" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        set_source_git
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#set_source_zip_chunk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        set_source_zip_chunk
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#set_source_zip_finalize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        set_source_zip_finalize
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#suggest_suppression" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        suggest_suppression
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validate_config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        validate_config
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#resources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resources
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#severity-levels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Severity levels
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+  <nav class="md-path" aria-label="Navigation" >
+    <ol class="md-path__list">
+      
+        
+  
+  
+    <li class="md-path__item">
+      <a href="../.." class="md-path__link">
+        
+  <span class="md-ellipsis">
+    Home
+  </span>
+
+      </a>
+    </li>
+  
+
+      
+      
+        
+  
+  
+    
+    
+      <li class="md-path__item">
+        <a href="../" class="md-path__link">
+          
+  <span class="md-ellipsis">
+    Reference
+  </span>
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ol>
+  </nav>
+
+              
+              <article class="md-content__inner md-typeset">
+                
+  <div class="ash-doc-label">Documentation</div>
+  <div id="main-content" tabindex="-1">
+    
+
+
+  
+  
+
+
+<!--
+  Generated by scripts/generate_mcp_tool_reference.py from the MCP server's registered tools and resources.
+  Do not edit this file by hand: change the code or the generator, then run
+    uv run python scripts/generate_mcp_tool_reference.py
+  CI runs `uv run python scripts/generate_mcp_tool_reference.py --check` and fails when this file is stale.
+-->
+
+<h1 id="mcp-tools-reference">MCP tools reference<a class="headerlink" href="#mcp-tools-reference" title="Permanent link">&para;</a></h1>
+<p>This page is generated from the tools and resources the ASH MCP server registers, with editorial notes kept in the generator by <code>scripts/generate_mcp_tool_reference.py</code>. Edits made to this file by hand are overwritten the next time it is generated.</p>
+<p>The ASH MCP server exposes twenty-two tools and five resources.</p>
+<h2 id="run_ash_scan">run_ash_scan<a class="headerlink" href="#run_ash_scan" title="Permanent link">&para;</a></h2>
+<p>Starts a scan in the server process and returns a <code>scan_id</code> at once. The scan stops if the server process exits; over stdio, that is when the client disconnects.</p>
+<!-- doctest: options of=mcp.run_ash_scan -->
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Type</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>source_dir</code></td>
+<td>string | null</td>
+<td>not set</td>
+<td>Absolute path to scan. When not set: the tree this session delivered with <code>set_source_git</code> or <code>set_source_zip_finalize</code>. With none delivered, a call with no session id (stdio) scans the server's working directory, and a call with a session id is refused</td>
+</tr>
+<tr>
+<td><code>severity_threshold</code></td>
+<td>string | null</td>
+<td>not set</td>
+<td>Least severe finding that counts as actionable, any case; it can make the config's <code>global_settings.severity_threshold</code> stricter for this scan, never looser</td>
+</tr>
+<tr>
+<td><code>config_path</code></td>
+<td>string | null</td>
+<td>not set</td>
+<td>Custom config path. When not set: the profile this session bound with <code>select_profile</code>, else the config ASH discovers in the source directory, else the file <code>ASH_CONFIG</code> names in the server's environment, else the built-in defaults</td>
+</tr>
+<tr>
+<td><code>clean_output</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Set the previous scan's results in the output directory aside as soon as the scan is registered; with <code>false</code>, the scan's own set-up does it a moment later. Either way they are deleted once the scan has results of its own, and put back if it fails or is canceled. A refused call leaves the previous results as they were</td>
+</tr>
+</tbody>
+</table>
+<p>Output reports are written to <code>&lt;source_dir&gt;/.ash/ash_output/</code> — there is no parameter to override this. Scanner selection, mode, and other tuning live in the project's ASH config, not in tool arguments.</p>
+<p>Returns:</p>
+<!-- doctest: config kind=mcp-response of=mcp.run_ash_scan -->
+<div class="language-json highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">{</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">&quot;success&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;running&quot;</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="nt">&quot;scan_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;uuid&gt;&quot;</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span><span class="nt">&quot;progress&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.0</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Scan started, initializing scanners. Use get_scan_progress to track progress.&quot;</span><span class="p">,</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="nt">&quot;directory_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;absolute path scanned&gt;&quot;</span><span class="p">,</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">  </span><span class="nt">&quot;important&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">    </span><span class="nt">&quot;connection_management&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;server&#39;s polling guidance&gt;&quot;</span><span class="p">,</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">    </span><span class="nt">&quot;next_steps&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;...&quot;</span><span class="p">]</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">  </span><span class="p">}</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="p">}</span>
+</span></code></pre></div>
+<p>The <code>directory_path</code> field tells you the resolved absolute path the server is scanning — derive <code>output_dir</code> for <code>get_scan_results</code> from this value (<code>&lt;directory_path&gt;/.ash/ash_output</code>) rather than constructing it independently.</p>
+<p>Poll <code>get_scan_progress</code> until <code>is_complete</code> is <code>true</code>, then read <code>status</code>. <code>is_complete</code> is <code>true</code> for every ending, including <code>failed</code> and <code>cancelled</code>. (See <code>get_scan_progress</code> below.)</p>
+<p>A refused config keeps its own <code>error_type</code>. The scan does not start, and the response is <code>success: false</code> with one of these <code>error_type</code> values and the reason in <code>error</code>:</p>
+<ul>
+<li><code>config_input_not_permitted</code>: <code>config_path</code>, or a base its <code>extends</code> chain names, is outside the directories this session may read a config from.</li>
+<li><code>config_check_failed</code>: the check of the config sources in the scan target could not finish (an unreadable entry, a link loop), so the scan was not started. The config was not found to be outside the permitted roots -- that case is <code>config_input_not_permitted</code> -- so check the config files in the target for unreadable entries and link loops.</li>
+<li><code>config_field_denied</code>: a config file an MCP client delivered or named sets a field the session's runtime-override policy denies. <code>error</code> names each field and why.</li>
+<li><code>config_policy_unreadable</code>: that policy cannot be established, for example because the profile the session bound is no longer registered. <code>error</code> starts with <code>A config an MCP client delivered cannot be checked:</code>.</li>
+<li><code>config_env_not_resolved</code>: a file of the config uses an <code>!ENV</code> tag, or a plain value that starts with a <code>${VAR}</code> or <code>${VAR:default}</code> reference, where none is resolved. For a remote caller that is any file the operator did not set aside (outside the directories <code>ASH_MCP_ALLOWED_CONFIG_ROOTS</code> names, other than the profile files the server writes in the calling session's <code>config/</code> directory), the scan target's own config included, and every base such a file extends; for a stdio caller, a file a client delivered. The server's own config, the file <code>ASH_CONFIG</code> names outside the MCP workspace root and each registered profile, is not refused. <code>error</code> names the file and the line or key.</li>
+</ul>
+<p>The target and source checks have their own <code>error_type</code> values too (<code>scan_target_not_permitted</code>, <code>output_dir_not_permitted</code>, <code>no_source_delivered</code>, <code>session_source_mismatch</code>, <code>delivered_source_missing</code>, <code>invalid_session_id</code>). A directory that already has a scan is refused with <code>error_type: MCPResourceError</code> and <code>error_category: resource_exhausted</code>; <code>error</code> says the directory <code>already has an active scan</code>, or, for a scan that was cancelled or stopped at its timeout and has not finished stopping, <code>has a scan that is still stopping</code>. That <code>error_type</code> is the exception's class name, and an unexpected error while the scan is being started arrives as <code>MCPResourceError</code> too, with <code>error_category: unexpected_error</code>, so <code>MCPResourceError</code> alone does not prove a deliberate refusal: branch on <code>error_category</code>. The server's <code>max_concurrent_scans</code> limit is refused the same way (<code>resource_exhausted</code>); its <code>context</code> holds <code>max_concurrent_scans</code>: wait for a running scan to finish, then retry. The busy-directory refusal's <code>context</code> names the running scan's <code>scan_id</code> only when the scan is this session's: poll <code>get_scan_progress</code> with it, or <code>cancel_scan</code> it if it is no longer needed (<code>list_active_scans</code> lists this session's scans). Without a <code>scan_id</code>, another session's scan holds the directory and the server does not name it: wait and retry, or scan another directory. After a <code>cancel_scan</code> of that directory the refusal repeats until the scan has stopped (see <code>cancel_scan</code>): retry after a few seconds. Any other reason the scan could not be started returns <code>error_type: scan_start_failure</code>, and an unexpected error returns the exception's class name. Branch on <code>error_type</code> and <code>error_category</code>, never on the text of <code>error</code>.</p>
+<p>On failure, <code>error_type</code> is one of <code>committed_output_files</code>, <code>config_env_not_resolved</code>, <code>config_field_denied</code>, <code>config_input_not_permitted</code>, <code>config_policy_unreadable</code>, <code>delivered_source_missing</code>, <code>invalid_session_id</code>, <code>no_source_delivered</code>, <code>output_dir_not_permitted</code>, <code>output_dir_not_usable</code>, <code>scan_start_failure</code>, <code>scan_target_not_permitted</code>, <code>session_identity_required</code>, <code>session_scan_limit</code>, <code>session_source_mismatch</code>, <code>source_delivery_busy</code> and <code>source_dir_not_usable</code>, or the class name of an exception.</p>
+<h2 id="get_scan_progress">get_scan_progress<a class="headerlink" href="#get_scan_progress" title="Permanent link">&para;</a></h2>
+<p>Poll progress every 5 seconds until <code>is_complete</code> is <code>true</code>, then read <code>status</code>: <code>completed</code>, <code>incomplete</code>, <code>failed</code>, or <code>cancelled</code>. The scan continues server-side independently of polling.</p>
+<!-- doctest: options of=mcp.get_scan_progress -->
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scan_id</code></td>
+<td>string</td>
+<td>From <code>run_ash_scan</code></td>
+</tr>
+</tbody>
+</table>
+<p>Returns:</p>
+<!-- doctest: config kind=mcp-response of=mcp.get_scan_progress -->
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>{
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  &quot;scan_id&quot;: &quot;...&quot;,
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>  &quot;directory_path&quot;: &quot;/path/to/scanned/project&quot;,
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>  &quot;output_directory&quot;: &quot;/path/to/.ash/ash_output&quot;,
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>  &quot;start_time&quot;: &quot;&lt;iso8601&gt;&quot;,
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>  &quot;end_time&quot;: &quot;&lt;iso8601 | null&gt;&quot;,
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>  &quot;status&quot;: &quot;pending | running | completed | incomplete | failed | cancelled&quot;,
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>  &quot;severity_threshold&quot;: &quot;&lt;the threshold the scan was judged by; null until it finishes when none was named&gt;&quot;,
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>  &quot;config_path&quot;: &quot;&lt;path | null&gt;&quot;,
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>  &quot;warnings&quot;: [...],
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>  &quot;error_message&quot;: &quot;&lt;str | null&gt;&quot;,
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>  &quot;is_complete&quot;: bool,
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>  &quot;results_available&quot;: bool,
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>  &quot;output_holds_previous_results&quot;: bool,
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>  &quot;coverage_complete&quot;: &quot;bool | null&quot;,
+</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>  &quot;incomplete_scanners&quot;: [
+</span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>    { &quot;scanner&quot;: &quot;grype&quot;, &quot;status&quot;: &quot;MISSING&quot;, &quot;reason&quot;: &quot;missing_dependencies&quot;, &quot;detail&quot;: &quot;MISSING&quot; }
+</span><span id="__span-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>  ],
+</span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>  &quot;no_scanner_ran&quot;: bool,
+</span><span id="__span-1-20"><a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>  &quot;incomplete_converters&quot;: [{ &quot;converter&quot;: &quot;...&quot;, &quot;reason&quot;: &quot;...&quot;, &quot;failed_input_kinds&quot;: [&quot;...&quot;] }],
+</span><span id="__span-1-21"><a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>  &quot;unevaluated_rules&quot;: [&quot;...&quot;],
+</span><span id="__span-1-22"><a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>  &quot;stale_content_databases&quot;: [{ &quot;name&quot;: &quot;grype-db&quot;, &quot;scanner&quot;: &quot;grype&quot;, &quot;built&quot;: &quot;&lt;iso8601 | null&gt;&quot;, &quot;age&quot;: &quot;...&quot;, &quot;max_age&quot;: &quot;...&quot;, &quot;refresh&quot;: &quot;...&quot; }],
+</span><span id="__span-1-23"><a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>  &quot;completed_scanners&quot;: int,
+</span><span id="__span-1-24"><a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>  &quot;finished_scanners&quot;: int,
+</span><span id="__span-1-25"><a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>  &quot;total_scanners&quot;: int,
+</span><span id="__span-1-26"><a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>  &quot;scanner_status_counts&quot;: { &quot;passed&quot;: int, &quot;failed&quot;: int, &quot;skipped&quot;: int, &quot;running&quot;: int, &quot;pending&quot;: int },
+</span><span id="__span-1-27"><a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>  &quot;total_findings&quot;: int,
+</span><span id="__span-1-28"><a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a>  &quot;severity_counts&quot;: { &quot;critical&quot;: int, &quot;high&quot;: int, &quot;medium&quot;: int, &quot;low&quot;: int, &quot;info&quot;: int, &quot;suppressed&quot;: int },
+</span><span id="__span-1-29"><a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>  &quot;scanners&quot;: {
+</span><span id="__span-1-30"><a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a>    &quot;&lt;scanner_name&gt;&quot;: {
+</span><span id="__span-1-31"><a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a>      &quot;&lt;target_type&gt;&quot;: { ... per-scanner-target progress ... }
+</span><span id="__span-1-32"><a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a>    }
+</span><span id="__span-1-33"><a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a>  }
+</span><span id="__span-1-34"><a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a>}
+</span></code></pre></div>
+<p>There is no overall percentage field. To compute progress, use <code>finished_scanners / total_scanners</code>: <code>finished_scanners</code> counts every scanner that has ended, whatever its status, and <code>completed_scanners</code> only the ones that PASSED. <code>scanner_status_counts</code> splits them into <code>passed</code>, <code>failed</code> (FAILED or ERROR), <code>skipped</code> (MISSING or SKIPPED), <code>running</code>, and <code>pending</code>. Guard against <code>total_scanners == 0</code> during the pre-flight phase (before any scanner has registered). Show "initializing" or 0% when <code>total_scanners</code> is zero.</p>
+<p>There is no top-level <code>duration</code> field; derive elapsed time from <code>start_time</code> and <code>end_time</code> (or from current time while running).</p>
+<p><code>is_complete</code> is <code>true</code> once the scan has ended, whatever the ending: <code>completed</code>, <code>incomplete</code>, <code>failed</code> or <code>cancelled</code>. It is decided by the scan's state alone, never by a results file on disk, which can be a previous scan's. <code>results_available</code> is <code>true</code> for <code>completed</code> and <code>incomplete</code>, the scans whose results <code>get_scan_results</code> can read.</p>
+<p>A failed or cancelled scan leaves the previous scan's results in place. ASH puts them back in <code>output_directory</code>, and <code>output_holds_previous_results</code> is then <code>true</code> and the scanner fields are empty, because those files are not this scan's. <code>get_scan_results</code> on that directory reads the previous scan's results.</p>
+<p><code>incomplete</code> is terminal, with partial coverage. The run finished and its results are readable, but a selected scanner was <code>MISSING</code> or <code>ERROR</code> (or lost targets), no scanner reached a verdict, a converter did not run or could not convert some of its inputs, a rule could not be evaluated, or a content database was past its declared age bound. <code>incomplete_scanners</code> names each scanner and why, and <code>stale_content_databases</code> each stale database. The findings are real but partial, so read them, and do not report the target as clean. <code>failed</code> means the run crashed, left no readable results, or ran past the server's <code>scan_timeout_seconds</code>. <code>coverage_complete</code> is <code>null</code> while running and for <code>failed</code> or <code>cancelled</code>; with <code>fail_on_incomplete_scanners: false</code> a scan is <code>completed</code> with <code>coverage_complete: false</code> when scanners did not run.</p>
+<p>Status enum: the documented values are <code>pending | running | completed | incomplete | failed | cancelled</code>. The registry uses <code>pending</code> briefly while a scan is queued, transitions to <code>running</code> once execution begins, and may also expose the legacy <code>in_progress</code> string from older <code>ScanProgress</code> instances. Treat <code>pending</code>, <code>running</code>, and <code>in_progress</code> as equivalent "not done yet" states.</p>
+<p>On failure, <code>error_type</code> is one of <code>invalid_session_id</code>, <code>scan_not_found</code> and <code>session_identity_required</code>, or the class name of an exception.</p>
+<h2 id="get_scan_results">get_scan_results<a class="headerlink" href="#get_scan_results" title="Permanent link">&para;</a></h2>
+<p>Fetch finalized results with filtering. Run only after <code>get_scan_progress</code> reports complete.</p>
+<!-- doctest: options of=mcp.get_scan_results -->
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Type</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>output_dir</code></td>
+<td>string</td>
+<td><code>".ash/ash_output"</code></td>
+<td>Absolute path strongly recommended; the server resolves relative paths against its own cwd, which usually isn't your project root</td>
+</tr>
+<tr>
+<td><code>filter_level</code></td>
+<td>string</td>
+<td><code>"full"</code></td>
+<td><code>full</code>, <code>summary</code>, <code>minimal</code></td>
+</tr>
+<tr>
+<td><code>scanners</code></td>
+<td>string</td>
+<td>not set</td>
+<td>Comma-separated subset; not set means every scanner</td>
+</tr>
+<tr>
+<td><code>severities</code></td>
+<td>string</td>
+<td>not set</td>
+<td>Comma-separated subset of <code>critical,high,medium,low,info,suppressed</code>; not set means every severity</td>
+</tr>
+<tr>
+<td><code>actionable_only</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Keep only the actionable findings, the ones behind exit code 2: unsuppressed and at or above the severity threshold the scan was judged by (a scanner's own where its config sets one). Drop the rest and add <code>findings</code>, a flat list of them that honors <code>scanners</code> and <code>severities</code> (<code>full</code> level only)</td>
+</tr>
+</tbody>
+</table>
+<p>With <code>filter_level</code> <code>full</code>, <code>raw_results</code> is the aggregated results document without its <code>sarif</code>, <code>cyclonedx</code>, and <code>ash_config</code> sections; <code>summary</code> returns the metadata and the counts by severity and by scanner, and <code>minimal</code> the status. Individual findings are in the report files: <code>get_scan_result_paths</code> lists them, and the <code>flat-json</code> reporter, which is enabled by default, writes <code>reports/ash.flat.json</code> under <code>output_dir</code>.</p>
+<p><code>status</code> is <code>completed</code> or <code>incomplete</code>, decided by the same rule as the scan's exit code, with <code>coverage_complete</code> and <code>incomplete_scanners</code> as in <code>get_scan_progress</code>. An <code>incomplete</code> scan's findings are returned in full.</p>
+<p>On failure, <code>error_type</code> is <code>invalid_session_id</code>, or the class name of an exception.</p>
+<h2 id="get_scan_summary">get_scan_summary<a class="headerlink" href="#get_scan_summary" title="Permanent link">&para;</a></h2>
+<p>Metadata and counts only — no individual findings. Cheap for quick health checks.</p>
+<!-- doctest: options of=mcp.get_scan_summary -->
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Type</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>output_dir</code></td>
+<td>string</td>
+<td><code>".ash/ash_output"</code></td>
+<td>Absolute path</td>
+</tr>
+</tbody>
+</table>
+<p>Returns total count, severity breakdown, scanner statuses.</p>
+<p>On failure, <code>error_type</code> is <code>invalid_session_id</code>, or the class name of an exception.</p>
+<h2 id="get_scan_result_paths">get_scan_result_paths<a class="headerlink" href="#get_scan_result_paths" title="Permanent link">&para;</a></h2>
+<p>Returns file paths to all generated reports. Useful when you want to read HTML, SARIF, CSV, or markdown directly with file tools instead of pulling JSON over MCP.</p>
+<!-- doctest: options of=mcp.get_scan_result_paths -->
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Type</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>output_dir</code></td>
+<td>string</td>
+<td><code>".ash/ash_output"</code></td>
+<td>Absolute path</td>
+</tr>
+</tbody>
+</table>
+<p>Returns a dict mapping format names to absolute paths.</p>
+<p>On failure, <code>error_type</code> is one of <code>DirectoryNotFound</code>, <code>invalid_session_id</code> and <code>scan_target_not_permitted</code>, or the class name of an exception.</p>
+<h2 id="list_active_scans">list_active_scans<a class="headerlink" href="#list_active_scans" title="Permanent link">&para;</a></h2>
+<p>All scans the server tracks (active + recently completed).</p>
+<p>No parameters. Returns a list of scan summaries.</p>
+<p>On failure, <code>error_type</code> is one of <code>invalid_session_id</code> and <code>session_identity_required</code>, or the class name of an exception.</p>
+<h2 id="cancel_scan">cancel_scan<a class="headerlink" href="#cancel_scan" title="Permanent link">&para;</a></h2>
+<p>Stops a running scan. The scanner tool running at the time is stopped with every process it started (SIGTERM, then SIGKILL after 10 seconds). The scan halts at its next cancel check, and no further scanner, phase, or reporter starts, so a scan canceled before its report phase writes no reports. Work that is not waiting on a child process, such as a scanner parsing its tool's output, can still finish and write under <code>scanners/</code> or <code>converted/</code>, but <code>ash_aggregated_results.json</code> is not written after the cancel. When the output directory held a previous scan's results, they are put back in place of every result the canceled scan wrote; its log, <code>ash.log</code>, stays, and an <code>ash.log.jsonl</code> already there is left as it was. With no previous results, what the scan wrote before it stopped stays, except that a cancel during the report phase removes the reports that phase wrote. <code>reports/ash.unused-suppressions.md</code>, which its reporter writes on its own, stays even then.</p>
+<!-- doctest: options of=mcp.cancel_scan -->
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scan_id</code></td>
+<td>string</td>
+<td>The scan to cancel</td>
+</tr>
+</tbody>
+</table>
+<p>Returns <code>success</code>, <code>status</code>, and <code>message</code>. The status is <code>cancelled</code> at once. A running scan stops within about 10 seconds; one still waiting for another scan of its session stops when that scan ends. Until it has stopped, <code>run_ash_scan</code> refuses another scan of the same directory as still stopping, and the scan counts against <code>max_concurrent_scans</code>. A scan that has already ended is not changed, and the response has <code>success: false</code> and the scan's status. For a <code>run_ash_workspace_scan</code>, <code>cancel_scan</code> takes one project's scan id and stops that project, which ends <code>failed</code>; the other projects carry on.</p>
+<p>On failure, <code>error_type</code> is one of <code>invalid_session_id</code> and <code>session_identity_required</code>, or the class name of an exception.</p>
+<h2 id="check_installation">check_installation<a class="headerlink" href="#check_installation" title="Permanent link">&para;</a></h2>
+<p>Reports whether ASH can scan: its version and, for each built-in scanner, whether its tool can run. Enabled means enabled in ASH's defaults: the call reads no project's config and checks no plugin scanner. It runs each scanner's dependency check, which can start the tool, so it takes several seconds, and it installs and downloads nothing. The tool of a scanner that ASH installs with uv is installed when <code>uv tool list</code> lists it, or when its executable is on <code>PATH</code> or in a directory ASH also searches, such as <code>~/.ash/bin</code>. A scanner whose tool is not, when the server is online and has uv, is listed in <code>installs_on_first_scan</code>, because the first scan installs it with uv, which needs network access. Offline, or without uv, it is listed in <code>missing_dependencies</code>. Offline, semgrep is also missing when it has no rules cache.</p>
+<p>No parameters. Returns <code>installed</code> (at least one enabled scanner can run, or will once the first scan installs its tool), <code>ready</code> (every enabled scanner can run or will), <code>version</code>, <code>scanners</code> (each scanner's <code>name</code>, <code>enabled</code>, <code>dependencies_satisfied</code>, <code>installs_on_first_scan</code>, and <code>version</code>), <code>installs_on_first_scan</code>, <code>missing_dependencies</code> and <code>undetermined_dependencies</code> (the enabled scanners whose tool is missing and that a scan cannot install, or whose check could not run), and <code>ash_command_available</code> (whether an <code>ash</code> executable is on <code>PATH</code>, which the server does not need).</p>
+<p>On failure, <code>error_type</code> is <code>invalid_session_id</code>, or the class name of an exception.</p>
+<h2 id="clear_source">clear_source<a class="headerlink" href="#clear_source" title="Permanent link">&para;</a></h2>
+<p>Delete this session's delivered source tree and workspace.</p>
+<p>No parameters. Deletes this session's delivered source tree and workspace.</p>
+<p>Refused while a scan of this session is running: <code>success: false</code>, <code>error_type: source_delivery_busy</code>. Clear again once the scan ends. Entries the server cannot delete (files another account owns) stay on disk; the session's delivered source is forgotten either way.</p>
+<p>On failure, <code>error_type</code> is one of <code>invalid_session_id</code>, <code>session_identity_required</code> and <code>source_delivery_busy</code>, or the class name of an exception.</p>
+<h2 id="diff_scan_results">diff_scan_results<a class="headerlink" href="#diff_scan_results" title="Permanent link">&para;</a></h2>
+<p>Compare two ash_aggregated_results.json files and return a structured diff.</p>
+<!-- doctest: options of=mcp.diff_scan_results -->
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>before_path</code></td>
+<td>string</td>
+<td>Path to the baseline ash_aggregated_results.json file.</td>
+</tr>
+<tr>
+<td><code>after_path</code></td>
+<td>string</td>
+<td>Path to the comparison ash_aggregated_results.json file.</td>
+</tr>
+</tbody>
+</table>
+<p>On failure, <code>error_type</code> is <code>invalid_session_id</code>, or the class name of an exception.</p>
+<h2 id="explain_finding">explain_finding<a class="headerlink" href="#explain_finding" title="Permanent link">&para;</a></h2>
+<p>Return structured details for a single finding by ID.</p>
+<!-- doctest: options of=mcp.explain_finding -->
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Type</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>finding_id</code></td>
+<td>string</td>
+<td><em>required</em></td>
+<td>The FlatVulnerability ID to look up (e.g. "bandit-B601-880359fd90e1").</td>
+</tr>
+<tr>
+<td><code>results_path</code></td>
+<td>string | null</td>
+<td>not set</td>
+<td>Optional path to the output directory containing ash_aggregated_results.json. Defaults to &lt;cwd&gt;/.ash/ash_output.</td>
+</tr>
+</tbody>
+</table>
+<p>On failure, <code>error_type</code> is <code>invalid_session_id</code>, or the class name of an exception.</p>
+<h2 id="get_config">get_config<a class="headerlink" href="#get_config" title="Permanent link">&para;</a></h2>
+<p>Get the resolved ASH config (defaults + user overrides merged).</p>
+<!-- doctest: options of=mcp.get_config -->
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Type</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>config_path</code></td>
+<td>string | null</td>
+<td>not set</td>
+<td>Optional explicit path to config file. If None, auto-discovers.</td>
+</tr>
+<tr>
+<td><code>raw</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>If True, returns the file's contents as written, without merging defaults or reading the environment. A value the config's loader would read from the environment (an <code>!ENV</code> value, or an unquoted <code>${VAR:default}</code>) comes back as <code>!ENV</code> and the reference, never as its value; a quoted string that only looks like a reference comes back as written.</td>
+</tr>
+<tr>
+<td><code>search_dir</code></td>
+<td>string | null</td>
+<td>not set</td>
+<td>The directory the caller's scan will target (scan_directory's directory_path). With config_path None it is where the config is discovered; with a named config_path it is the target the file is judged for, so the answer refuses exactly what a scan of that target refuses -- an entry such a scan drops with a warning never refuses the answer. Without it, a named file is judged for this session's delivered source, or else the server's working directory.</td>
+</tr>
+</tbody>
+</table>
+<p>A config this session may not read, or one a client delivered that the server refuses, returns <code>success: false</code> with <code>error_type</code> <code>config_input_not_permitted</code>, <code>config_field_denied</code>, <code>config_policy_unreadable</code> or <code>config_env_not_resolved</code>, as <code>run_ash_scan</code> does for the same file.</p>
+<p>On failure, <code>error_type</code> is one of <code>config_env_not_resolved</code>, <code>config_field_denied</code>, <code>config_input_not_permitted</code>, <code>config_policy_unreadable</code>, <code>invalid_session_id</code>, <code>plugin_module_refused</code>, <code>scan_target_not_permitted</code> and <code>source_dir_not_usable</code>, or the class name of an exception.</p>
+<h2 id="list_profiles">list_profiles<a class="headerlink" href="#list_profiles" title="Permanent link">&para;</a></h2>
+<p>List the config profiles the operator registered at server startup.</p>
+<p>No parameters. Returns the config profiles the operator registered at server startup, each with <code>ash mcp --profile NAME=path/to/ash.yaml</code> (repeatable). A client cannot register one; an empty list means the operator registered none.</p>
+<p>On failure, <code>error_type</code> is the class name of an exception.</p>
+<h2 id="list_scanners">list_scanners<a class="headerlink" href="#list_scanners" title="Permanent link">&para;</a></h2>
+<p>List all registered ASH scanners with their metadata.</p>
+<p>No parameters. Returns one entry per registered scanner with its config name, detected version, and whether it is enabled.</p>
+<h2 id="resolve_ash_workspace">resolve_ash_workspace<a class="headerlink" href="#resolve_ash_workspace" title="Permanent link">&para;</a></h2>
+<p>Resolve a VS Code workspace file into a scan plan without scanning anything.</p>
+<!-- doctest: options of=mcp.resolve_ash_workspace -->
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Type</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>workspace_file</code></td>
+<td>string</td>
+<td><em>required</em></td>
+<td>Absolute path to the .code-workspace file.</td>
+</tr>
+<tr>
+<td><code>workspace_config</code></td>
+<td>string | null</td>
+<td>not set</td>
+<td>Optional path to a workspace policy file. Must exist if given; ASH will not fall back to searching for one.</td>
+</tr>
+<tr>
+<td><code>allow_missing_projects</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Mark project directories that are absent or unreadable as skipped instead of refusing the workspace.</td>
+</tr>
+<tr>
+<td><code>config_overrides</code></td>
+<td>array | null</td>
+<td>not set</td>
+<td>Optional list of <code>key=value</code> config overrides, applied to each project's config so the reported threshold is the enforced one.</td>
+</tr>
+<tr>
+<td><code>profile</code></td>
+<td>string | null</td>
+<td>not set</td>
+<td>Name of a registered config profile to resolve under for this one call, instead of whatever select_profile bound to this session. Call list_profiles to see what the operator registered. The fields the profile sets are final for every project, and a project's own config fills the rest.</td>
+</tr>
+</tbody>
+</table>
+<p>A workspace policy file, named or found in the workspace file's directory or its <code>.ash</code> directory, is used only when it is in a directory <code>ASH_MCP_ALLOWED_CONFIG_ROOTS</code> names; any other refuses the workspace with exit code 4, or with exit code 3 when a client delivered it and it sets a field the server's policy denies.</p>
+<p>On failure, <code>error_type</code> is one of <code>config_env_not_resolved</code>, <code>config_input_not_permitted</code>, <code>environment_value_in_longer_string</code>, <code>invalid_session_id</code> and <code>output_dir_not_usable</code>, or the class name of an exception.</p>
+<h2 id="run_ash_workspace_scan">run_ash_workspace_scan<a class="headerlink" href="#run_ash_workspace_scan" title="Permanent link">&para;</a></h2>
+<p>Scan every project in a VS Code workspace and return the per-project verdict.</p>
+<!-- doctest: options of=mcp.run_ash_workspace_scan -->
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Type</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>workspace_file</code></td>
+<td>string</td>
+<td><em>required</em></td>
+<td>Absolute path to the .code-workspace file.</td>
+</tr>
+<tr>
+<td><code>workspace_config</code></td>
+<td>string | null</td>
+<td>not set</td>
+<td>Optional path to a workspace policy file.</td>
+</tr>
+<tr>
+<td><code>allow_missing_projects</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Skip absent or unreadable project directories rather than refusing the workspace.</td>
+</tr>
+<tr>
+<td><code>config_overrides</code></td>
+<td>array | null</td>
+<td>not set</td>
+<td>Optional list of <code>key=value</code> config overrides.</td>
+</tr>
+<tr>
+<td><code>output_dir</code></td>
+<td>string | null</td>
+<td>not set</td>
+<td>Where to write the workspace output tree. Defaults to <code>&lt;workspace root&gt;/.ash/ash_output</code>. Refused when it, a directory or file ASH writes in it, or a project's <code>projects/&lt;key&gt;</code> is a symlink.</td>
+</tr>
+<tr>
+<td><code>scanners</code></td>
+<td>array | null</td>
+<td>not set</td>
+<td>Restrict every project to these scanner names.</td>
+</tr>
+<tr>
+<td><code>excluded_scanners</code></td>
+<td>array | null</td>
+<td>not set</td>
+<td>Exclude these scanners from every project. Takes precedence over <code>scanners</code>.</td>
+</tr>
+<tr>
+<td><code>offline</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Run without network access.</td>
+</tr>
+<tr>
+<td><code>clean_output</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Hide each project's previous results once the scan has its directory. Either way they are put back for a project whose scan does not finish. A scan refused because a project already has a scan touches nothing in any project's output.</td>
+</tr>
+<tr>
+<td><code>profile</code></td>
+<td>string | null</td>
+<td>not set</td>
+<td>Name of a registered config profile to scan under for this one call, instead of whatever select_profile bound to this session. An unknown name refuses the whole scan; running N repository scans under the default config because a profile name was misspelled, and reporting success, is exactly what the confinement refusal above exists to prevent. The fields the profile sets are final for every project, and a project's own config fills the rest.</td>
+</tr>
+</tbody>
+</table>
+<p>A workspace policy file, named or found in the workspace file's directory or its <code>.ash</code> directory, is used only when it is in a directory <code>ASH_MCP_ALLOWED_CONFIG_ROOTS</code> names; any other refuses the workspace with exit code 4, or with exit code 3 when a client delivered it and it sets a field the server's policy denies.</p>
+<p>On failure, <code>error_type</code> is one of <code>config_env_not_resolved</code>, <code>config_input_not_permitted</code>, <code>environment_value_in_longer_string</code>, <code>invalid_session_id</code>, <code>output_dir_not_usable</code>, <code>session_scan_limit</code> and <code>source_delivery_busy</code>, or the class name of an exception.</p>
+<h2 id="select_profile">select_profile<a class="headerlink" href="#select_profile" title="Permanent link">&para;</a></h2>
+<p>Bind one of the operator's registered config profiles to this session.</p>
+<!-- doctest: options of=mcp.select_profile -->
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Type</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>profile_name</code></td>
+<td>string</td>
+<td><em>required</em></td>
+<td>Name the operator registered the profile under.</td>
+</tr>
+<tr>
+<td><code>patch_ops</code></td>
+<td>array | null</td>
+<td>not set</td>
+<td>JSON-Patch operations to apply to the profile's config.</td>
+</tr>
+<tr>
+<td><code>override_yaml</code></td>
+<td>string | null</td>
+<td>not set</td>
+<td>Complete ASH config YAML replacing the profile's.</td>
+</tr>
+</tbody>
+</table>
+<p>On failure, <code>error_type</code> is one of <code>environment_value_in_longer_string</code>, <code>invalid_session_id</code>, <code>session_identity_required</code> and <code>session_workspace_busy</code>, or the class name of an exception.</p>
+<h2 id="set_source_git">set_source_git<a class="headerlink" href="#set_source_git" title="Permanent link">&para;</a></h2>
+<p>Clone a repository into this session's workspace and make it the scan target.</p>
+<!-- doctest: options of=mcp.set_source_git -->
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Type</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>url</code></td>
+<td>string</td>
+<td><em>required</em></td>
+<td>Repository URL</td>
+</tr>
+<tr>
+<td><code>ref</code></td>
+<td>string | null</td>
+<td>not set</td>
+<td>Branch, tag, or commit; not set means the remote's default branch</td>
+</tr>
+<tr>
+<td><code>ssh_key_id</code></td>
+<td>string | null</td>
+<td>not set</td>
+<td>Leave it out: the server registers no SSH keys, so any value is refused</td>
+</tr>
+<tr>
+<td><code>depth</code></td>
+<td>integer</td>
+<td><code>1</code></td>
+<td>Clone depth, a whole number of commits from 1 to 1000</td>
+</tr>
+</tbody>
+</table>
+<p>Refused while a scan of this session is running, because the clone would replace the tree and config files that scan is reading. The response is <code>success: false</code>, <code>error_type: source_delivery_busy</code>, and <code>error</code> set to <code>a scan of this session is running; change the delivered source after it finishes</code>. Deliver the source again once <code>get_scan_progress</code> reports a terminal status.</p>
+<p>A refusal or a git failure returns <code>success: false</code> with an <code>error_type</code>: <code>clone_url_not_permitted</code> (a url beginning with <code>-</code> or using the <code>ext::</code> transport, a url holding a control character or a lone surrogate, or a url whose host cannot be read), <code>clone_ref_not_permitted</code> (a ref beginning with <code>-</code> or holding a control character or a lone surrogate), <code>invalid_clone_depth</code> (below 1 or above 1000; the limit is on how much history is fetched), <code>invalid_session_id</code>, <code>local_clone_source_refused</code> (a local path or <code>file://</code> url, which would read the server's own filesystem), <code>clone_host_not_permitted</code> (the host is not in <code>ASH_MCP_GIT_ALLOWED_HOSTS</code>), <code>ssh_key_not_registered</code> (an <code>ssh_key_id</code> was named), <code>clone_timed_out</code> (git ran past its time limit and was stopped), <code>git_clone_failed</code> or <code>git_checkout_failed</code> (git's own message is in <code>error</code>; <code>git_clone_failed</code> also covers a git that is not on <code>PATH</code> or cannot be started), or <code>session_workspace_unavailable</code> (the session's workspace could not take the clone: a directory of it could not be created, the previously delivered source could not be moved aside for it, or the clone could not be moved into place; each move is tried a few times before it fails). The clone is made beside the delivered source and replaces it only once it has worked, so a delivery that fails for any of these reasons, or is refused, leaves the previously delivered source in place, and <code>run_ash_scan</code> with no <code>source_dir</code> scans it. A partial clone that cannot be fully deleted stays beside the source, logged, for the next delivery to delete, and the error returned is still git's own. The one exception is a clone that could not be moved into place after the previous source had been moved aside and could not be put back: the recorded source then names a path that is gone, and <code>run_ash_scan</code> with no <code>source_dir</code> answers <code>delivered_source_missing</code> until a source is delivered again; that next delivery puts the previous source back first. A <code>session_workspace_unavailable</code> that names a refused rename can be retried with the same call: the refusal is usually a program holding a handle inside a tree (a virus scanner, a file indexer), and it passes.</p>
+<p>A re-delivery needs room for both trees at once, because the new clone is made beside the delivered source, which is deleted only after it. When the disk is short, call <code>clear_source</code> first to free the delivered one. A clone, fetch or checkout that fails for want of space returns <code>git_clone_failed</code> or <code>git_checkout_failed</code> with git's own message, and that advice added when the session has a delivered source to free.</p>
+<p>On failure, <code>error_type</code> is one of <code>clone_host_not_permitted</code>, <code>clone_ref_not_permitted</code>, <code>clone_timed_out</code>, <code>clone_too_large</code>, <code>clone_tree_unreadable</code>, <code>clone_url_not_permitted</code>, <code>git_checkout_failed</code>, <code>git_clone_failed</code>, <code>invalid_clone_depth</code>, <code>invalid_session_id</code>, <code>local_clone_source_refused</code>, <code>session_identity_required</code>, <code>session_workspace_unavailable</code>, <code>source_delivery_busy</code> and <code>ssh_key_not_registered</code>, or the class name of an exception.</p>
+<h2 id="set_source_zip_chunk">set_source_zip_chunk<a class="headerlink" href="#set_source_zip_chunk" title="Permanent link">&para;</a></h2>
+<p>Upload one base64 chunk of a zipped source tree.</p>
+<!-- doctest: options of=mcp.set_source_zip_chunk -->
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>upload_id</code></td>
+<td>string</td>
+<td>Caller-chosen id tying the chunks of one upload together</td>
+</tr>
+<tr>
+<td><code>sequence</code></td>
+<td>integer</td>
+<td>Zero-based chunk index; chunks must arrive in order</td>
+</tr>
+<tr>
+<td><code>data_b64</code></td>
+<td>string</td>
+<td>Base64 of this chunk's bytes</td>
+</tr>
+<tr>
+<td><code>last</code></td>
+<td>boolean</td>
+<td><code>true</code> on the final chunk</td>
+</tr>
+</tbody>
+</table>
+<p>Pair with <code>set_source_zip_finalize</code>, which verifies the reassembled archive against <code>expected_sha256</code> before extracting it. A chunked upload that is never finalized is not a scan target.</p>
+<p>When the session's workspace directory cannot be created, both upload tools return <code>success: false</code> with <code>error_type</code> <code>session_workspace_unavailable</code>.</p>
+<p>While the server removes the session's workspace for being unused longer than its time to live, <code>set_source_zip_chunk</code> returns <code>success: false</code> with <code>error_type</code> <code>session_workspace_busy</code>. Send the upload again from its first chunk.</p>
+<p>On failure, <code>error_type</code> is one of <code>invalid_session_id</code>, <code>session_identity_required</code>, <code>session_workspace_busy</code> and <code>session_workspace_unavailable</code>, or the class name of an exception.</p>
+<h2 id="set_source_zip_finalize">set_source_zip_finalize<a class="headerlink" href="#set_source_zip_finalize" title="Permanent link">&para;</a></h2>
+<p>Verify an uploaded zip and extract it as this session's scan target.</p>
+<!-- doctest: options of=mcp.set_source_zip_finalize -->
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>upload_id</code></td>
+<td>string</td>
+<td>The identifier used for the preceding chunk calls.</td>
+</tr>
+<tr>
+<td><code>expected_sha256</code></td>
+<td>string</td>
+<td>Hex sha256 of the complete zip.</td>
+</tr>
+</tbody>
+</table>
+<p>Refused while a scan of this session is running, for the same reason as <code>set_source_git</code>: <code>success: false</code>, <code>error_type: source_delivery_busy</code>, and <code>error</code> set to <code>a scan of this session is running; change the delivered source after it finishes</code>. <code>set_source_zip_chunk</code> is not refused, so the chunks can be sent while the scan runs and the upload finalized after it ends.</p>
+<p>A finalize that cannot deliver returns <code>success: false</code> with an <code>error</code>. Its <code>error_type</code> is <code>session_workspace_unavailable</code> when the session's workspace could not take the tree: a directory of it could not be created, the previous tree could not be renamed aside (nothing is deleted where it stands), or the extracted one could not be moved into place, whatever the operating system error was. The previous tree stays delivered and the uploaded zip is kept, so the same call can be sent again; when the previous tree could not be put back either, <code>run_ash_scan</code> with no <code>source_dir</code> answers <code>delivered_source_missing</code>. A checksum mismatch, an upload that never received its last chunk, or an archive the limits refuse returns <code>error</code> with no <code>error_type</code>. An archive that is not a zip returns <code>error_type</code> <code>BadZipFile</code>, and a failure on disk while the archive is read or extracted (no space, no permission, a file that vanished) returns the class name of the exception, <code>OSError</code> or one of its subclasses; both carry an <code>error</code> that starts <code>Error finalizing source upload:</code>.</p>
+<p>On failure, <code>error_type</code> is one of <code>invalid_session_id</code>, <code>session_identity_required</code>, <code>session_workspace_unavailable</code> and <code>source_delivery_busy</code>, or the class name of an exception.</p>
+<h2 id="suggest_suppression">suggest_suppression<a class="headerlink" href="#suggest_suppression" title="Permanent link">&para;</a></h2>
+<p>Build a paste-ready AshSuppression entry for a specific finding.</p>
+<!-- doctest: options of=mcp.suggest_suppression -->
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Type</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>finding_id</code></td>
+<td>string</td>
+<td><em>required</em></td>
+<td>Stable hash ID of the finding (from get_scan_results or explain_finding).</td>
+</tr>
+<tr>
+<td><code>results_path</code></td>
+<td>string | null</td>
+<td>not set</td>
+<td>Path to ash_aggregated_results.json. Defaults to .ash/ash_output/ash_aggregated_results.json in cwd.</td>
+</tr>
+<tr>
+<td><code>expiration</code></td>
+<td>string | null</td>
+<td>not set</td>
+<td>Expiration date in YYYY-MM-DD format. Defaults to 90 days from today.</td>
+</tr>
+<tr>
+<td><code>justification</code></td>
+<td>string | null</td>
+<td>not set</td>
+<td>Human-readable reason for the suppression.</td>
+</tr>
+</tbody>
+</table>
+<p>On failure, <code>error_type</code> is one of <code>invalid_session_id</code> and <code>path_not_expressible</code>, or the class name of an exception.</p>
+<h2 id="validate_config">validate_config<a class="headerlink" href="#validate_config" title="Permanent link">&para;</a></h2>
+<p>Validate an ASH configuration file or content string.</p>
+<!-- doctest: options of=mcp.validate_config -->
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Type</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>config_content</code></td>
+<td>string | null</td>
+<td>not set</td>
+<td>YAML/JSON string to validate.</td>
+</tr>
+<tr>
+<td><code>config_path</code></td>
+<td>string | null</td>
+<td>not set</td>
+<td>Path to the config file to validate.</td>
+</tr>
+</tbody>
+</table>
+<p><code>config_content</code> counts as the client's config, and so does a <code>config_path</code> that a client delivered or that is outside the directories <code>ASH_MCP_ALLOWED_CONFIG_ROOTS</code> names and its session's <code>config/</code> directory. Each field such a config may not set under the server's runtime-override policy is an error of type <code>denied_by_runtime_policy</code>, and a policy the server cannot read is one error of type <code>config_policy_unreadable</code>; for <code>config_content</code>, both only when a remote client calls. A <code>${VAR}</code> or <code>${VAR:default}</code> reference at the start of a plain value, or an <code>!ENV</code> tag, in such a config is an error of type <code>config_env_not_resolved</code>.</p>
+<p>Each entry of <code>errors</code> has a <code>type</code> that is one of <code>config_env_not_resolved</code>, <code>config_input_not_permitted</code>, <code>duplicate_field</code>, <code>extends_error</code>, <code>file_not_found</code>, <code>internal_field</code>, <code>invalid_field</code>, <code>invalid_session_id</code>, <code>json_parse_error</code>, <code>missing_input</code>, <code>missing_required_field</code>, <code>toml_parse_error</code>, <code>unknown_field</code>, <code>validation_error</code> and <code>yaml_parse_error</code>, or the class name of an exception.</p>
+<h2 id="resources">Resources<a class="headerlink" href="#resources" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>ash://exit-codes</code> — Return the meaning of each ASH exit code as JSON</li>
+<li><code>ash://help</code> — Get help information about ASH usage</li>
+<li><code>ash://schema/config</code> — Return the AshConfig JSON schema</li>
+<li><code>ash://schema/suppression</code> — Return the AshSuppression JSON schema</li>
+<li><code>ash://status</code> — Get the current status of ASH installation</li>
+</ul>
+<p>Read these via the standard MCP resource read mechanism for context-free help.</p>
+<h2 id="severity-levels">Severity levels<a class="headerlink" href="#severity-levels" title="Permanent link">&para;</a></h2>
+<p><code>CRITICAL</code> &gt; <code>HIGH</code> &gt; <code>MEDIUM</code> &gt; <code>LOW</code> &gt; <code>INFO</code> &gt; <code>SUPPRESSED</code></p>
+<p><code>actionable_only=True</code> drops <code>SUPPRESSED</code> findings (false positives, accepted risks) and findings below the scan's severity threshold, which are reported but do not fail the scan.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,116.24a6,6,0,0,1-8.48,0L134,54.49V216a6,6,0,0,1-12,0V54.49L60.24,116.24a6,6,0,0,1-8.48-8.48l72-72a6,6,0,0,1,8.48,0l72,72A6,6,0,0,1,204.24,116.24Z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+  
+    
+
+<nav class="ash-pagination" aria-label="Previous and next documentation pages">
+  <div class="ash-wrap ash-pagination__inner">
+    
+    <a href="../converters/" rel="prev">
+      <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M222,128a6,6,0,0,1-6,6H54.49l61.75,61.76a6,6,0,1,1-8.48,8.48l-72-72a6,6,0,0,1,0-8.48l72-72a6,6,0,0,1,8.48,8.48L54.49,122H216A6,6,0,0,1,222,128Z"/></svg></span><span><span class="ash-pagination__direction">PREVIOUS</span>Converters</span>
+    </a>
+    
+    
+    <a class="ash-pagination__next" href="../exit-codes/" rel="next">
+      <span><span class="ash-pagination__direction">NEXT</span>Exit codes</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M220.24,132.24l-72,72a6,6,0,0,1-8.48-8.48L201.51,134H40a6,6,0,0,1,0-12H201.51L139.76,60.24a6,6,0,0,1,8.48-8.48l72,72A6,6,0,0,1,220.24,132.24Z"/></svg></span>
+    </a>
+    
+  </div>
+</nav>
+
+  
+  <footer class="ash-footer">
+    <div class="ash-wrap ash-footer__top">
+      <div>
+        <a class="ash-brand" href="../.." aria-label="ASH home">
+          <span class="ash-brand__name">ASH<span class="ash-brand__subtitle">Automated Security Helper</span></span>
+        </a>
+      </div>
+      <div class="ash-footer__links">
+        <div><span>Documentation</span><a href="../../getting-started/local/">Quick start</a><a href="../../how-to/configure/">Configuration</a><a href="../cli/">CLI reference</a></div>
+        <div><span>Integrations</span><a href="../scanners/">Scanners</a><a href="../../getting-started/ci/">CI/CD integration</a><a href="../../plugins/">Plugin development</a></div>
+        <div><span>Project</span><a href="https://github.com/awslabs/automated-security-helper">GitHub <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a><a href="../../contributing/">Contribute</a><a href="https://github.com/awslabs/automated-security-helper/issues">Get help <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a></div>
+      </div>
+    </div>
+    <div class="ash-wrap ash-footer__bottom">
+      <span class="ash-footer-credit">Build with <span class="ash-footer-heart" role="img" aria-label="love">&lt;3</span> at Amazon Web Services</span>
+      <div><button class="ash-motion-toggle" type="button" data-ash-motion aria-pressed="false"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M128,26A102,102,0,1,0,230,128,102.12,102.12,0,0,0,128,26Zm0,192a90,90,0,1,1,90-90A90.1,90.1,0,0,1,128,218ZM110,96v64a6,6,0,0,1-12,0V96a6,6,0,0,1,12,0Zm48,0v64a6,6,0,0,1-12,0V96a6,6,0,0,1,12,0Z"/></svg></span> <span>Pause motion</span></button><a href="https://github.com/awslabs/automated-security-helper/blob/main/LICENSE">License</a><a href="../../contributing/#security-issue-notifications">Security</a></div>
+    </div>
+    <div class="ash-wrap ash-footer__copyright">&copy; Amazon Web Services, Inc. or its affiliates. All rights reserved.</div>
+  </footer>
+  <div class="ash-toast" role="status" aria-live="polite" aria-atomic="true" data-ash-toast></div>
+
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.indexes", "navigation.path", "navigation.top", "navigation.footer", "toc.follow", "content.tabs.link", "search.share", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate", "content.code.select"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../assets/javascripts/ash.js"></script>
+      
+    
+  </body>
+</html>

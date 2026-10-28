@@ -1,0 +1,4791 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Security scanning for code, infrastructure, secrets, and dependencies.">
+      
+      
+      
+        <link rel="canonical" href="https://awslabs.github.io/automated-security-helper/latest/reference/configuration/">
+      
+      
+        <link rel="prev" href="../cli/">
+      
+      
+        <link rel="next" href="../environment-variables/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="data:,">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Configuration - ASH - Automated Security Helper</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/ash.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  
+  <!-- Phosphor SVG icon license:
+  MIT License
+
+Copyright (c) 2023 Phosphor Icons
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+  -->
+  <meta name="theme-color" content="#0f141a">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Configuration · ASH">
+  <meta property="og:description" content="Security scanning for code, infrastructure, secrets, and dependencies.">
+  <link rel="preload" href="../../assets/fonts/open-sans.woff2" as="font" type="font/woff2" crossorigin>
+  <noscript>
+    <style>
+      .ash-search-trigger, .ash-menu-toggle, .ash-motion-toggle, .ash-copy,
+       .ash-tabs, .ash-mode-picker, .ash-filter, [data-ash-run], [data-scan-controls],
+       [data-ash-drawer], [data-ash-handbook] { display: none !important; }
+      .ash-install-panel[hidden] { display: block !important; margin-top: 1.5rem; }
+       @media (max-width: 960px) {
+        .ash-header { position: relative; height: auto; }
+      }
+    </style>
+  </noscript>
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#configuration-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+        <aside class="md-banner">
+          <div class="md-banner__inner md-grid md-typeset">
+            
+            <span data-ash-notice="unreleased">
+      These docs describe the main branch, which is not released yet, so a feature
+      described here may not be in the latest release.
+      The install commands in this version of the docs install
+      <code>main</code>, not a release.
+      <a href="../../..">Read the docs for the latest release</a>
+      to install a release.
+    </span>
+          </div>
+          
+        </aside>
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+<a class="ash-skip" href="#main-content">Skip to content</a>
+<header class="md-header ash-header" data-md-component="header">
+  <nav class="ash-header__inner md-grid" aria-label="Main navigation">
+    <a class="ash-brand" href="../.." aria-label="ASH home" data-md-component="logo">
+      <span class="ash-brand__name">ASH<span class="ash-brand__subtitle">Automated Security Helper</span></span>
+    </a>
+    <div class="ash-header__links">
+      <a href="../.." >Overview</a>
+      <a href="../../docs/quick-start-guide/" aria-current="true">Documentation</a>
+      <a href="../..#scanners">Scanners</a>
+      <a href="../../integrations/" >Integrations</a>
+    </div>
+    <div class="ash-sr-only md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">ASH - Automated Security Helper</div>
+        <div class="md-header__topic" data-md-component="header-topic">Configuration</div>
+      </div>
+    </div>
+    <div class="ash-header__actions">
+      
+        <button class="ash-handbook-toggle" type="button" data-ash-handbook aria-label="Browse all documentation" aria-haspopup="dialog" aria-controls="ash-handbook" aria-expanded="false" disabled><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232,50H160a38,38,0,0,0-32,17.55A38,38,0,0,0,96,50H24a6,6,0,0,0-6,6V200a6,6,0,0,0,6,6H96a26,26,0,0,1,26,26,6,6,0,0,0,12,0,26,26,0,0,1,26-26h72a6,6,0,0,0,6-6V56A6,6,0,0,0,232,50ZM96,194H30V62H96a26,26,0,0,1,26,26V204.31A37.86,37.86,0,0,0,96,194Zm130,0H160a37.87,37.87,0,0,0-26,10.32V88a26,26,0,0,1,26-26h66ZM160,90h40a6,6,0,0,1,0,12H160a6,6,0,0,1,0-12Zm46,38a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,128Zm0,32a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,160Z"/></svg></span><span>Contents</span></button>
+      
+      <button class="ash-search-trigger" type="button" data-ash-search aria-label="Search documentation" aria-haspopup="dialog" aria-controls="ash-search-dialog" aria-expanded="false" disabled>
+        <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M228.24,219.76l-51.38-51.38a86.15,86.15,0,1,0-8.48,8.48l51.38,51.38a6,6,0,0,0,8.48-8.48ZM38,112a74,74,0,1,1,74,74A74.09,74.09,0,0,1,38,112Z"/></svg></span><span>Search docs</span><kbd data-ash-shortcut>⌘ K</kbd>
+      </button>
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M122,40V16a6,6,0,0,1,12,0V40a6,6,0,0,1-12,0Zm68,88a62,62,0,1,1-62-62A62.07,62.07,0,0,1,190,128Zm-12,0a50,50,0,1,0-50,50A50.06,50.06,0,0,0,178,128ZM59.76,68.24a6,6,0,1,0,8.48-8.48l-16-16a6,6,0,0,0-8.48,8.48Zm0,119.52-16,16a6,6,0,1,0,8.48,8.48l16-16a6,6,0,1,0-8.48-8.48ZM192,70a6,6,0,0,0,4.24-1.76l16-16a6,6,0,0,0-8.48-8.48l-16,16A6,6,0,0,0,192,70Zm4.24,117.76a6,6,0,0,0-8.48,8.48l16,16a6,6,0,0,0,8.48-8.48ZM46,128a6,6,0,0,0-6-6H16a6,6,0,0,0,0,12H40A6,6,0,0,0,46,128Zm82,82a6,6,0,0,0-6,6v24a6,6,0,0,0,12,0V216A6,6,0,0,0,128,210Zm112-88H216a6,6,0,0,0,0,12h24a6,6,0,0,0,0-12Z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232.13,143.64a6,6,0,0,0-6-1.49A90.07,90.07,0,0,1,113.86,29.85a6,6,0,0,0-7.49-7.48A102.88,102.88,0,0,0,54.48,58.68,102,102,0,0,0,197.32,201.52a102.88,102.88,0,0,0,36.31-51.89A6,6,0,0,0,232.13,143.64Zm-42,48.29a90,90,0,0,1-126-126A90.9,90.9,0,0,1,99.65,37.66,102.06,102.06,0,0,0,218.34,156.35,90.9,90.9,0,0,1,190.1,191.93Z"/></svg>
+      </label>
+    
+  
+</form>
+        <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+      
+      <template data-ash-theme-icons>
+        <span data-color-scheme="default"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M122,40V16a6,6,0,0,1,12,0V40a6,6,0,0,1-12,0Zm68,88a62,62,0,1,1-62-62A62.07,62.07,0,0,1,190,128Zm-12,0a50,50,0,1,0-50,50A50.06,50.06,0,0,0,178,128ZM59.76,68.24a6,6,0,1,0,8.48-8.48l-16-16a6,6,0,0,0-8.48,8.48Zm0,119.52-16,16a6,6,0,1,0,8.48,8.48l16-16a6,6,0,1,0-8.48-8.48ZM192,70a6,6,0,0,0,4.24-1.76l16-16a6,6,0,0,0-8.48-8.48l-16,16A6,6,0,0,0,192,70Zm4.24,117.76a6,6,0,0,0-8.48,8.48l16,16a6,6,0,0,0,8.48-8.48ZM46,128a6,6,0,0,0-6-6H16a6,6,0,0,0,0,12H40A6,6,0,0,0,46,128Zm82,82a6,6,0,0,0-6,6v24a6,6,0,0,0,12,0V216A6,6,0,0,0,128,210Zm112-88H216a6,6,0,0,0,0,12h24a6,6,0,0,0,0-12Z"/></svg></span></span>
+        <span data-color-scheme="slate"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232.13,143.64a6,6,0,0,0-6-1.49A90.07,90.07,0,0,1,113.86,29.85a6,6,0,0,0-7.49-7.48A102.88,102.88,0,0,0,54.48,58.68,102,102,0,0,0,197.32,201.52a102.88,102.88,0,0,0,36.31-51.89A6,6,0,0,0,232.13,143.64Zm-42,48.29a90,90,0,0,1-126-126A90.9,90.9,0,0,1,99.65,37.66,102.06,102.06,0,0,0,218.34,156.35,90.9,90.9,0,0,1,190.1,191.93Z"/></svg></span></span>
+      </template>
+      <a class="ash-github" href="https://github.com/awslabs/automated-security-helper" aria-label="ASH on GitHub">
+        <span>GitHub</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span>
+      </a>
+      <button class="ash-menu-toggle" type="button" aria-label="Open navigation" aria-haspopup="dialog" aria-expanded="false" aria-controls="ash-mobile-menu" data-ash-menu disabled>
+        <span class="ash-menu-glyph" aria-hidden="true"><i></i><i></i></span>
+      </button>
+    </div>
+    
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M228.24,219.76l-51.38-51.38a86.15,86.15,0,1,0-8.48,8.48l51.38,51.38a6,6,0,0,0,8.48-8.48ZM38,112a74,74,0,1,1,74,74A74.09,74.09,0,0,1,38,112Z"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M222,128a6,6,0,0,1-6,6H54.49l61.75,61.76a6,6,0,1,1-8.48,8.48l-72-72a6,6,0,0,1,0-8.48l72-72a6,6,0,0,1,8.48,8.48L54.49,122H216A6,6,0,0,1,222,128Z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,195.76a6,6,0,1,1-8.48,8.48L128,136.49,60.24,204.24a6,6,0,0,1-8.48-8.48L119.51,128,51.76,60.24a6,6,0,0,1,8.48-8.48L128,119.51l67.76-67.75a6,6,0,0,1,8.48,8.48L136.49,128Z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+  </nav>
+  <dialog class="ash-mobile-menu" id="ash-mobile-menu" aria-label="Site navigation" hidden>
+    <div class="ash-mobile-menu__heading"><p class="ash-mobile-menu__eyebrow">Navigation</p><button type="button" data-ash-menu-close aria-label="Close navigation"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,195.76a6,6,0,1,1-8.48,8.48L128,136.49,60.24,204.24a6,6,0,0,1-8.48-8.48L119.51,128,51.76,60.24a6,6,0,0,1,8.48-8.48L128,119.51l67.76-67.75a6,6,0,0,1,8.48,8.48L136.49,128Z"/></svg></span></button></div>
+    <a href="../..">Overview <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../../docs/quick-start-guide/">Documentation <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../..#scanners">Scanners <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../../integrations/">Integrations <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="https://github.com/awslabs/automated-security-helper">GitHub <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    
+      <button type="button" data-ash-drawer>Browse all documentation <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232,50H160a38,38,0,0,0-32,17.55A38,38,0,0,0,96,50H24a6,6,0,0,0-6,6V200a6,6,0,0,0,6,6H96a26,26,0,0,1,26,26,6,6,0,0,0,12,0,26,26,0,0,1,26-26h72a6,6,0,0,0,6-6V56A6,6,0,0,0,232,50ZM96,194H30V62H96a26,26,0,0,1,26,26V204.31A37.86,37.86,0,0,0,96,194Zm130,0H160a37.87,37.87,0,0,0-26,10.32V88a26,26,0,0,1,26-26h66ZM160,90h40a6,6,0,0,1,0,12H160a6,6,0,0,1,0-12Zm46,38a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,128Zm0,32a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,160Z"/></svg></span></button>
+    
+  </dialog>
+  <noscript>
+    <nav class="ash-static-navigation" aria-label="Site navigation">
+      <a href="../..">Overview</a>
+      <a href="../../docs/quick-start-guide/">Documentation</a>
+      <a href="../..#scanners">Scanners</a>
+      <a href="../../integrations/">Integrations</a>
+      <a href="https://github.com/awslabs/automated-security-helper">GitHub</a>
+    </nav>
+  </noscript>
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ASH - Automated Security Helper" class="md-nav__button md-logo" aria-label="ASH - Automated Security Helper" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ASH - Automated Security Helper
+  </label>
+  
+    <div class="md-nav__source">
+      
+<a href="https://github.com/awslabs/automated-security-helper" title="ASH on GitHub" class="md-source" aria-label="ASH on GitHub">
+  <span class="ash-icon md-source__icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M230,64a30,30,0,1,0-36,29.4V112a10,10,0,0,1-10,10H96a21.84,21.84,0,0,0-10,2.42v-31a30,30,0,1,0-12,0v69.2a30,30,0,1,0,12,0V144a10,10,0,0,1,10-10h88a22,22,0,0,0,22-22V93.4A30.05,30.05,0,0,0,230,64ZM62,64A18,18,0,1,1,80,82,18,18,0,0,1,62,64ZM98,192a18,18,0,1,1-18-18A18,18,0,0,1,98,192ZM200,82a18,18,0,1,1,18-18A18,18,0,0,1,200,82Z"/></svg></span>
+  <span class="md-source__repository">ASH on GitHub</span>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../getting-started/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_2" id="__nav_2_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/local/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan on your machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add ASH to CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connect an AI agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/platform-teams/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roll out across repositories
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install ASH
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/advanced-usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Manage scanner tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/configure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configure ASH
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/choose-scanners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose scanners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/set-the-gate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Set the gate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/suppress-findings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Suppress findings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/read-results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read scan results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/export-reports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/scanner-sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enable the scanner sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/run-in-a-container/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run in a container
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/run-offline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run offline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose an integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/pre-commit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run ASH with pre-commit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_14" id="__nav_3_14_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CI systems
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    CI systems
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/ci/github-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub Actions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/ci/gitlab-ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitLab CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/ci/other-ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Other CI systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/scale-large-repos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scale to large repositories
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/mcp-server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run the MCP server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/agent-plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install an agent plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/genai-steering-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH GenAI integration guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/deploy-on-aws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deploy on AWS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/troubleshoot/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshoot
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/migrate-from-v2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migrate from v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/how-ash-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How ASH works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/trust-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration trust model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/scanning-untrusted-code/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanning untrusted code
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanner sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/content-databases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Content databases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/suppressions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Suppressions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_5" id="__nav_5_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#where-ash-finds-its-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where ASH finds its configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#top-level-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Top-level keys
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sections
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sections">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#global_settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        global_settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#global_settingsignore_paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        global_settings.ignore_paths[]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#global_settingssuppressions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        global_settings.suppressions[]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#global_settingsmcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        global_settings.mcp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#global_settingsmcpruntime_overrides" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        global_settings.mcp.runtime_overrides
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sandbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sandbox
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#content_db_staleness_overrides" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        content_db_staleness_overrides[]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#build" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        build
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mcp-resource-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mcp-resource-management
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        workspace
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#plugin-sections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plugin sections
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Plugin sections">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scanners" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scanners
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reporters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        reporters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#converters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        converters
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workspace-policy-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workspace policy file
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Workspace policy file">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#workspace-policy-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workspace policy keys
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workspace-policy-workspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workspace policy workspace
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workspace-policy-workspacesuppressions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workspace policy workspace.suppressions[]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workspace-policy-workspaceignore_paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workspace policy workspace.ignore_paths[]
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment-variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scanners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reporters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../converters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Converters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../exit-codes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exit codes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../output-files/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Output files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../coverage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coverage by language
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../python-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../plugins/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugins
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Plugins
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_2" id="__nav_6_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Built-in scanner pages
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Built-in scanner pages
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/actionlint/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    actionlint
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/cfn-lint-and-cfn-guard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cfn-lint and cfn-guard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/gitleaks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/trivy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trivy filesystem scanner (trivy)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/zizmor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    zizmor (GitHub Actions)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_3" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../docs/plugins/community/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Community plugins
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6_3" id="__nav_6_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Community plugins
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/ferret-scan-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH Ferret Scan Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/snyk-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH Snyk Code Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/snyk-plugin-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Snyk Plugin CI/CD Setup Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/trivy-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trivy Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/aws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS reporters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-scanner/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a scanner plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-reporter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a reporter plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-converter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a converter plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/event-subscribers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Subscribe to scan events
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../contributing/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contributing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/documentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/interface-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interface design system
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/interface-review/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interaction surface inventory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/high-end-design-review/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design & UX review
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/releases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#where-ash-finds-its-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where ASH finds its configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#top-level-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Top-level keys
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sections
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sections">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#global_settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        global_settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#global_settingsignore_paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        global_settings.ignore_paths[]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#global_settingssuppressions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        global_settings.suppressions[]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#global_settingsmcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        global_settings.mcp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#global_settingsmcpruntime_overrides" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        global_settings.mcp.runtime_overrides
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sandbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sandbox
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#content_db_staleness_overrides" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        content_db_staleness_overrides[]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#build" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        build
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mcp-resource-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mcp-resource-management
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        workspace
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#plugin-sections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plugin sections
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Plugin sections">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scanners" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scanners
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reporters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        reporters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#converters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        converters
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workspace-policy-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workspace policy file
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Workspace policy file">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#workspace-policy-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workspace policy keys
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workspace-policy-workspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workspace policy workspace
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workspace-policy-workspacesuppressions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workspace policy workspace.suppressions[]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workspace-policy-workspaceignore_paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workspace policy workspace.ignore_paths[]
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+  <nav class="md-path" aria-label="Navigation" >
+    <ol class="md-path__list">
+      
+        
+  
+  
+    <li class="md-path__item">
+      <a href="../.." class="md-path__link">
+        
+  <span class="md-ellipsis">
+    Home
+  </span>
+
+      </a>
+    </li>
+  
+
+      
+      
+        
+  
+  
+    
+    
+      <li class="md-path__item">
+        <a href="../" class="md-path__link">
+          
+  <span class="md-ellipsis">
+    Reference
+  </span>
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ol>
+  </nav>
+
+              
+              <article class="md-content__inner md-typeset">
+                
+  <div class="ash-doc-label">Documentation</div>
+  <div id="main-content" tabindex="-1">
+    
+
+
+  
+  
+
+
+<!--
+  Generated by scripts/generate_config_reference.py from the AshConfig and AshWorkspaceConfig pydantic models.
+  Do not edit this file by hand: change the code or the generator, then run
+    uv run python scripts/generate_config_reference.py
+  CI runs `uv run python scripts/generate_config_reference.py --check` and fails when this file is stale.
+
+  Anchors: every key has <a id> equal to its dotted path with [] removed,
+  e.g. #global_settings.severity_threshold, #global_settings.suppressions.rule_id.
+-->
+
+<h1 id="configuration-reference">Configuration reference<a class="headerlink" href="#configuration-reference" title="Permanent link">&para;</a></h1>
+<p>This page is generated from the configuration models in the ASH source code by <code>scripts/generate_config_reference.py</code>. Edits made to this file by hand are overwritten the next time it is generated.</p>
+<p>Every key is listed with its type, default and the description the model carries. A key whose model has no description says so. Keys inside a list are written <code>key[].field</code>: <code>global_settings.suppressions[].rule_id</code> is the <code>rule_id</code> of one entry in the <code>suppressions</code> list. A default written as from <code>NAME</code>, else <code>value</code> is read from that environment variable when ASH starts; <code>value</code> applies when the variable is not set.</p>
+<h2 id="where-ash-finds-its-configuration">Where ASH finds its configuration<a class="headerlink" href="#where-ash-finds-its-configuration" title="Permanent link">&para;</a></h2>
+<p>A path given with <code>--config</code>, <code>-c</code>, or the <code>ASH_CONFIG</code> environment variable is used as is, and nothing is discovered.</p>
+<p>Otherwise ASH looks in the scan's source directory and uses the first of these it finds. Sources are never merged: every other one that exists is ignored, with a warning naming it.</p>
+<ol>
+<li><code>.ash.yml</code></li>
+<li><code>.ash/.ash.yml</code></li>
+<li><code>.ash.yaml</code></li>
+<li><code>.ash/.ash.yaml</code></li>
+<li><code>.ash.json</code></li>
+<li><code>.ash/.ash.json</code></li>
+<li><code>ash.yml</code></li>
+<li><code>.ash/ash.yml</code></li>
+<li><code>ash.yaml</code></li>
+<li><code>.ash/ash.yaml</code></li>
+<li><code>ash.json</code></li>
+<li><code>.ash/ash.json</code></li>
+<li><code>.ashrc.toml</code></li>
+<li><code>.ashrc.yaml</code></li>
+<li><code>.ashrc.yml</code></li>
+<li><code>.ashrc.json</code></li>
+<li><code>ashrc.toml</code></li>
+<li><code>ashrc.yaml</code></li>
+<li><code>ashrc.yml</code></li>
+<li><code>ashrc.json</code></li>
+<li><code>pyproject.toml</code></li>
+</ol>
+<p><code>pyproject.toml</code> counts only when it has a <code>[tool.ash]</code> table; one without it is not a configuration source.</p>
+<p>These are read from the source directory only, never from <code>.ash/</code>: <code>.ashrc.toml</code>, <code>.ashrc.yaml</code>, <code>.ashrc.yml</code>, <code>.ashrc.json</code>, <code>ashrc.toml</code>, <code>ashrc.yaml</code>, <code>ashrc.yml</code>, <code>ashrc.json</code>, <code>pyproject.toml</code>.</p>
+<p>A config file can name base files with <code>extends</code>. A chain may be at most 10 levels deep and read at most 50 files.</p>
+<h2 id="top-level-keys">Top-level keys<a class="headerlink" href="#top-level-keys" title="Permanent link">&para;</a></h2>
+<p>A key not listed here is ignored, without an error, when the configuration is loaded.</p>
+<!-- doctest: options of=config -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="project_name"></a><code>project_name</code></td>
+<td>string</td>
+<td>from <code>ASH_PROJECT_NAME</code>, else <code>ash-scan</code></td>
+<td>Name of the project being scanned</td>
+</tr>
+<tr>
+<td><a id="global_settings"></a><code>global_settings</code></td>
+<td><a href="#section-global_settings">section</a></td>
+<td>see the section</td>
+<td>Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence.</td>
+</tr>
+<tr>
+<td><a id="fail_on_findings"></a><code>fail_on_findings</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Whether to exit with non-zero code if findings are detected</td>
+</tr>
+<tr>
+<td><a id="fail_on_incomplete_scanners"></a><code>fail_on_incomplete_scanners</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). A SKIPPED scanner, one not selected or one with nothing of its kind to scan, does not trip this by itself, but a run in which every scanner is SKIPPED, such as one where no selected scanner had a file to scan, exits 1 while this is on. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Selects on the scanner's status, so it covers only a failure that reached that status. Defaults to True, so a scanner recorded ERROR or MISSING does not report the exit code of a clean scan. Converters count too: one that crashed, one that could not convert some of its inputs, and one whose tool is missing while it had inputs make the scan exit non-zero the same way. Set it to False, or pass --no-fail-on-incomplete-scanners, to accept a partial scan's exit code; excluding the scanner whose tool is unavailable is usually better, because an excluded scanner is recorded SKIPPED and the report then says what was not measured. One ending overrides this setting: a run where ASH could not stop a scanner's tool exits 1 either way, because the tool may still be running and writing into the output directory.</td>
+</tr>
+<tr>
+<td><a id="honor_ignore_files"></a><code>honor_ignore_files</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Whether the .gitignore and .ignore files in the scanned tree decide which files are left out of ASH's scan set, the file list detect-secrets, cfn-nag, cdk-nag, cfn-lint, cfn-guard, actionlint, zizmor, npm-audit and the converters read. True (the default) leaves out every file they match. False scans those files too; ASH's own exclusions (.git, CDK assets, its own output directory) still apply. An operator setting: a config file inside the scanned tree, or one an MCP client supplied, cannot change it, and its value there is ignored with a warning. Set it in a config file outside the tree, with --config-overrides, or with --no-honor-ignore-files / --honor-ignore-files. Every scan records the outcome in metadata.ignore_file_exclusions.</td>
+</tr>
+<tr>
+<td><a id="sandbox"></a><code>sandbox</code></td>
+<td><a href="#section-sandbox">section</a></td>
+<td>see the section</td>
+<td>OS-level sandboxing of scanner subprocesses.</td>
+</tr>
+<tr>
+<td><a id="content_db_staleness"></a><code>content_db_staleness</code></td>
+<td>one of <code>fail</code>, <code>warn</code></td>
+<td><code>fail</code></td>
+<td>What a scan does when a scanner's content database (grype's or trivy's vulnerability database, the offline semgrep/opengrep rulesets) was built longer ago than the bound declared for it in automated_security_helper/utils/content_databases.py. 'fail' (the default) keeps the scanner's findings and exits 1, naming the database, its build time, its age and the bound. 'warn' lets the scan pass and records the same warning in the log and in the reports (summary, SARIF invocation notifications, flat JSON). The CLI flag --allow-stale-content-db sets 'warn' for one scan and takes precedence over this value; --no-allow-stale-content-db sets 'fail'.</td>
+</tr>
+<tr>
+<td><a id="content_db_staleness_overrides"></a><code>content_db_staleness_overrides</code></td>
+<td>list of <a href="#section-content_db_staleness_overrides">section</a></td>
+<td><code>[]</code></td>
+<td>Per-database exceptions to content_db_staleness, each with a required expiration date and reason. An entry holds one named database to its own policy until 00:00 UTC on its expiration date, and every database not named keeps content_db_staleness. An expired entry is ignored with a warning. Empty by default. Either form of --allow-stale-content-db clears this list for that scan, so the flag still decides for every database.</td>
+</tr>
+<tr>
+<td><a id="content_db_staleness_offline_image_default"></a><code>content_db_staleness_offline_image_default</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Whether an image built with OFFLINE=YES holds trivy-db to 'warn' rather than to content_db_staleness: fail. Such an image carries the trivy database it was built with, and trivy's own bound would fail every scan in it from a day after the build; with this, those scans pass and every report records the stale database. Only trivy-db: grype-db and the offline rulesets keep content_db_staleness. ASH_OFFLINE_AT_BUILD_TIME=YES in ASH's environment, which the image sets from its OFFLINE build argument, turns it on; without that variable this does nothing, whatever it says. Set false to hold trivy-db to content_db_staleness in the image too. A content_db_staleness_overrides entry for trivy-db outranks it, and either form of --allow-stale-content-db sets this to false for that scan.</td>
+</tr>
+<tr>
+<td><a id="ash_plugin_modules"></a><code>ash_plugin_modules</code></td>
+<td>list of string</td>
+<td><code>[]</code></td>
+<td>List of Python modules to import containing ASH plugins and/or event subscribers. These are loaded in addition to the default modules.</td>
+</tr>
+<tr>
+<td><a id="external_reports_to_include"></a><code>external_reports_to_include</code></td>
+<td>list of string</td>
+<td><code>[]</code></td>
+<td>List of external reports to include in the final report. These can be paths to SARIF or CycloneDX reports produced by other tools.</td>
+</tr>
+<tr>
+<td><a id="build"></a><code>build</code></td>
+<td><a href="#section-build">section</a> or null</td>
+<td><code>null</code></td>
+<td>Build-time configuration settings. <code>ash config validate</code> warns that this key is an internal field, and still passes the config; a scan accepts it.</td>
+</tr>
+<tr>
+<td><a id="converters"></a><code>converters</code></td>
+<td><a href="#section-converters">section</a></td>
+<td>see the section</td>
+<td>Converter configurations by name.</td>
+</tr>
+<tr>
+<td><a id="scanners"></a><code>scanners</code></td>
+<td><a href="#section-scanners">section</a></td>
+<td>see the section</td>
+<td>Scanner configurations by name.</td>
+</tr>
+<tr>
+<td><a id="reporters"></a><code>reporters</code></td>
+<td><a href="#section-reporters">section</a></td>
+<td>see the section</td>
+<td>Reporter configurations by name.</td>
+</tr>
+<tr>
+<td><a id="output_formats"></a><code>output_formats</code></td>
+<td>list of one of <code>aggregated</code>, <code>text</code>, <code>flat-json</code>, <code>yaml</code>, <code>csv</code>, <code>html</code>, <code>dict</code>, <code>junitxml</code>, <code>markdown</code>, <code>sarif</code>, <code>asff</code>, <code>ocsf</code>, <code>cyclonedx</code>, <code>spdx</code>, <code>custom</code>, <code>github-ghas</code>, <code>gitlab-sast</code>, <code>gitlab-cyclonedx</code>, <code>unused-suppressions</code>, <code>aws-security-hub</code>, <code>bedrock-summary-reporter</code>, <code>cloudwatch-logs</code>, <code>s3</code></td>
+<td><code>[]</code></td>
+<td>Reports to write, by reporter name (for example sarif, markdown, github-ghas): a list, one name, or names separated by commas. Narrows the enabled reporters; it does not enable a disabled one. Empty or null writes every enabled reporter. A --output-formats list on the command line replaces this list.</td>
+</tr>
+<tr>
+<td><a id="mcp-resource-management"></a><code>mcp-resource-management</code></td>
+<td><a href="#section-mcp-resource-management">section</a></td>
+<td>see the section</td>
+<td>Configuration for MCP server resource management and limits. Also accepted as <code>mcp_resource_management</code>.</td>
+</tr>
+<tr>
+<td><a id="workspace"></a><code>workspace</code></td>
+<td><a href="#section-workspace">section</a></td>
+<td>see the section</td>
+<td>Workspace-mode execution settings. Read from the config resolved for the workspace root; a project's own copy of this block is ignored, because how many projects run at once is not a project's decision.</td>
+</tr>
+<tr>
+<td><a id="extends"></a><code>extends</code></td>
+<td>string, list of string, or null</td>
+<td><code>null</code></td>
+<td>Base config file(s) this config extends: a path, or a list of paths applied in order, relative to this file. Mappings merge key by key; lists and scalars from this file replace the base's. Paths must stay inside the repository being scanned; URLs are refused. Read when the file is loaded and not written back when a config is saved.</td>
+</tr>
+<tr>
+<td><a id="patch"></a><code>patch</code></td>
+<td>list of mapping of string to any or null</td>
+<td><code>null</code></td>
+<td>RFC 6902 JSON-Patch operations (add, remove, replace, test) applied after this file is merged over its bases. Use 'add' at '/global_settings/suppressions/-' to append to a base's list. Read when the file is loaded and not written back when a config is saved.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="sections">Sections<a class="headerlink" href="#sections" title="Permanent link">&para;</a></h2>
+<h3 id="global_settings"><a id="section-global_settings"></a><code>global_settings</code><a class="headerlink" href="#global_settings" title="Permanent link">&para;</a></h3>
+<p>A key not listed here is an error when the configuration is loaded.</p>
+<!-- doctest: options of=global_settings -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="global_settings.severity_threshold"></a><code>severity_threshold</code></td>
+<td>one of <code>ALL</code>, <code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code></td>
+<td>from <code>ASH_DEFAULT_SEVERITY_LEVEL</code>, else <code>MEDIUM</code></td>
+<td>Global minimum severity level to consider findings as failures across all scanners</td>
+</tr>
+<tr>
+<td><a id="global_settings.ignore_paths"></a><code>ignore_paths</code></td>
+<td>list of <a href="#section-global_settings-ignore_paths">section</a></td>
+<td><code>[]</code></td>
+<td>Global list of IgnorePaths. Each path requires a reason for ignoring, e.g. 'Folder contains test data only and is not committed'.</td>
+</tr>
+<tr>
+<td><a id="global_settings.suppressions"></a><code>suppressions</code></td>
+<td>list of <a href="#section-global_settings-suppressions">section</a></td>
+<td><code>[]</code></td>
+<td>Global list of suppression rules. Each rule specifies findings to suppress based on rule ID, file path, and optional line numbers.</td>
+</tr>
+<tr>
+<td><a id="global_settings.mcp"></a><code>mcp</code></td>
+<td><a href="#section-global_settings-mcp">section</a></td>
+<td>see the section</td>
+<td>MCP-server-specific configuration (runtime override allowlist, etc.).</td>
+</tr>
+</tbody>
+</table>
+<h3 id="global_settingsignore_paths"><a id="section-global_settings-ignore_paths"></a><code>global_settings.ignore_paths[]</code><a class="headerlink" href="#global_settingsignore_paths" title="Permanent link">&para;</a></h3>
+<p>Represents a path exclusion entry.</p>
+<p>Each entry in the list has these keys.</p>
+<p>A key not listed here is accepted and kept, without validation.</p>
+<!-- doctest: options of=global_settings.ignore_paths -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="global_settings.ignore_paths.path"></a><code>path</code></td>
+<td>string</td>
+<td>required</td>
+<td>Path or pattern to exclude</td>
+</tr>
+<tr>
+<td><a id="global_settings.ignore_paths.reason"></a><code>reason</code></td>
+<td>string</td>
+<td>required</td>
+<td>Reason for exclusion</td>
+</tr>
+<tr>
+<td><a id="global_settings.ignore_paths.expiration"></a><code>expiration</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan.</td>
+</tr>
+<tr>
+<td><a id="global_settings.ignore_paths.client_supplied"></a><code>client_supplied</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="global_settingssuppressions"><a id="section-global_settings-suppressions"></a><code>global_settings.suppressions[]</code><a class="headerlink" href="#global_settingssuppressions" title="Permanent link">&para;</a></h3>
+<p>Represents a finding suppression rule.</p>
+<p>Each entry in the list has these keys.</p>
+<p>A key not listed here is accepted and kept, without validation.</p>
+<!-- doctest: options of=global_settings.suppressions -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="global_settings.suppressions.path"></a><code>path</code></td>
+<td>string</td>
+<td>required</td>
+<td>Path or pattern to exclude</td>
+</tr>
+<tr>
+<td><a id="global_settings.suppressions.reason"></a><code>reason</code></td>
+<td>string</td>
+<td>required</td>
+<td>Reason for exclusion</td>
+</tr>
+<tr>
+<td><a id="global_settings.suppressions.expiration"></a><code>expiration</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan.</td>
+</tr>
+<tr>
+<td><a id="global_settings.suppressions.client_supplied"></a><code>client_supplied</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored.</td>
+</tr>
+<tr>
+<td><a id="global_settings.suppressions.rule_id"></a><code>rule_id</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>Rule ID to suppress</td>
+</tr>
+<tr>
+<td><a id="global_settings.suppressions.line_start"></a><code>line_start</code></td>
+<td>integer or null</td>
+<td><code>null</code></td>
+<td>(Optional) Starting line number</td>
+</tr>
+<tr>
+<td><a id="global_settings.suppressions.line_end"></a><code>line_end</code></td>
+<td>integer or null</td>
+<td><code>null</code></td>
+<td>(Optional) Ending line number</td>
+</tr>
+<tr>
+<td><a id="global_settings.suppressions.package_name"></a><code>package_name</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>(Optional) Only suppress findings about this package (glob, case-insensitive). Findings that do not report a package name never match.</td>
+</tr>
+<tr>
+<td><a id="global_settings.suppressions.package_version"></a><code>package_version</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>(Optional) Only suppress findings about this installed package version (glob, case-insensitive). Findings that do not report an installed version never match.</td>
+</tr>
+<tr>
+<td><a id="global_settings.suppressions.package_path"></a><code>package_path</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>(Optional) Only suppress findings about the package copy installed at this path, relative to the scan root (glob, supports **), e.g. 'deploy/cdk/node_modules/aws-cdk-lib/node_modules/brace-expansion'. Separates two copies with the same name and version. Findings that do not report an install path never match.</td>
+</tr>
+<tr>
+<td><a id="global_settings.suppressions.symbol"></a><code>symbol</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>(Optional) Only suppress findings whose lines lie inside the definition with this qualified name, e.g. 'MyClass.my_method', in the finding's file. Names are dotted from the top of the file, exact and case-sensitive. Resolved by parsing the file with tree-sitter (Python, JavaScript, TypeScript, Java), which needs the 'symbols' extra; a finding whose file cannot be parsed never matches.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="global_settingsmcp"><a id="section-global_settings-mcp"></a><code>global_settings.mcp</code><a class="headerlink" href="#global_settingsmcp" title="Permanent link">&para;</a></h3>
+<p>MCP-server-specific config bundle (transport-agnostic).</p>
+<p>A key not listed here is an error when the configuration is loaded.</p>
+<!-- doctest: options of=global_settings.mcp -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="global_settings.mcp.runtime_overrides"></a><code>runtime_overrides</code></td>
+<td><a href="#section-global_settings-mcp-runtime_overrides">section</a></td>
+<td>see the section</td>
+<td>Allowlist for runtime JSON-Patch overrides.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="global_settingsmcpruntime_overrides"><a id="section-global_settings-mcp-runtime_overrides"></a><code>global_settings.mcp.runtime_overrides</code><a class="headerlink" href="#global_settingsmcpruntime_overrides" title="Permanent link">&para;</a></h3>
+<p>Allowlist + denylist controlling which JSON-Patch ops the MCP server accepts.</p>
+<p>A key not listed here is an error when the configuration is loaded.</p>
+<!-- doctest: options of=global_settings.mcp.runtime_overrides -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="global_settings.mcp.runtime_overrides.enabled"></a><code>enabled</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Master switch — runtime patches are rejected unless True.</td>
+</tr>
+<tr>
+<td><a id="global_settings.mcp.runtime_overrides.allowed_paths"></a><code>allowed_paths</code></td>
+<td>list of string</td>
+<td><code>[]</code></td>
+<td>JSON-Pointer glob patterns the client may target. <code>*</code> matches one segment, <code>**</code> matches any subtree. Example: '/scanners/*/options/severity_threshold'.</td>
+</tr>
+<tr>
+<td><a id="global_settings.mcp.runtime_overrides.denied_paths"></a><code>denied_paths</code></td>
+<td>list of string</td>
+<td><code>["/fail_on_findings", "/fail_on_incomplete_scanners", "/content_db_staleness", "/content_db_staleness_overrides", "/honor_ignore_files", "/content_db_staleness_offline_image_default", "/sandbox", "/sandbox/**", "/ash_plugin_modules", "/ash_plugin_modules/**", "/scanners/detect-secrets/options/scan_settings/filters_used", "/scanners/detect-secrets/options/scan_settings/filters_used/**", "/scanners/detect-secrets/options/scan_settings/plugins_used", "/scanners/detect-secrets/options/scan_settings/plugins_used/**", "/scanners/detect-secrets/options/baseline_file", "/global_settings/ignore_paths", "/global_settings/suppressions", "/global_settings/mcp", "/global_settings/mcp/**", "/scanners/opengrep/options/exclude_rule", "/scanners/semgrep/options/exclude_rule", "/scanners/bandit/options/confidence_level", "/scanners/checkov/options/frameworks", "/scanners/checkov/options/skip_frameworks", "/scanners/opengrep/options/config", "/scanners/opengrep/options/patterns", "/scanners/opengrep/options/severity", "/scanners/semgrep/options/config", "/scanners/semgrep/options/severity", "/scanners/detect-secrets/options/scan_settings", "/scanners/cdk-nag/options/nag_packs/AwsSolutionsChecks", "/scanners/ferret-scan/options/checks", "/scanners/ferret-scan/options/confidence_levels", "/scanners/ferret-scan/options/disable_ip_types", "/scanners/ferret-scan/options/enable_preprocessors", "/scanners/ferret-scan/options/finding_limit", "/scanners/ferret-scan/options/profile", "/scanners/ferret-scan/options/recursive", "/scanners/ferret-scan/options/respect_gitignore", "/scanners/ferret-scan/options/use_default_config", "/scanners/ferret-scan/options/validator_budget", "/scanners/trivy-repo/options/license_full", "/scanners/trivy-repo/options/scanners", "/scanners/cfn-guard/options/rule_sets", "/scanners/cfn-lint/options/ignore_checks", "/scanners/cfn-lint/options/regions", "/scanners/gitleaks/options/baseline_path", "/scanners/trivy/options/scanners", "/scanners/trivy/options/ignore_unfixed", "/scanners/*/options/offline", "/scanners/ferret-scan/options/max_live_bytes", "/scanners/gitleaks/options/max_target_megabytes", "/scanners/bandit/options/config_file", "/scanners/checkov/options/config_file", "/scanners/ferret-scan/options/config_file", "/scanners/grype/options/config_file", "/scanners/syft/options/config_file", "/scanners/trivy-repo/options/secret_config_file", "/scanners/trivy-repo/options/config_file", "/scanners/trivy-repo/options/module_dir", "/scanners/trivy/options/config_file", "/scanners/trivy/options/secret_config_file", "/scanners/actionlint/options/config_file", "/scanners/actionlint/options/shellcheck", "/scanners/actionlint/options/pyflakes", "/scanners/cfn-guard/options/rules_paths", "/scanners/cfn-lint/options/config_file", "/scanners/gitleaks/options/config_file", "/scanners/zizmor/options/config_file", "/scanners/zizmor/options/online_audits", "/scanners/snyk-code/options/honor_tree_exclusions", "/scanners/cfn-lint/options/honor_inline_ignores", "/scanners/gitleaks/options/honor_inline_ignores", "/scanners/zizmor/options/honor_inline_ignores", "/scanners/*/options/tool_version", "/converters/jupyter/options/tool_version", "/scanners/opengrep/options/version", "/scanners/opengrep/options/sha256", "/scanners/opengrep/options/metrics", "/scanners/semgrep/options/metrics", "/reporters/bedrock-summary-reporter/options/aws_*", "/reporters/cloudwatch-logs/**", "/reporters/aws-security-hub/**", "/reporters/bedrock-summary-reporter/options/model_id", "/reporters/bedrock-summary-reporter/options/output_file", "/reporters/bedrock-summary-reporter/options/output_executive_file", "/reporters/bedrock-summary-reporter/options/output_technical_file", "/reporters/s3/**", "/reporters/bedrock-summary-reporter/**", "/reporters/gitlab-sast/options/exclude_suppressed", "/scanners/detect-secrets/**", "/scanners/npm-audit/**", "/scanners/opengrep/**", "/scanners/semgrep/**", "/scanners/snyk-code/**", "/scanners/trivy-repo/**", "/scanners/trivy/**", "/scanners/zizmor/**", "/converters/archive/options/max_members", "/converters/archive/options/max_member_bytes", "/converters/archive/options/max_total_bytes", "/converters/archive/options/max_compression_ratio"]</code></td>
+<td>JSON-Pointer glob patterns that are never allowed (denied wins over allowed). Each entry starts with '/'. The defaults block the fields that decide whether a scan fails, what it runs and reports, where findings are sent, the scanner sandbox, and this policy. A list equal to a default ASH has shipped counts as the current default list. Any other list is added to the current defaults, unless replace_default_denied_paths is true. When it is added, a list that holds some default entries and leaves others out still gets them, and a warning names the ones it leaves out. Whatever the list, and with replace_default_denied_paths too, the entries ASH always denies (the scanner sandbox, ash_plugin_modules, the detect-secrets verification, plugin and baseline settings, the archive converter's extraction limits, and the sections of the plugins that send data off the host: the s3, aws-security-hub, cloudwatch-logs and bedrock-summary-reporter reporters and the detect-secrets, npm-audit, opengrep, semgrep, snyk-code and trivy-repo scanners) are added to it.</td>
+</tr>
+<tr>
+<td><a id="global_settings.mcp.runtime_overrides.denied_value_patterns"></a><code>denied_value_patterns</code></td>
+<td>mapping of string to string</td>
+<td><code>{}</code></td>
+<td>Map of JSON-Pointer pattern to regex. add/replace ops are rejected when any string leaf reachable from the op's value matches the regex; lists and dicts are walked recursively so a forbidden token cannot be hidden inside a nested structure. The <code>test</code> op is exempt because it is read-only. Each key starts with '/'.</td>
+</tr>
+<tr>
+<td><a id="global_settings.mcp.runtime_overrides.replace_default_denied_paths"></a><code>replace_default_denied_paths</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>When true, denied_paths is used as written instead of being added to ASH's default list, and each default entry it leaves out is named in a warning. When false (the default), the entries listed are denied as well as the defaults. Either way, an unset list, or one equal to a default ASH has shipped, gets the current default list.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="sandbox"><a id="section-sandbox"></a><code>sandbox</code><a class="headerlink" href="#sandbox" title="Permanent link">&para;</a></h3>
+<p>OS-level sandboxing of scanner subprocesses. Off by default.</p>
+<p>A key not listed here is an error when the configuration is loaded.</p>
+<!-- doctest: options of=sandbox -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="sandbox.mode"></a><code>mode</code></td>
+<td>one of <code>off</code>, <code>auto</code>, <code>bwrap</code>, <code>firejail</code>, <code>landlock</code>, <code>sandbox-exec</code></td>
+<td><code>"off"</code></td>
+<td>How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. A mode that --sandbox, ASH_CONFIG or the operator's config file sets is a floor: a config file inside a git checkout or the scanned directory cannot turn it off or switch backends. Not applied in container mode, where the container is the boundary; ASH logs a warning when it is set there.</td>
+</tr>
+<tr>
+<td><a id="sandbox.network_scanners"></a><code>network_scanners</code></td>
+<td>list of string or null</td>
+<td><code>null</code></td>
+<td>Scanners allowed a network when the scan is online. Null (the default) uses each scanner's declared need: semgrep, opengrep, grype, trivy, npm-audit and snyk-code fetch rules, databases or audit data. A list replaces those defaults. Under --offline no scanner gets a network. Honored only from --config-overrides or a config file outside every git checkout and the scanned directory; set by any other config file, a list can only remove network.</td>
+</tr>
+<tr>
+<td><a id="sandbox.extra_read_paths"></a><code>extra_read_paths</code></td>
+<td>list of string</td>
+<td><code>[]</code></td>
+<td>Additional host paths every sandboxed scanner may read, for example a corporate CA bundle or a shared rule directory. '~' and $VARS expand. Honored only from --config-overrides or a config file outside every git checkout and the scanned directory.</td>
+</tr>
+<tr>
+<td><a id="sandbox.read_path_scanners"></a><code>read_path_scanners</code></td>
+<td>list of string</td>
+<td><code>[]</code></td>
+<td>Scanners allowed the extra host paths their own options ask for (a rules file or baseline outside the source tree, for example). Under a sandbox, without this, a scanner whose read paths come from its options gets only the default policy, and ASH does not read a detect-secrets baseline_file outside the source tree. With it, a granted path, that baseline included, is used only when it resolves inside the source tree or an extra_read_paths entry. Honored only from --config-overrides or a config file outside every git checkout and the scanned directory.</td>
+</tr>
+<tr>
+<td><a id="sandbox.env_scanners"></a><code>env_scanners</code></td>
+<td>list of string</td>
+<td><code>[]</code></td>
+<td>Scanners allowed the environment variables their own options ask for (a token for an online check, for example). Without this, such variables are not passed. Honored only from --config-overrides or a config file outside every git checkout and the scanned directory.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="content_db_staleness_overrides"><a id="section-content_db_staleness_overrides"></a><code>content_db_staleness_overrides[]</code><a class="headerlink" href="#content_db_staleness_overrides" title="Permanent link">&para;</a></h3>
+<p>One content database held to a different staleness policy, until a fixed date.</p>
+<p>Each entry in the list has these keys.</p>
+<p>A key not listed here is an error when the configuration is loaded.</p>
+<!-- doctest: options of=content_db_staleness_overrides -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="content_db_staleness_overrides.database"></a><code>database</code></td>
+<td>string</td>
+<td>required</td>
+<td>The content database's registry name, as listed in automated_security_helper/utils/content_databases.py: grype-db, trivy-db, semgrep-offline-rules or opengrep-offline-rules.</td>
+</tr>
+<tr>
+<td><a id="content_db_staleness_overrides.policy"></a><code>policy</code></td>
+<td>one of <code>fail</code>, <code>warn</code></td>
+<td>required</td>
+<td>The policy this database is held to while the entry is in effect.</td>
+</tr>
+<tr>
+<td><a id="content_db_staleness_overrides.expiration"></a><code>expiration</code></td>
+<td>string</td>
+<td>required</td>
+<td>Required. The date (YYYY-MM-DD, UTC) from which the entry no longer applies: at 00:00 UTC that day the database returns to the policy it has without the entry, which is content_db_staleness, or, for trivy-db in an image built with OFFLINE=YES, that image's warn default unless content_db_staleness_offline_image_default is false.</td>
+</tr>
+<tr>
+<td><a id="content_db_staleness_overrides.reason"></a><code>reason</code></td>
+<td>string, length at least 1</td>
+<td>required</td>
+<td>Required. Why this database is held differently.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="build"><a id="section-build"></a><code>build</code><a class="headerlink" href="#build" title="Permanent link">&para;</a></h3>
+<p>Configuration model for build-time settings.</p>
+<p>A key not listed here is an error when the configuration is loaded.</p>
+<!-- doctest: options of=build -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="build.build_mode"></a><code>build_mode</code></td>
+<td>one of <code>ONLINE</code>, <code>OFFLINE</code></td>
+<td><code>ONLINE</code></td>
+<td>Build mode for the container image build. If enabled, also enables offline mode during the scan phase without any explicit directive when scanning.</td>
+</tr>
+<tr>
+<td><a id="build.tool_install_scripts"></a><code>tool_install_scripts</code></td>
+<td>mapping of string to list of string</td>
+<td><code>{}</code></td>
+<td>Map of tool names to their installation scripts</td>
+</tr>
+<tr>
+<td><a id="build.custom_scanners"></a><code>custom_scanners</code></td>
+<td>list of mapping, length at most 0</td>
+<td><code>[]</code></td>
+<td>Not supported: nothing reads these entries, so the list must stay empty. Configure scanners under their own sections.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="mcp-resource-management"><a id="section-mcp-resource-management"></a><code>mcp-resource-management</code><a class="headerlink" href="#mcp-resource-management" title="Permanent link">&para;</a></h3>
+<p>Configuration model for MCP resource management settings.</p>
+<p>A key not listed here is an error when the configuration is loaded.</p>
+<!-- doctest: options of=mcp-resource-management -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="mcp-resource-management.max_concurrent_scans"></a><code>max_concurrent_scans</code></td>
+<td>integer or null, at least 0, at most 100</td>
+<td><code>3</code></td>
+<td>Maximum number of scans the MCP server runs at once, across every session; a scan started beyond it is refused. A workspace scan counts as one scan, however many projects it has. 0 or null for no limit. Read from the operator's ASH_CONFIG only.</td>
+</tr>
+<tr>
+<td><a id="mcp-resource-management.max_concurrent_scans_per_session"></a><code>max_concurrent_scans_per_session</code></td>
+<td>integer, at least 0, at most 100</td>
+<td><code>2</code></td>
+<td>Maximum number of scans one session of a network transport (streamable-http, sse) may run at once; 0 for no per-session limit. A run_ash_workspace_scan counts once. Read from the operator's config (ASH_CONFIG) only, never from a scanned or delivered one. stdio's single session is not limited.</td>
+</tr>
+<tr>
+<td><a id="mcp-resource-management.max_concurrent_tasks"></a><code>max_concurrent_tasks</code></td>
+<td>integer, at least 1, at most 50</td>
+<td><code>20</code></td>
+<td>Not enforced: nothing reads this setting. Maximum number of concurrent async tasks allowed</td>
+</tr>
+<tr>
+<td><a id="mcp-resource-management.thread_pool_max_workers"></a><code>thread_pool_max_workers</code></td>
+<td>integer, at least 1, at most 20</td>
+<td><code>4</code></td>
+<td>Not enforced: nothing reads this setting. Maximum number of worker threads in the shared thread pool</td>
+</tr>
+<tr>
+<td><a id="mcp-resource-management.scan_timeout_seconds"></a><code>scan_timeout_seconds</code></td>
+<td>integer or null, at least 0, at most 86,400</td>
+<td><code>1800</code></td>
+<td>Longest a single MCP scan may run, in seconds, counted from when it starts running (after any wait for another scan of its session); a scan still running then is stopped and reported as failed. For a workspace scan it covers the whole workspace, and every project is stopped and reported as failed. 60 to 86400, or 0 or null for no limit. Read from the operator's ASH_CONFIG only.</td>
+</tr>
+<tr>
+<td><a id="mcp-resource-management.operation_timeout_seconds"></a><code>operation_timeout_seconds</code></td>
+<td>integer, at least 30, at most 600</td>
+<td><code>180</code></td>
+<td>Not enforced: nothing reads this setting. Default timeout for general operations in seconds</td>
+</tr>
+<tr>
+<td><a id="mcp-resource-management.shutdown_timeout_seconds"></a><code>shutdown_timeout_seconds</code></td>
+<td>integer, at least 5, at most 300</td>
+<td><code>30</code></td>
+<td>Not enforced: nothing reads this setting. Maximum time to wait for graceful shutdown in seconds</td>
+</tr>
+<tr>
+<td><a id="mcp-resource-management.memory_warning_threshold_mb"></a><code>memory_warning_threshold_mb</code></td>
+<td>integer, at least 100, at most 8,192</td>
+<td><code>1024</code></td>
+<td>Not enforced: nothing reads this setting. Memory usage threshold in MB that triggers warnings</td>
+</tr>
+<tr>
+<td><a id="mcp-resource-management.memory_critical_threshold_mb"></a><code>memory_critical_threshold_mb</code></td>
+<td>integer, at least 200, at most 16,384</td>
+<td><code>2048</code></td>
+<td>Not enforced: nothing reads this setting. Memory usage threshold in MB that triggers protective actions</td>
+</tr>
+<tr>
+<td><a id="mcp-resource-management.task_count_warning_threshold"></a><code>task_count_warning_threshold</code></td>
+<td>integer, at least 5, at most 100</td>
+<td><code>15</code></td>
+<td>Not enforced: nothing reads this setting. Active task count that triggers warnings</td>
+</tr>
+<tr>
+<td><a id="mcp-resource-management.max_message_size_bytes"></a><code>max_message_size_bytes</code></td>
+<td>integer, at least 1,024, at most 104,857,600</td>
+<td><code>10485760</code></td>
+<td>Not enforced: nothing reads this setting. Maximum size of MCP messages in bytes</td>
+</tr>
+<tr>
+<td><a id="mcp-resource-management.max_path_length"></a><code>max_path_length</code></td>
+<td>integer, at least 256, at most 8,192</td>
+<td><code>4096</code></td>
+<td>Not enforced: nothing reads this setting. Maximum allowed path length for security validation</td>
+</tr>
+<tr>
+<td><a id="mcp-resource-management.max_directory_size_mb"></a><code>max_directory_size_mb</code></td>
+<td>integer, at least 10, at most 10,240</td>
+<td><code>1000</code></td>
+<td>Not enforced: nothing reads this setting. Maximum directory size in MB that can be scanned</td>
+</tr>
+<tr>
+<td><a id="mcp-resource-management.enable_health_checks"></a><code>enable_health_checks</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Not enforced: nothing reads this setting. Enable periodic health checks and resource monitoring</td>
+</tr>
+<tr>
+<td><a id="mcp-resource-management.health_check_interval_seconds"></a><code>health_check_interval_seconds</code></td>
+<td>integer, at least 10, at most 300</td>
+<td><code>60</code></td>
+<td>Not enforced: nothing reads this setting. Interval between health checks in seconds</td>
+</tr>
+<tr>
+<td><a id="mcp-resource-management.enable_resource_logging"></a><code>enable_resource_logging</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Not enforced: nothing reads this setting. Enable detailed resource management logging</td>
+</tr>
+<tr>
+<td><a id="mcp-resource-management.log_resource_operations"></a><code>log_resource_operations</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Not enforced: nothing reads this setting. Log individual resource operations for debugging</td>
+</tr>
+</tbody>
+</table>
+<h3 id="workspace"><a id="section-workspace"></a><code>workspace</code><a class="headerlink" href="#workspace" title="Permanent link">&para;</a></h3>
+<p>How many projects a workspace scan runs at once, and how long each may take.</p>
+<p>A key not listed here is an error when the configuration is loaded.</p>
+<!-- doctest: options of=workspace -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="workspace.max_parallel_projects"></a><code>max_parallel_projects</code></td>
+<td>integer or null, at least 1, at most 64</td>
+<td><code>null</code></td>
+<td>Maximum number of projects scanned concurrently. Unset means min(4, cpu_count). This is an outer bound over each project's own scanner thread pool, not a replacement for it.</td>
+</tr>
+<tr>
+<td><a id="workspace.project_timeout"></a><code>project_timeout</code></td>
+<td>number or null, greater than 0</td>
+<td><code>null</code></td>
+<td>Seconds to allow a single project. Unset means no limit. On timeout that project is recorded as failed and the remaining projects still complete.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="plugin-sections">Plugin sections<a class="headerlink" href="#plugin-sections" title="Permanent link">&para;</a></h2>
+<p><code>scanners</code>, <code>reporters</code> and <code>converters</code> each map a plugin name to that plugin's configuration. Every plugin's entry has these keys; what goes under <code>options</code> is specific to the plugin and is listed on its reference page.</p>
+<!-- doctest: options of=scanners.* -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>string, length at least 1, matches <code>^[a-zA-Z][\w-]+$</code></td>
+<td>the plugin's own name</td>
+<td>Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter. <code>ash config validate</code> warns that it is internal-only in a scanner, reporter, or converter entry, and still passes the config; a scan accepts it.</td>
+</tr>
+<tr>
+<td><code>enabled</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Whether the component is enabled</td>
+</tr>
+<tr>
+<td><code>options</code></td>
+<td>mapping</td>
+<td>the plugin's defaults</td>
+<td>The plugin's options. Each plugin's are listed on its reference page: <a href="../scanners/">scanners</a>, <a href="../reporters/">reporters</a>, <a href="../converters/">converters</a>.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="scanners"><a id="section-scanners"></a><code>scanners</code><a class="headerlink" href="#scanners" title="Permanent link">&para;</a></h3>
+<p>The scanners ASH declares a configuration for. Other scanner names are accepted too (the section allows extra keys), for scanners loaded from <code>ash_plugin_modules</code>.</p>
+<!-- doctest: options of=scanners -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Enabled by default</th>
+<th>Scanner options</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="scanners.actionlint"></a><code>actionlint</code></td>
+<td>yes</td>
+<td><a href="../scanners/#actionlint"><code>actionlint</code> options</a></td>
+</tr>
+<tr>
+<td><a id="scanners.bandit"></a><code>bandit</code></td>
+<td>yes</td>
+<td><a href="../scanners/#bandit"><code>bandit</code> options</a></td>
+</tr>
+<tr>
+<td><a id="scanners.cdk-nag"></a><code>cdk-nag</code></td>
+<td>yes</td>
+<td><a href="../scanners/#cdk-nag"><code>cdk-nag</code> options</a></td>
+</tr>
+<tr>
+<td><a id="scanners.cfn-guard"></a><code>cfn-guard</code></td>
+<td>yes</td>
+<td><a href="../scanners/#cfn-guard"><code>cfn-guard</code> options</a></td>
+</tr>
+<tr>
+<td><a id="scanners.cfn-lint"></a><code>cfn-lint</code></td>
+<td>yes</td>
+<td><a href="../scanners/#cfn-lint"><code>cfn-lint</code> options</a></td>
+</tr>
+<tr>
+<td><a id="scanners.cfn-nag"></a><code>cfn-nag</code></td>
+<td>yes</td>
+<td><a href="../scanners/#cfn-nag"><code>cfn-nag</code> options</a></td>
+</tr>
+<tr>
+<td><a id="scanners.checkov"></a><code>checkov</code></td>
+<td>yes</td>
+<td><a href="../scanners/#checkov"><code>checkov</code> options</a></td>
+</tr>
+<tr>
+<td><a id="scanners.detect-secrets"></a><code>detect-secrets</code></td>
+<td>yes</td>
+<td><a href="../scanners/#detect-secrets"><code>detect-secrets</code> options</a></td>
+</tr>
+<tr>
+<td><a id="scanners.gitleaks"></a><code>gitleaks</code></td>
+<td>yes</td>
+<td><a href="../scanners/#gitleaks"><code>gitleaks</code> options</a></td>
+</tr>
+<tr>
+<td><a id="scanners.grype"></a><code>grype</code></td>
+<td>yes</td>
+<td><a href="../scanners/#grype"><code>grype</code> options</a></td>
+</tr>
+<tr>
+<td><a id="scanners.npm-audit"></a><code>npm-audit</code></td>
+<td>yes</td>
+<td><a href="../scanners/#npm-audit"><code>npm-audit</code> options</a></td>
+</tr>
+<tr>
+<td><a id="scanners.opengrep"></a><code>opengrep</code></td>
+<td>yes on Linux and macOS; no on Windows</td>
+<td><a href="../scanners/#opengrep"><code>opengrep</code> options</a></td>
+</tr>
+<tr>
+<td><a id="scanners.semgrep"></a><code>semgrep</code></td>
+<td>yes on Linux and macOS; no on Windows</td>
+<td><a href="../scanners/#semgrep"><code>semgrep</code> options</a></td>
+</tr>
+<tr>
+<td><a id="scanners.syft"></a><code>syft</code></td>
+<td>yes</td>
+<td><a href="../scanners/#syft"><code>syft</code> options</a></td>
+</tr>
+<tr>
+<td><a id="scanners.trivy"></a><code>trivy</code></td>
+<td>yes</td>
+<td><a href="../scanners/#trivy"><code>trivy</code> options</a></td>
+</tr>
+<tr>
+<td><a id="scanners.zizmor"></a><code>zizmor</code></td>
+<td>yes</td>
+<td><a href="../scanners/#zizmor"><code>zizmor</code> options</a></td>
+</tr>
+</tbody>
+</table>
+<h3 id="reporters"><a id="section-reporters"></a><code>reporters</code><a class="headerlink" href="#reporters" title="Permanent link">&para;</a></h3>
+<p>The reporters ASH declares a configuration for. Other reporter names are accepted too (the section allows extra keys), for reporters loaded from <code>ash_plugin_modules</code>.</p>
+<!-- doctest: options of=reporters -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Enabled by default</th>
+<th>Reporter options</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="reporters.csv"></a><code>csv</code></td>
+<td>yes</td>
+<td><a href="../reporters/#csv"><code>csv</code> options</a></td>
+</tr>
+<tr>
+<td><a id="reporters.cyclonedx"></a><code>cyclonedx</code></td>
+<td>yes</td>
+<td><a href="../reporters/#cyclonedx"><code>cyclonedx</code> options</a></td>
+</tr>
+<tr>
+<td><a id="reporters.gitlab-cyclonedx"></a><code>gitlab-cyclonedx</code></td>
+<td>yes</td>
+<td><a href="../reporters/#gitlab-cyclonedx"><code>gitlab-cyclonedx</code> options</a></td>
+</tr>
+<tr>
+<td><a id="reporters.html"></a><code>html</code></td>
+<td>yes</td>
+<td><a href="../reporters/#html"><code>html</code> options</a></td>
+</tr>
+<tr>
+<td><a id="reporters.flat-json"></a><code>flat-json</code></td>
+<td>yes</td>
+<td><a href="../reporters/#flat-json"><code>flat-json</code> options</a></td>
+</tr>
+<tr>
+<td><a id="reporters.gitlab-sast"></a><code>gitlab-sast</code></td>
+<td>yes</td>
+<td><a href="../reporters/#gitlab-sast"><code>gitlab-sast</code> options</a></td>
+</tr>
+<tr>
+<td><a id="reporters.github-ghas"></a><code>github-ghas</code></td>
+<td>yes</td>
+<td><a href="../reporters/#github-ghas"><code>github-ghas</code> options</a></td>
+</tr>
+<tr>
+<td><a id="reporters.junitxml"></a><code>junitxml</code></td>
+<td>yes</td>
+<td><a href="../reporters/#junitxml"><code>junitxml</code> options</a></td>
+</tr>
+<tr>
+<td><a id="reporters.markdown"></a><code>markdown</code></td>
+<td>yes</td>
+<td><a href="../reporters/#markdown"><code>markdown</code> options</a></td>
+</tr>
+<tr>
+<td><a id="reporters.ocsf"></a><code>ocsf</code></td>
+<td>yes</td>
+<td><a href="../reporters/#ocsf"><code>ocsf</code> options</a></td>
+</tr>
+<tr>
+<td><a id="reporters.sarif"></a><code>sarif</code></td>
+<td>yes</td>
+<td><a href="../reporters/#sarif"><code>sarif</code> options</a></td>
+</tr>
+<tr>
+<td><a id="reporters.spdx"></a><code>spdx</code></td>
+<td>no</td>
+<td><a href="../reporters/#spdx"><code>spdx</code> options</a></td>
+</tr>
+<tr>
+<td><a id="reporters.text"></a><code>text</code></td>
+<td>yes</td>
+<td><a href="../reporters/#text"><code>text</code> options</a></td>
+</tr>
+<tr>
+<td><a id="reporters.unused-suppressions"></a><code>unused-suppressions</code></td>
+<td>yes</td>
+<td><a href="../reporters/#unused-suppressions"><code>unused-suppressions</code> options</a></td>
+</tr>
+<tr>
+<td><a id="reporters.yaml"></a><code>yaml</code></td>
+<td>no</td>
+<td><a href="../reporters/#yaml"><code>yaml</code> options</a></td>
+</tr>
+</tbody>
+</table>
+<h3 id="converters"><a id="section-converters"></a><code>converters</code><a class="headerlink" href="#converters" title="Permanent link">&para;</a></h3>
+<p>The converters ASH declares a configuration for. Other converter names are accepted too (the section allows extra keys), for converters loaded from <code>ash_plugin_modules</code>.</p>
+<!-- doctest: options of=converters -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Enabled by default</th>
+<th>Converter options</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="converters.archive"></a><code>archive</code></td>
+<td>yes</td>
+<td><a href="../converters/#archive"><code>archive</code> options</a></td>
+</tr>
+<tr>
+<td><a id="converters.jupyter"></a><code>jupyter</code></td>
+<td>yes</td>
+<td><a href="../converters/#jupyter"><code>jupyter</code> options</a></td>
+</tr>
+</tbody>
+</table>
+<h2 id="workspace-policy-file">Workspace policy file<a class="headerlink" href="#workspace-policy-file" title="Permanent link">&para;</a></h2>
+<p>In workspace mode, policy that applies to every project lives in its own file, separate from any project's configuration.</p>
+<p>ASH looks for it at the workspace root and then in <code>.ash/</code>, under any of these names: <code>.ash-workspace.yml</code>, <code>.ash-workspace.yaml</code>, <code>.ash-workspace.json</code>, <code>ash-workspace.yml</code>, <code>ash-workspace.yaml</code>, <code>ash-workspace.json</code>.</p>
+<p>Exactly one may exist: when ASH finds more than one, it refuses the workspace rather than choose.</p>
+<h3 id="workspace-policy-keys">Workspace policy keys<a class="headerlink" href="#workspace-policy-keys" title="Permanent link">&para;</a></h3>
+<p>A key not listed here is an error when the configuration is loaded.</p>
+<!-- doctest: options of=workspace-policy -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="workspace-policy.workspace"></a><code>workspace</code></td>
+<td><a href="#workspace-section-workspace">section</a></td>
+<td>see the section</td>
+<td>Workspace-wide policy. Distinct from AshConfig.workspace, which holds execution scheduling knobs in a project config; nothing here can be set from a project's own file.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="workspace-policy-workspace"><a id="workspace-section-workspace"></a>Workspace policy <code>workspace</code><a class="headerlink" href="#workspace-policy-workspace" title="Permanent link">&para;</a></h3>
+<p>Workspace-wide policy: the <code>workspace</code> block of the policy file.</p>
+<p>A key not listed here is an error when the configuration is loaded.</p>
+<!-- doctest: options of=workspace-policy.workspace -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="workspace-policy.workspace.max_severity_threshold"></a><code>max_severity_threshold</code></td>
+<td>one of <code>ALL</code>, <code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code>, or null</td>
+<td><code>null</code></td>
+<td>The LOOSEST severity threshold any project may use. A project configuring something stricter keeps it; a project configuring something looser is tightened to this value. 'max' refers to permissiveness, not to severity: the strictness order is ALL &lt; LOW &lt; MEDIUM &lt; HIGH &lt; CRITICAL, so raising this value LOOSENS the ceiling. Unset means no ceiling. Case-sensitive.</td>
+</tr>
+<tr>
+<td><a id="workspace-policy.workspace.suppressions"></a><code>suppressions</code></td>
+<td>list of <a href="#workspace-section-workspace-suppressions">section</a></td>
+<td><code>[]</code></td>
+<td>Suppressions that apply across the workspace. Paths are WORKSPACE-relative (e.g. 'api/src/legacy.py') and are rewritten into each project's own coordinates before being applied. A suppression that cannot match inside a project is not passed to it; one that cannot be rewritten soundly refuses the workspace.</td>
+</tr>
+<tr>
+<td><a id="workspace-policy.workspace.ignore_paths"></a><code>ignore_paths</code></td>
+<td>list of <a href="#workspace-section-workspace-ignore_paths">section</a></td>
+<td><code>[]</code></td>
+<td>Paths excluded across the workspace. Workspace-relative and pushed down per project, exactly as 'suppressions' are.</td>
+</tr>
+<tr>
+<td><a id="workspace-policy.workspace.additional_scanners"></a><code>additional_scanners</code></td>
+<td>list of string</td>
+<td><code>[]</code></td>
+<td>Scanners every project must run, in addition to whatever it enables itself. Additive only -- this cannot disable a scanner a project enabled. A scanner the project already declares runs under the project's own config and its findings are the project's; a scanner added only by this policy runs with default config and its findings are tagged 'origin: workspace-policy' and reported separately.</td>
+</tr>
+<tr>
+<td><a id="workspace-policy.workspace.policy_scanners_gate"></a><code>policy_scanners_gate</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Whether findings from policy-added scanners affect a project's exit code. Default false: a workspace that adds a scanner to gather visibility should not thereby fail projects that never opted into it, and turning it on is the operator saying they have triaged what the new scanner reports.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="workspace-policy-workspacesuppressions"><a id="workspace-section-workspace-suppressions"></a>Workspace policy <code>workspace.suppressions[]</code><a class="headerlink" href="#workspace-policy-workspacesuppressions" title="Permanent link">&para;</a></h3>
+<p>Represents a finding suppression rule.</p>
+<p>Each entry in the list has these keys.</p>
+<p>A key not listed here is accepted and kept, without validation.</p>
+<!-- doctest: options of=workspace-policy.workspace.suppressions -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="workspace-policy.workspace.suppressions.path"></a><code>path</code></td>
+<td>string</td>
+<td>required</td>
+<td>Path or pattern to exclude</td>
+</tr>
+<tr>
+<td><a id="workspace-policy.workspace.suppressions.reason"></a><code>reason</code></td>
+<td>string</td>
+<td>required</td>
+<td>Reason for exclusion</td>
+</tr>
+<tr>
+<td><a id="workspace-policy.workspace.suppressions.expiration"></a><code>expiration</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan.</td>
+</tr>
+<tr>
+<td><a id="workspace-policy.workspace.suppressions.client_supplied"></a><code>client_supplied</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored.</td>
+</tr>
+<tr>
+<td><a id="workspace-policy.workspace.suppressions.rule_id"></a><code>rule_id</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>Rule ID to suppress</td>
+</tr>
+<tr>
+<td><a id="workspace-policy.workspace.suppressions.line_start"></a><code>line_start</code></td>
+<td>integer or null</td>
+<td><code>null</code></td>
+<td>(Optional) Starting line number</td>
+</tr>
+<tr>
+<td><a id="workspace-policy.workspace.suppressions.line_end"></a><code>line_end</code></td>
+<td>integer or null</td>
+<td><code>null</code></td>
+<td>(Optional) Ending line number</td>
+</tr>
+<tr>
+<td><a id="workspace-policy.workspace.suppressions.package_name"></a><code>package_name</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>(Optional) Only suppress findings about this package (glob, case-insensitive). Findings that do not report a package name never match.</td>
+</tr>
+<tr>
+<td><a id="workspace-policy.workspace.suppressions.package_version"></a><code>package_version</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>(Optional) Only suppress findings about this installed package version (glob, case-insensitive). Findings that do not report an installed version never match.</td>
+</tr>
+<tr>
+<td><a id="workspace-policy.workspace.suppressions.package_path"></a><code>package_path</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>(Optional) Only suppress findings about the package copy installed at this path, relative to the scan root (glob, supports **), e.g. 'deploy/cdk/node_modules/aws-cdk-lib/node_modules/brace-expansion'. Separates two copies with the same name and version. Findings that do not report an install path never match.</td>
+</tr>
+<tr>
+<td><a id="workspace-policy.workspace.suppressions.symbol"></a><code>symbol</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>(Optional) Only suppress findings whose lines lie inside the definition with this qualified name, e.g. 'MyClass.my_method', in the finding's file. Names are dotted from the top of the file, exact and case-sensitive. Resolved by parsing the file with tree-sitter (Python, JavaScript, TypeScript, Java), which needs the 'symbols' extra; a finding whose file cannot be parsed never matches.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="workspace-policy-workspaceignore_paths"><a id="workspace-section-workspace-ignore_paths"></a>Workspace policy <code>workspace.ignore_paths[]</code><a class="headerlink" href="#workspace-policy-workspaceignore_paths" title="Permanent link">&para;</a></h3>
+<p>Represents a path exclusion entry.</p>
+<p>Each entry in the list has these keys.</p>
+<p>A key not listed here is accepted and kept, without validation.</p>
+<!-- doctest: options of=workspace-policy.workspace.ignore_paths -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="workspace-policy.workspace.ignore_paths.path"></a><code>path</code></td>
+<td>string</td>
+<td>required</td>
+<td>Path or pattern to exclude</td>
+</tr>
+<tr>
+<td><a id="workspace-policy.workspace.ignore_paths.reason"></a><code>reason</code></td>
+<td>string</td>
+<td>required</td>
+<td>Reason for exclusion</td>
+</tr>
+<tr>
+<td><a id="workspace-policy.workspace.ignore_paths.expiration"></a><code>expiration</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan.</td>
+</tr>
+<tr>
+<td><a id="workspace-policy.workspace.ignore_paths.client_supplied"></a><code>client_supplied</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored.</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,116.24a6,6,0,0,1-8.48,0L134,54.49V216a6,6,0,0,1-12,0V54.49L60.24,116.24a6,6,0,0,1-8.48-8.48l72-72a6,6,0,0,1,8.48,0l72,72A6,6,0,0,1,204.24,116.24Z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+  
+    
+
+<nav class="ash-pagination" aria-label="Previous and next documentation pages">
+  <div class="ash-wrap ash-pagination__inner">
+    
+    <a href="../cli/" rel="prev">
+      <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M222,128a6,6,0,0,1-6,6H54.49l61.75,61.76a6,6,0,1,1-8.48,8.48l-72-72a6,6,0,0,1,0-8.48l72-72a6,6,0,0,1,8.48,8.48L54.49,122H216A6,6,0,0,1,222,128Z"/></svg></span><span><span class="ash-pagination__direction">PREVIOUS</span>CLI</span>
+    </a>
+    
+    
+    <a class="ash-pagination__next" href="../environment-variables/" rel="next">
+      <span><span class="ash-pagination__direction">NEXT</span>Environment variables</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M220.24,132.24l-72,72a6,6,0,0,1-8.48-8.48L201.51,134H40a6,6,0,0,1,0-12H201.51L139.76,60.24a6,6,0,0,1,8.48-8.48l72,72A6,6,0,0,1,220.24,132.24Z"/></svg></span>
+    </a>
+    
+  </div>
+</nav>
+
+  
+  <footer class="ash-footer">
+    <div class="ash-wrap ash-footer__top">
+      <div>
+        <a class="ash-brand" href="../.." aria-label="ASH home">
+          <span class="ash-brand__name">ASH<span class="ash-brand__subtitle">Automated Security Helper</span></span>
+        </a>
+      </div>
+      <div class="ash-footer__links">
+        <div><span>Documentation</span><a href="../../getting-started/local/">Quick start</a><a href="../../how-to/configure/">Configuration</a><a href="../cli/">CLI reference</a></div>
+        <div><span>Integrations</span><a href="../scanners/">Scanners</a><a href="../../getting-started/ci/">CI/CD integration</a><a href="../../plugins/">Plugin development</a></div>
+        <div><span>Project</span><a href="https://github.com/awslabs/automated-security-helper">GitHub <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a><a href="../../contributing/">Contribute</a><a href="https://github.com/awslabs/automated-security-helper/issues">Get help <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a></div>
+      </div>
+    </div>
+    <div class="ash-wrap ash-footer__bottom">
+      <span class="ash-footer-credit">Build with <span class="ash-footer-heart" role="img" aria-label="love">&lt;3</span> at Amazon Web Services</span>
+      <div><button class="ash-motion-toggle" type="button" data-ash-motion aria-pressed="false"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M128,26A102,102,0,1,0,230,128,102.12,102.12,0,0,0,128,26Zm0,192a90,90,0,1,1,90-90A90.1,90.1,0,0,1,128,218ZM110,96v64a6,6,0,0,1-12,0V96a6,6,0,0,1,12,0Zm48,0v64a6,6,0,0,1-12,0V96a6,6,0,0,1,12,0Z"/></svg></span> <span>Pause motion</span></button><a href="https://github.com/awslabs/automated-security-helper/blob/main/LICENSE">License</a><a href="../../contributing/#security-issue-notifications">Security</a></div>
+    </div>
+    <div class="ash-wrap ash-footer__copyright">&copy; Amazon Web Services, Inc. or its affiliates. All rights reserved.</div>
+  </footer>
+  <div class="ash-toast" role="status" aria-live="polite" aria-atomic="true" data-ash-toast></div>
+
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.indexes", "navigation.path", "navigation.top", "navigation.footer", "toc.follow", "content.tabs.link", "search.share", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate", "content.code.select"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../assets/javascripts/ash.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,4605 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Security scanning for code, infrastructure, secrets, and dependencies.">
+      
+      
+      
+        <link rel="canonical" href="https://awslabs.github.io/automated-security-helper/latest/reference/reporters/">
+      
+      
+        <link rel="prev" href="../scanners/">
+      
+      
+        <link rel="next" href="../converters/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="data:,">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Reporters - ASH - Automated Security Helper</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/ash.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  
+  <!-- Phosphor SVG icon license:
+  MIT License
+
+Copyright (c) 2023 Phosphor Icons
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+  -->
+  <meta name="theme-color" content="#0f141a">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Reporters · ASH">
+  <meta property="og:description" content="Security scanning for code, infrastructure, secrets, and dependencies.">
+  <link rel="preload" href="../../assets/fonts/open-sans.woff2" as="font" type="font/woff2" crossorigin>
+  <noscript>
+    <style>
+      .ash-search-trigger, .ash-menu-toggle, .ash-motion-toggle, .ash-copy,
+       .ash-tabs, .ash-mode-picker, .ash-filter, [data-ash-run], [data-scan-controls],
+       [data-ash-drawer], [data-ash-handbook] { display: none !important; }
+      .ash-install-panel[hidden] { display: block !important; margin-top: 1.5rem; }
+       @media (max-width: 960px) {
+        .ash-header { position: relative; height: auto; }
+      }
+    </style>
+  </noscript>
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#reporters-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+        <aside class="md-banner">
+          <div class="md-banner__inner md-grid md-typeset">
+            
+            <span data-ash-notice="unreleased">
+      These docs describe the main branch, which is not released yet, so a feature
+      described here may not be in the latest release.
+      The install commands in this version of the docs install
+      <code>main</code>, not a release.
+      <a href="../../..">Read the docs for the latest release</a>
+      to install a release.
+    </span>
+          </div>
+          
+        </aside>
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+<a class="ash-skip" href="#main-content">Skip to content</a>
+<header class="md-header ash-header" data-md-component="header">
+  <nav class="ash-header__inner md-grid" aria-label="Main navigation">
+    <a class="ash-brand" href="../.." aria-label="ASH home" data-md-component="logo">
+      <span class="ash-brand__name">ASH<span class="ash-brand__subtitle">Automated Security Helper</span></span>
+    </a>
+    <div class="ash-header__links">
+      <a href="../.." >Overview</a>
+      <a href="../../docs/quick-start-guide/" aria-current="true">Documentation</a>
+      <a href="../..#scanners">Scanners</a>
+      <a href="../../integrations/" >Integrations</a>
+    </div>
+    <div class="ash-sr-only md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">ASH - Automated Security Helper</div>
+        <div class="md-header__topic" data-md-component="header-topic">Reporters</div>
+      </div>
+    </div>
+    <div class="ash-header__actions">
+      
+        <button class="ash-handbook-toggle" type="button" data-ash-handbook aria-label="Browse all documentation" aria-haspopup="dialog" aria-controls="ash-handbook" aria-expanded="false" disabled><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232,50H160a38,38,0,0,0-32,17.55A38,38,0,0,0,96,50H24a6,6,0,0,0-6,6V200a6,6,0,0,0,6,6H96a26,26,0,0,1,26,26,6,6,0,0,0,12,0,26,26,0,0,1,26-26h72a6,6,0,0,0,6-6V56A6,6,0,0,0,232,50ZM96,194H30V62H96a26,26,0,0,1,26,26V204.31A37.86,37.86,0,0,0,96,194Zm130,0H160a37.87,37.87,0,0,0-26,10.32V88a26,26,0,0,1,26-26h66ZM160,90h40a6,6,0,0,1,0,12H160a6,6,0,0,1,0-12Zm46,38a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,128Zm0,32a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,160Z"/></svg></span><span>Contents</span></button>
+      
+      <button class="ash-search-trigger" type="button" data-ash-search aria-label="Search documentation" aria-haspopup="dialog" aria-controls="ash-search-dialog" aria-expanded="false" disabled>
+        <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M228.24,219.76l-51.38-51.38a86.15,86.15,0,1,0-8.48,8.48l51.38,51.38a6,6,0,0,0,8.48-8.48ZM38,112a74,74,0,1,1,74,74A74.09,74.09,0,0,1,38,112Z"/></svg></span><span>Search docs</span><kbd data-ash-shortcut>⌘ K</kbd>
+      </button>
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M122,40V16a6,6,0,0,1,12,0V40a6,6,0,0,1-12,0Zm68,88a62,62,0,1,1-62-62A62.07,62.07,0,0,1,190,128Zm-12,0a50,50,0,1,0-50,50A50.06,50.06,0,0,0,178,128ZM59.76,68.24a6,6,0,1,0,8.48-8.48l-16-16a6,6,0,0,0-8.48,8.48Zm0,119.52-16,16a6,6,0,1,0,8.48,8.48l16-16a6,6,0,1,0-8.48-8.48ZM192,70a6,6,0,0,0,4.24-1.76l16-16a6,6,0,0,0-8.48-8.48l-16,16A6,6,0,0,0,192,70Zm4.24,117.76a6,6,0,0,0-8.48,8.48l16,16a6,6,0,0,0,8.48-8.48ZM46,128a6,6,0,0,0-6-6H16a6,6,0,0,0,0,12H40A6,6,0,0,0,46,128Zm82,82a6,6,0,0,0-6,6v24a6,6,0,0,0,12,0V216A6,6,0,0,0,128,210Zm112-88H216a6,6,0,0,0,0,12h24a6,6,0,0,0,0-12Z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232.13,143.64a6,6,0,0,0-6-1.49A90.07,90.07,0,0,1,113.86,29.85a6,6,0,0,0-7.49-7.48A102.88,102.88,0,0,0,54.48,58.68,102,102,0,0,0,197.32,201.52a102.88,102.88,0,0,0,36.31-51.89A6,6,0,0,0,232.13,143.64Zm-42,48.29a90,90,0,0,1-126-126A90.9,90.9,0,0,1,99.65,37.66,102.06,102.06,0,0,0,218.34,156.35,90.9,90.9,0,0,1,190.1,191.93Z"/></svg>
+      </label>
+    
+  
+</form>
+        <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+      
+      <template data-ash-theme-icons>
+        <span data-color-scheme="default"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M122,40V16a6,6,0,0,1,12,0V40a6,6,0,0,1-12,0Zm68,88a62,62,0,1,1-62-62A62.07,62.07,0,0,1,190,128Zm-12,0a50,50,0,1,0-50,50A50.06,50.06,0,0,0,178,128ZM59.76,68.24a6,6,0,1,0,8.48-8.48l-16-16a6,6,0,0,0-8.48,8.48Zm0,119.52-16,16a6,6,0,1,0,8.48,8.48l16-16a6,6,0,1,0-8.48-8.48ZM192,70a6,6,0,0,0,4.24-1.76l16-16a6,6,0,0,0-8.48-8.48l-16,16A6,6,0,0,0,192,70Zm4.24,117.76a6,6,0,0,0-8.48,8.48l16,16a6,6,0,0,0,8.48-8.48ZM46,128a6,6,0,0,0-6-6H16a6,6,0,0,0,0,12H40A6,6,0,0,0,46,128Zm82,82a6,6,0,0,0-6,6v24a6,6,0,0,0,12,0V216A6,6,0,0,0,128,210Zm112-88H216a6,6,0,0,0,0,12h24a6,6,0,0,0,0-12Z"/></svg></span></span>
+        <span data-color-scheme="slate"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232.13,143.64a6,6,0,0,0-6-1.49A90.07,90.07,0,0,1,113.86,29.85a6,6,0,0,0-7.49-7.48A102.88,102.88,0,0,0,54.48,58.68,102,102,0,0,0,197.32,201.52a102.88,102.88,0,0,0,36.31-51.89A6,6,0,0,0,232.13,143.64Zm-42,48.29a90,90,0,0,1-126-126A90.9,90.9,0,0,1,99.65,37.66,102.06,102.06,0,0,0,218.34,156.35,90.9,90.9,0,0,1,190.1,191.93Z"/></svg></span></span>
+      </template>
+      <a class="ash-github" href="https://github.com/awslabs/automated-security-helper" aria-label="ASH on GitHub">
+        <span>GitHub</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span>
+      </a>
+      <button class="ash-menu-toggle" type="button" aria-label="Open navigation" aria-haspopup="dialog" aria-expanded="false" aria-controls="ash-mobile-menu" data-ash-menu disabled>
+        <span class="ash-menu-glyph" aria-hidden="true"><i></i><i></i></span>
+      </button>
+    </div>
+    
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M228.24,219.76l-51.38-51.38a86.15,86.15,0,1,0-8.48,8.48l51.38,51.38a6,6,0,0,0,8.48-8.48ZM38,112a74,74,0,1,1,74,74A74.09,74.09,0,0,1,38,112Z"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M222,128a6,6,0,0,1-6,6H54.49l61.75,61.76a6,6,0,1,1-8.48,8.48l-72-72a6,6,0,0,1,0-8.48l72-72a6,6,0,0,1,8.48,8.48L54.49,122H216A6,6,0,0,1,222,128Z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,195.76a6,6,0,1,1-8.48,8.48L128,136.49,60.24,204.24a6,6,0,0,1-8.48-8.48L119.51,128,51.76,60.24a6,6,0,0,1,8.48-8.48L128,119.51l67.76-67.75a6,6,0,0,1,8.48,8.48L136.49,128Z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+  </nav>
+  <dialog class="ash-mobile-menu" id="ash-mobile-menu" aria-label="Site navigation" hidden>
+    <div class="ash-mobile-menu__heading"><p class="ash-mobile-menu__eyebrow">Navigation</p><button type="button" data-ash-menu-close aria-label="Close navigation"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,195.76a6,6,0,1,1-8.48,8.48L128,136.49,60.24,204.24a6,6,0,0,1-8.48-8.48L119.51,128,51.76,60.24a6,6,0,0,1,8.48-8.48L128,119.51l67.76-67.75a6,6,0,0,1,8.48,8.48L136.49,128Z"/></svg></span></button></div>
+    <a href="../..">Overview <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../../docs/quick-start-guide/">Documentation <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../..#scanners">Scanners <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../../integrations/">Integrations <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="https://github.com/awslabs/automated-security-helper">GitHub <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    
+      <button type="button" data-ash-drawer>Browse all documentation <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232,50H160a38,38,0,0,0-32,17.55A38,38,0,0,0,96,50H24a6,6,0,0,0-6,6V200a6,6,0,0,0,6,6H96a26,26,0,0,1,26,26,6,6,0,0,0,12,0,26,26,0,0,1,26-26h72a6,6,0,0,0,6-6V56A6,6,0,0,0,232,50ZM96,194H30V62H96a26,26,0,0,1,26,26V204.31A37.86,37.86,0,0,0,96,194Zm130,0H160a37.87,37.87,0,0,0-26,10.32V88a26,26,0,0,1,26-26h66ZM160,90h40a6,6,0,0,1,0,12H160a6,6,0,0,1,0-12Zm46,38a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,128Zm0,32a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,160Z"/></svg></span></button>
+    
+  </dialog>
+  <noscript>
+    <nav class="ash-static-navigation" aria-label="Site navigation">
+      <a href="../..">Overview</a>
+      <a href="../../docs/quick-start-guide/">Documentation</a>
+      <a href="../..#scanners">Scanners</a>
+      <a href="../../integrations/">Integrations</a>
+      <a href="https://github.com/awslabs/automated-security-helper">GitHub</a>
+    </nav>
+  </noscript>
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ASH - Automated Security Helper" class="md-nav__button md-logo" aria-label="ASH - Automated Security Helper" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ASH - Automated Security Helper
+  </label>
+  
+    <div class="md-nav__source">
+      
+<a href="https://github.com/awslabs/automated-security-helper" title="ASH on GitHub" class="md-source" aria-label="ASH on GitHub">
+  <span class="ash-icon md-source__icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M230,64a30,30,0,1,0-36,29.4V112a10,10,0,0,1-10,10H96a21.84,21.84,0,0,0-10,2.42v-31a30,30,0,1,0-12,0v69.2a30,30,0,1,0,12,0V144a10,10,0,0,1,10-10h88a22,22,0,0,0,22-22V93.4A30.05,30.05,0,0,0,230,64ZM62,64A18,18,0,1,1,80,82,18,18,0,0,1,62,64ZM98,192a18,18,0,1,1-18-18A18,18,0,0,1,98,192ZM200,82a18,18,0,1,1,18-18A18,18,0,0,1,200,82Z"/></svg></span>
+  <span class="md-source__repository">ASH on GitHub</span>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../getting-started/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_2" id="__nav_2_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/local/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan on your machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add ASH to CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connect an AI agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/platform-teams/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roll out across repositories
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install ASH
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/advanced-usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Manage scanner tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/configure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configure ASH
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/choose-scanners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose scanners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/set-the-gate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Set the gate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/suppress-findings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Suppress findings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/read-results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read scan results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/export-reports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/scanner-sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enable the scanner sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/run-in-a-container/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run in a container
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/run-offline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run offline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose an integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/pre-commit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run ASH with pre-commit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_14" id="__nav_3_14_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CI systems
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    CI systems
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/ci/github-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub Actions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/ci/gitlab-ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitLab CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/ci/other-ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Other CI systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/scale-large-repos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scale to large repositories
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/mcp-server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run the MCP server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/agent-plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install an agent plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/genai-steering-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH GenAI integration guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/deploy-on-aws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deploy on AWS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/troubleshoot/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshoot
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/migrate-from-v2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migrate from v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/how-ash-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How ASH works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/trust-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration trust model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/scanning-untrusted-code/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanning untrusted code
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanner sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/content-databases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Content databases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/suppressions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Suppressions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_5" id="__nav_5_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment-variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scanners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporters
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#built-in-reporters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Built-in reporters
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reporters-in-plugin-modules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reporters in plugin modules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#csv" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        csv
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cyclonedx" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cyclonedx
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#flat-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        flat-json
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#github-ghas" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        github-ghas
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gitlab-cyclonedx" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gitlab-cyclonedx
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gitlab-sast" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gitlab-sast
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#html" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        html
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#junitxml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        junitxml
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#markdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        markdown
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ocsf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ocsf
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sarif" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sarif
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#spdx" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spdx
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        text
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#unused-suppressions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        unused-suppressions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#yaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        yaml
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aws-security-hub" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        aws-security-hub
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bedrock-summary-reporter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bedrock-summary-reporter
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cloudwatch-logs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cloudwatch-logs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#s3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        s3
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../converters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Converters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../exit-codes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exit codes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../output-files/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Output files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../coverage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coverage by language
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../python-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../plugins/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugins
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Plugins
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_2" id="__nav_6_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Built-in scanner pages
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Built-in scanner pages
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/actionlint/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    actionlint
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/cfn-lint-and-cfn-guard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cfn-lint and cfn-guard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/gitleaks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/trivy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trivy filesystem scanner (trivy)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/zizmor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    zizmor (GitHub Actions)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_3" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../docs/plugins/community/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Community plugins
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6_3" id="__nav_6_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Community plugins
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/ferret-scan-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH Ferret Scan Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/snyk-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH Snyk Code Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/snyk-plugin-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Snyk Plugin CI/CD Setup Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/trivy-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trivy Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/aws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS reporters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-scanner/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a scanner plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-reporter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a reporter plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-converter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a converter plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/event-subscribers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Subscribe to scan events
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../contributing/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contributing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/documentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/interface-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interface design system
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/interface-review/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interaction surface inventory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/high-end-design-review/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design & UX review
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/releases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#built-in-reporters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Built-in reporters
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reporters-in-plugin-modules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reporters in plugin modules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#csv" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        csv
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cyclonedx" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cyclonedx
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#flat-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        flat-json
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#github-ghas" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        github-ghas
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gitlab-cyclonedx" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gitlab-cyclonedx
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gitlab-sast" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gitlab-sast
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#html" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        html
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#junitxml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        junitxml
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#markdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        markdown
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ocsf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ocsf
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sarif" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sarif
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#spdx" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spdx
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        text
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#unused-suppressions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        unused-suppressions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#yaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        yaml
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aws-security-hub" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        aws-security-hub
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bedrock-summary-reporter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bedrock-summary-reporter
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cloudwatch-logs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cloudwatch-logs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#s3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        s3
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+  <nav class="md-path" aria-label="Navigation" >
+    <ol class="md-path__list">
+      
+        
+  
+  
+    <li class="md-path__item">
+      <a href="../.." class="md-path__link">
+        
+  <span class="md-ellipsis">
+    Home
+  </span>
+
+      </a>
+    </li>
+  
+
+      
+      
+        
+  
+  
+    
+    
+      <li class="md-path__item">
+        <a href="../" class="md-path__link">
+          
+  <span class="md-ellipsis">
+    Reference
+  </span>
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ol>
+  </nav>
+
+              
+              <article class="md-content__inner md-typeset">
+                
+  <div class="ash-doc-label">Documentation</div>
+  <div id="main-content" tabindex="-1">
+    
+
+
+  
+  
+
+
+<!--
+  Generated by scripts/generate_reporter_docs.py from the reporter plugins declared under automated_security_helper/plugin_modules.
+  Do not edit this file by hand: change the code or the generator, then run
+    uv run python scripts/generate_reporter_docs.py
+  CI runs `uv run python scripts/generate_reporter_docs.py --check` and fails when this file is stale.
+
+  Anchors: each reporter's heading id is its config name (#sarif, #flat-json);
+  each option has <a id> reporters.<name>.options.<option>.
+  The use-case and standard columns are editorial, from REPORTER_DOCS in the generator.
+-->
+
+<h1 id="reporters-reference">Reporters reference<a class="headerlink" href="#reporters-reference" title="Permanent link">&para;</a></h1>
+<p>This page is generated from the reporter plugins in the ASH source code by <code>scripts/generate_reporter_docs.py</code>. Edits made to this file by hand are overwritten the next time it is generated.</p>
+<h2 id="built-in-reporters">Built-in reporters<a class="headerlink" href="#built-in-reporters" title="Permanent link">&para;</a></h2>
+<!-- doctest: options of=reporters -->
+<table>
+<thead>
+<tr>
+<th>Reporter</th>
+<th>File extension</th>
+<th>Enabled by default</th>
+<th>Primary use case</th>
+<th>Standard</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#csv">CSV</a> (<code>csv</code>)</td>
+<td><code>.csv</code></td>
+<td>yes</td>
+<td>Spreadsheet analysis, filtering</td>
+<td>RFC 4180</td>
+</tr>
+<tr>
+<td><a href="#cyclonedx">CycloneDX</a> (<code>cyclonedx</code>)</td>
+<td><code>.cdx.json</code></td>
+<td>yes</td>
+<td>Software bill of materials (SBOM)</td>
+<td><a href="https://cyclonedx.org/specification/overview/">CycloneDX 1.6</a></td>
+</tr>
+<tr>
+<td><a href="#flat-json">Flat JSON</a> (<code>flat-json</code>)</td>
+<td><code>.flat.json</code></td>
+<td>yes</td>
+<td>Programmatic consumption, dashboards</td>
+<td>ASH-native</td>
+</tr>
+<tr>
+<td><a href="#github-ghas">GitHub GHAS</a> (<code>github-ghas</code>)</td>
+<td><code>.ghas.sarif</code></td>
+<td>yes</td>
+<td>GitHub Advanced Security code scanning upload</td>
+<td><a href="https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html">OASIS SARIF 2.1.0</a></td>
+</tr>
+<tr>
+<td><a href="#gitlab-cyclonedx">GitLab CycloneDX</a> (<code>gitlab-cyclonedx</code>)</td>
+<td><code>.gl-dependency-scanning-report.cdx.json</code></td>
+<td>yes</td>
+<td>GitLab dependency scanning</td>
+<td><a href="https://docs.gitlab.com/ee/ci/yaml/artifacts_reports.html#artifactsreportsdependency_scanning">GitLab dependency scanning report</a></td>
+</tr>
+<tr>
+<td><a href="#gitlab-sast">GitLab SAST</a> (<code>gitlab-sast</code>)</td>
+<td><code>.gl-sast-report.json</code></td>
+<td>yes</td>
+<td>GitLab Security Dashboard</td>
+<td><a href="https://docs.gitlab.com/ee/ci/yaml/artifacts_reports.html#artifactsreportssast">GitLab SAST report</a></td>
+</tr>
+<tr>
+<td><a href="#html">HTML</a> (<code>html</code>)</td>
+<td><code>.html</code></td>
+<td>yes</td>
+<td>Interactive browser-based reports</td>
+<td>--</td>
+</tr>
+<tr>
+<td><a href="#junitxml">JUnit XML</a> (<code>junitxml</code>)</td>
+<td><code>.junit.xml</code></td>
+<td>yes</td>
+<td>CI/CD test result reporting</td>
+<td><a href="https://llg.cubic.org/docs/junit/">JUnit XML</a></td>
+</tr>
+<tr>
+<td><a href="#markdown">Markdown</a> (<code>markdown</code>)</td>
+<td><code>.summary.md</code></td>
+<td>yes</td>
+<td>Pull request comments, documentation</td>
+<td>CommonMark</td>
+</tr>
+<tr>
+<td><a href="#ocsf">OCSF</a> (<code>ocsf</code>)</td>
+<td><code>.ocsf.json</code></td>
+<td>yes</td>
+<td>Security data lakes, SIEM ingestion</td>
+<td><a href="https://schema.ocsf.io/">OCSF 1.0</a></td>
+</tr>
+<tr>
+<td><a href="#sarif">SARIF</a> (<code>sarif</code>)</td>
+<td><code>.sarif</code></td>
+<td>yes</td>
+<td>IDE integration, GitHub/GitLab code scanning</td>
+<td><a href="https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html">OASIS SARIF 2.1.0</a></td>
+</tr>
+<tr>
+<td><a href="#spdx">SPDX</a> (<code>spdx</code>)</td>
+<td><code>.spdx.json</code></td>
+<td>no</td>
+<td>License compliance, SBOM</td>
+<td><a href="https://spdx.dev/specifications/">SPDX 2.3</a></td>
+</tr>
+<tr>
+<td><a href="#text">Text</a> (<code>text</code>)</td>
+<td><code>.summary.txt</code></td>
+<td>yes</td>
+<td>Console output, logs</td>
+<td>--</td>
+</tr>
+<tr>
+<td><a href="#unused-suppressions">Unused suppressions</a> (<code>unused-suppressions</code>)</td>
+<td><code>.unused-suppressions.json</code></td>
+<td>yes</td>
+<td>Suppression hygiene: rules that matched nothing this scan</td>
+<td>ASH-native</td>
+</tr>
+<tr>
+<td><a href="#yaml">YAML</a> (<code>yaml</code>)</td>
+<td><code>.yaml</code></td>
+<td>no</td>
+<td>Human-readable structured data</td>
+<td>--</td>
+</tr>
+</tbody>
+</table>
+<p>Of the 15 built-in reporters, 13 are enabled by default: <code>csv</code>, <code>cyclonedx</code>, <code>flat-json</code>, <code>github-ghas</code>, <code>gitlab-cyclonedx</code>, <code>gitlab-sast</code>, <code>html</code>, <code>junitxml</code>, <code>markdown</code>, <code>ocsf</code>, <code>sarif</code>, <code>text</code>, and <code>unused-suppressions</code>. <code>spdx</code> and <code>yaml</code> are available but disabled by default.</p>
+<p>A default written as from <code>NAME</code>, else <code>value</code> is read from that environment variable when ASH starts; <code>value</code> applies when the variable is not set.</p>
+<h2 id="reporters-in-plugin-modules">Reporters in plugin modules<a class="headerlink" href="#reporters-in-plugin-modules" title="Permanent link">&para;</a></h2>
+<p>These are loaded only when the configuration's <code>ash_plugin_modules</code> names their module.</p>
+<!-- doctest: options of=reporters -->
+<table>
+<thead>
+<tr>
+<th>Reporter</th>
+<th>File extension</th>
+<th>Enabled by default</th>
+<th>Provided by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#aws-security-hub"><code>aws-security-hub</code></a></td>
+<td><code>.aws-security-hub.asff.json</code></td>
+<td>no</td>
+<td>plugin module <code>ash_aws_plugins</code></td>
+</tr>
+<tr>
+<td><a href="#bedrock-summary-reporter"><code>bedrock-summary-reporter</code></a></td>
+<td><code>.bedrock.summary.md</code></td>
+<td>no</td>
+<td>plugin module <code>ash_aws_plugins</code></td>
+</tr>
+<tr>
+<td><a href="#cloudwatch-logs"><code>cloudwatch-logs</code></a></td>
+<td><code>.cwlog.json</code></td>
+<td>no</td>
+<td>plugin module <code>ash_aws_plugins</code></td>
+</tr>
+<tr>
+<td><a href="#s3"><code>s3</code></a></td>
+<td><code>.s3.json</code></td>
+<td>no</td>
+<td>plugin module <code>ash_aws_plugins</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="csv"><code>csv</code><a class="headerlink" href="#csv" title="Permanent link">&para;</a></h2>
+<p>Formats results as CSV.</p>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter.CsvReporter</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>File extension: <code>.csv</code></li>
+<li>Runs with <code>--python-only</code>: yes</li>
+</ul>
+<p>This plugin has no options.</p>
+<h2 id="cyclonedx"><code>cyclonedx</code><a class="headerlink" href="#cyclonedx" title="Permanent link">&para;</a></h2>
+<p>Formats results as CycloneDX.</p>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.reporters.cyclonedx_reporter.CycloneDXReporter</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>File extension: <code>.cdx.json</code></li>
+<li>Runs with <code>--python-only</code>: yes</li>
+</ul>
+<p>This plugin has no options.</p>
+<h2 id="flat-json"><code>flat-json</code><a class="headerlink" href="#flat-json" title="Permanent link">&para;</a></h2>
+<p>Formats results as a flattened JSON array of findings.</p>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.reporters.flatjson_reporter.FlatJSONReporter</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>File extension: <code>.flat.json</code></li>
+<li>Runs with <code>--python-only</code>: yes</li>
+</ul>
+<p>Options, under <code>reporters.flat-json.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=reporters.flat-json -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="reporters.flat-json.options.include_scanner_metrics"></a><code>include_scanner_metrics</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>No description in the code.</td>
+</tr>
+<tr>
+<td><a id="reporters.flat-json.options.include_summary_metrics"></a><code>include_summary_metrics</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>No description in the code.</td>
+</tr>
+<tr>
+<td><a id="reporters.flat-json.options.include_metadata"></a><code>include_metadata</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>No description in the code.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="github-ghas"><code>github-ghas</code><a class="headerlink" href="#github-ghas" title="Permanent link">&para;</a></h2>
+<p>Produces a SARIF report optimized for GitHub Advanced Security Code Scanning.</p>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.reporters.github_ghas_reporter.GHASReporter</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>File extension: <code>.ghas.sarif</code></li>
+<li>Runs with <code>--python-only</code>: yes</li>
+</ul>
+<p>Options, under <code>reporters.github-ghas.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=reporters.github-ghas -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="reporters.github-ghas.options.exclude_suppressed"></a><code>exclude_suppressed</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>When true (default), suppressed findings are excluded from the GHAS report. GitHub has its own dismissal workflow so suppressed findings are typically not needed.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="gitlab-cyclonedx"><code>gitlab-cyclonedx</code><a class="headerlink" href="#gitlab-cyclonedx" title="Permanent link">&para;</a></h2>
+<p>Enriches CycloneDX SBOM with GitLab dependency scanning properties.</p>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_cyclonedx_reporter.GitLabCycloneDXReporter</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>File extension: <code>.gl-dependency-scanning-report.cdx.json</code></li>
+<li>Runs with <code>--python-only</code>: yes</li>
+</ul>
+<p>Options, under <code>reporters.gitlab-cyclonedx.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=reporters.gitlab-cyclonedx -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="reporters.gitlab-cyclonedx.options.category"></a><code>category</code></td>
+<td>string</td>
+<td><code>production</code></td>
+<td>Default dependency category injected as gitlab:dependency_scanning:category. Typically 'production' or 'development'.</td>
+</tr>
+<tr>
+<td><a id="reporters.gitlab-cyclonedx.options.package_manager_override"></a><code>package_manager_override</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>If set, overrides the auto-detected package manager name for ALL components. Useful for single-ecosystem repos.</td>
+</tr>
+<tr>
+<td><a id="reporters.gitlab-cyclonedx.options.language_override"></a><code>language_override</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>If set, overrides the auto-detected language name for ALL components.</td>
+</tr>
+<tr>
+<td><a id="reporters.gitlab-cyclonedx.options.input_file_path_override"></a><code>input_file_path_override</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>If set, overrides the auto-detected input file path for ALL components. Useful when Syft reports absolute container paths that don't match the repo layout.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="gitlab-sast"><code>gitlab-sast</code><a class="headerlink" href="#gitlab-sast" title="Permanent link">&para;</a></h2>
+<p>Formats vulnerability findings report as GitLab SAST format.</p>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_sast_reporter.GitLabSASTReporter</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>File extension: <code>.gl-sast-report.json</code></li>
+<li>Runs with <code>--python-only</code>: yes</li>
+</ul>
+<p>Options, under <code>reporters.gitlab-sast.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=reporters.gitlab-sast -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="reporters.gitlab-sast.options.exclude_suppressed"></a><code>exclude_suppressed</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>When true, suppressed findings are excluded entirely from the GitLab SAST report. When false (default), suppressed findings are included with Info severity and the suppression reason in the solution field.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="html"><code>html</code><a class="headerlink" href="#html" title="Permanent link">&para;</a></h2>
+<p>Formats results as HTML.</p>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.reporters.html_reporter.HtmlReporter</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>File extension: <code>.html</code></li>
+<li>Runs with <code>--python-only</code>: yes</li>
+</ul>
+<p>This plugin has no options.</p>
+<h2 id="junitxml"><code>junitxml</code><a class="headerlink" href="#junitxml" title="Permanent link">&para;</a></h2>
+<p>Formats results as JUnitXML.</p>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.reporters.junitxml_reporter.JunitXmlReporter</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>File extension: <code>.junit.xml</code></li>
+<li>Runs with <code>--python-only</code>: yes</li>
+</ul>
+<p>Options, under <code>reporters.junitxml.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=reporters.junitxml -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="reporters.junitxml.options.respect_severity_threshold"></a><code>respect_severity_threshold</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>No description in the code.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="markdown"><code>markdown</code><a class="headerlink" href="#markdown" title="Permanent link">&para;</a></h2>
+<p>A triage-first report shared by files, CI summaries, and GitHub comments.</p>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.reporters.markdown_reporter.MarkdownReporter</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>File extension: <code>.summary.md</code></li>
+<li>Runs with <code>--python-only</code>: yes</li>
+</ul>
+<p>Options, under <code>reporters.markdown.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=reporters.markdown -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="reporters.markdown.options.include_summary"></a><code>include_summary</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>No description in the code.</td>
+</tr>
+<tr>
+<td><a id="reporters.markdown.options.include_findings_table"></a><code>include_findings_table</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>No description in the code.</td>
+</tr>
+<tr>
+<td><a id="reporters.markdown.options.include_detailed_findings"></a><code>include_detailed_findings</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>No description in the code.</td>
+</tr>
+<tr>
+<td><a id="reporters.markdown.options.max_detailed_findings"></a><code>max_detailed_findings</code></td>
+<td>integer</td>
+<td><code>20</code></td>
+<td>No description in the code.</td>
+</tr>
+<tr>
+<td><a id="reporters.markdown.options.top_hotspots_limit"></a><code>top_hotspots_limit</code></td>
+<td>integer</td>
+<td><code>10</code></td>
+<td>No description in the code.</td>
+</tr>
+<tr>
+<td><a id="reporters.markdown.options.use_collapsible_details"></a><code>use_collapsible_details</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>No description in the code.</td>
+</tr>
+<tr>
+<td><a id="reporters.markdown.options.compact"></a><code>compact</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>No description in the code.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="ocsf"><code>ocsf</code><a class="headerlink" href="#ocsf" title="Permanent link">&para;</a></h2>
+<p>Formats results as an array of Open Cybersecurity Schema Framework (OCSF) VulnerabilityFinding objects.</p>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.reporters.ocsf_reporter.OcsfReporter</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>File extension: <code>.ocsf.json</code></li>
+<li>Runs with <code>--python-only</code>: yes</li>
+</ul>
+<p>This plugin has no options.</p>
+<h2 id="sarif"><code>sarif</code><a class="headerlink" href="#sarif" title="Permanent link">&para;</a></h2>
+<p>Formats results as SARIF.</p>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.reporters.sarif_reporter.SarifReporter</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>File extension: <code>.sarif</code></li>
+<li>Runs with <code>--python-only</code>: yes</li>
+</ul>
+<p>This plugin has no options.</p>
+<h2 id="spdx"><code>spdx</code><a class="headerlink" href="#spdx" title="Permanent link">&para;</a></h2>
+<p>Formats results as an SPDX 2.3 JSON document.</p>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.reporters.spdx_reporter.SpdxReporter</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: no</li>
+<li>File extension: <code>.spdx.json</code></li>
+<li>Runs with <code>--python-only</code>: yes</li>
+</ul>
+<p>This plugin has no options.</p>
+<h2 id="text"><code>text</code><a class="headerlink" href="#text" title="Permanent link">&para;</a></h2>
+<p>Formats results as a human-readable plain text document.</p>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.reporters.text_reporter.TextReporter</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>File extension: <code>.summary.txt</code></li>
+<li>Runs with <code>--python-only</code>: yes</li>
+</ul>
+<p>Options, under <code>reporters.text.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=reporters.text -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="reporters.text.options.include_summary"></a><code>include_summary</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>No description in the code.</td>
+</tr>
+<tr>
+<td><a id="reporters.text.options.include_findings_table"></a><code>include_findings_table</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>No description in the code. The comment on its line in the code: This can be lengthy, default to False.</td>
+</tr>
+<tr>
+<td><a id="reporters.text.options.include_detailed_findings"></a><code>include_detailed_findings</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>No description in the code.</td>
+</tr>
+<tr>
+<td><a id="reporters.text.options.max_detailed_findings"></a><code>max_detailed_findings</code></td>
+<td>integer</td>
+<td><code>20</code></td>
+<td>No description in the code.</td>
+</tr>
+<tr>
+<td><a id="reporters.text.options.top_hotspots_limit"></a><code>top_hotspots_limit</code></td>
+<td>integer</td>
+<td><code>20</code></td>
+<td>No description in the code.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="unused-suppressions"><code>unused-suppressions</code><a class="headerlink" href="#unused-suppressions" title="Permanent link">&para;</a></h2>
+<p>Identifies and reports suppressions that were not applied to any findings.</p>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter.UnusedSuppressionsReporter</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>File extension: <code>.unused-suppressions.json</code></li>
+<li>Runs with <code>--python-only</code>: yes</li>
+<li>Also writes, with the default options: <code>reports/ash.unused-suppressions.md</code></li>
+</ul>
+<p>Options, under <code>reporters.unused-suppressions.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=reporters.unused-suppressions -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="reporters.unused-suppressions.options.output_format"></a><code>output_format</code></td>
+<td>string</td>
+<td><code>both</code></td>
+<td>No description in the code. The comment on its line in the code: "json", "markdown", or "both".</td>
+</tr>
+</tbody>
+</table>
+<h2 id="yaml"><code>yaml</code><a class="headerlink" href="#yaml" title="Permanent link">&para;</a></h2>
+<p>Formats results as YAML.</p>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.reporters.yaml_reporter.YamlReporter</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: no</li>
+<li>File extension: <code>.yaml</code></li>
+<li>Runs with <code>--python-only</code>: yes</li>
+</ul>
+<p>This plugin has no options.</p>
+<h2 id="aws-security-hub"><code>aws-security-hub</code><a class="headerlink" href="#aws-security-hub" title="Permanent link">&para;</a></h2>
+<p>Sends security findings to AWS Security Hub in ASFF format.</p>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_reporter.SecurityHubReporter</code></li>
+<li>Provided by: plugin module <code>ash_aws_plugins</code>, loaded when <code>ash_plugin_modules</code> names <code>automated_security_helper.plugin_modules.ash_aws_plugins</code></li>
+<li>Enabled by default: no</li>
+<li>File extension: <code>.aws-security-hub.asff.json</code></li>
+<li>Runs with <code>--python-only</code>: yes</li>
+</ul>
+<p>Options, under <code>reporters.aws-security-hub.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=reporters.aws-security-hub -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="reporters.aws-security-hub.options.aws_region"></a><code>aws_region</code></td>
+<td>string or null</td>
+<td>from <code>AWS_REGION</code>, else from <code>AWS_DEFAULT_REGION</code>, else <code>null</code></td>
+<td>AWS Region for Security Hub integration</td>
+</tr>
+<tr>
+<td><a id="reporters.aws-security-hub.options.aws_profile"></a><code>aws_profile</code></td>
+<td>string or null</td>
+<td>from <code>AWS_PROFILE</code>, else <code>null</code></td>
+<td>AWS Profile to use for authentication</td>
+</tr>
+<tr>
+<td><a id="reporters.aws-security-hub.options.account_id"></a><code>account_id</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>AWS account ID the findings are imported into. Looked up from the credentials if not set; when set, it must be the credentials' account, because Security Hub accepts findings sent with the account's default product ARN only from the account they name</td>
+</tr>
+<tr>
+<td><a id="reporters.aws-security-hub.options.max_retries"></a><code>max_retries</code></td>
+<td>integer, at most 10</td>
+<td><code>3</code></td>
+<td>Maximum number of retries for a throttled or failed BatchImportFindings request</td>
+</tr>
+<tr>
+<td><a id="reporters.aws-security-hub.options.base_delay"></a><code>base_delay</code></td>
+<td>number, at most 60</td>
+<td><code>1.0</code></td>
+<td>Base delay in seconds between retry attempts</td>
+</tr>
+<tr>
+<td><a id="reporters.aws-security-hub.options.max_delay"></a><code>max_delay</code></td>
+<td>number, at most 60</td>
+<td><code>60.0</code></td>
+<td>Maximum delay in seconds between retry attempts</td>
+</tr>
+<tr>
+<td><a id="reporters.aws-security-hub.options.findings_scope"></a><code>findings_scope</code></td>
+<td>string or null, length at most 1,024</td>
+<td><code>null</code></td>
+<td>Name of the findings this scan owns in Security Hub, unique among the repositories that import into the same account and Region: finding Ids are derived from it, and archiving touches only the findings recorded with it. Required; project_name is not used. Set it only in the operator's configuration (--config-overrides, or a config file outside the scanned tree), because it decides which findings a scan updates and archives</td>
+</tr>
+<tr>
+<td><a id="reporters.aws-security-hub.options.archive_resolved_findings"></a><code>archive_resolved_findings</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Archive findings an earlier scan of the same scope imported that this scan no longer reports, for the scanners that lost no target. Off by default: a finding a scan did not report is not always fixed. Needs securityhub:GetFindings, which is also used to keep each existing finding's CreatedAt. Set it only in the operator's configuration</td>
+</tr>
+</tbody>
+</table>
+<h2 id="bedrock-summary-reporter"><code>bedrock-summary-reporter</code><a class="headerlink" href="#bedrock-summary-reporter" title="Permanent link">&para;</a></h2>
+<p>Generates a summary of security findings using Amazon Bedrock.</p>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter.BedrockSummaryReporter</code></li>
+<li>Provided by: plugin module <code>ash_aws_plugins</code>, loaded when <code>ash_plugin_modules</code> names <code>automated_security_helper.plugin_modules.ash_aws_plugins</code></li>
+<li>Enabled by default: no</li>
+<li>File extension: <code>.bedrock.summary.md</code></li>
+<li>Runs with <code>--python-only</code>: yes</li>
+</ul>
+<p>Options, under <code>reporters.bedrock-summary-reporter.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=reporters.bedrock-summary-reporter -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.aws_region"></a><code>aws_region</code></td>
+<td>string or null, matches <code>(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}</code></td>
+<td>from <code>AWS_REGION</code>, else from <code>AWS_DEFAULT_REGION</code>, else <code>us-east-1</code></td>
+<td>AWS region to use for Bedrock. If not specified, the default region will be used. If specified, the region will be used for all Bedrock requests.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.aws_profile"></a><code>aws_profile</code></td>
+<td>string or null</td>
+<td>from <code>AWS_PROFILE</code>, else <code>null</code></td>
+<td>AWS profile to use for Bedrock. If not specified, the default profile will be used.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.model_id"></a><code>model_id</code></td>
+<td>string</td>
+<td>from <code>ASH_BEDROCK_MODEL_ID</code>, else <code>us.anthropic.claude-3-7-sonnet-20250219-v1:0</code></td>
+<td>Bedrock model ID to use for generating summaries.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.temperature"></a><code>temperature</code></td>
+<td>number</td>
+<td>from <code>ASH_BEDROCK_TEMPERATURE</code>, else <code>0.5</code></td>
+<td>Temperature parameter for the Bedrock model. Higher values make output more random.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.max_tokens"></a><code>max_tokens</code></td>
+<td>integer</td>
+<td>from <code>ASH_BEDROCK_MAX_TOKENS</code>, else <code>4000</code></td>
+<td>Maximum number of tokens to generate in the response.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.top_p"></a><code>top_p</code></td>
+<td>number</td>
+<td><code>0.9</code></td>
+<td>Top-p parameter for the Bedrock model. Controls diversity of generated text.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.max_findings_to_analyze"></a><code>max_findings_to_analyze</code></td>
+<td>integer</td>
+<td><code>10</code></td>
+<td>Maximum number of findings to include in the analysis.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.max_findings_per_severity"></a><code>max_findings_per_severity</code></td>
+<td>integer</td>
+<td><code>5</code></td>
+<td>Maximum number of findings to include per severity level when grouping by severity.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.group_by_severity"></a><code>group_by_severity</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Whether to group findings by severity level in the report.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.add_section_headers"></a><code>add_section_headers</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Whether to add section headers to the report for better organization.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.add_table_of_contents"></a><code>add_table_of_contents</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Whether to add a table of contents to the report.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.enable_caching"></a><code>enable_caching</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Whether to cache Bedrock responses to avoid duplicate API calls.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.output_markdown"></a><code>output_markdown</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Whether to output the report as a markdown file.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.output_file"></a><code>output_file</code></td>
+<td>string</td>
+<td><code>ash.bedrock.summary.md</code></td>
+<td>Filename for the main output markdown report, a file name in the reports directory.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.max_retries"></a><code>max_retries</code></td>
+<td>integer or null, at most 10</td>
+<td><code>null</code></td>
+<td>Maximum number of retries for Bedrock API calls. Unset, a model call is retried 3 times and a model listing makes 3 attempts.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.base_delay"></a><code>base_delay</code></td>
+<td>number, at most 60</td>
+<td><code>1.0</code></td>
+<td>Base delay in seconds between retries (will be increased exponentially).</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.max_delay"></a><code>max_delay</code></td>
+<td>number, at most 60</td>
+<td><code>60.0</code></td>
+<td>Maximum delay in seconds between retries.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.enable_fallback_models"></a><code>enable_fallback_models</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Whether to try fallback models if the primary model fails.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.output_executive_file"></a><code>output_executive_file</code></td>
+<td>string</td>
+<td><code>bedrock-executive.md</code></td>
+<td>Filename for the executive summary markdown report, a file name in the reports directory.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.output_technical_file"></a><code>output_technical_file</code></td>
+<td>string</td>
+<td><code>bedrock-technical.md</code></td>
+<td>Filename for the technical analysis markdown report, a file name in the reports directory.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.include_code_snippets"></a><code>include_code_snippets</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Whether to include code snippets in the report.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.summary_style"></a><code>summary_style</code></td>
+<td>one of <code>executive</code>, <code>technical</code>, <code>detailed</code></td>
+<td><code>executive</code></td>
+<td>Style of summary to generate: executive (high-level), technical (detailed), or detailed (comprehensive).</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.custom_prompt"></a><code>custom_prompt</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>Custom prompt to prepend to all Bedrock requests for more tailored analysis.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.exclude_scanner_types"></a><code>exclude_scanner_types</code></td>
+<td>list of string</td>
+<td><code>["SECRET"]</code></td>
+<td>Scanner tool types whose findings are counted but not sent to the model (e.g., 'SECRETS'). A finding's type is its scanner's tool type, looked up from the scanner's name, or a tool_type:: tag on the finding; 'SECRET' and 'SECRETS' both name the secrets type. A finding whose type cannot be determined is sent without its code snippets.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.actionable_only"></a><code>actionable_only</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Whether to include only actionable findings (not suppressed, above severity threshold).</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.include_sections"></a><code>include_sections</code></td>
+<td>list of string</td>
+<td><code>["executive_summary", "risk_assessment", "technical_analysis", "remediation_guide", "compliance_impact"]</code></td>
+<td>List of sections to include in the report.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.exclude_sections"></a><code>exclude_sections</code></td>
+<td>list of string</td>
+<td><code>[]</code></td>
+<td>List of sections to exclude from the report.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.industry_context"></a><code>industry_context</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>Industry context to provide to the model for more relevant analysis.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.compliance_frameworks"></a><code>compliance_frameworks</code></td>
+<td>list of string</td>
+<td><code>[]</code></td>
+<td>List of compliance frameworks to consider in the analysis.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.custom_context"></a><code>custom_context</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>Custom context information to provide to the model.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.summarize_findings"></a><code>summarize_findings</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Whether to summarize findings to reduce token usage.</td>
+</tr>
+<tr>
+<td><a id="reporters.bedrock-summary-reporter.options.batch_processing"></a><code>batch_processing</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Whether to process findings in batches for better performance with large datasets.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="cloudwatch-logs"><code>cloudwatch-logs</code><a class="headerlink" href="#cloudwatch-logs" title="Permanent link">&para;</a></h2>
+<p>Formats results and publishes to CloudWatch Logs.</p>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_aws_plugins.cloudwatch_logs_reporter.CloudWatchLogsReporter</code></li>
+<li>Provided by: plugin module <code>ash_aws_plugins</code>, loaded when <code>ash_plugin_modules</code> names <code>automated_security_helper.plugin_modules.ash_aws_plugins</code></li>
+<li>Enabled by default: no</li>
+<li>File extension: <code>.cwlog.json</code></li>
+<li>Runs with <code>--python-only</code>: yes</li>
+</ul>
+<p>Options, under <code>reporters.cloudwatch-logs.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=reporters.cloudwatch-logs -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="reporters.cloudwatch-logs.options.aws_region"></a><code>aws_region</code></td>
+<td>string or null, matches <code>(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}</code></td>
+<td>from <code>AWS_REGION</code>, else from <code>AWS_DEFAULT_REGION</code>, else <code>null</code></td>
+<td>AWS region for CloudWatch Logs</td>
+</tr>
+<tr>
+<td><a id="reporters.cloudwatch-logs.options.log_group_name"></a><code>log_group_name</code></td>
+<td>string or null</td>
+<td>from <code>ASH_CLOUDWATCH_LOG_GROUP_NAME</code>, else <code>null</code></td>
+<td>CloudWatch Logs group name to publish results to</td>
+</tr>
+<tr>
+<td><a id="reporters.cloudwatch-logs.options.log_stream_name"></a><code>log_stream_name</code></td>
+<td>string</td>
+<td><code>ASHScanResults</code></td>
+<td>CloudWatch Logs stream name to publish results to</td>
+</tr>
+<tr>
+<td><a id="reporters.cloudwatch-logs.options.max_retries"></a><code>max_retries</code></td>
+<td>integer, at most 10</td>
+<td><code>3</code></td>
+<td>Maximum number of retry attempts for CloudWatch API calls</td>
+</tr>
+<tr>
+<td><a id="reporters.cloudwatch-logs.options.base_delay"></a><code>base_delay</code></td>
+<td>number, at most 60</td>
+<td><code>1.0</code></td>
+<td>Base delay in seconds between retry attempts</td>
+</tr>
+<tr>
+<td><a id="reporters.cloudwatch-logs.options.max_delay"></a><code>max_delay</code></td>
+<td>number, at most 60</td>
+<td><code>60.0</code></td>
+<td>Maximum delay in seconds between retry attempts</td>
+</tr>
+</tbody>
+</table>
+<h2 id="s3"><code>s3</code><a class="headerlink" href="#s3" title="Permanent link">&para;</a></h2>
+<p>Formats results and uploads to an S3 bucket.</p>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter.S3Reporter</code></li>
+<li>Provided by: plugin module <code>ash_aws_plugins</code>, loaded when <code>ash_plugin_modules</code> names <code>automated_security_helper.plugin_modules.ash_aws_plugins</code></li>
+<li>Enabled by default: no</li>
+<li>File extension: <code>.s3.json</code></li>
+<li>Runs with <code>--python-only</code>: yes</li>
+</ul>
+<p>Options, under <code>reporters.s3.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=reporters.s3 -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="reporters.s3.options.aws_region"></a><code>aws_region</code></td>
+<td>string or null, matches <code>(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}</code></td>
+<td>from <code>AWS_REGION</code>, else from <code>AWS_DEFAULT_REGION</code>, else <code>null</code></td>
+<td>AWS region to use for S3 operations</td>
+</tr>
+<tr>
+<td><a id="reporters.s3.options.aws_profile"></a><code>aws_profile</code></td>
+<td>string or null</td>
+<td>from <code>AWS_PROFILE</code>, else <code>null</code></td>
+<td>AWS profile to use for authentication</td>
+</tr>
+<tr>
+<td><a id="reporters.s3.options.bucket_name"></a><code>bucket_name</code></td>
+<td>string or null</td>
+<td>from <code>ASH_S3_BUCKET_NAME</code>, else <code>null</code></td>
+<td>Name of the S3 bucket to store reports</td>
+</tr>
+<tr>
+<td><a id="reporters.s3.options.key_prefix"></a><code>key_prefix</code></td>
+<td>string</td>
+<td><code>ash-reports/</code></td>
+<td>Prefix for S3 object keys</td>
+</tr>
+<tr>
+<td><a id="reporters.s3.options.file_format"></a><code>file_format</code></td>
+<td>one of <code>json</code>, <code>yaml</code></td>
+<td><code>json</code></td>
+<td>Format to use for the report file</td>
+</tr>
+<tr>
+<td><a id="reporters.s3.options.max_retries"></a><code>max_retries</code></td>
+<td>integer, at most 10</td>
+<td><code>3</code></td>
+<td>Maximum number of retry attempts for S3 operations</td>
+</tr>
+<tr>
+<td><a id="reporters.s3.options.base_delay"></a><code>base_delay</code></td>
+<td>number, at most 60</td>
+<td><code>1.0</code></td>
+<td>Base delay in seconds between retry attempts</td>
+</tr>
+<tr>
+<td><a id="reporters.s3.options.max_delay"></a><code>max_delay</code></td>
+<td>number, at most 60</td>
+<td><code>60.0</code></td>
+<td>Maximum delay in seconds between retry attempts</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,116.24a6,6,0,0,1-8.48,0L134,54.49V216a6,6,0,0,1-12,0V54.49L60.24,116.24a6,6,0,0,1-8.48-8.48l72-72a6,6,0,0,1,8.48,0l72,72A6,6,0,0,1,204.24,116.24Z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+  
+    
+
+<nav class="ash-pagination" aria-label="Previous and next documentation pages">
+  <div class="ash-wrap ash-pagination__inner">
+    
+    <a href="../scanners/" rel="prev">
+      <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M222,128a6,6,0,0,1-6,6H54.49l61.75,61.76a6,6,0,1,1-8.48,8.48l-72-72a6,6,0,0,1,0-8.48l72-72a6,6,0,0,1,8.48,8.48L54.49,122H216A6,6,0,0,1,222,128Z"/></svg></span><span><span class="ash-pagination__direction">PREVIOUS</span>Scanners</span>
+    </a>
+    
+    
+    <a class="ash-pagination__next" href="../converters/" rel="next">
+      <span><span class="ash-pagination__direction">NEXT</span>Converters</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M220.24,132.24l-72,72a6,6,0,0,1-8.48-8.48L201.51,134H40a6,6,0,0,1,0-12H201.51L139.76,60.24a6,6,0,0,1,8.48-8.48l72,72A6,6,0,0,1,220.24,132.24Z"/></svg></span>
+    </a>
+    
+  </div>
+</nav>
+
+  
+  <footer class="ash-footer">
+    <div class="ash-wrap ash-footer__top">
+      <div>
+        <a class="ash-brand" href="../.." aria-label="ASH home">
+          <span class="ash-brand__name">ASH<span class="ash-brand__subtitle">Automated Security Helper</span></span>
+        </a>
+      </div>
+      <div class="ash-footer__links">
+        <div><span>Documentation</span><a href="../../getting-started/local/">Quick start</a><a href="../../how-to/configure/">Configuration</a><a href="../cli/">CLI reference</a></div>
+        <div><span>Integrations</span><a href="../scanners/">Scanners</a><a href="../../getting-started/ci/">CI/CD integration</a><a href="../../plugins/">Plugin development</a></div>
+        <div><span>Project</span><a href="https://github.com/awslabs/automated-security-helper">GitHub <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a><a href="../../contributing/">Contribute</a><a href="https://github.com/awslabs/automated-security-helper/issues">Get help <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a></div>
+      </div>
+    </div>
+    <div class="ash-wrap ash-footer__bottom">
+      <span class="ash-footer-credit">Build with <span class="ash-footer-heart" role="img" aria-label="love">&lt;3</span> at Amazon Web Services</span>
+      <div><button class="ash-motion-toggle" type="button" data-ash-motion aria-pressed="false"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M128,26A102,102,0,1,0,230,128,102.12,102.12,0,0,0,128,26Zm0,192a90,90,0,1,1,90-90A90.1,90.1,0,0,1,128,218ZM110,96v64a6,6,0,0,1-12,0V96a6,6,0,0,1,12,0Zm48,0v64a6,6,0,0,1-12,0V96a6,6,0,0,1,12,0Z"/></svg></span> <span>Pause motion</span></button><a href="https://github.com/awslabs/automated-security-helper/blob/main/LICENSE">License</a><a href="../../contributing/#security-issue-notifications">Security</a></div>
+    </div>
+    <div class="ash-wrap ash-footer__copyright">&copy; Amazon Web Services, Inc. or its affiliates. All rights reserved.</div>
+  </footer>
+  <div class="ash-toast" role="status" aria-live="polite" aria-atomic="true" data-ash-toast></div>
+
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.indexes", "navigation.path", "navigation.top", "navigation.footer", "toc.follow", "content.tabs.link", "search.share", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate", "content.code.select"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../assets/javascripts/ash.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,4485 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Security scanning for code, infrastructure, secrets, and dependencies.">
+      
+      
+      
+        <link rel="canonical" href="https://awslabs.github.io/automated-security-helper/latest/how-to/troubleshoot/">
+      
+      
+        <link rel="prev" href="../deploy-on-aws/">
+      
+      
+        <link rel="next" href="../migrate-from-v2/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="data:,">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Troubleshoot - ASH - Automated Security Helper</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/ash.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  
+  <!-- Phosphor SVG icon license:
+  MIT License
+
+Copyright (c) 2023 Phosphor Icons
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+  -->
+  <meta name="theme-color" content="#0f141a">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Troubleshoot · ASH">
+  <meta property="og:description" content="Security scanning for code, infrastructure, secrets, and dependencies.">
+  <link rel="preload" href="../../assets/fonts/open-sans.woff2" as="font" type="font/woff2" crossorigin>
+  <noscript>
+    <style>
+      .ash-search-trigger, .ash-menu-toggle, .ash-motion-toggle, .ash-copy,
+       .ash-tabs, .ash-mode-picker, .ash-filter, [data-ash-run], [data-scan-controls],
+       [data-ash-drawer], [data-ash-handbook] { display: none !important; }
+      .ash-install-panel[hidden] { display: block !important; margin-top: 1.5rem; }
+       @media (max-width: 960px) {
+        .ash-header { position: relative; height: auto; }
+      }
+    </style>
+  </noscript>
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#troubleshoot" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+        <aside class="md-banner">
+          <div class="md-banner__inner md-grid md-typeset">
+            
+            <span data-ash-notice="unreleased">
+      These docs describe the main branch, which is not released yet, so a feature
+      described here may not be in the latest release.
+      The install commands in this version of the docs install
+      <code>main</code>, not a release.
+      <a href="../../..">Read the docs for the latest release</a>
+      to install a release.
+    </span>
+          </div>
+          
+        </aside>
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+<a class="ash-skip" href="#main-content">Skip to content</a>
+<header class="md-header ash-header" data-md-component="header">
+  <nav class="ash-header__inner md-grid" aria-label="Main navigation">
+    <a class="ash-brand" href="../.." aria-label="ASH home" data-md-component="logo">
+      <span class="ash-brand__name">ASH<span class="ash-brand__subtitle">Automated Security Helper</span></span>
+    </a>
+    <div class="ash-header__links">
+      <a href="../.." >Overview</a>
+      <a href="../../docs/quick-start-guide/" aria-current="true">Documentation</a>
+      <a href="../..#scanners">Scanners</a>
+      <a href="../../integrations/" >Integrations</a>
+    </div>
+    <div class="ash-sr-only md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">ASH - Automated Security Helper</div>
+        <div class="md-header__topic" data-md-component="header-topic">Troubleshoot</div>
+      </div>
+    </div>
+    <div class="ash-header__actions">
+      
+        <button class="ash-handbook-toggle" type="button" data-ash-handbook aria-label="Browse all documentation" aria-haspopup="dialog" aria-controls="ash-handbook" aria-expanded="false" disabled><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232,50H160a38,38,0,0,0-32,17.55A38,38,0,0,0,96,50H24a6,6,0,0,0-6,6V200a6,6,0,0,0,6,6H96a26,26,0,0,1,26,26,6,6,0,0,0,12,0,26,26,0,0,1,26-26h72a6,6,0,0,0,6-6V56A6,6,0,0,0,232,50ZM96,194H30V62H96a26,26,0,0,1,26,26V204.31A37.86,37.86,0,0,0,96,194Zm130,0H160a37.87,37.87,0,0,0-26,10.32V88a26,26,0,0,1,26-26h66ZM160,90h40a6,6,0,0,1,0,12H160a6,6,0,0,1,0-12Zm46,38a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,128Zm0,32a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,160Z"/></svg></span><span>Contents</span></button>
+      
+      <button class="ash-search-trigger" type="button" data-ash-search aria-label="Search documentation" aria-haspopup="dialog" aria-controls="ash-search-dialog" aria-expanded="false" disabled>
+        <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M228.24,219.76l-51.38-51.38a86.15,86.15,0,1,0-8.48,8.48l51.38,51.38a6,6,0,0,0,8.48-8.48ZM38,112a74,74,0,1,1,74,74A74.09,74.09,0,0,1,38,112Z"/></svg></span><span>Search docs</span><kbd data-ash-shortcut>⌘ K</kbd>
+      </button>
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M122,40V16a6,6,0,0,1,12,0V40a6,6,0,0,1-12,0Zm68,88a62,62,0,1,1-62-62A62.07,62.07,0,0,1,190,128Zm-12,0a50,50,0,1,0-50,50A50.06,50.06,0,0,0,178,128ZM59.76,68.24a6,6,0,1,0,8.48-8.48l-16-16a6,6,0,0,0-8.48,8.48Zm0,119.52-16,16a6,6,0,1,0,8.48,8.48l16-16a6,6,0,1,0-8.48-8.48ZM192,70a6,6,0,0,0,4.24-1.76l16-16a6,6,0,0,0-8.48-8.48l-16,16A6,6,0,0,0,192,70Zm4.24,117.76a6,6,0,0,0-8.48,8.48l16,16a6,6,0,0,0,8.48-8.48ZM46,128a6,6,0,0,0-6-6H16a6,6,0,0,0,0,12H40A6,6,0,0,0,46,128Zm82,82a6,6,0,0,0-6,6v24a6,6,0,0,0,12,0V216A6,6,0,0,0,128,210Zm112-88H216a6,6,0,0,0,0,12h24a6,6,0,0,0,0-12Z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232.13,143.64a6,6,0,0,0-6-1.49A90.07,90.07,0,0,1,113.86,29.85a6,6,0,0,0-7.49-7.48A102.88,102.88,0,0,0,54.48,58.68,102,102,0,0,0,197.32,201.52a102.88,102.88,0,0,0,36.31-51.89A6,6,0,0,0,232.13,143.64Zm-42,48.29a90,90,0,0,1-126-126A90.9,90.9,0,0,1,99.65,37.66,102.06,102.06,0,0,0,218.34,156.35,90.9,90.9,0,0,1,190.1,191.93Z"/></svg>
+      </label>
+    
+  
+</form>
+        <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+      
+      <template data-ash-theme-icons>
+        <span data-color-scheme="default"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M122,40V16a6,6,0,0,1,12,0V40a6,6,0,0,1-12,0Zm68,88a62,62,0,1,1-62-62A62.07,62.07,0,0,1,190,128Zm-12,0a50,50,0,1,0-50,50A50.06,50.06,0,0,0,178,128ZM59.76,68.24a6,6,0,1,0,8.48-8.48l-16-16a6,6,0,0,0-8.48,8.48Zm0,119.52-16,16a6,6,0,1,0,8.48,8.48l16-16a6,6,0,1,0-8.48-8.48ZM192,70a6,6,0,0,0,4.24-1.76l16-16a6,6,0,0,0-8.48-8.48l-16,16A6,6,0,0,0,192,70Zm4.24,117.76a6,6,0,0,0-8.48,8.48l16,16a6,6,0,0,0,8.48-8.48ZM46,128a6,6,0,0,0-6-6H16a6,6,0,0,0,0,12H40A6,6,0,0,0,46,128Zm82,82a6,6,0,0,0-6,6v24a6,6,0,0,0,12,0V216A6,6,0,0,0,128,210Zm112-88H216a6,6,0,0,0,0,12h24a6,6,0,0,0,0-12Z"/></svg></span></span>
+        <span data-color-scheme="slate"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232.13,143.64a6,6,0,0,0-6-1.49A90.07,90.07,0,0,1,113.86,29.85a6,6,0,0,0-7.49-7.48A102.88,102.88,0,0,0,54.48,58.68,102,102,0,0,0,197.32,201.52a102.88,102.88,0,0,0,36.31-51.89A6,6,0,0,0,232.13,143.64Zm-42,48.29a90,90,0,0,1-126-126A90.9,90.9,0,0,1,99.65,37.66,102.06,102.06,0,0,0,218.34,156.35,90.9,90.9,0,0,1,190.1,191.93Z"/></svg></span></span>
+      </template>
+      <a class="ash-github" href="https://github.com/awslabs/automated-security-helper" aria-label="ASH on GitHub">
+        <span>GitHub</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span>
+      </a>
+      <button class="ash-menu-toggle" type="button" aria-label="Open navigation" aria-haspopup="dialog" aria-expanded="false" aria-controls="ash-mobile-menu" data-ash-menu disabled>
+        <span class="ash-menu-glyph" aria-hidden="true"><i></i><i></i></span>
+      </button>
+    </div>
+    
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M228.24,219.76l-51.38-51.38a86.15,86.15,0,1,0-8.48,8.48l51.38,51.38a6,6,0,0,0,8.48-8.48ZM38,112a74,74,0,1,1,74,74A74.09,74.09,0,0,1,38,112Z"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M222,128a6,6,0,0,1-6,6H54.49l61.75,61.76a6,6,0,1,1-8.48,8.48l-72-72a6,6,0,0,1,0-8.48l72-72a6,6,0,0,1,8.48,8.48L54.49,122H216A6,6,0,0,1,222,128Z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,195.76a6,6,0,1,1-8.48,8.48L128,136.49,60.24,204.24a6,6,0,0,1-8.48-8.48L119.51,128,51.76,60.24a6,6,0,0,1,8.48-8.48L128,119.51l67.76-67.75a6,6,0,0,1,8.48,8.48L136.49,128Z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+  </nav>
+  <dialog class="ash-mobile-menu" id="ash-mobile-menu" aria-label="Site navigation" hidden>
+    <div class="ash-mobile-menu__heading"><p class="ash-mobile-menu__eyebrow">Navigation</p><button type="button" data-ash-menu-close aria-label="Close navigation"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,195.76a6,6,0,1,1-8.48,8.48L128,136.49,60.24,204.24a6,6,0,0,1-8.48-8.48L119.51,128,51.76,60.24a6,6,0,0,1,8.48-8.48L128,119.51l67.76-67.75a6,6,0,0,1,8.48,8.48L136.49,128Z"/></svg></span></button></div>
+    <a href="../..">Overview <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../../docs/quick-start-guide/">Documentation <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../..#scanners">Scanners <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../../integrations/">Integrations <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="https://github.com/awslabs/automated-security-helper">GitHub <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    
+      <button type="button" data-ash-drawer>Browse all documentation <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232,50H160a38,38,0,0,0-32,17.55A38,38,0,0,0,96,50H24a6,6,0,0,0-6,6V200a6,6,0,0,0,6,6H96a26,26,0,0,1,26,26,6,6,0,0,0,12,0,26,26,0,0,1,26-26h72a6,6,0,0,0,6-6V56A6,6,0,0,0,232,50ZM96,194H30V62H96a26,26,0,0,1,26,26V204.31A37.86,37.86,0,0,0,96,194Zm130,0H160a37.87,37.87,0,0,0-26,10.32V88a26,26,0,0,1,26-26h66ZM160,90h40a6,6,0,0,1,0,12H160a6,6,0,0,1,0-12Zm46,38a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,128Zm0,32a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,160Z"/></svg></span></button>
+    
+  </dialog>
+  <noscript>
+    <nav class="ash-static-navigation" aria-label="Site navigation">
+      <a href="../..">Overview</a>
+      <a href="../../docs/quick-start-guide/">Documentation</a>
+      <a href="../..#scanners">Scanners</a>
+      <a href="../../integrations/">Integrations</a>
+      <a href="https://github.com/awslabs/automated-security-helper">GitHub</a>
+    </nav>
+  </noscript>
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ASH - Automated Security Helper" class="md-nav__button md-logo" aria-label="ASH - Automated Security Helper" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ASH - Automated Security Helper
+  </label>
+  
+    <div class="md-nav__source">
+      
+<a href="https://github.com/awslabs/automated-security-helper" title="ASH on GitHub" class="md-source" aria-label="ASH on GitHub">
+  <span class="ash-icon md-source__icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M230,64a30,30,0,1,0-36,29.4V112a10,10,0,0,1-10,10H96a21.84,21.84,0,0,0-10,2.42v-31a30,30,0,1,0-12,0v69.2a30,30,0,1,0,12,0V144a10,10,0,0,1,10-10h88a22,22,0,0,0,22-22V93.4A30.05,30.05,0,0,0,230,64ZM62,64A18,18,0,1,1,80,82,18,18,0,0,1,62,64ZM98,192a18,18,0,1,1-18-18A18,18,0,0,1,98,192ZM200,82a18,18,0,1,1,18-18A18,18,0,0,1,200,82Z"/></svg></span>
+  <span class="md-source__repository">ASH on GitHub</span>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../getting-started/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_2" id="__nav_2_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/local/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan on your machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add ASH to CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connect an AI agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/platform-teams/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roll out across repositories
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install ASH
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/advanced-usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Manage scanner tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configure ASH
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../choose-scanners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose scanners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../set-the-gate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Set the gate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../suppress-findings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Suppress findings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../read-results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read scan results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../export-reports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/scanner-sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enable the scanner sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../run-in-a-container/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run in a container
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../run-offline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run offline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose an integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pre-commit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run ASH with pre-commit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_14" id="__nav_3_14_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CI systems
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    CI systems
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ci/github-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub Actions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ci/gitlab-ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitLab CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ci/other-ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Other CI systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scale-large-repos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scale to large repositories
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run the MCP server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install an agent plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/genai-steering-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH GenAI integration guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deploy-on-aws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deploy on AWS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshoot
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshoot
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#scanners-that-do-not-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scanners that do not run
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Scanners that do not run">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-scanner-shows-missing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A scanner shows MISSING
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-scanner-is-missing-because-it-was-found-only-inside-the-scanned-tree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A tool inside the scanned directory is not run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-scanner-is-error-with-an-exit-code-it-does-not-accept" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A scanner is ERROR with an exit code it does not accept
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#semgrep-and-opengrep-show-skipped-on-windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        semgrep and opengrep show SKIPPED on Windows
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exit-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit codes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Exit codes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-scan-exits-1-with-no-findings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The scan exits 1 with no findings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#no-selected-scanner-had-a-file-to-scan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        No selected scanner had a file to scan
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-scan-exits-1-because-conversion-was-incomplete" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The scan exits 1 because conversion was incomplete
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-scan-exits-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The scan exits 2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-command-exits-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The command exits 5
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-scan-exits-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The scan exits 3
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#your-configuration-has-no-effect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Your configuration has no effect
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-setting-in-the-repositorys-config-file-is-ignored" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A setting in the repository's config file is ignored
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-scan-exits-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The scan exits 4
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#output-directory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output directory
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Output directory">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-scan-stops-because-something-in-the-output-directory-is-a-symlink" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The scan stops because the output directory is a symlink
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-scan-stops-because-a-report-file-is-a-link" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The scan stops because a report file is a link
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#content-databases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Content databases
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Content databases">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-content-database-is-stale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A content database is stale
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#slow-or-stuck-scans" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Slow or stuck scans
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Slow or stuck scans">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-first-scan-is-slow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The first scan is slow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-scanner-hangs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A scanner hangs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#installing-and-running-ash" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Installing and running ASH
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Installing and running ASH">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-install-fails-while-building-rtoml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The install fails while building rtoml
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-install-fails-because-git-is-missing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The install fails because git is missing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ash-is-not-found-after-installing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ash is not found after installing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ash-runs-a-different-program-on-windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ash runs a different program on Windows
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#results-differ-between-your-machine-and-ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Results differ between your machine and CI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#container-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Container mode
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Container mode">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-container-image-does-not-build" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The container image does not build
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../migrate-from-v2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migrate from v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/how-ash-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How ASH works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/trust-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration trust model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/scanning-untrusted-code/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanning untrusted code
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanner sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/content-databases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Content databases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/suppressions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Suppressions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../reference/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_5" id="__nav_5_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/environment-variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/scanners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/reporters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/converters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Converters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/mcp-tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/exit-codes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exit codes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/output-files/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Output files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/coverage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coverage by language
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/python-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../plugins/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugins
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Plugins
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_2" id="__nav_6_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Built-in scanner pages
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Built-in scanner pages
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/actionlint/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    actionlint
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/cfn-lint-and-cfn-guard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cfn-lint and cfn-guard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/gitleaks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/trivy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trivy filesystem scanner (trivy)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/zizmor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    zizmor (GitHub Actions)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_3" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../docs/plugins/community/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Community plugins
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6_3" id="__nav_6_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Community plugins
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/ferret-scan-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH Ferret Scan Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/snyk-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH Snyk Code Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/snyk-plugin-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Snyk Plugin CI/CD Setup Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/trivy-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trivy Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/aws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS reporters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-scanner/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a scanner plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-reporter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a reporter plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-converter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a converter plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/event-subscribers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Subscribe to scan events
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../contributing/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contributing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/documentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/interface-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interface design system
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/interface-review/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interaction surface inventory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/high-end-design-review/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design & UX review
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/releases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#scanners-that-do-not-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scanners that do not run
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Scanners that do not run">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-scanner-shows-missing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A scanner shows MISSING
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-scanner-is-missing-because-it-was-found-only-inside-the-scanned-tree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A tool inside the scanned directory is not run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-scanner-is-error-with-an-exit-code-it-does-not-accept" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A scanner is ERROR with an exit code it does not accept
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#semgrep-and-opengrep-show-skipped-on-windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        semgrep and opengrep show SKIPPED on Windows
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exit-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit codes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Exit codes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-scan-exits-1-with-no-findings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The scan exits 1 with no findings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#no-selected-scanner-had-a-file-to-scan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        No selected scanner had a file to scan
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-scan-exits-1-because-conversion-was-incomplete" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The scan exits 1 because conversion was incomplete
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-scan-exits-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The scan exits 2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-command-exits-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The command exits 5
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-scan-exits-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The scan exits 3
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#your-configuration-has-no-effect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Your configuration has no effect
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-setting-in-the-repositorys-config-file-is-ignored" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A setting in the repository's config file is ignored
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-scan-exits-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The scan exits 4
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#output-directory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output directory
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Output directory">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-scan-stops-because-something-in-the-output-directory-is-a-symlink" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The scan stops because the output directory is a symlink
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-scan-stops-because-a-report-file-is-a-link" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The scan stops because a report file is a link
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#content-databases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Content databases
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Content databases">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-content-database-is-stale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A content database is stale
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#slow-or-stuck-scans" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Slow or stuck scans
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Slow or stuck scans">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-first-scan-is-slow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The first scan is slow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-scanner-hangs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A scanner hangs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#installing-and-running-ash" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Installing and running ASH
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Installing and running ASH">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-install-fails-while-building-rtoml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The install fails while building rtoml
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-install-fails-because-git-is-missing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The install fails because git is missing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ash-is-not-found-after-installing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ash is not found after installing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ash-runs-a-different-program-on-windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ash runs a different program on Windows
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#results-differ-between-your-machine-and-ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Results differ between your machine and CI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#container-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Container mode
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Container mode">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-container-image-does-not-build" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The container image does not build
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+  <nav class="md-path" aria-label="Navigation" >
+    <ol class="md-path__list">
+      
+        
+  
+  
+    <li class="md-path__item">
+      <a href="../.." class="md-path__link">
+        
+  <span class="md-ellipsis">
+    Home
+  </span>
+
+      </a>
+    </li>
+  
+
+      
+      
+        
+  
+  
+    
+    
+      <li class="md-path__item">
+        <a href="../install/" class="md-path__link">
+          
+  <span class="md-ellipsis">
+    How-to guides
+  </span>
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ol>
+  </nav>
+
+              
+              <article class="md-content__inner md-typeset">
+                
+  <div class="ash-doc-label">Documentation</div>
+  <div id="main-content" tabindex="-1">
+    
+
+
+  
+  
+
+
+<h1 id="troubleshoot">Troubleshoot<a class="headerlink" href="#troubleshoot" title="Permanent link">&para;</a></h1>
+<p>Find the symptom, then read its cause and fix. Two places hold most of what you need:
+the console output of the scan, and <code>ash.log</code> in the output directory
+(<code>.ash/ash_output/ash.log</code> by default), which has every warning, including the ones the
+console summary leaves out.</p>
+<h2 id="scanners-that-do-not-run">Scanners that do not run<a class="headerlink" href="#scanners-that-do-not-run" title="Permanent link">&para;</a></h2>
+<h3 id="a-scanner-shows-missing">A scanner shows MISSING<a class="headerlink" href="#a-scanner-shows-missing" title="Permanent link">&para;</a></h3>
+<p>Symptom: a row in the summary table has the result MISSING, and the scan ends with:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>ERROR (1) Exiting because the scan was incomplete: 1 selected scanner(s) did not
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>evaluate everything they were given
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  grype: MISSING
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    its tool grype was not found on PATH or in /home/me/.ash/bin, /home/me/.local/share/uv/tools/automated-security-helper/bin, /usr/local/bin; install it with `ash dependencies install` or exclude grype with --exclude-scanners
+</span></code></pre></div>
+<p>Cause: ASH could not find the scanner's tool, or could not install it. The line under
+each MISSING scanner gives the reason, and so does its <code>missing_reason</code> in
+<code>ash_aggregated_results.json</code>. A warning in <code>ash.log</code> names what is missing too, for
+example <code>Grype executable not found in PATH. Please ensure grype is installed.</code> The
+console shows it when the progress display is off (<code>--no-progress</code>). For the scanners
+ASH installs with uv, one or both of these warnings mean ASH found no <code>uv</code>, neither the
+copy installed with ASH, beside the Python interpreter that runs it, nor one on your
+<code>PATH</code>, so it cannot install them during the scan:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>UV tool validation failed - UV is not available but required
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>UV tool execution is required but UV is not available for checkov
+</span></code></pre></div>
+<p>A scanner with nothing to scan in the project, such as cdk-nag with no CloudFormation
+template, npm-audit with no lockfile beside a <code>package.json</code>, or actionlint with no
+workflows, shows SKIPPED instead, whether or not its tool is installed. Scanners that
+have no such check, such as grype and semgrep, show MISSING whenever their tool is
+missing.</p>
+<p>Fix: install the tool, usually with <code>ash dependencies install --tool grype</code> (using the
+scanner's name). <a href="../../docs/advanced-usage/#when-a-scanner-shows-missing">When a scanner shows MISSING</a>
+lists the exceptions: detect-secrets, cdk-nag, npm-audit, and cfn-nag. If you do not need the scanner,
+leave it out with <code>ash --exclude-scanners grype</code>, which records it as SKIPPED.</p>
+<h3 id="a-scanner-is-missing-because-it-was-found-only-inside-the-scanned-tree">A tool inside the scanned directory is not run<a class="headerlink" href="#a-scanner-is-missing-because-it-was-found-only-inside-the-scanned-tree" title="Permanent link">&para;</a></h3>
+<p>Symptom: a scanner shows MISSING although its tool is installed, and after the list of
+incomplete scanners the scan names each tool it found only inside the scanned
+directory:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Found only inside the scanned tree, so not run: grype (/home/me/repo/.venv/bin/grype). To use them, install it outside the scanned tree, or set ASH_ALLOW_IN_TREE_TOOLS=1 or pass --allow-in-tree-tools to allow tools from the tree.
+</span></code></pre></div>
+<p><code>ash.log</code> has a warning for each one (the console shows it too when the progress display
+is off):</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Not running grype from inside the scanned tree /home/me/repo: /home/me/repo/.venv/bin/grype. To use it, install it outside the scanned tree, or set ASH_ALLOW_IN_TREE_TOOLS=1 or pass --allow-in-tree-tools to allow tools from the tree.
+</span></code></pre></div>
+<p>The scanner's <code>missing_reason</code> in <code>ash_aggregated_results.json</code> records the reason, as
+"grype was found only inside the scanned tree, at ...".</p>
+<p>Cause: during a scan, ASH does not run programs found inside the directory it scans.
+The usual case is a scanner installed in the project's virtual environment or
+<code>node_modules</code>, which <code>uv run</code> or <code>npm run</code> put first on <code>PATH</code>.</p>
+<p>Fix: install the tool outside the repository, for example with
+<code>ash dependencies install</code> or <code>uv tool install</code>. To use the in-tree copies for one
+scan, pass <code>--allow-in-tree-tools</code> or set <code>ASH_ALLOW_IN_TREE_TOOLS=1</code>. <code>ash mcp</code>
+ignores both. See
+<a href="../../docs/advanced-usage/#tools-inside-the-scanned-directory">Tools inside the scanned directory</a>.</p>
+<h3 id="a-scanner-is-error-with-an-exit-code-it-does-not-accept">A scanner is ERROR with an exit code it does not accept<a class="headerlink" href="#a-scanner-is-error-with-an-exit-code-it-does-not-accept" title="Permanent link">&para;</a></h3>
+<p>Symptom: a scanner's row is <code>ERROR</code>, and its error names the tool's exit code:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Failed to execute semgrep scanner on source: SemgrepScanner scan failed: its tool exited with code 7, which this scanner does not accept as a completed run, so its results file is not graded (exit code 7: not an accepted exit code; success_exit_codes=[0, 1]). No stderr captured; checked .ash/ash_output/scanners/semgrep/source/SemgrepScanner.stderr.log, which the tool did not write. .ash/ash_output/scanners/semgrep/source/results_sarif.sarif reports: Invalid YAML file ...
+</span></code></pre></div>
+<p>Cause: the tool reported that it failed. Each scanner accepts the exit codes its tool uses
+for a run that completed, with or without findings, and nothing else. A failed tool
+can still leave a results file (semgrep exits 7 and writes SARIF holding only error
+notifications when it cannot read a rule configuration; grype exits 1 and writes a
+zero-byte report when it cannot load its database), so ASH does not read the file of
+a run with any other code: an empty or error-only file would otherwise be graded
+<code>PASSED</code> with no findings. A tool ended by a signal shows as <code>128 + N</code> (129 for
+SIGHUP, 130 for SIGINT, 137 for SIGKILL). 127 is a tool the OS could not start, or
+a run ASH itself failed to carry out (the scanner's errors name ASH's error).</p>
+<table>
+<thead>
+<tr>
+<th>Scanner</th>
+<th>Accepted exit codes</th>
+<th>What the tool uses other codes for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>bandit</td>
+<td>0, 1 (issues found)</td>
+<td>2: any error (<code>bandit/cli/main.py</code>)</td>
+</tr>
+<tr>
+<td>checkov</td>
+<td>0, 1 (failed checks)</td>
+<td>2: the run crashed (<code>checkov/main.py</code>)</td>
+</tr>
+<tr>
+<td>grype</td>
+<td>0, 2 (a match at or above <code>grype --fail-on</code>)</td>
+<td>1: any error, such as a database it cannot load (grype's <code>cmd/grype/cli</code> package)</td>
+</tr>
+<tr>
+<td>semgrep</td>
+<td>0, 1 (findings)</td>
+<td>2: fatal; 3 and up: specific failures, 7 for a rule configuration it cannot read (<code>semgrep/error.py</code>)</td>
+</tr>
+<tr>
+<td>opengrep</td>
+<td>0, 1</td>
+<td>the same values as semgrep (<code>src/osemgrep/core/Exit_code.ml</code>)</td>
+</tr>
+<tr>
+<td>trivy, trivy-repo</td>
+<td>0</td>
+<td>1: any error (trivy's <code>cmd/trivy</code> package)</td>
+</tr>
+<tr>
+<td>syft</td>
+<td>0</td>
+<td>1: any error (syft's <code>cmd/syft</code> package)</td>
+</tr>
+<tr>
+<td>ferret-scan</td>
+<td>0, 3 (coverage cut short under <code>fail_on_incomplete</code>: the findings are reported and the row is <code>ERROR</code>, as its target counts as failed)</td>
+<td>1: any error</td>
+</tr>
+<tr>
+<td>snyk-code</td>
+<td>0, 1 (issues found)</td>
+<td>2: an error; 3: no supported project (<code>src/cli/exit-codes.ts</code>)</td>
+</tr>
+<tr>
+<td>gitleaks</td>
+<td>0, 2 (leaks found: ASH runs <code>gitleaks --exit-code=2</code>)</td>
+<td>1: any error, such as an unreadable config; gitleaks exits 1 for leaks too unless told otherwise, which is why ASH moves the leaks code</td>
+</tr>
+<tr>
+<td>zizmor</td>
+<td>0, 3 (nothing it could audit; findings never set the status because ASH runs <code>zizmor --no-exit-codes</code>)</td>
+<td>any other status</td>
+</tr>
+<tr>
+<td>actionlint</td>
+<td>0, 1 (problems found)</td>
+<td>2: a bad command line; 3: a fatal error, such as an unreadable file</td>
+</tr>
+<tr>
+<td>cfn-lint</td>
+<td>0 and the even values up to 14: 2 error, 4 warning and 8 informational, added together for a run with more than one level (<code>cfnlint/runner/cli.py</code>)</td>
+<td>1: a fatal error, so any odd status; anything above 15</td>
+</tr>
+<tr>
+<td>cfn-guard</td>
+<td>0, 19 (at least one rule failed)</td>
+<td>any other status, such as 255 for a parse error or a missing rules path</td>
+</tr>
+</tbody>
+</table>
+<p>trivy exits 0 for a run with findings unless its <code>exit-code</code> setting names another
+code. ASH runs trivy and trivy-repo with <code>trivy --exit-code=0</code>, which outranks an
+<code>exit-code</code> in the operator's trivy config and <code>TRIVY_EXIT_CODE</code> (measured with trivy
+0.75.0), and neither scanner reads a <code>trivy.yaml</code> from the scanned directory, so a
+run with findings exits 0 and a nonzero exit only ever means trivy failed. ASH
+decides the scan's exit code from the findings itself.</p>
+<p>cfn-nag, npm audit, detect-secrets and cdk-nag are not in this table. cfn-nag exits
+with its count of failing violations and is judged per template; npm audit exits 1
+both for advisories and for errors and is judged by whether it wrote a report;
+detect-secrets and cdk-nag run in ASH's own worker processes.</p>
+<p>Fix: read what the message quotes, and fix what the tool reported: its stderr, or, when
+it wrote none (semgrep and opengrep report a rule file they cannot read only in
+their SARIF), the error-level notifications from its results file, which the
+message names. The full text is in the <code>&lt;Scanner&gt;.stderr.log</code>, the
+<code>&lt;Scanner&gt;.stdout.log</code> and the results file under <code>scanners/&lt;name&gt;/&lt;target&gt;/</code> in the
+output directory; the message names the ones the tool wrote.
+For semgrep and opengrep under <code>--offline</code>, see
+<a href="../../docs/advanced-usage/#seeding-the-semgrep-and-opengrep-rule-cache">Seeding the semgrep and opengrep rule cache</a>.
+For grype, see <a href="../run-offline/#scanners">What each scanner does offline</a>.</p>
+<p>The scan exits 1 for an <code>ERROR</code> scanner while <code>fail_on_incomplete_scanners</code> is on,
+which is the default. With it off, the exit code comes from the findings alone, so a
+scan whose only problem is the failed scanner exits 0; see
+<a href="../set-the-gate/#incomplete">Incomplete scans</a>.</p>
+<h3 id="semgrep-and-opengrep-show-skipped-on-windows">semgrep and opengrep show SKIPPED on Windows<a class="headerlink" href="#semgrep-and-opengrep-show-skipped-on-windows" title="Permanent link">&para;</a></h3>
+<p>Cause: both are off by default on Windows, and semgrep publishes no Windows build, so
+it is SKIPPED even when you turn it on. A SKIPPED scanner does not fail the scan, so
+the scan passes without them, as long as another selected scanner runs.</p>
+<p>Fix: to run them, scan from WSL or in a container. See
+<a href="../../docs/advanced-usage/#platform-limits">Platform limits</a>.</p>
+<h2 id="exit-codes">Exit codes<a class="headerlink" href="#exit-codes" title="Permanent link">&para;</a></h2>
+<p>ASH exits 0 when nothing is actionable, 1 when the scan is incomplete or failed, 2 when
+it has actionable findings at or above the threshold, 3 for a configuration it cannot use
+or an input it refuses before scanning, such as a linked output directory, 4 for a
+workspace error, and 5 for a usage error. When a scan is both incomplete and has
+findings, it exits 1 (a workspace scan exits 2). See
+<a href="../../reference/exit-codes/">Exit codes</a>.</p>
+<h3 id="the-scan-exits-1-with-no-findings">The scan exits 1 with no findings<a class="headerlink" href="#the-scan-exits-1-with-no-findings" title="Permanent link">&para;</a></h3>
+<p>Cause: the scan is incomplete, or it stopped before running. The last lines say which:</p>
+<ul>
+<li><code>Exiting because the scan was incomplete</code>, followed by the scanners: a scanner is
+  MISSING, or it ran and failed (ERROR), or it could not read some of its inputs. For
+  ERROR, the scanner's own messages are in <code>ash.log</code> and in its stderr log under
+  <code>scanners/</code> in the output directory.</li>
+<li><code>Exiting because conversion was incomplete</code>: see the next entry.</li>
+<li><code>Exiting because N content database(s) are past their declared age bound</code>: see
+  <a href="#a-content-database-is-stale">A content database is stale</a>.</li>
+<li><code>Exiting because no scanner ran</code>: every scanner was SKIPPED, so the scan shows
+  nothing about the code. Each scanner's <code>skipped_reason</code> in
+  <code>ash_aggregated_results.json</code> says why. Check <code>--scanners</code>, <code>--exclude-scanners</code>, and
+  the <code>enabled</code> settings in your configuration.</li>
+<li>A message that no selected scanner had a file to scan: see
+  <a href="#no-selected-scanner-had-a-file-to-scan">No selected scanner had a file to scan</a>.</li>
+<li><code>Exiting because N rule(s) could not be evaluated</code>: cdk-nag rules failed with an
+  error on your templates, so the scan says nothing about them. Fix the template the
+  rule fails on, or suppress that rule's findings for the template.</li>
+</ul>
+<p>Fix: fix the cause named in the message. To accept an incomplete scan, pass
+<code>--no-fail-on-incomplete-scanners</code>, as the scan's message says, or set
+<code>fail_on_incomplete_scanners: false</code> at the top level of your configuration. Excluding
+the scanner is usually better, because the reports then say it did not run.</p>
+<h3 id="no-selected-scanner-had-a-file-to-scan">No selected scanner had a file to scan<a class="headerlink" href="#no-selected-scanner-had-a-file-to-scan" title="Permanent link">&para;</a></h3>
+<p>Symptom: the scan exits 1 with no findings, every selected scanner is SKIPPED, and the
+error names the scanners that had nothing to scan:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>No selected scanner had a file to scan: bandit was SKIPPED with nothing to scan, so this run has shown the target to be neither clean nor dirty. To accept a run that scanned nothing, set fail_on_incomplete_scanners: false or pass --no-fail-on-incomplete-scanners.
+</span></code></pre></div>
+<p>When the config sets <code>global_settings.ignore_paths</code>, the error also shows its first three
+patterns, with a count of any others, and suggests narrowing them:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>No selected scanner had a file to scan: detect-secrets was SKIPPED with nothing to scan, so this run has shown the target to be neither clean nor dirty. The config&#39;s global_settings.ignore_paths (&#39;**&#39;) leaves every path it matches out of what the scanners read, which can leave them nothing to scan; narrow it to have those files scanned. To accept a run that scanned nothing, set fail_on_incomplete_scanners: false or pass --no-fail-on-incomplete-scanners.
+</span></code></pre></div>
+<p>A run whose scanners were all SKIPPED for another reason, such as a <code>--scanners</code> name
+that matches no scanner on this platform, or every selected scanner turned off in the
+configuration, reports <code>Scan ran no scanners:</code> instead, with each scanner and its status;
+see <a href="#the-scan-exits-1-with-no-findings">The scan exits 1 with no findings</a>.</p>
+<p>Cause: each selected scanner had nothing to read, so the scan shows nothing about the
+code. A scanner that reads only some files, such as cfn-nag with no CloudFormation
+template or bandit with no Python file, has nothing to read in a project without them,
+and no scanner has anything to read when the scan set is empty. Two cases are ERROR
+instead, and the error gives a count. semgrep and opengrep are ERROR when their own
+exclusions, rather than <code>ignore_paths</code>, left out every file they found. bandit is ERROR
+when it scanned no file although Python files that nothing excludes are there; when
+<code>ignore_paths</code> or bandit's own <code>excluded_paths</code> leave out every Python file, bandit is
+SKIPPED.</p>
+<p>Fix: check that <code>--source-dir</code> names the project, that <code>ignore_paths</code>, and the
+repository's <code>.gitignore</code> and <code>.ignore</code> files, leave the files you mean to scan, and that
+the scanners you selected read them; <a href="../../reference/coverage/">Scanner coverage</a> lists
+what each scanner reads. To accept such a scan, pass <code>--no-fail-on-incomplete-scanners</code>
+or set <code>fail_on_incomplete_scanners: false</code>; it then exits 0. <code>ash merge</code> gives the same
+verdict over the shards.</p>
+<h3 id="the-scan-exits-1-because-conversion-was-incomplete">The scan exits 1 because conversion was incomplete<a class="headerlink" href="#the-scan-exits-1-because-conversion-was-incomplete" title="Permanent link">&para;</a></h3>
+<p>Symptom:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>ERROR (1) Exiting because conversion was incomplete: 1 converter(s) did not process the files they were given
+</span></code></pre></div>
+<p>Cause: ASH converts Jupyter notebooks to Python, and extracts <code>.zip</code>, <code>.tar</code>, and <code>.gz</code>
+archives, before it scans them. A notebook that <code>nbconvert</code> could not convert, or an
+archive that cannot be read, fails the scan so that its content is not silently left
+unscanned. The lines after the message name each converter and up to five of the files
+it could not convert, or, for a converter that crashed, its error as <code>&lt;Type&gt;: &lt;message&gt;</code>.
+<code>ash.log</code> has a line for each file with the reason, <code>Could not convert '&lt;file&gt;': &lt;reason&gt;</code>
+(the console shows it too when the progress display is off), and each converter's
+<code>failed_inputs</code> in <code>ash_aggregated_results.json</code> records the same reason. A reason that
+comes from an unexpected error is the error's type and message, such as
+<code>BadZipFile: Bad CRC-32 for file 'app.py'</code>. For a notebook, the reason says that nbconvert
+exited with a non-zero code, did not finish within 60 seconds, or wrote no output, or that
+uv could not run nbconvert and no <code>jupyter-nbconvert</code> was found.</p>
+<p>A notebook in an offline scan with no nbconvert installed gives
+<code>jupyter: dependencies unavailable, so it never ran</code>, because ASH does not install
+nbconvert offline.</p>
+<p>Fix: for notebooks, install nbconvert ahead of time with
+<code>ash dependencies install --tool jupyter</code>, or let ASH install it during an online scan.
+To see nbconvert's own error output, run the scan again with <code>--debug</code>. For a corrupt
+archive, fix or remove the file. To skip a file, add it to <code>global_settings.ignore_paths</code>
+with a reason; see <a href="../suppress-findings/">Suppress findings</a>.</p>
+<h3 id="the-scan-exits-2">The scan exits 2<a class="headerlink" href="#the-scan-exits-2" title="Permanent link">&para;</a></h3>
+<p>Cause: the scan found at least one finding at or above the severity threshold, which
+is MEDIUM unless you change it. The scan ends with
+<code>ERROR (2) Exiting due to 2 actionable findings found in ASH scan</code>.</p>
+<p>Fix: fix or suppress the findings (<a href="../suppress-findings/">Suppress findings</a>). To
+report findings without failing, pass <code>--no-fail-on-findings</code>, or set
+<code>fail_on_findings: false</code> at the top level of your configuration, not under
+<code>global_settings</code>. To fail only on more severe findings, set
+<code>global_settings.severity_threshold</code>. See <a href="../set-the-gate/">Set the gate</a>.</p>
+<h3 id="the-command-exits-5">The command exits 5<a class="headerlink" href="#the-command-exits-5" title="Permanent link">&para;</a></h3>
+<p>Symptom: the command stops before anything runs and writes no report. A mistyped option
+prints an <code>Error</code> box:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Usage: ash scan [OPTIONS]
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>Try &#39;ash scan --help&#39; for help.
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>╭─ Error ──────────────────────────────────────────────────────────────────────╮
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>│ No such option: --fail-on-finding (Possible options: --fail-on-findings,     │
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>│ --no-fail-on-findings)                                                       │
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>╰──────────────────────────────────────────────────────────────────────────────╯
+</span></code></pre></div>
+<p>Cause: a usage error. Every <code>ash</code> command exits 5 when its command line is wrong: an
+option or argument the command does not take, a value an option does not accept (such
+as an invalid <code>--output-formats</code>, <code>--mode</code>, <code>--strategy</code>, or <code>--min-severity</code>), a
+<code>--scanners</code> list that names no scanner, a <code>--source-dir</code> that does not exist or
+cannot be entered, an <code>--output-dir</code> that ASH cannot create, enter, or write in,
+<code>--use-existing</code> with no results to use, or an <code>ash report --format</code> that no reporter
+answers to. The code is not 2, so a CI gate does not read a mistyped flag as a scan
+with findings. Two selections exit 2 instead: an <code>ash dependencies install --tool</code> name
+that it has no plugin for, and a <code>--plugin-type</code> other than <code>converter</code>, <code>scanner</code>, or
+<code>reporter</code> (<a href="../../reference/exit-codes/#other">Exit codes</a>).</p>
+<!-- doctest: run expect-exit=5 -->
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>ash<span class="w"> </span>scan<span class="w"> </span>--output-formats<span class="w"> </span>nosuch
+</span></code></pre></div>
+<p><code>ash report</code> with a format no reporter answers to lists the ones it has, whether or not
+there are results to report:</p>
+<!-- doctest: run expect-exit=5 -->
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>ash<span class="w"> </span>report<span class="w"> </span>--format<span class="w"> </span>nosuch
+</span></code></pre></div>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>Error: Reporter plugin &#39;nosuch&#39; not found.
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>Available reporter formats:
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>  - csv
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>  - cyclonedx
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>  - github-ghas
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>  ...
+</span></code></pre></div>
+<p>Fix: correct the command line; <code>ash &lt;command&gt; --help</code> lists each command's options.
+Scanner and reporter names use hyphens, as <code>ash plugin list</code> shows them. A single
+misspelled name among valid ones in <code>--scanners</code> is not a usage error: ASH logs
+<code>No registered scanner matches ...</code> and runs the others.</p>
+<h3 id="the-scan-exits-3">The scan exits 3<a class="headerlink" href="#the-scan-exits-3" title="Permanent link">&para;</a></h3>
+<p>Symptom:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>ERROR (3) Invalid configuration: Configuration validation failed for &#39;/home/me/repo/.ashrc.yaml&#39;: Invalid value at &#39;global_settings.fail_on_findings&#39;: Extra inputs are not permitted. Run: ash config lint --config /home/me/repo/.ashrc.yaml
+</span></code></pre></div>
+<p>Cause: the configuration file has a key ASH does not know below the top level, or a
+value of the wrong type anywhere, top level included. A suppression, an ignore path, or
+a plugin's options with a key ASH does not know is refused too, and the message lists
+the keys it accepts:</p>
+<!-- doctest: run expect-exit=3 -->
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>.ashrc.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="s">global_settings:</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="s">  suppressions:</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="s">    - rule_id: B602</span>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="s">      path: app.py</span>
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="s">      reason: Commands come from a fixed allowlist</span>
+</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="s">      expires: &quot;2027-04-30&quot;</span>
+</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="s">EOF</span>
+</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>ash<span class="w"> </span>config<span class="w"> </span>validate
+</span></code></pre></div>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>❌ 1 error(s); a scan refuses the configuration because of these:
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>  1. Invalid value at &#39;global_settings.suppressions[0]&#39;: Value error, Unknown key &#39;expires&#39; (did you mean &#39;expiration&#39;?) in a suppression. Accepted keys: expiration, line_end, line_start, package_name, package_path, package_version, path, reason, rule_id, symbol.
+</span></code></pre></div>
+<p>A common case is an unquoted <code>expiration</code> date in a suppression: YAML reads it as a
+date, and ASH expects text. Quote it, as in <code>"2027-04-30"</code>.</p>
+<p>Fix: correct the key or value that the message names. <code>ash config validate</code> and
+<code>ash config lint</code> check the file the way a scan does and report the same errors, with
+exit code 3; <code>lint</code> marks each one <code>[blocks the scan]</code>. See
+<a href="../configure/">Configure ASH</a>.</p>
+<h3 id="your-configuration-has-no-effect">Your configuration has no effect<a class="headerlink" href="#your-configuration-has-no-effect" title="Permanent link">&para;</a></h3>
+<p>Symptom: the scan behaves as if your configuration file were not there: suppressions
+do not apply, or a setting is ignored. The scan does not exit 3.</p>
+<p>Cause: one of these. A file that does not exist or does not parse is not one of them:
+the scan refuses it with exit 3.</p>
+<ul>
+<li>A top-level key is misspelled, such as <code>fail_on_finding</code>. ASH ignores unknown keys at
+  the top level.</li>
+<li>ASH found a different file first. <code>ash config get</code> prints the configuration a scan
+  would use.</li>
+<li>A suppression's or an ignore path's <code>expiration</code> date has passed. The entry then
+  stops applying, and the scan starts with a warning that names it (see below).</li>
+<li>The setting is one a repository's file may not set; see the next entry.</li>
+</ul>
+<p>An ignore path that expired lets its files back into the scan, so the finding in <code>app.py</code>
+counts again here:</p>
+<!-- doctest: run expect-exit=2 -->
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>.ashrc.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="s">global_settings:</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="s">  ignore_paths:</span>
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="s">    - path: app.py</span>
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="s">      reason: Generated file, scanned upstream</span>
+</span><span id="__span-15-6"><a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="s">      expiration: &quot;2026-01-31&quot;</span>
+</span><span id="__span-15-7"><a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="s">EOF</span>
+</span><span id="__span-15-8"><a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a>ash<span class="w"> </span>scan<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--no-progress
+</span></code></pre></div>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>The following ignore paths and suppressions have expired and no longer apply:
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>  - Ignore path &#39;app.py&#39; expired on 2026-01-31. Reason: Generated file, scanned upstream
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>Remove them, or move their expiration dates, in your ASH configuration file.
+</span></code></pre></div>
+<p>Fix: run <code>ash config validate</code>, which checks the file the way a scan does and warns
+about unknown top-level keys and a missing <code>project_name</code>, and <code>ash config get</code>, which
+prints the configuration a scan would use. <code>ash config lint</code> also lists expired
+suppressions and ignore paths.</p>
+<h3 id="a-setting-in-the-repositorys-config-file-is-ignored">A setting in the repository's config file is ignored<a class="headerlink" href="#a-setting-in-the-repositorys-config-file-is-ignored" title="Permanent link">&para;</a></h3>
+<p>Symptom: a warning such as:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>Ignoring sandbox.network_scanners from /home/me/repo/.ash/.ash.yaml: that config is inside a git checkout or the scanned tree, or was delivered by an MCP client. ...
+</span></code></pre></div>
+<p>Cause: some settings decide what ASH may run, read, or send, or whether a stale database
+fails the scan: sandbox grants, plugin modules, reporter destinations and credentials,
+options that name a scanner's own configuration or ignore file, <code>tool_version</code>, trivy-repo's
+<code>disable_telemetry: false</code>, and a relaxed <code>content_db_staleness</code>. A config file inside the scanned directory, or inside any git
+checkout, could have been written by someone other than you, so ASH ignores those settings
+from it, even from a config you keep in an ops repository of its own. These settings count
+as yours only from <code>--config-overrides</code> or a config file outside every git checkout and the
+scanned directory. The warning names each
+setting and the file, says why, and says how to keep the setting. For a plugin module
+found inside a git checkout or the scanned directory, it also gives where Python found the
+module and which checkout or directory that is. For other modules, it says that the module
+is not importable, or what ASH's AWS or Snyk plugin package would send off the host.</p>
+<p>Under <code>ash mcp</code>, a config file that an MCP client names as a scan's <code>config_path</code>, outside
+the directories <code>ASH_MCP_ALLOWED_CONFIG_ROOTS</code> names, is held to the same limits. Under the
+default policy, a config file an MCP client delivered is refused instead when its own <code>sandbox</code>
+section gives a scanner a network or an <code>extra_read_paths</code> entry the server's settings do
+not, or changes a sandbox mode other than <code>off</code> that the server sets, or when its own
+<code>ash_plugin_modules</code> list adds a module this check would drop; see
+<a href="../mcp-server/#what-a-delivered-config-cannot-set">What a delivered config cannot set</a>.</p>
+<p>Fix: pass the setting with <code>--config-overrides</code>, or move the file outside every git
+checkout, such as under <code>/etc/ash</code>, and name it with <code>--config</code>. A file inside the scanned
+directory has to move out of it as well. Name a plugin module with <code>--ash-plugin-modules</code>, or install it outside
+every git checkout and the scanned directory. A config inside a checkout cannot add ASH's
+AWS or Snyk plugin package at all, so name those with <code>--ash-plugin-modules</code> or one of the
+two ways above.
+For some scanners, the file such an option names must also be outside the scanned
+tree; <a href="../choose-scanners/#operator-only">Options only the operator can set</a> says
+which. See <a href="../../concepts/trust-model/">Configuration trust model</a>.</p>
+<h3 id="the-scan-exits-4">The scan exits 4<a class="headerlink" href="#the-scan-exits-4" title="Permanent link">&para;</a></h3>
+<p>Cause: a workspace scan (<code>--workspace</code>) could not start, or a workspace option was used
+without one. The message names the problem. The causes are:</p>
+<ul>
+<li>the workspace file is missing or is not valid JSON;</li>
+<li><code>--workspace auto</code> finds more than one workspace file;</li>
+<li>a project path contains <code>..</code>, or a project directory does not exist;</li>
+<li><code>--source-dir</code> is given with <code>--workspace</code>;</li>
+<li><code>--dry-run</code>, <code>--allow-missing-projects</code>, or <code>--workspace-config</code> is given without
+  <code>--workspace</code>.</li>
+</ul>
+<p>Fix: correct the workspace file or the command line, or pass <code>--allow-missing-projects</code>
+to skip projects that do not exist. See <a href="../scale-large-repos/">Scale to large repositories</a>.</p>
+<h2 id="output-directory">Output directory<a class="headerlink" href="#output-directory" title="Permanent link">&para;</a></h2>
+<h3 id="the-scan-stops-because-something-in-the-output-directory-is-a-symlink">The scan stops because the output directory is a symlink<a class="headerlink" href="#the-scan-stops-because-something-in-the-output-directory-is-a-symlink" title="Permanent link">&para;</a></h3>
+<p>Symptom: the scan exits 3 before writing anything, with one of:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>ERROR (3) The output directory /home/me/out is a symlink. ASH does not write to, clear or mount its output directory through a link, whatever the sandbox mode. Pass --output-dir with a directory that is not a link, or replace the link with a directory.
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>ERROR (3) /home/me/repo/.ash is a symlink, on the way to the output directory /home/me/repo/.ash/ash_output. ...
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>ERROR (3) /home/me/out/reports is a symlink. ...
+</span></code></pre></div>
+<p>Cause: the output directory, a directory on the way to it inside the scanned
+directory, or something ASH writes inside it, such as <code>reports</code>, is a symbolic link.
+ASH clears and writes its output directory, so it does not do that through a link. This
+check applies whether or not the sandbox is on. In an <code>ash --workspace</code> scan, a link at
+<code>projects/&lt;project&gt;</code> fails only that project, and a link at <code>projects</code> or
+<code>.workspace-spool</code> stops the whole run. <a href="../../reference/output-files/#links">Output files</a>
+lists every path ASH checks.</p>
+<p>Fix: pass <code>--output-dir</code> with a real directory, which can be outside the project, or
+replace the link with a directory. Turning the sandbox off does not change this.</p>
+<h3 id="the-scan-stops-because-a-report-file-is-a-link">The scan stops because a report file is a link<a class="headerlink" href="#the-scan-stops-because-a-report-file-is-a-link" title="Permanent link">&para;</a></h3>
+<p>Symptom: the run exits 1 before any reporter writes, with this message (<code>ash merge</code>
+prints the same text after <code>Refusing to write reports:</code>):</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>ERROR (1) /home/me/out/reports/ash.sarif is a symlink. ASH does not write a report through a link. Remove the link and run ASH again.
+</span></code></pre></div>
+<p>Cause: a file a reporter is about to write in <code>reports/</code> is a symbolic link or a
+directory junction. A scan clears <code>reports/</code> first, so this usually comes from
+<code>ash scan --use-existing</code> or <code>ash merge</code> writing into an output directory that already
+holds the link.</p>
+<p>Fix: remove the link and run the command again, or write to a new output directory.</p>
+<h2 id="content-databases">Content databases<a class="headerlink" href="#content-databases" title="Permanent link">&para;</a></h2>
+<h3 id="a-content-database-is-stale">A content database is stale<a class="headerlink" href="#a-content-database-is-stale" title="Permanent link">&para;</a></h3>
+<p>Symptom:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>ERROR (1) Exiting because 1 content database(s) are past their declared age bound
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>  Content database semgrep-offline-rules (semgrep) is stale: downloaded 2026-08-31T22:43:12Z, 40d 0h old, past its 720h bound ...
+</span></code></pre></div>
+<p>Cause: grype, trivy, and offline semgrep and opengrep read databases that go out of
+date. ASH fails a scan whose database is past its age bound, or whose age it cannot
+read; <a href="../../concepts/content-databases/">Content databases</a> lists the bounds. Online
+scans keep grype's and trivy's databases current, so this usually happens offline or
+with an old image.</p>
+<p>Fix: refresh the database. For an offline image, rebuild it with
+<code>ash build-image --offline</code>. For offline rules on your machine, download them again
+(<a href="../../docs/advanced-usage/#seeding-the-semgrep-and-opengrep-rule-cache">Seeding the semgrep and opengrep rule cache</a>).
+To scan with the old database anyway, pass <code>--allow-stale-content-db</code> or set
+<code>content_db_staleness: warn</code>: the stale database then no longer fails the scan, and
+every report names it. With <code>warn</code>, a scan passes even when a database is missing, so its
+vulnerability results can be incomplete. See
+<a href="../../concepts/content-databases/">Content databases</a> and
+<a href="../run-offline/">Run ASH offline</a>.</p>
+<h2 id="slow-or-stuck-scans">Slow or stuck scans<a class="headerlink" href="#slow-or-stuck-scans" title="Permanent link">&para;</a></h2>
+<h3 id="the-first-scan-is-slow">The first scan is slow<a class="headerlink" href="#the-first-scan-is-slow" title="Permanent link">&para;</a></h3>
+<p>Cause: the first scan downloads grype's vulnerability database, which can take a
+minute or more, and installs any uv-based scanner that is not installed yet. Later
+scans reuse both.</p>
+<p>Fix: run <code>ash dependencies install</code> ahead of time. In CI, cache the scanners' cache
+directories, such as <code>~/.cache/grype</code> and <code>~/.cache/trivy</code>, between runs.</p>
+<h3 id="a-scanner-hangs">A scanner hangs<a class="headerlink" href="#a-scanner-hangs" title="Permanent link">&para;</a></h3>
+<p>Symptom: the scan stops making progress. Every 60 seconds the log shows which scanners
+are still running:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>bandit still running on source (60s elapsed)
+</span></code></pre></div>
+<p>Cause: each scanner has a time limit, <code>scan_timeout</code>, which defaults to 1800 seconds
+(30 minutes). A scanner that reaches it is stopped and shows as ERROR. With
+<code>scan_timeout</code> set to 65, for example:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>(bandit @ source) timed out after 65.0s and was killed. Raise scanners.bandit.options.scan_timeout if this target legitimately needs longer.
+</span></code></pre></div>
+<p>There is no limit on the scan as a whole.</p>
+<p>Fix: find the scanner in the "still running" lines or in <code>ash.log</code>, and look at its
+stderr log under <code>scanners/&lt;scanner&gt;/</code> in the output directory. Then do one of these:</p>
+<ul>
+<li>Exclude it for now: <code>ash --exclude-scanners bandit</code>.</li>
+<li>Lower or raise its limit: <code>ash --config-overrides 'scanners.bandit.options.scan_timeout=600'</code>.</li>
+<li>Run scanners one at a time to see where time goes: <code>ash --strategy sequential</code>.</li>
+<li>Get more detail with <code>ash --verbose</code> or <code>ash --debug</code>.</li>
+</ul>
+<h2 id="installing-and-running-ash">Installing and running ASH<a class="headerlink" href="#installing-and-running-ash" title="Permanent link">&para;</a></h2>
+<h3 id="the-install-fails-while-building-rtoml">The install fails while building <code>rtoml</code><a class="headerlink" href="#the-install-fails-while-building-rtoml" title="Permanent link">&para;</a></h3>
+<p>Symptom: <code>uvx</code> or <code>uv tool install</code> fails with
+<code>Failed to build rtoml</code> and a message that the Python version (3.15) is newer than
+PyO3's maximum supported version.</p>
+<p>Cause: uv chose Python 3.15, which some of ASH's dependencies do not support yet.</p>
+<p>Fix: pass a supported Python version, as in <code>uv tool install --python 3.12</code>. See
+<a href="../install/">Install ASH</a>.</p>
+<h3 id="the-install-fails-because-git-is-missing">The install fails because git is missing<a class="headerlink" href="#the-install-fails-because-git-is-missing" title="Permanent link">&para;</a></h3>
+<p>Symptom: uv stops with an error whose causes end in:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>  cause: Git operation failed
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>  cause: Git executable not found. Ensure that Git is installed and available.
+</span></code></pre></div>
+<p>Cause: uv and pip fetch ASH from its git repository, which needs git.</p>
+<p>Fix: install git and run the command again.</p>
+<h3 id="ash-is-not-found-after-installing"><code>ash</code> is not found after installing<a class="headerlink" href="#ash-is-not-found-after-installing" title="Permanent link">&para;</a></h3>
+<p>Cause: the directory where uv or pipx puts commands is not on your <code>PATH</code> in the
+current shell.</p>
+<p>Fix: open a new terminal. If that does not help, run <code>uv tool update-shell</code> (for uv)
+or <code>pipx ensurepath</code> (for pipx), then open a new terminal.</p>
+<h3 id="ash-runs-a-different-program-on-windows"><code>ash</code> runs a different program on Windows<a class="headerlink" href="#ash-runs-a-different-program-on-windows" title="Permanent link">&para;</a></h3>
+<p>Symptom: in Git Bash or an MSYS2 shell, <code>ash --version</code> prints an error such as
+<code>ash: 0: Illegal option --</code>, and <code>ash dependencies install</code> reports
+<code>cannot open dependencies</code>.</p>
+<p>Cause: Git for Windows and MSYS2 ship an unrelated shell named <code>ash</code>, and it comes first
+on your <code>PATH</code>.</p>
+<p>Fix: use <code>ashv3</code> or <code>automated-security-helper</code>, which are the same program as ASH's
+<code>ash</code>.</p>
+<h3 id="results-differ-between-your-machine-and-ci">Results differ between your machine and CI<a class="headerlink" href="#results-differ-between-your-machine-and-ci" title="Permanent link">&para;</a></h3>
+<p>Cause: the two runs differ in something ASH does not control:</p>
+<ul>
+<li>Scanner versions. A scanner on your <code>PATH</code> is used if its version is in range, so
+  your machine and CI can run different versions.</li>
+<li>Database age. grype's and trivy's databases change daily.</li>
+<li>Platform. On Windows, semgrep and opengrep are SKIPPED.</li>
+<li>Diff scans. With <code>--changed-files-only</code>, ASH reports findings in every file when git
+  cannot list the changes: the base ref does not exist, as in a shallow clone, the
+  directory is not in a git repository, or git is not installed. The log says which,
+  such as <code>git diff against origin/main failed (rc=128); falling back to full scan</code>.</li>
+<li>Mode. <code>ash --mode precommit</code> runs a smaller set of scanners.</li>
+</ul>
+<p>Fix: run the same scanner versions in both places, for example with the same container
+image, and fetch enough history in CI for the diff.</p>
+<h2 id="container-mode">Container mode<a class="headerlink" href="#container-mode" title="Permanent link">&para;</a></h2>
+<h3 id="the-container-image-does-not-build">The container image does not build<a class="headerlink" href="#the-container-image-does-not-build" title="Permanent link">&para;</a></h3>
+<p>Container mode builds ASH's image on your machine before it scans. Common causes:</p>
+<ul>
+<li>No container runtime. The scan exits 1 with <code>Unable to resolve an OCI runner</code>. ASH
+  tries finch, docker, nerdctl, and podman, in that order. Install one, or name it with
+  <code>--oci-runner</code>.</li>
+<li>A non-numeric user or group ID: <code>Container UID must be a numeric value</code>. Pass numbers
+  to <code>--container-uid</code> and <code>--container-gid</code>.</li>
+<li>No revision to install. A package that recorded no commit, such as one built from a
+  source tarball, installs the release tag of its version, and a development or
+  pre-release version has none, so the build stops and asks for
+  <code>--ash-revision-to-install</code>. Pass a tag, a branch, or a full commit ID.
+  <a href="../run-in-a-container/#revision">Which ASH goes into the image</a> lists where the
+  revision comes from for each kind of install.</li>
+<li>No access to the base image registry or the internet. The build pulls a Python base
+  image and downloads ASH and its scanners. To use a mirror of the base image, set
+  <code>ASH_BASE_IMAGE_OVERRIDE</code>.</li>
+</ul>
+<p>Run container mode from a directory other than the project you scan, and name the
+project with <code>--source-dir</code>.</p>
+<p>To scan offline with an image you already built, add <code>--no-build</code>, as in
+<code>ash scan --mode container --offline --no-build</code>. Without it, container mode builds the
+image first, and the first offline build of a UTC day downloads the databases again,
+which needs network access. See <a href="../run-offline/">Run ASH offline</a>.</p>
+<p>With <code>--custom-containerfile</code>, ASH builds the <code>ci</code> target, which runs as root, even if you
+pass <code>--build-target non-root</code>. On Windows, ASH builds <code>ci</code> unless you name a target. A
+<code>non-root</code> build that would give its user UID 0 or GID 0, as a job running as root does,
+stops with exit code 3 before anything is built: pass <code>--build-target ci</code> there.</p>
+<p>See <a href="../run-in-a-container/">Run ASH in a container</a>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,116.24a6,6,0,0,1-8.48,0L134,54.49V216a6,6,0,0,1-12,0V54.49L60.24,116.24a6,6,0,0,1-8.48-8.48l72-72a6,6,0,0,1,8.48,0l72,72A6,6,0,0,1,204.24,116.24Z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+  
+    
+
+<nav class="ash-pagination" aria-label="Previous and next documentation pages">
+  <div class="ash-wrap ash-pagination__inner">
+    
+    <a href="../deploy-on-aws/" rel="prev">
+      <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M222,128a6,6,0,0,1-6,6H54.49l61.75,61.76a6,6,0,1,1-8.48,8.48l-72-72a6,6,0,0,1,0-8.48l72-72a6,6,0,0,1,8.48,8.48L54.49,122H216A6,6,0,0,1,222,128Z"/></svg></span><span><span class="ash-pagination__direction">PREVIOUS</span>Deploy on AWS</span>
+    </a>
+    
+    
+    <a class="ash-pagination__next" href="../migrate-from-v2/" rel="next">
+      <span><span class="ash-pagination__direction">NEXT</span>Migrate from v2</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M220.24,132.24l-72,72a6,6,0,0,1-8.48-8.48L201.51,134H40a6,6,0,0,1,0-12H201.51L139.76,60.24a6,6,0,0,1,8.48-8.48l72,72A6,6,0,0,1,220.24,132.24Z"/></svg></span>
+    </a>
+    
+  </div>
+</nav>
+
+  
+  <footer class="ash-footer">
+    <div class="ash-wrap ash-footer__top">
+      <div>
+        <a class="ash-brand" href="../.." aria-label="ASH home">
+          <span class="ash-brand__name">ASH<span class="ash-brand__subtitle">Automated Security Helper</span></span>
+        </a>
+      </div>
+      <div class="ash-footer__links">
+        <div><span>Documentation</span><a href="../../getting-started/local/">Quick start</a><a href="../configure/">Configuration</a><a href="../../reference/cli/">CLI reference</a></div>
+        <div><span>Integrations</span><a href="../../reference/scanners/">Scanners</a><a href="../../getting-started/ci/">CI/CD integration</a><a href="../../plugins/">Plugin development</a></div>
+        <div><span>Project</span><a href="https://github.com/awslabs/automated-security-helper">GitHub <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a><a href="../../contributing/">Contribute</a><a href="https://github.com/awslabs/automated-security-helper/issues">Get help <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a></div>
+      </div>
+    </div>
+    <div class="ash-wrap ash-footer__bottom">
+      <span class="ash-footer-credit">Build with <span class="ash-footer-heart" role="img" aria-label="love">&lt;3</span> at Amazon Web Services</span>
+      <div><button class="ash-motion-toggle" type="button" data-ash-motion aria-pressed="false"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M128,26A102,102,0,1,0,230,128,102.12,102.12,0,0,0,128,26Zm0,192a90,90,0,1,1,90-90A90.1,90.1,0,0,1,128,218ZM110,96v64a6,6,0,0,1-12,0V96a6,6,0,0,1,12,0Zm48,0v64a6,6,0,0,1-12,0V96a6,6,0,0,1,12,0Z"/></svg></span> <span>Pause motion</span></button><a href="https://github.com/awslabs/automated-security-helper/blob/main/LICENSE">License</a><a href="../../contributing/#security-issue-notifications">Security</a></div>
+    </div>
+    <div class="ash-wrap ash-footer__copyright">&copy; Amazon Web Services, Inc. or its affiliates. All rights reserved.</div>
+  </footer>
+  <div class="ash-toast" role="status" aria-live="polite" aria-atomic="true" data-ash-toast></div>
+
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.indexes", "navigation.path", "navigation.top", "navigation.footer", "toc.follow", "content.tabs.link", "search.share", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate", "content.code.select"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../assets/javascripts/ash.js"></script>
+      
+    
+  </body>
+</html>

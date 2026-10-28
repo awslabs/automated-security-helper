@@ -1,0 +1,4303 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Security scanning for code, infrastructure, secrets, and dependencies.">
+      
+      
+      
+        <link rel="canonical" href="https://awslabs.github.io/automated-security-helper/latest/reference/environment-variables/">
+      
+      
+        <link rel="prev" href="../configuration/">
+      
+      
+        <link rel="next" href="../scanners/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="data:,">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Environment variables - ASH - Automated Security Helper</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/ash.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  
+  <!-- Phosphor SVG icon license:
+  MIT License
+
+Copyright (c) 2023 Phosphor Icons
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+  -->
+  <meta name="theme-color" content="#0f141a">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Environment variables · ASH">
+  <meta property="og:description" content="Security scanning for code, infrastructure, secrets, and dependencies.">
+  <link rel="preload" href="../../assets/fonts/open-sans.woff2" as="font" type="font/woff2" crossorigin>
+  <noscript>
+    <style>
+      .ash-search-trigger, .ash-menu-toggle, .ash-motion-toggle, .ash-copy,
+       .ash-tabs, .ash-mode-picker, .ash-filter, [data-ash-run], [data-scan-controls],
+       [data-ash-drawer], [data-ash-handbook] { display: none !important; }
+      .ash-install-panel[hidden] { display: block !important; margin-top: 1.5rem; }
+       @media (max-width: 960px) {
+        .ash-header { position: relative; height: auto; }
+      }
+    </style>
+  </noscript>
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#environment-variables" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+        <aside class="md-banner">
+          <div class="md-banner__inner md-grid md-typeset">
+            
+            <span data-ash-notice="unreleased">
+      These docs describe the main branch, which is not released yet, so a feature
+      described here may not be in the latest release.
+      The install commands in this version of the docs install
+      <code>main</code>, not a release.
+      <a href="../../..">Read the docs for the latest release</a>
+      to install a release.
+    </span>
+          </div>
+          
+        </aside>
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+<a class="ash-skip" href="#main-content">Skip to content</a>
+<header class="md-header ash-header" data-md-component="header">
+  <nav class="ash-header__inner md-grid" aria-label="Main navigation">
+    <a class="ash-brand" href="../.." aria-label="ASH home" data-md-component="logo">
+      <span class="ash-brand__name">ASH<span class="ash-brand__subtitle">Automated Security Helper</span></span>
+    </a>
+    <div class="ash-header__links">
+      <a href="../.." >Overview</a>
+      <a href="../../docs/quick-start-guide/" aria-current="true">Documentation</a>
+      <a href="../..#scanners">Scanners</a>
+      <a href="../../integrations/" >Integrations</a>
+    </div>
+    <div class="ash-sr-only md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">ASH - Automated Security Helper</div>
+        <div class="md-header__topic" data-md-component="header-topic">Environment variables</div>
+      </div>
+    </div>
+    <div class="ash-header__actions">
+      
+        <button class="ash-handbook-toggle" type="button" data-ash-handbook aria-label="Browse all documentation" aria-haspopup="dialog" aria-controls="ash-handbook" aria-expanded="false" disabled><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232,50H160a38,38,0,0,0-32,17.55A38,38,0,0,0,96,50H24a6,6,0,0,0-6,6V200a6,6,0,0,0,6,6H96a26,26,0,0,1,26,26,6,6,0,0,0,12,0,26,26,0,0,1,26-26h72a6,6,0,0,0,6-6V56A6,6,0,0,0,232,50ZM96,194H30V62H96a26,26,0,0,1,26,26V204.31A37.86,37.86,0,0,0,96,194Zm130,0H160a37.87,37.87,0,0,0-26,10.32V88a26,26,0,0,1,26-26h66ZM160,90h40a6,6,0,0,1,0,12H160a6,6,0,0,1,0-12Zm46,38a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,128Zm0,32a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,160Z"/></svg></span><span>Contents</span></button>
+      
+      <button class="ash-search-trigger" type="button" data-ash-search aria-label="Search documentation" aria-haspopup="dialog" aria-controls="ash-search-dialog" aria-expanded="false" disabled>
+        <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M228.24,219.76l-51.38-51.38a86.15,86.15,0,1,0-8.48,8.48l51.38,51.38a6,6,0,0,0,8.48-8.48ZM38,112a74,74,0,1,1,74,74A74.09,74.09,0,0,1,38,112Z"/></svg></span><span>Search docs</span><kbd data-ash-shortcut>⌘ K</kbd>
+      </button>
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M122,40V16a6,6,0,0,1,12,0V40a6,6,0,0,1-12,0Zm68,88a62,62,0,1,1-62-62A62.07,62.07,0,0,1,190,128Zm-12,0a50,50,0,1,0-50,50A50.06,50.06,0,0,0,178,128ZM59.76,68.24a6,6,0,1,0,8.48-8.48l-16-16a6,6,0,0,0-8.48,8.48Zm0,119.52-16,16a6,6,0,1,0,8.48,8.48l16-16a6,6,0,1,0-8.48-8.48ZM192,70a6,6,0,0,0,4.24-1.76l16-16a6,6,0,0,0-8.48-8.48l-16,16A6,6,0,0,0,192,70Zm4.24,117.76a6,6,0,0,0-8.48,8.48l16,16a6,6,0,0,0,8.48-8.48ZM46,128a6,6,0,0,0-6-6H16a6,6,0,0,0,0,12H40A6,6,0,0,0,46,128Zm82,82a6,6,0,0,0-6,6v24a6,6,0,0,0,12,0V216A6,6,0,0,0,128,210Zm112-88H216a6,6,0,0,0,0,12h24a6,6,0,0,0,0-12Z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232.13,143.64a6,6,0,0,0-6-1.49A90.07,90.07,0,0,1,113.86,29.85a6,6,0,0,0-7.49-7.48A102.88,102.88,0,0,0,54.48,58.68,102,102,0,0,0,197.32,201.52a102.88,102.88,0,0,0,36.31-51.89A6,6,0,0,0,232.13,143.64Zm-42,48.29a90,90,0,0,1-126-126A90.9,90.9,0,0,1,99.65,37.66,102.06,102.06,0,0,0,218.34,156.35,90.9,90.9,0,0,1,190.1,191.93Z"/></svg>
+      </label>
+    
+  
+</form>
+        <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+      
+      <template data-ash-theme-icons>
+        <span data-color-scheme="default"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M122,40V16a6,6,0,0,1,12,0V40a6,6,0,0,1-12,0Zm68,88a62,62,0,1,1-62-62A62.07,62.07,0,0,1,190,128Zm-12,0a50,50,0,1,0-50,50A50.06,50.06,0,0,0,178,128ZM59.76,68.24a6,6,0,1,0,8.48-8.48l-16-16a6,6,0,0,0-8.48,8.48Zm0,119.52-16,16a6,6,0,1,0,8.48,8.48l16-16a6,6,0,1,0-8.48-8.48ZM192,70a6,6,0,0,0,4.24-1.76l16-16a6,6,0,0,0-8.48-8.48l-16,16A6,6,0,0,0,192,70Zm4.24,117.76a6,6,0,0,0-8.48,8.48l16,16a6,6,0,0,0,8.48-8.48ZM46,128a6,6,0,0,0-6-6H16a6,6,0,0,0,0,12H40A6,6,0,0,0,46,128Zm82,82a6,6,0,0,0-6,6v24a6,6,0,0,0,12,0V216A6,6,0,0,0,128,210Zm112-88H216a6,6,0,0,0,0,12h24a6,6,0,0,0,0-12Z"/></svg></span></span>
+        <span data-color-scheme="slate"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232.13,143.64a6,6,0,0,0-6-1.49A90.07,90.07,0,0,1,113.86,29.85a6,6,0,0,0-7.49-7.48A102.88,102.88,0,0,0,54.48,58.68,102,102,0,0,0,197.32,201.52a102.88,102.88,0,0,0,36.31-51.89A6,6,0,0,0,232.13,143.64Zm-42,48.29a90,90,0,0,1-126-126A90.9,90.9,0,0,1,99.65,37.66,102.06,102.06,0,0,0,218.34,156.35,90.9,90.9,0,0,1,190.1,191.93Z"/></svg></span></span>
+      </template>
+      <a class="ash-github" href="https://github.com/awslabs/automated-security-helper" aria-label="ASH on GitHub">
+        <span>GitHub</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span>
+      </a>
+      <button class="ash-menu-toggle" type="button" aria-label="Open navigation" aria-haspopup="dialog" aria-expanded="false" aria-controls="ash-mobile-menu" data-ash-menu disabled>
+        <span class="ash-menu-glyph" aria-hidden="true"><i></i><i></i></span>
+      </button>
+    </div>
+    
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M228.24,219.76l-51.38-51.38a86.15,86.15,0,1,0-8.48,8.48l51.38,51.38a6,6,0,0,0,8.48-8.48ZM38,112a74,74,0,1,1,74,74A74.09,74.09,0,0,1,38,112Z"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M222,128a6,6,0,0,1-6,6H54.49l61.75,61.76a6,6,0,1,1-8.48,8.48l-72-72a6,6,0,0,1,0-8.48l72-72a6,6,0,0,1,8.48,8.48L54.49,122H216A6,6,0,0,1,222,128Z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,195.76a6,6,0,1,1-8.48,8.48L128,136.49,60.24,204.24a6,6,0,0,1-8.48-8.48L119.51,128,51.76,60.24a6,6,0,0,1,8.48-8.48L128,119.51l67.76-67.75a6,6,0,0,1,8.48,8.48L136.49,128Z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+  </nav>
+  <dialog class="ash-mobile-menu" id="ash-mobile-menu" aria-label="Site navigation" hidden>
+    <div class="ash-mobile-menu__heading"><p class="ash-mobile-menu__eyebrow">Navigation</p><button type="button" data-ash-menu-close aria-label="Close navigation"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,195.76a6,6,0,1,1-8.48,8.48L128,136.49,60.24,204.24a6,6,0,0,1-8.48-8.48L119.51,128,51.76,60.24a6,6,0,0,1,8.48-8.48L128,119.51l67.76-67.75a6,6,0,0,1,8.48,8.48L136.49,128Z"/></svg></span></button></div>
+    <a href="../..">Overview <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../../docs/quick-start-guide/">Documentation <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../..#scanners">Scanners <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../../integrations/">Integrations <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="https://github.com/awslabs/automated-security-helper">GitHub <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    
+      <button type="button" data-ash-drawer>Browse all documentation <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232,50H160a38,38,0,0,0-32,17.55A38,38,0,0,0,96,50H24a6,6,0,0,0-6,6V200a6,6,0,0,0,6,6H96a26,26,0,0,1,26,26,6,6,0,0,0,12,0,26,26,0,0,1,26-26h72a6,6,0,0,0,6-6V56A6,6,0,0,0,232,50ZM96,194H30V62H96a26,26,0,0,1,26,26V204.31A37.86,37.86,0,0,0,96,194Zm130,0H160a37.87,37.87,0,0,0-26,10.32V88a26,26,0,0,1,26-26h66ZM160,90h40a6,6,0,0,1,0,12H160a6,6,0,0,1,0-12Zm46,38a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,128Zm0,32a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,160Z"/></svg></span></button>
+    
+  </dialog>
+  <noscript>
+    <nav class="ash-static-navigation" aria-label="Site navigation">
+      <a href="../..">Overview</a>
+      <a href="../../docs/quick-start-guide/">Documentation</a>
+      <a href="../..#scanners">Scanners</a>
+      <a href="../../integrations/">Integrations</a>
+      <a href="https://github.com/awslabs/automated-security-helper">GitHub</a>
+    </nav>
+  </noscript>
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ASH - Automated Security Helper" class="md-nav__button md-logo" aria-label="ASH - Automated Security Helper" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ASH - Automated Security Helper
+  </label>
+  
+    <div class="md-nav__source">
+      
+<a href="https://github.com/awslabs/automated-security-helper" title="ASH on GitHub" class="md-source" aria-label="ASH on GitHub">
+  <span class="ash-icon md-source__icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M230,64a30,30,0,1,0-36,29.4V112a10,10,0,0,1-10,10H96a21.84,21.84,0,0,0-10,2.42v-31a30,30,0,1,0-12,0v69.2a30,30,0,1,0,12,0V144a10,10,0,0,1,10-10h88a22,22,0,0,0,22-22V93.4A30.05,30.05,0,0,0,230,64ZM62,64A18,18,0,1,1,80,82,18,18,0,0,1,62,64ZM98,192a18,18,0,1,1-18-18A18,18,0,0,1,98,192ZM200,82a18,18,0,1,1,18-18A18,18,0,0,1,200,82Z"/></svg></span>
+  <span class="md-source__repository">ASH on GitHub</span>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../getting-started/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_2" id="__nav_2_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/local/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan on your machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add ASH to CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connect an AI agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/platform-teams/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roll out across repositories
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install ASH
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/advanced-usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Manage scanner tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/configure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configure ASH
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/choose-scanners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose scanners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/set-the-gate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Set the gate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/suppress-findings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Suppress findings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/read-results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read scan results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/export-reports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/scanner-sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enable the scanner sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/run-in-a-container/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run in a container
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/run-offline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run offline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose an integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/pre-commit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run ASH with pre-commit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_14" id="__nav_3_14_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CI systems
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    CI systems
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/ci/github-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub Actions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/ci/gitlab-ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitLab CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/ci/other-ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Other CI systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/scale-large-repos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scale to large repositories
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/mcp-server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run the MCP server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/agent-plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install an agent plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/genai-steering-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH GenAI integration guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/deploy-on-aws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deploy on AWS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/troubleshoot/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshoot
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/migrate-from-v2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migrate from v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/how-ash-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How ASH works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/trust-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration trust model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/scanning-untrusted-code/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanning untrusted code
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanner sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/content-databases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Content databases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/suppressions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Suppressions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_5" id="__nav_5_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment variables
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#ash-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ASH variables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#variables-from-other-tools-and-the-platform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Variables from other tools and the platform
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#variables-a-configuration-file-can-read" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Variables a configuration file can read
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lookups-that-could-not-be-resolved" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lookups that could not be resolved
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scanners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reporters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../converters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Converters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../exit-codes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exit codes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../output-files/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Output files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../coverage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coverage by language
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../python-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../plugins/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugins
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Plugins
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_2" id="__nav_6_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Built-in scanner pages
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Built-in scanner pages
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/actionlint/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    actionlint
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/cfn-lint-and-cfn-guard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cfn-lint and cfn-guard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/gitleaks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/trivy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trivy filesystem scanner (trivy)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/zizmor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    zizmor (GitHub Actions)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_3" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../docs/plugins/community/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Community plugins
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6_3" id="__nav_6_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Community plugins
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/ferret-scan-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH Ferret Scan Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/snyk-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH Snyk Code Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/snyk-plugin-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Snyk Plugin CI/CD Setup Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/trivy-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trivy Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/aws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS reporters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-scanner/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a scanner plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-reporter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a reporter plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-converter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a converter plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/event-subscribers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Subscribe to scan events
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../contributing/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contributing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/documentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/interface-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interface design system
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/interface-review/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interaction surface inventory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/high-end-design-review/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design & UX review
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/releases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#ash-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ASH variables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#variables-from-other-tools-and-the-platform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Variables from other tools and the platform
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#variables-a-configuration-file-can-read" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Variables a configuration file can read
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lookups-that-could-not-be-resolved" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lookups that could not be resolved
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+  <nav class="md-path" aria-label="Navigation" >
+    <ol class="md-path__list">
+      
+        
+  
+  
+    <li class="md-path__item">
+      <a href="../.." class="md-path__link">
+        
+  <span class="md-ellipsis">
+    Home
+  </span>
+
+      </a>
+    </li>
+  
+
+      
+      
+        
+  
+  
+    
+    
+      <li class="md-path__item">
+        <a href="../" class="md-path__link">
+          
+  <span class="md-ellipsis">
+    Reference
+  </span>
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ol>
+  </nav>
+
+              
+              <article class="md-content__inner md-typeset">
+                
+  <div class="ash-doc-label">Documentation</div>
+  <div id="main-content" tabindex="-1">
+    
+
+
+  
+  
+
+
+<!--
+  Generated by scripts/generate_env_var_reference.py from an AST walk of the package and the shipped scripts.
+  Do not edit this file by hand: change the code or the generator, then run
+    uv run python scripts/generate_env_var_reference.py
+  CI runs `uv run python scripts/generate_env_var_reference.py --check` and fails when this file is stale.
+-->
+
+<h1 id="environment-variables">Environment variables<a class="headerlink" href="#environment-variables" title="Permanent link">&para;</a></h1>
+<p>This page is generated from the code that reads each variable by <code>scripts/generate_env_var_reference.py</code>. Edits made to this file by hand are overwritten the next time it is generated.</p>
+<p>ASH reads 141 environment variables: 58 of its own (<code>ASH_</code> prefix) and 83 set by other tools or the platform. The tables list every place each one is read. A variable that sets a CLI option links to that option; the option on the command line takes precedence over the variable.</p>
+<p>Columns:</p>
+<ul>
+<li>Default: the value the code uses when the variable is unset, as written in the code, at each read that supplies one. Where none does, or the only one is an empty string, it is the default of the CLI option the variable sets, or of the configuration key it is the default of. Blank means none of these supplies one (the code checks whether the variable is set, or treats unset as empty).</li>
+<li>Container image: the value the ASH container image sets, from an <code>ENV</code> line in the <code>Dockerfile</code>, and the build stage that sets it.</li>
+<li>Read at: the file of each read and the function, method or script function it is in, or module level or top level when it is in none. <code>ash</code> and <code>utils/</code> are the shell and PowerShell entry scripts; everything else is the Python package.</li>
+<li>Purpose: the option's help text, or the code comment or docstring at the read, quoted with the file and function it is in. "Purpose not documented in code." means the code around the read does not say.</li>
+</ul>
+<h2 id="ash-variables">ASH variables<a class="headerlink" href="#ash-variables" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Container image</th>
+<th>Read at</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ASH_ACTUAL_OUTPUT_DIR</code></td>
+<td><code>self._context.output_dir.as_posix()</code><br><code>display_path(opts.output_dir)</code></td>
+<td></td>
+<td><code>automated_security_helper/core/execution_engine.py</code> (<code>ScanExecutionEngine.execute_phases</code>)<br><code>automated_security_helper/interactions/run_ash_scan.py</code> (<code>_print_summary</code>, <code>_print_workspace_summary</code>)<br><code>automated_security_helper/utils/scan_output_dirs.py</code> (<code>_host_output_dir_in_the_tree</code>)</td>
+<td>The single-scan summary's rule (display_path): relative to the working directory, else absolute, and the host's path inside the container image. (<code>automated_security_helper/interactions/run_ash_scan.py</code>, <code>_print_workspace_summary</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_ACTUAL_SOURCE_DIR</code></td>
+<td><code>self._context.source_dir.as_posix()</code></td>
+<td></td>
+<td><code>automated_security_helper/core/execution_engine.py</code> (<code>ScanExecutionEngine.execute_phases</code>)<br><code>automated_security_helper/utils/scan_output_dirs.py</code> (<code>_host_output_dir_in_the_tree</code>)<br><code>automated_security_helper/utils/scan_source.py</code> (<code>_started_by_the_launcher</code>)</td>
+<td>Set by ASH's container launcher (<code>run_ash_container</code>): the host's source and output directories, mounted at <code>/src</code> and <code>/out</code>. (<code>automated_security_helper/utils/scan_output_dirs.py</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_ALLOW_IN_TREE_TOOLS</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/subprocess_utils.py</code> (<code>in_tree_tools_allowed</code>)</td>
+<td>The environment variable that lets ASH start a tool from inside the scanned tree. Read from the process environment only, which belongs to the operator. (<code>automated_security_helper/utils/subprocess_utils.py</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_BASE_IMAGE_OVERRIDE</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>ash</code> (top level)<br><code>automated_security_helper/interactions/run_ash_container.py</code> (<code>_build_image</code>, <code>run_ash_container</code>)<br><code>utils/ash_helpers.ps1</code> (<code>Invoke-ASH</code>)</td>
+<td>ASH_BASE_IMAGE_OVERRIDE redirects <code>FROM ${BASE_IMAGE}</code> at the registry that actually answered, and is set by .github/actions/prepull-base-image when ECR Public refuses the base image and Docker Hub serves it instead. (<code>automated_security_helper/interactions/run_ash_container.py</code>, <code>_build_image</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_BASE_OCI_LAYOUT</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>ash</code> (top level)<br><code>automated_security_helper/interactions/run_ash_container.py</code> (<code>_base_oci_layout_args</code>)<br><code>utils/ash_helpers.ps1</code> (<code>Invoke-ASH</code>)</td>
+<td><code>ASH_BASE_OCI_LAYOUT=&lt;layout dir&gt;@&lt;arch manifest digest&gt;</code> is set by <code>.github/actions/prepull-base-image</code> on a cache hit, after it has verified every blob in the layout against the Dockerfile's pinned digest. (<code>automated_security_helper/interactions/run_ash_container.py</code>, <code>_base_oci_layout_args</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_BASE_REF</code></td>
+<td><code>origin/main</code></td>
+<td></td>
+<td><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)</td>
+<td>Sets <a href="../cli/#scan--base-ref"><code>ash scan --base-ref</code></a>. Git ref to diff against when --changed-files-only is set.</td>
+</tr>
+<tr>
+<td><code>ASH_BEDROCK_MAX_TOKENS</code></td>
+<td><code>4000</code></td>
+<td></td>
+<td><code>automated_security_helper/plugin_modules/ash_aws_plugins/bedrock_summary_reporter.py</code> (<code>BedrockSummaryReporterConfigOptions</code>, <code>_read_ash_bedrock_defaults</code>)</td>
+<td>Sets the default of <a href="../reporters/#reporters.bedrock-summary-reporter.options.max_tokens"><code>reporters.bedrock-summary-reporter.options.max_tokens</code></a>.</td>
+</tr>
+<tr>
+<td><code>ASH_BEDROCK_MODEL_ID</code></td>
+<td><code>""</code><br><code>us.anthropic.claude-3-7-sonnet-20250219-v1:0</code></td>
+<td></td>
+<td><code>automated_security_helper/config/ash_config.py</code> (<code>reporter_default_values</code>)<br><code>automated_security_helper/plugin_modules/ash_aws_plugins/bedrock_summary_reporter.py</code> (<code>BedrockSummaryReporterConfigOptions</code>, <code>_read_ash_bedrock_defaults</code>)</td>
+<td>Sets the default of <a href="../reporters/#reporters.bedrock-summary-reporter.options.model_id"><code>reporters.bedrock-summary-reporter.options.model_id</code></a>.</td>
+</tr>
+<tr>
+<td><code>ASH_BEDROCK_TEMPERATURE</code></td>
+<td><code>0.5</code></td>
+<td></td>
+<td><code>automated_security_helper/plugin_modules/ash_aws_plugins/bedrock_summary_reporter.py</code> (<code>BedrockSummaryReporterConfigOptions</code>, <code>_read_ash_bedrock_defaults</code>)</td>
+<td>Sets the default of <a href="../reporters/#reporters.bedrock-summary-reporter.options.temperature"><code>reporters.bedrock-summary-reporter.options.temperature</code></a>.</td>
+</tr>
+<tr>
+<td><code>ASH_BIN_PATH</code></td>
+<td><code>~/.ash/bin</code></td>
+<td><code>${ASH_BIN_PATH}</code> (core)</td>
+<td><code>automated_security_helper/cli/dependencies.py</code> (<code>install_dependencies</code>)<br><code>automated_security_helper/core/constants.py</code> (<code>ash_bin_path_from_environment</code>)<br><code>automated_security_helper/utils/subprocess_utils.py</code> (<code>_lookup</code>)<br><code>automated_security_helper/utils/uv_tool_runner.py</code> (<code>_lookup_key</code>)</td>
+<td>Sets <a href="../cli/#dependencies-install--bin-path"><code>ash dependencies install --bin-path</code></a>. Path to install binaries to.</td>
+</tr>
+<tr>
+<td><code>ASH_CFN_GUARD_RULES_DIR</code></td>
+<td></td>
+<td><code>/usr/share/ash/cfn-guard-rules</code> (core)</td>
+<td><code>automated_security_helper/utils/rules_bundles.py</code> (<code>rules_root</code>)</td>
+<td>Environment variable naming the directory rules bundles are installed under. (<code>automated_security_helper/utils/rules_bundles.py</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_CHANGED_FILES_ONLY</code></td>
+<td>off</td>
+<td></td>
+<td><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)</td>
+<td>Sets <a href="../cli/#scan--changed-files-only"><code>ash scan --changed-files-only</code></a>. Report only findings in files changed between --base-ref and HEAD, for example on a pull request. Scanners still scan every file; findings located in other files are dropped from every report, the summary counts and the exit code. Findings with no file location are kept. When git cannot list the changes, everything is reported; when nothing changed inside --source-dir, nothing is. Not supported with --mode container, which refuses it (exit 5).</td>
+</tr>
+<tr>
+<td><code>ASH_CLOUDWATCH_LOG_GROUP_NAME</code></td>
+<td><code>null</code> (the default of <code>reporters.cloudwatch-logs.options.log_group_name</code>)</td>
+<td></td>
+<td><code>automated_security_helper/config/ash_config.py</code> (<code>reporter_default_values</code>)<br><code>automated_security_helper/plugin_modules/ash_aws_plugins/cloudwatch_logs_reporter.py</code> (<code>CloudWatchLogsReporterConfigOptions</code>)</td>
+<td>Sets the default of <a href="../reporters/#reporters.cloudwatch-logs.options.log_group_name"><code>reporters.cloudwatch-logs.options.log_group_name</code></a>.</td>
+</tr>
+<tr>
+<td><code>ASH_CONFIG</code></td>
+<td>not set</td>
+<td></td>
+<td><code>ash</code> (top level)<br><code>automated_security_helper/cli/config.py</code> (<code>_refused_file_label</code>, <code>get</code>, <code>init</code>, <code>lint</code>, <code>update</code>, <code>validate</code>, <code>validate_plugin_dependencies</code>, <code>wizard</code>)<br><code>automated_security_helper/cli/dependencies.py</code> (<code>install_dependencies</code>)<br><code>automated_security_helper/cli/image.py</code> (<code>build_ash_image_cli_command</code>)<br><code>automated_security_helper/cli/inspect/inspect_findings_app.py</code> (<code>findings_command</code>)<br><code>automated_security_helper/cli/mcp/__init__.py</code> (<code>_ash_config_refusal</code>)<br><code>automated_security_helper/cli/merge.py</code> (<code>merge_command</code>)<br><code>automated_security_helper/cli/plugin.py</code> (<code>list_plugins</code>)<br><code>automated_security_helper/cli/report.py</code> (<code>report_command</code>)<br><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)<br><code>automated_security_helper/config/config_validator.py</code> (<code>ConfigValidator._ash_config_check</code>)<br><code>automated_security_helper/config/default_config.py</code> (<code>_ash_config_file</code>, <code>default_config_document</code>, <code>default_config_document_for_tree</code>, <code>get_default_config</code>)<br><code>automated_security_helper/config/named_config.py</code> (<code>refuse_a_named_config_that_does_not_exist</code>)<br><code>automated_security_helper/config/resolve_config.py</code> (<code>_resolve_config</code>, <code>resolve_config</code>)<br><code>automated_security_helper/interactions/run_ash_container.py</code> (<code>_host_ash_config</code>)<br><code>automated_security_helper/interactions/run_ash_scan.py</code> (<code>_ash_config_fallback</code>, <code>_gate_has_a_schema_to_judge</code>, <code>_outer_mode_config_load</code>, <code>_refuse_a_named_config_that_is_not_a_file</code>, <code>run_ash_scan</code>)<br><code>utils/ash_helpers.ps1</code> (<code>Invoke-ASH</code>)</td>
+<td>Sets <a href="../cli/#build-image--config"><code>ash build-image --config</code></a>. The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.<br>Sets <a href="../cli/#config-get--config"><code>ash config get --config</code></a>. The path to the configuration file. By default, the config a scan of the current directory would use: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.<br>Sets <a href="../cli/#config-init--config"><code>ash config init --config</code></a>. Where to write the new config file. By default .ashrc.yaml in the current directory, a name a scan of that directory reads. Discovery reads these names: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Can also be set with the ASH_CONFIG environment variable.<br>Sets <a href="../cli/#config-lint--config"><code>ash config lint --config</code></a>. The path to the configuration file. By default, the config a scan of the current directory would use: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.<br>Sets <a href="../cli/#config-update--config"><code>ash config update --config</code></a>. The path to the configuration file. By default, the config a scan of the current directory would use: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.<br>Sets <a href="../cli/#config-validate--config"><code>ash config validate --config</code></a>. The path to the configuration file. By default, the config a scan of the current directory would use: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.<br>Sets <a href="../cli/#config-validate-plugin-dependencies--config"><code>ash config validate-plugin-dependencies --config</code></a>. The path to the configuration file. By default, the config a scan of the current directory would use: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.<br>Sets <a href="../cli/#config-wizard--config"><code>ash config wizard --config</code></a>. Path to read/write the configuration file. By default, the config a scan of the current directory would use, or a new .ashrc.yaml when there is none.<br>Sets <a href="../cli/#dependencies-install--config"><code>ash dependencies install --config</code></a>. The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.<br>Sets <a href="../cli/#inspect-findings--config"><code>ash inspect findings --config</code></a>. Path to the configuration file where suppressions should be saved. By default, ASH searches for ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. With none found, suppressions go to a new .ashrc.yaml in the current directory.<br>Sets <a href="../cli/#merge--config"><code>ash merge --config</code></a>. The operator's config file. Its values replace the shards' for the settings a shard's recorded config cannot choose, such as where reporters send findings and which off-host reporters run. Its ash_plugin_modules are the plugin modules the merge loads, with any --config-overrides adds; a module only the shards recorded is not loaded. It adds no reporter section the shards did not record; use --config-overrides for that.<br>Sets <a href="../cli/#plugin-list--config"><code>ash plugin list --config</code></a>. The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.<br>Sets <a href="../cli/#report--config"><code>ash report --config</code></a>. The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.<br>Sets <a href="../cli/#scan--config"><code>ash scan --config</code></a>. The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.</td>
+</tr>
+<tr>
+<td><code>ASH_DEBUG</code></td>
+<td><code>""</code><br><code>NO</code></td>
+<td></td>
+<td><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)<br><code>automated_security_helper/core/execution_engine.py</code> (<code>ScanExecutionEngine.__init__</code>)<br><code>automated_security_helper/interactions/run_ash_scan.py</code> (<code>_env_flag</code>)<br><code>utils/common.sh</code> (<code>debug_echo</code>, <code>debug_show_tree</code>)</td>
+<td>Sets <a href="../cli/#scan--debug"><code>ash scan --debug</code></a>. Enable debug logging. Any log flag on the command line overrides ASH_DEBUG.</td>
+</tr>
+<tr>
+<td><code>ASH_DEBUG_SHOW_LOCALS</code></td>
+<td><code>NO</code></td>
+<td></td>
+<td><code>automated_security_helper/utils/log.py</code> (<code>_show_locals_requested</code>)</td>
+<td>ASH_DEBUG_SHOW_LOCALS asks for them, for a maintainer debugging on their own machine. (<code>automated_security_helper/utils/log.py</code>, <code>show_debug_locals</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_DEFAULT_SEVERITY_LEVEL</code></td>
+<td><code>MEDIUM</code> (the default of <code>global_settings.severity_threshold</code>)</td>
+<td></td>
+<td><code>automated_security_helper/core/constants.py</code> (module level)</td>
+<td>Sets the default of <a href="../configuration/#global_settings.severity_threshold"><code>global_settings.severity_threshold</code></a>.</td>
+</tr>
+<tr>
+<td><code>ASH_DEPENDENCIES_UNKNOWN_TOOLS</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>automated_security_helper/cli/dependencies.py</code> (<code>install_dependencies</code>)</td>
+<td>Exactly <code>skip</code>, as the docs say: not a value that only strips to it. (<code>automated_security_helper/cli/dependencies.py</code>, <code>install_dependencies</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_DETECT_SECRETS_REFUSE_HTTP</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/detect_secrets_worker.py</code> (module level)</td>
+<td>Only as the worker itself (<code>python -m</code>) or as a spawned pool process, which imports the worker as <code>__mp_main__</code>. ASH imports this module for REFUSE_HTTP_ENV, and the variable must not turn off HTTP in ASH's own process. (<code>automated_security_helper/utils/detect_secrets_worker.py</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_DISABLE_GHA_BUILD_CACHE</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>automated_security_helper/interactions/run_ash_container.py</code> (<code>_gha_layer_cache_args</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>ASH_DOWNLOAD_MAX_ATTEMPTS</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/download_utils.py</code> (<code>_download_retry_policy</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>ASH_DOWNLOAD_RETRY_DELAY</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/download_utils.py</code> (<code>_download_retry_policy</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>ASH_EXCLUDED_SCANNERS</code></td>
+<td>not set</td>
+<td></td>
+<td><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)</td>
+<td>Sets <a href="../cli/#scan--exclude-scanners"><code>ash scan --exclude-scanners</code></a>. Specific scanner names to exclude from running. Takes precedence over scanners parameter.</td>
+</tr>
+<tr>
+<td><code>ASH_GHA_BUILD_CACHE_EXPORT</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>automated_security_helper/interactions/run_ash_container.py</code> (<code>_gha_layer_cache_args</code>)</td>
+<td>Which layers to export, if any: ASH_GHA_BUILD_CACHE_EXPORT is none, min or max, and unset means min. min stays the default. (<code>automated_security_helper/interactions/run_ash_container.py</code>, <code>_gha_layer_cache_args</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_IMAGE_NAME</code></td>
+<td><code>automated-security-helper:${TARGET_STAGE}</code></td>
+<td></td>
+<td><code>ash</code> (top level)<br><code>automated_security_helper/interactions/run_ash_container.py</code> (<code>run_ash_container</code>)<br><code>utils/ash_helpers.ps1</code> (<code>Invoke-ASH</code>)</td>
+<td>An empty ASH_IMAGE_NAME names no image, as in ./ash and Invoke-ASH. (<code>automated_security_helper/interactions/run_ash_container.py</code>, <code>run_ash_container</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_IN_CONTAINER</code></td>
+<td><code>NO</code></td>
+<td><code>YES</code> (core)</td>
+<td><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)<br><code>automated_security_helper/interactions/run_ash_scan.py</code> (<code>_live_progress_enabled</code>)<br><code>automated_security_helper/utils/log.py</code> (<code>get_logger</code>)<br><code>automated_security_helper/utils/scan_source.py</code> (<code>_in_container</code>)</td>
+<td>Set by the ASH image itself (Dockerfile: <code>ENV ASH_IN_CONTAINER="YES"</code>). (<code>automated_security_helper/utils/scan_source.py</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_IN_NIX</code></td>
+<td><code>NO</code></td>
+<td></td>
+<td><code>automated_security_helper/interactions/run_ash_nix.py</code> (<code>run_ash_nix</code>)<br><code>automated_security_helper/interactions/run_ash_scan.py</code> (<code>_log_files_the_nix_host_opened</code>)</td>
+<td>Recursion guard, following the existing ASH_IN_CONTAINER precedent. The inner invocation is rewritten to --mode local, so this should never be observed as already set; it is checked anyway because the alternative to a loud failure is a fork bomb. (<code>automated_security_helper/interactions/run_ash_nix.py</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_LOG_LEVEL</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/log.py</code> (<code>_last_resort_level</code>)</td>
+<td>The level the last resort takes homeless records at: ASH_LOG_LEVEL when the environment names a level, WARNING otherwise. (<code>automated_security_helper/utils/log.py</code>, <code>_last_resort_level</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_LOG_TO_STDERR</code></td>
+<td><code>NO</code></td>
+<td></td>
+<td><code>automated_security_helper/utils/log.py</code> (<code>get_logger</code>)</td>
+<td>The stdio MCP transport uses stdout as its JSON-RPC channel, and the MCP server runs scans in-process (mcp_tools hands run_ash_scan to loop.run_in_executor, i.e. a thread in the same process). (<code>automated_security_helper/utils/log.py</code>, <code>get_logger</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_MCP_ALLOWED_CONFIG_ROOTS</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/cli/mcp/sandbox.py</code> (<code>operator_config_roots</code>)</td>
+<td>Directories the server may read a config input from -- an <code>.ash.yaml</code>, a <code>.code-workspace</code> definition, a <code>--workspace-config</code> policy file. (<code>automated_security_helper/cli/mcp/sandbox.py</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_MCP_ALLOWED_ROOTS</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/cli/mcp/sandbox.py</code> (<code>operator_scan_roots</code>)<br><code>automated_security_helper/cli/mcp/scan_target.py</code> (<code>_allowed_roots</code>)</td>
+<td>Directories the server may scan and write an output tree into. Unchanged spelling and meaning; see the module docstring on migration. (<code>automated_security_helper/cli/mcp/sandbox.py</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_MCP_GIT_ALLOWED_HOSTS</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>automated_security_helper/cli/mcp/source_delivery.py</code> (<code>_git_allowed_entries</code>)</td>
+<td>Where <code>set_source_git</code> may clone from, set by the operator. Comma- or whitespace-separated <code>[scheme://]host[:port]</code> entries. A bare host stands for its scheme's default port (https 443, ssh 22) on either scheme; <code>host:port</code> names the port, and <code>https://</code> or <code>ssh://</code> the scheme. (<code>automated_security_helper/cli/mcp/source_delivery.py</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_MCP_TRANSPORT</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/cli/mcp/sandbox.py</code> (<code>get_server_transport</code>, <code>unknown_transport_override</code>)</td>
+<td>Which transport this process serves. Held in the environment rather than in a module global, for two reasons that a global got wrong. A module global leaks. (<code>automated_security_helper/cli/mcp/sandbox.py</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_MCP_WORKSPACE_ROOT</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/cli/mcp/source_delivery.py</code> (<code>resolve_workspace_root</code>)</td>
+<td>1. <code>$ASH_MCP_WORKSPACE_ROOT</code> 2. <code>$XDG_CACHE_HOME/ash-mcp/</code> 3. <code>~/.cache/ash-mcp/</code> (<code>automated_security_helper/cli/mcp/source_delivery.py</code>, <code>resolve_workspace_root</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_MODE</code></td>
+<td><code>local</code></td>
+<td></td>
+<td><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)</td>
+<td>Sets <a href="../cli/#scan--mode"><code>ash scan --mode</code></a>. Execution mode preset. 'local' (default) runs the scan in this process with the scanner tools installed on this machine. 'precommit' is a local scan that runs only bandit, detect-secrets, checkov, cdk-nag, npm-audit, plus any --scanners, with simplified output and no progress display; in workspace mode it changes only the output. 'container' builds the ASH container image and runs the scan inside it. 'nix' runs the scan inside <code>nix develop</code>, whose shell supplies pinned scanner versions, and always offline.</td>
+</tr>
+<tr>
+<td><code>ASH_NIX_FLAKE_REF</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/interactions/run_ash_nix.py</code> (<code>resolve_flake_ref</code>)</td>
+<td>Overrides which flake supplies the toolchain. Documented because the default cannot be right for every installation, and a wrong flake reference otherwise produces a Nix error with no hint that it is configurable. (<code>automated_security_helper/interactions/run_ash_nix.py</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_OCI_RUNNER</code></td>
+<td></td>
+<td></td>
+<td><code>utils/ash_helpers.ps1</code> (<code>Invoke-ASH</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>ASH_OFFLINE</code></td>
+<td><code>NO</code></td>
+<td><code>${OFFLINE}</code> (core)</td>
+<td><code>automated_security_helper/cli/config.py</code> (<code>wizard</code>)<br><code>automated_security_helper/core/constants.py</code> (<code>is_offline_mode</code>)<br><code>automated_security_helper/utils/process_env.py</code> (<code>hold_environ</code>, <code>release_environ</code>)</td>
+<td>Check if ASH is running in offline mode via ASH_OFFLINE env var. (<code>automated_security_helper/core/constants.py</code>, <code>is_offline_mode</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_OFFLINE_AT_BUILD_TIME</code></td>
+<td><code>NO</code></td>
+<td><code>${OFFLINE}</code> (core)</td>
+<td><code>automated_security_helper/utils/content_databases.py</code> (<code>built_offline</code>)</td>
+<td>Set by the Dockerfile from its <code>OFFLINE</code> build argument (<code>ENV ASH_OFFLINE_AT_BUILD_TIME="${OFFLINE}"</code>), so it is <code>YES</code> in an image built with <code>OFFLINE=YES</code>; nothing else in ASH sets it, and ASH reads it wherever it is set. (<code>automated_security_helper/utils/content_databases.py</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_OUTPUT_DIR</code></td>
+<td>not set<br>required</td>
+<td></td>
+<td><code>automated_security_helper/cli/merge.py</code> (<code>merge_command</code>)<br><code>automated_security_helper/cli/report.py</code> (<code>report_command</code>)<br><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)</td>
+<td>Sets <a href="../cli/#merge--output-dir"><code>ash merge --output-dir</code></a>. Directory to write the merged results and reports to.<br>Sets <a href="../cli/#report--output-dir"><code>ash report --output-dir</code></a>. The directory to output results to<br>Sets <a href="../cli/#scan--output-dir"><code>ash scan --output-dir</code></a>. The directory to output results to</td>
+</tr>
+<tr>
+<td><code>ASH_OUTPUT_FORMAT</code></td>
+<td><code>text</code></td>
+<td></td>
+<td><code>utils/grype-docker-execute.sh</code> (top level)<br><code>utils/js-docker-execute.sh</code> (top level)<br><code>utils/yaml-docker-execute.sh</code> (top level)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>ASH_PINS_DIR</code></td>
+<td></td>
+<td><code>/ash-pins</code> (core)</td>
+<td><code>automated_security_helper/assets/install-pinned-tool.py</code> (<code>default_package_root</code>)</td>
+<td><code>ASH_PINS_DIR</code> first, which is what the Dockerfile sets, then the checkout layout inferred from this file's own location -- assets/ and utils/ are siblings -- so the script is runnable and testable straight from a clone with no environment set up. (<code>automated_security_helper/assets/install-pinned-tool.py</code>, <code>default_package_root</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_PLUGIN_MODULES</code></td>
+<td>not set</td>
+<td></td>
+<td><code>automated_security_helper/cli/plugin.py</code> (<code>list_plugins</code>)<br><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)<br><code>automated_security_helper/config/plugin_module_trust.py</code> (<code>environment_plugin_modules</code>)</td>
+<td>Sets <a href="../cli/#plugin-list--ash-plugin-modules"><code>ash plugin list --ash-plugin-modules</code></a>, <a href="../cli/#scan--ash-plugin-modules"><code>ash scan --ash-plugin-modules</code></a>. List of Python modules to import containing ASH plugins and/or event subscribers. These are loaded in addition to the default modules.</td>
+</tr>
+<tr>
+<td><code>ASH_PROJECT_NAME</code></td>
+<td><code>ash-scan</code></td>
+<td></td>
+<td><code>automated_security_helper/config/ash_config.py</code> (<code>AshConfig</code>)</td>
+<td>Sets the default of <a href="../configuration/#project_name"><code>project_name</code></a>.</td>
+</tr>
+<tr>
+<td><code>ASH_ROOT_DIR</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>utils/ash_helpers.sh</code> (top level)</td>
+<td>A refusal returns 3, the code ASH uses for input it refuses, as ./ash and Invoke-ASH do. It returns from the sourced file and does not end the shell that sourced it. (<code>utils/ash_helpers.sh</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_S3_BUCKET_NAME</code></td>
+<td><code>null</code> (the default of <code>reporters.s3.options.bucket_name</code>)</td>
+<td></td>
+<td><code>automated_security_helper/config/ash_config.py</code> (<code>reporter_default_values</code>)<br><code>automated_security_helper/plugin_modules/ash_aws_plugins/s3_reporter.py</code> (<code>S3ReporterConfigOptions</code>)</td>
+<td>Sets the default of <a href="../reporters/#reporters.s3.options.bucket_name"><code>reporters.s3.options.bucket_name</code></a>.</td>
+</tr>
+<tr>
+<td><code>ASH_SCANNERS</code></td>
+<td>not set</td>
+<td></td>
+<td><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)</td>
+<td>Sets <a href="../cli/#scan--scanners"><code>ash scan --scanners</code></a>. Specific scanner names to run. Defaults to all scanners.</td>
+</tr>
+<tr>
+<td><code>ASH_SCAN_SOURCE</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/scan_source.py</code> (<code>recorded_scan_source</code>, <code>why_no_scan_source</code>)</td>
+<td>Set by the container launcher (run_ash_container) to the label it worked out on the host, "" when it has none. Read only in a scan the launcher started. (<code>automated_security_helper/utils/scan_source.py</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_SHARD_COUNT</code></td>
+<td>not set</td>
+<td></td>
+<td><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)</td>
+<td>Sets <a href="../cli/#scan--shard-count"><code>ash scan --shard-count</code></a>. Total number of shards this scan is split across. Requires --shard-index. Balance is by scanner count rather than scanner cost, so counts above about four buy little: wall clock is bounded by the slowest single scanner.</td>
+</tr>
+<tr>
+<td><code>ASH_SHARD_INDEX</code></td>
+<td>not set</td>
+<td></td>
+<td><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)</td>
+<td>Sets <a href="../cli/#scan--shard-index"><code>ash scan --shard-index</code></a>. Zero-based index of this shard when one scan is split across several executors. Requires --shard-count. A 3-way split uses indices 0, 1 and 2. Each shard runs a disjoint subset of the scanners and records which ones in its results; recombine them with 'ash merge'.</td>
+</tr>
+<tr>
+<td><code>ASH_SOURCE_DIR</code></td>
+<td>not set</td>
+<td></td>
+<td><code>automated_security_helper/cli/config.py</code> (<code>get</code>, <code>lint</code>, <code>validate</code>, <code>validate_plugin_dependencies</code>)<br><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)</td>
+<td>Sets <a href="../cli/#config-get--source-dir"><code>ash config get --source-dir</code></a>. The directory a scan would scan, as <code>ash scan --source-dir</code>: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory.<br>Sets <a href="../cli/#config-lint--source-dir"><code>ash config lint --source-dir</code></a>. The directory a scan would scan, as <code>ash scan --source-dir</code>: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory.<br>Sets <a href="../cli/#config-validate--source-dir"><code>ash config validate --source-dir</code></a>. The directory a scan would scan, as <code>ash scan --source-dir</code>: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory.<br>Sets <a href="../cli/#config-validate-plugin-dependencies--source-dir"><code>ash config validate-plugin-dependencies --source-dir</code></a>. The directory a scan would scan, as <code>ash scan --source-dir</code>: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory.<br>Sets <a href="../cli/#scan--source-dir"><code>ash scan --source-dir</code></a>. The source directory to scan</td>
+</tr>
+<tr>
+<td><code>ASH_STATE_DIR</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>automated_security_helper/interactions/container_leftovers.py</code> (<code>state_dir</code>)</td>
+<td>Names the state directory outright; otherwise <code>~/.ash/state/containers</code>. (<code>automated_security_helper/interactions/container_leftovers.py</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_THIRD_PARTY_DIR</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/assets/install-pinned-tool.py</code> (<code>main</code>, <code>third_party_main</code>)</td>
+<td>Set by the Dockerfile's core stage. Unset, <code>install-pinned-tool &lt;tool&gt;</code> installs the executable only, which is what the uv-reqs stage and a developer want. (<code>automated_security_helper/assets/install-pinned-tool.py</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_TOOL_DOWNLOAD_CACHE</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>automated_security_helper/utils/download_utils.py</code> (<code>_tool_download_cache</code>)</td>
+<td>Directory of release assets kept between runs, set by CI (ASH_TOOL_DOWNLOAD_CACHE). It holds the downloaded release ASSETS, never extracted binaries and never install receipts. (<code>automated_security_helper/utils/download_utils.py</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_VERBOSE</code></td>
+<td>off</td>
+<td></td>
+<td><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)<br><code>automated_security_helper/core/execution_engine.py</code> (<code>ScanExecutionEngine.__init__</code>)<br><code>automated_security_helper/interactions/run_ash_scan.py</code> (<code>_env_flag</code>)</td>
+<td>Sets <a href="../cli/#scan--verbose"><code>ash scan --verbose</code></a>. Enable verbose logging. Any log flag on the command line overrides ASH_VERBOSE.</td>
+</tr>
+<tr>
+<td><code>ASH_WORD_AT</code></td>
+<td></td>
+<td></td>
+<td><code>ash</code> (<code>detect_subcommand</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>ASH_WORKSPACE</code></td>
+<td>not set</td>
+<td></td>
+<td><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)</td>
+<td>Sets <a href="../cli/#scan--workspace"><code>ash scan --workspace</code></a>. Path to a '.code-workspace' file whose folders are scanned as separate, independently-scoped projects. Pass 'auto' to use the single '*.code-workspace' file in the current directory. Mutually exclusive with --source-dir.</td>
+</tr>
+<tr>
+<td><code>ASH_WORKSPACE_CONFIG</code></td>
+<td>not set</td>
+<td></td>
+<td><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)</td>
+<td>Sets <a href="../cli/#scan--workspace-config"><code>ash scan --workspace-config</code></a>. Path to the workspace policy file (severity ceiling, workspace-wide suppressions and ignore paths, additional scanners). Without this, ASH looks for 'ash-workspace.{yaml,yml,json}' in the workspace root or its '.ash' directory; finding none is not an error. Must not be any project's own ASH config: workspace policy governs every project, so reading one project's config as policy would apply its settings to its siblings.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="variables-from-other-tools-and-the-platform">Variables from other tools and the platform<a class="headerlink" href="#variables-from-other-tools-and-the-platform" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Container image</th>
+<th>Read at</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ACTIONS_CACHE_URL</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/interactions/run_ash_container.py</code> (<code>_gha_layer_cache_args</code>)</td>
+<td>The exporter authenticates with ACTIONS_RUNTIME_TOKEN and talks to ACTIONS_CACHE_URL (protocol v1) or ACTIONS_RESULTS_URL (v2). (<code>automated_security_helper/interactions/run_ash_container.py</code>, <code>_gha_layer_cache_args</code>)</td>
+</tr>
+<tr>
+<td><code>ACTIONS_RESULTS_URL</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/interactions/run_ash_container.py</code> (<code>_gha_layer_cache_args</code>)</td>
+<td>The exporter authenticates with ACTIONS_RUNTIME_TOKEN and talks to ACTIONS_CACHE_URL (protocol v1) or ACTIONS_RESULTS_URL (v2). (<code>automated_security_helper/interactions/run_ash_container.py</code>, <code>_gha_layer_cache_args</code>)</td>
+</tr>
+<tr>
+<td><code>ACTIONS_RUNTIME_TOKEN</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/interactions/run_ash_container.py</code> (<code>_gha_layer_cache_args</code>)</td>
+<td>The exporter authenticates with ACTIONS_RUNTIME_TOKEN and talks to ACTIONS_CACHE_URL (protocol v1) or ACTIONS_RESULTS_URL (v2). (<code>automated_security_helper/interactions/run_ash_container.py</code>, <code>_gha_layer_cache_args</code>)</td>
+</tr>
+<tr>
+<td><code>APPVEYOR</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/log.py</code> (<code>_on_a_ci_runner</code>)</td>
+<td>Variables a CI runner sets, any value counting: GitHub Actions, Azure Pipelines, TeamCity, Jenkins, CodeBuild, GitLab CI, Buildkite, CircleCI, Travis CI, AppVeyor, Bitbucket Pipelines and Bamboo, which can set one of these alone. (<code>automated_security_helper/utils/log.py</code>)</td>
+</tr>
+<tr>
+<td><code>AWS_DEFAULT_REGION</code></td>
+<td><code>us-east-1</code></td>
+<td></td>
+<td><code>automated_security_helper/plugin_modules/ash_aws_plugins/bedrock_summary_reporter.py</code> (<code>BedrockSummaryReporterConfigOptions</code>)<br><code>automated_security_helper/plugin_modules/ash_aws_plugins/cloudwatch_logs_reporter.py</code> (<code>CloudWatchLogsReporterConfigOptions</code>)<br><code>automated_security_helper/plugin_modules/ash_aws_plugins/s3_reporter.py</code> (<code>S3ReporterConfigOptions</code>)<br><code>automated_security_helper/plugin_modules/ash_aws_plugins/security_hub_reporter.py</code> (<code>SecurityHubReporterConfigOptions</code>)</td>
+<td>Sets the default of <a href="../reporters/#reporters.aws-security-hub.options.aws_region"><code>reporters.aws-security-hub.options.aws_region</code></a>, <a href="../reporters/#reporters.bedrock-summary-reporter.options.aws_region"><code>reporters.bedrock-summary-reporter.options.aws_region</code></a>, <a href="../reporters/#reporters.cloudwatch-logs.options.aws_region"><code>reporters.cloudwatch-logs.options.aws_region</code></a>, <a href="../reporters/#reporters.s3.options.aws_region"><code>reporters.s3.options.aws_region</code></a>.</td>
+</tr>
+<tr>
+<td><code>AWS_PROFILE</code></td>
+<td><code>null</code> (the default of <code>reporters.aws-security-hub.options.aws_profile</code>)<br><code>null</code> (the default of <code>reporters.bedrock-summary-reporter.options.aws_profile</code>)<br><code>null</code> (the default of <code>reporters.s3.options.aws_profile</code>)</td>
+<td></td>
+<td><code>automated_security_helper/plugin_modules/ash_aws_plugins/bedrock_summary_reporter.py</code> (<code>BedrockSummaryReporterConfigOptions</code>)<br><code>automated_security_helper/plugin_modules/ash_aws_plugins/s3_reporter.py</code> (<code>S3ReporterConfigOptions</code>)<br><code>automated_security_helper/plugin_modules/ash_aws_plugins/security_hub_reporter.py</code> (<code>SecurityHubReporterConfigOptions</code>)</td>
+<td>Sets the default of <a href="../reporters/#reporters.aws-security-hub.options.aws_profile"><code>reporters.aws-security-hub.options.aws_profile</code></a>, <a href="../reporters/#reporters.bedrock-summary-reporter.options.aws_profile"><code>reporters.bedrock-summary-reporter.options.aws_profile</code></a>, <a href="../reporters/#reporters.s3.options.aws_profile"><code>reporters.s3.options.aws_profile</code></a>.</td>
+</tr>
+<tr>
+<td><code>AWS_REGION</code></td>
+<td><code>os.environ.get("AWS_DEFAULT_REGION", "us-east-1")</code><br><code>os.environ.get("AWS_DEFAULT_REGION", None)</code></td>
+<td></td>
+<td><code>automated_security_helper/plugin_modules/ash_aws_plugins/bedrock_summary_reporter.py</code> (<code>BedrockSummaryReporterConfigOptions</code>)<br><code>automated_security_helper/plugin_modules/ash_aws_plugins/cloudwatch_logs_reporter.py</code> (<code>CloudWatchLogsReporterConfigOptions</code>)<br><code>automated_security_helper/plugin_modules/ash_aws_plugins/s3_reporter.py</code> (<code>S3ReporterConfigOptions</code>)<br><code>automated_security_helper/plugin_modules/ash_aws_plugins/security_hub_reporter.py</code> (<code>SecurityHubReporterConfigOptions</code>)</td>
+<td>Sets the default of <a href="../reporters/#reporters.aws-security-hub.options.aws_region"><code>reporters.aws-security-hub.options.aws_region</code></a>, <a href="../reporters/#reporters.bedrock-summary-reporter.options.aws_region"><code>reporters.bedrock-summary-reporter.options.aws_region</code></a>, <a href="../reporters/#reporters.cloudwatch-logs.options.aws_region"><code>reporters.cloudwatch-logs.options.aws_region</code></a>, <a href="../reporters/#reporters.s3.options.aws_region"><code>reporters.s3.options.aws_region</code></a>.</td>
+</tr>
+<tr>
+<td><code>AZURE_PIPELINES</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/log.py</code> (<code>_on_a_ci_runner</code>)</td>
+<td>Variables a CI runner sets, any value counting: GitHub Actions, Azure Pipelines, TeamCity, Jenkins, CodeBuild, GitLab CI, Buildkite, CircleCI, Travis CI, AppVeyor, Bitbucket Pipelines and Bamboo, which can set one of these alone. (<code>automated_security_helper/utils/log.py</code>)</td>
+</tr>
+<tr>
+<td><code>BITBUCKET_BUILD_NUMBER</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/log.py</code> (<code>_on_a_ci_runner</code>)</td>
+<td>Variables a CI runner sets, any value counting: GitHub Actions, Azure Pipelines, TeamCity, Jenkins, CodeBuild, GitLab CI, Buildkite, CircleCI, Travis CI, AppVeyor, Bitbucket Pipelines and Bamboo, which can set one of these alone. (<code>automated_security_helper/utils/log.py</code>)</td>
+</tr>
+<tr>
+<td><code>BUILDKITE</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/log.py</code> (<code>_on_a_ci_runner</code>)</td>
+<td>Variables a CI runner sets, any value counting: GitHub Actions, Azure Pipelines, TeamCity, Jenkins, CodeBuild, GitLab CI, Buildkite, CircleCI, Travis CI, AppVeyor, Bitbucket Pipelines and Bamboo, which can set one of these alone. (<code>automated_security_helper/utils/log.py</code>)</td>
+</tr>
+<tr>
+<td><code>CFG_I</code></td>
+<td></td>
+<td></td>
+<td><code>ash</code> (top level)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>CI</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)<br><code>automated_security_helper/interactions/run_ash_scan.py</code> (<code>_live_progress_enabled</code>)<br><code>automated_security_helper/utils/log.py</code> (<code>_on_a_ci_runner</code>)</td>
+<td>It is utils/console.py's print, not rich's: its console checks each line it writes off a terminal, so none reads as a CI command. (<code>automated_security_helper/cli/scan.py</code>)</td>
+</tr>
+<tr>
+<td><code>CIRCLECI</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/log.py</code> (<code>_on_a_ci_runner</code>)</td>
+<td>Variables a CI runner sets, any value counting: GitHub Actions, Azure Pipelines, TeamCity, Jenkins, CodeBuild, GitLab CI, Buildkite, CircleCI, Travis CI, AppVeyor, Bitbucket Pipelines and Bamboo, which can set one of these alone. (<code>automated_security_helper/utils/log.py</code>)</td>
+</tr>
+<tr>
+<td><code>CODEBUILD_BUILD_ID</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/log.py</code> (<code>_on_a_ci_runner</code>)</td>
+<td>Variables a CI runner sets, any value counting: GitHub Actions, Azure Pipelines, TeamCity, Jenkins, CodeBuild, GitLab CI, Buildkite, CircleCI, Travis CI, AppVeyor, Bitbucket Pipelines and Bamboo, which can set one of these alone. (<code>automated_security_helper/utils/log.py</code>)</td>
+</tr>
+<tr>
+<td><code>CONTAINER_HOST</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/interactions/container_leftovers.py</code> (<code>_daemon_environment</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>DOCKER_CONTEXT</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/interactions/container_leftovers.py</code> (<code>_daemon_environment</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>DOCKER_EXTRA_ARGS</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>ash</code> (top level)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>DOCKER_HOST</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/interactions/container_leftovers.py</code> (<code>_daemon_environment</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>FORCE_COLOR</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/console.py</code> (<code>typer_console</code>)</td>
+<td>For what ASH prints in typer's place, a usage error and an escaping exception's traceback, so they look as typer prints them: typer's theme and option highlighter, its color system, a terminal forced under GITHUB_ACTIONS, FORCE_COLOR or PY_COLORS (whose logs show color) and turned off by _TYPER_FORCE_DISABLE_TERMINAL, ... (<code>automated_security_helper/utils/console.py</code>, <code>typer_console</code>)</td>
+</tr>
+<tr>
+<td><code>GITHUB_ACTIONS</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/command_safe_stream.py</code> (<code>_under_a_command_reading_runner</code>)<br><code>automated_security_helper/utils/console.py</code> (<code>typer_console</code>)<br><code>automated_security_helper/utils/log.py</code> (<code>_on_a_ci_runner</code>)</td>
+<td>The variable each runner that reads workflow commands from a job's output sets in every job: GitHub Actions, Azure Pipelines, TeamCity. Container mode and ./ash pass each one that is set into the container, so the scan there checks a terminal's lines too. (<code>automated_security_helper/utils/command_safe_stream.py</code>)</td>
+</tr>
+<tr>
+<td><code>GITLAB_CI</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/log.py</code> (<code>_on_a_ci_runner</code>)</td>
+<td>Variables a CI runner sets, any value counting: GitHub Actions, Azure Pipelines, TeamCity, Jenkins, CodeBuild, GitLab CI, Buildkite, CircleCI, Travis CI, AppVeyor, Bitbucket Pipelines and Bamboo, which can set one of these alone. (<code>automated_security_helper/utils/log.py</code>)</td>
+</tr>
+<tr>
+<td><code>GITLEAKS_CONFIG</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/plugin_modules/ash_builtin/scanners/gitleaks_scanner.py</code> (<code>GitleaksScanner._rescan_env</code>, <code>GitleaksScanner._resolve_config_file</code>)</td>
+<td>Environment variables gitleaks reads a config from. When either is set, outside the scanner sandbox, ASH does not pass <code>gitleaks --config</code> and gitleaks resolves it. (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/gitleaks_scanner.py</code>)</td>
+</tr>
+<tr>
+<td><code>GITLEAKS_CONFIG_TOML</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/plugin_modules/ash_builtin/scanners/gitleaks_scanner.py</code> (<code>GitleaksScanner._resolve_config_file</code>)</td>
+<td>Environment variables gitleaks reads a config from. When either is set, outside the scanner sandbox, ASH does not pass <code>gitleaks --config</code> and gitleaks resolves it. (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/gitleaks_scanner.py</code>)</td>
+</tr>
+<tr>
+<td><code>GIT_CEILING_DIRECTORIES</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>automated_security_helper/utils/scan_output_dirs.py</code> (<code>_repository_root_of</code>)<br><code>automated_security_helper/utils/scan_source.py</code> (<code>_ceiling_entries</code>)</td>
+<td><code>GIT_CEILING_DIRECTORIES</code> is honored as git honors it: *directory* itself is always looked at, listed or not, and the search stops before it would move up into a listed directory. (<code>automated_security_helper/utils/scan_output_dirs.py</code>, <code>_repository_root_of</code>)</td>
+</tr>
+<tr>
+<td><code>GIT_DIR</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/scan_source.py</code> (<code>_a_git_entry_may_exist</code>)</td>
+<td>True with a <code>.git</code> entry (of any kind: directory, file, symlink) in the directory or one of its parents, with GIT_DIR or GIT_WORK_TREE in *environ*, which point git at a repository wherever it runs, or whenever the walk cannot be sure: a directory that cannot be resolved, or a parent whose <code>.git</code> entry cannot be ... (<code>automated_security_helper/utils/scan_source.py</code>, <code>_a_git_entry_may_exist</code>)</td>
+</tr>
+<tr>
+<td><code>GIT_WORK_TREE</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/scan_source.py</code> (<code>_a_git_entry_may_exist</code>)</td>
+<td>True with a <code>.git</code> entry (of any kind: directory, file, symlink) in the directory or one of its parents, with GIT_DIR or GIT_WORK_TREE in *environ*, which point git at a repository wherever it runs, or whenever the walk cannot be sure: a directory that cannot be resolved, or a parent whose <code>.git</code> entry cannot be ... (<code>automated_security_helper/utils/scan_source.py</code>, <code>_a_git_entry_may_exist</code>)</td>
+</tr>
+<tr>
+<td><code>GRYPE_DB_CACHE_DIR</code></td>
+<td></td>
+<td><code>/deps/.grype</code> (core)</td>
+<td><code>automated_security_helper/utils/offline_mode_validator.py</code> (<code>validate_grype_offline_mode</code>)<br><code>utils/grype-docker-execute.sh</code> (top level)</td>
+<td>Check for GRYPE_DB_CACHE_DIR environment variable (<code>automated_security_helper/utils/offline_mode_validator.py</code>, <code>validate_grype_offline_mode</code>)</td>
+</tr>
+<tr>
+<td><code>HOME</code></td>
+<td><code>""</code></td>
+<td><code>${ASHUSER_HOME}</code> (non-root)</td>
+<td><code>automated_security_helper/core/constants.py</code> (<code>usable_home</code>, <code>warn_if_home_unusable</code>)</td>
+<td>On POSIX it is HOME when HOME is set, not empty, and absolute. (<code>automated_security_helper/core/constants.py</code>, <code>usable_home</code>)</td>
+</tr>
+<tr>
+<td><code>JENKINS_URL</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/log.py</code> (<code>_on_a_ci_runner</code>)</td>
+<td>Variables a CI runner sets, any value counting: GitHub Actions, Azure Pipelines, TeamCity, Jenkins, CodeBuild, GitLab CI, Buildkite, CircleCI, Travis CI, AppVeyor, Bitbucket Pipelines and Bamboo, which can set one of these alone. (<code>automated_security_helper/utils/log.py</code>)</td>
+</tr>
+<tr>
+<td><code>JSII_NODE</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/cdk_nag_wrapper.py</code> (<code>run_cdk_nag_against_cfn_template</code>)</td>
+<td>jsii starts JSII_NODE, or "node" by name, which on Windows is looked for in the working directory first; this process runs in ASH's, usually the repository being scanned. So it is given the node ASH resolved, as an absolute path. (<code>automated_security_helper/utils/cdk_nag_wrapper.py</code>, <code>run_cdk_nag_against_cfn_template</code>)</td>
+</tr>
+<tr>
+<td><code>LC_ALL</code></td>
+<td></td>
+<td></td>
+<td><code>utils/ash_helpers.ps1</code> (<code>Invoke-ASH.Get-AshFirstLine</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>LS_UID</code></td>
+<td></td>
+<td></td>
+<td><code>ash</code> (<code>git_entry_trusted</code>, <code>ls_mode_and_owner</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>MKDIR_REASON</code></td>
+<td><code>mkdir did not make it</code></td>
+<td></td>
+<td><code>ash</code> (top level)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>NO_COLOR</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/cli/report.py</code> (<code>report_command</code>)</td>
+<td><code>pretty</code> is color being on (no <code>--no-color</code>, no NO_COLOR); it takes effect only when *stream* is an interactive terminal. (<code>automated_security_helper/cli/report.py</code>, <code>_write_report</code>)</td>
+</tr>
+<tr>
+<td><code>NPM_CONFIG_CACHE</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/offline_mode_validator.py</code> (<code>validate_npm_audit_offline_mode</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>OCI_RUNNER</code></td>
+<td><code>$(command -v finch || command -v docker || command -v nerdctl || command -v podman)</code><br><code>""</code></td>
+<td></td>
+<td><code>ash</code> (top level)<br><code>automated_security_helper/cli/image.py</code> (<code>build_ash_image_cli_command</code>)<br><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)<br><code>utils/ash_helpers.ps1</code> (<code>Invoke-ASH</code>)</td>
+<td>Sets <a href="../cli/#build-image--oci-runner"><code>ash build-image --oci-runner</code></a>. Use the specified OCI runner instead of docker to run the containerized tools. To prefix every OCI command with a wrapper (e.g. sudo), set the OCI_RUNNER_WRAPPER environment variable instead of using this option (e.g. OCI_RUNNER_WRAPPER=sudo ash ...).<br>Sets <a href="../cli/#scan--oci-runner"><code>ash scan --oci-runner</code></a>. Use the specified OCI runner instead of docker to run the containerized tools</td>
+</tr>
+<tr>
+<td><code>OCI_RUNNER_WRAPPER</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>ash</code> (top level)<br><code>automated_security_helper/interactions/run_ash_container.py</code> (<code>_get_oci_wrapper_prefix</code>)<br><code>utils/ash_helpers.ps1</code> (<code>Invoke-ASH</code>)</td>
+<td>OCI_RUNNER_WRAPPER prefixes all OCI commands (like RUSTC_WRAPPER for cargo) Example: OCI_RUNNER_WRAPPER=sudo makes all finch/docker calls use sudo (<code>ash</code>)</td>
+</tr>
+<tr>
+<td><code>OPENGREP_RULES_CACHE_DIR</code></td>
+<td><code>""</code></td>
+<td><code>/deps/.opengrep</code> (core)</td>
+<td><code>automated_security_helper/plugin_modules/ash_builtin/scanners/_grep_scanner_base.py</code> (<code>GrepScannerBase._configure_offline_mode</code>, <code>GrepScannerBase.content_database_probe_context</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>PATH</code></td>
+<td><code>""</code><br><code>os.defpath</code></td>
+<td><code>/root/.local/bin:$PATH</code> (uv-reqs)<br><code>/root/.local/bin:$PATH</code> (core)<br><code>/usr/local/bin:$PATH</code> (core)<br><code>${ASH_BIN_PATH}:$PATH</code> (core)<br><code>${ASHUSER_HOME}/.local/bin:$PATH</code> (non-root)</td>
+<td><code>automated_security_helper/assets/install-pinned-tool.py</code> (<code>_absolute_entries</code>)<br><code>automated_security_helper/utils/sandbox/backends.py</code> (<code>_probe_env</code>)<br><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>_path_directories</code>)<br><code>automated_security_helper/utils/subprocess_utils.py</code> (<code>_absolute_path_entries</code>, <code>_lookup</code>, <code>started_from_working_directory</code>)<br><code>automated_security_helper/utils/uv_tool_runner.py</code> (<code>_lookup_key</code>)</td>
+<td>The absolute entries of <code>search_path</code>, or of PATH. (<code>automated_security_helper/assets/install-pinned-tool.py</code>, <code>_absolute_entries</code>)</td>
+</tr>
+<tr>
+<td><code>PWD</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>ash</code> (<code>carry_config_file</code>)<br><code>automated_security_helper/config/sandbox_grants.py</code> (<code>_logical_paths</code>)<br><code>automated_security_helper/interactions/run_ash_container.py</code> (<code>_name_from_the_logical_directory</code>)<br><code>utils/yaml-docker-execute.sh</code> (top level)</td>
+<td>ASH builds an absolute scan root from the physical working directory, so a root whose text starts with it is rejoined to <code>$PWD</code> from the rest of its text, <code>..</code> and symlinks included. (<code>automated_security_helper/config/sandbox_grants.py</code>, <code>_logical_paths</code>)</td>
+</tr>
+<tr>
+<td><code>PYTHONIOENCODING</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/process_env.py</code> (<code>setdefault_environ</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>PY_COLORS</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/console.py</code> (<code>typer_console</code>)</td>
+<td>For what ASH prints in typer's place, a usage error and an escaping exception's traceback, so they look as typer prints them: typer's theme and option highlighter, its color system, a terminal forced under GITHUB_ACTIONS, FORCE_COLOR or PY_COLORS (whose logs show color) and turned off by _TYPER_FORCE_DISABLE_TERMINAL, ... (<code>automated_security_helper/utils/console.py</code>, <code>typer_console</code>)</td>
+</tr>
+<tr>
+<td><code>ProgramData</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/cli/mcp/scan_target.py</code> (<code>_denied_root_values</code>)</td>
+<td>Windows equivalents, read from the shell's own directory variables so the policy follows a system installed on a drive other than C:. (<code>automated_security_helper/cli/mcp/scan_target.py</code>)</td>
+</tr>
+<tr>
+<td><code>ProgramFiles</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/cli/mcp/scan_target.py</code> (<code>_denied_root_values</code>)</td>
+<td>Windows equivalents, read from the shell's own directory variables so the policy follows a system installed on a drive other than C:. (<code>automated_security_helper/cli/mcp/scan_target.py</code>)</td>
+</tr>
+<tr>
+<td><code>ProgramFiles(x86)</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/cli/mcp/scan_target.py</code> (<code>_denied_root_values</code>)</td>
+<td>Windows equivalents, read from the shell's own directory variables so the policy follows a system installed on a drive other than C:. (<code>automated_security_helper/cli/mcp/scan_target.py</code>)</td>
+</tr>
+<tr>
+<td><code>ProgramW6432</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/cli/mcp/scan_target.py</code> (<code>_denied_root_values</code>)</td>
+<td>Windows equivalents, read from the shell's own directory variables so the policy follows a system installed on a drive other than C:. (<code>automated_security_helper/cli/mcp/scan_target.py</code>)</td>
+</tr>
+<tr>
+<td><code>RI_DEVKIT</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/plugin_modules/ash_builtin/scanners/cfn_nag_scanner.py</code> (<code>CfnNagScanner._missing_gem_prerequisites</code>)</td>
+<td>Windows is checked on RI_DEVKIT rather than on a compiler being present, and the difference is not pedantic. A first attempt probed for cc/gcc/clang; (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/cfn_nag_scanner.py</code>, <code>CfnNagScanner._missing_gem_prerequisites</code>)</td>
+</tr>
+<tr>
+<td><code>SEMGREP_ENABLE_VERSION_CHECK</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/process_env.py</code> (<code>hold_environ</code>, <code>release_environ</code>)</td>
+<td>semgrep's own switch for its version check: the variable its <code>--enable-version-check/--disable-version-check</code> option reads. "0" is off. (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/semgrep_scanner.py</code>)</td>
+</tr>
+<tr>
+<td><code>SEMGREP_RULES_CACHE_DIR</code></td>
+<td><code>""</code></td>
+<td><code>/deps/.semgrep</code> (core)</td>
+<td><code>automated_security_helper/plugin_modules/ash_builtin/scanners/_grep_scanner_base.py</code> (<code>GrepScannerBase._configure_offline_mode</code>, <code>GrepScannerBase.content_database_probe_context</code>)<br><code>automated_security_helper/plugin_modules/ash_builtin/scanners/semgrep_scanner.py</code> (<code>SemgrepScanner.extra_subprocess_env</code>)<br><code>utils/grype-docker-execute.sh</code> (top level)</td>
+<td>Env var pointing at the offline rule cache (e.g. SEMGREP_RULES_CACHE_DIR). (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/_grep_scanner_base.py</code>, <code>GrepScannerBase.cache_dir_env_var</code>)</td>
+</tr>
+<tr>
+<td><code>SNYK_TOKEN</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>automated_security_helper/plugin_modules/ash_snyk_plugins/snyk_code_scanner.py</code> (<code>SnykCodeScanner.validate_plugin_dependencies</code>)</td>
+<td>Check if SNYK_TOKEN is defined on the environment variable or if using local mode, the file ${HOME}/.config/configstore/snyk.json or ${HOME}/.config/configstore/.snyk.json exists (<code>automated_security_helper/plugin_modules/ash_snyk_plugins/snyk_code_scanner.py</code>, <code>SnykCodeScanner.validate_plugin_dependencies</code>)</td>
+</tr>
+<tr>
+<td><code>SOURCE_ANCESTOR</code></td>
+<td><code>/</code></td>
+<td></td>
+<td><code>ash</code> (top level)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>SSH_AUTH_SOCK</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>automated_security_helper/utils/sandbox/backends.py</code> (<code>FirejailBackend.plan</code>)</td>
+<td>firejail leaves everything outside $HOME visible, including the local IPC endpoints a scanner could use to act outside the sandbox: the container runtime sockets, the per-user runtime directory (session bus, gpg-agent, rootless Docker or Podman) and the SSH agent. (<code>automated_security_helper/utils/sandbox/backends.py</code>, <code>FirejailBackend.plan</code>)</td>
+</tr>
+<tr>
+<td><code>SYSTEMROOT</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/subprocess_utils.py</code> (<code>_windows_system_directory</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>SystemDrive</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/uv_tool_runner.py</code> (<code>_windows_system_drive_root</code>)</td>
+<td>ntpath, so the parsing is Windows' wherever this runs. (<code>automated_security_helper/utils/uv_tool_runner.py</code>, <code>_windows_system_drive_root</code>)</td>
+</tr>
+<tr>
+<td><code>SystemRoot</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/cli/mcp/scan_target.py</code> (<code>_denied_root_values</code>)<br><code>automated_security_helper/utils/subprocess_utils.py</code> (<code>_windows_system_directory</code>)<br><code>automated_security_helper/utils/uv_tool_runner.py</code> (<code>_windows_system_drive_root</code>)</td>
+<td>Windows equivalents, read from the shell's own directory variables so the policy follows a system installed on a drive other than C:. (<code>automated_security_helper/cli/mcp/scan_target.py</code>)</td>
+</tr>
+<tr>
+<td><code>TEAMCITY_VERSION</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/command_safe_stream.py</code> (<code>_under_a_command_reading_runner</code>)<br><code>automated_security_helper/utils/log.py</code> (<code>_on_a_ci_runner</code>)</td>
+<td>The variable each runner that reads workflow commands from a job's output sets in every job: GitHub Actions, Azure Pipelines, TeamCity. Container mode and ./ash pass each one that is set into the container, so the scan there checks a terminal's lines too. (<code>automated_security_helper/utils/command_safe_stream.py</code>)</td>
+</tr>
+<tr>
+<td><code>TERMINAL_WIDTH</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>automated_security_helper/cli/entrypoint.py</code> (<code>_ash_traceback</code>)<br><code>automated_security_helper/utils/console.py</code> (<code>typer_console</code>)</td>
+<td>typer's widths, its TERMINAL_WIDTH or else the console's, where Rich's own defaults are 100 and 88; read now, as typer_console reads it. (<code>automated_security_helper/cli/entrypoint.py</code>, <code>_ash_traceback</code>)</td>
+</tr>
+<tr>
+<td><code>TF_BUILD</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/command_safe_stream.py</code> (<code>_under_a_command_reading_runner</code>)<br><code>automated_security_helper/utils/log.py</code> (<code>_on_a_ci_runner</code>)</td>
+<td>The variable each runner that reads workflow commands from a job's output sets in every job: GitHub Actions, Azure Pipelines, TeamCity. Container mode and ./ash pass each one that is set into the container, so the scan there checks a terminal's lines too. (<code>automated_security_helper/utils/command_safe_stream.py</code>)</td>
+</tr>
+<tr>
+<td><code>TMPDIR</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/interactions/container_leftovers.py</code> (<code>_env_dir_parents</code>)</td>
+<td>Where such a directory can be, after <code>$TMPDIR</code>. Each prefix is looked for under every one. (<code>automated_security_helper/interactions/container_leftovers.py</code>)</td>
+</tr>
+<tr>
+<td><code>TRAVIS</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/log.py</code> (<code>_on_a_ci_runner</code>)</td>
+<td>Variables a CI runner sets, any value counting: GitHub Actions, Azure Pipelines, TeamCity, Jenkins, CodeBuild, GitLab CI, Buildkite, CircleCI, Travis CI, AppVeyor, Bitbucket Pipelines and Bamboo, which can set one of these alone. (<code>automated_security_helper/utils/log.py</code>)</td>
+</tr>
+<tr>
+<td><code>TRIVY_CACHE_DIR</code></td>
+<td></td>
+<td><code>/deps/.trivy</code> (core)</td>
+<td><code>automated_security_helper/utils/offline_mode_validator.py</code> (<code>validate_trivy_offline_mode</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>TRIVY_CONFIG</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/plugin_modules/ash_builtin/scanners/_trivy_scanner_base.py</code> (<code>TrivyScannerBase._operator_config_choice</code>)</td>
+<td>The variable is the operator's, set where ASH runs, so a relative path in it is taken from the working directory as written, as TRIVY_IGNOREFILE's is (_trivy_input_file), not from the scanned directory. The value is quoted as set. (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/_trivy_scanner_base.py</code>, <code>TrivyScannerBase._operator_config_choice</code>)</td>
+</tr>
+<tr>
+<td><code>TRIVY_IGNOREFILE</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/plugin_modules/ash_builtin/scanners/_trivy_scanner_base.py</code> (<code>TrivyScannerBase._trivy_input_file</code>)<br><code>automated_security_helper/plugin_modules/ash_trivy_plugins/trivy_repo_scanner.py</code> (<code>TrivyRepoScanner._environment_values</code>)</td>
+<td>The variable is the operator's, set where ASH runs, so a relative path in it names a file there, as written, not one at the root of the scanned tree. (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/_trivy_scanner_base.py</code>, <code>TrivyScannerBase._trivy_input_file</code>)</td>
+</tr>
+<tr>
+<td><code>TRIVY_SECRET_CONFIG</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/plugin_modules/ash_builtin/scanners/_trivy_scanner_base.py</code> (<code>TrivyScannerBase._trivy_input_file</code>)<br><code>automated_security_helper/plugin_modules/ash_trivy_plugins/trivy_repo_scanner.py</code> (<code>TrivyRepoScanner._environment_values</code>)</td>
+<td>The variable is the operator's, set where ASH runs, so a relative path in it names a file there, as written, not one at the root of the scanned tree. (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/_trivy_scanner_base.py</code>, <code>TrivyScannerBase._trivy_input_file</code>)</td>
+</tr>
+<tr>
+<td><code>TYPER_STANDARD_TRACEBACK</code></td>
+<td><code>os.getenv("_TYPER_STANDARD_TRACEBACK")</code></td>
+<td></td>
+<td><code>automated_security_helper/cli/entrypoint.py</code> (<code>_ash_traceback</code>)</td>
+<td>With TYPER_STANDARD_TRACEBACK set, or no pretty traceback asked for, the plain traceback is printed, shown the same way. (<code>automated_security_helper/cli/entrypoint.py</code>, <code>_ash_traceback</code>)</td>
+</tr>
+<tr>
+<td><code>UV_CACHE_DIR</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>build_scanner_policy</code>, <code>uv_cache_directory</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>UV_OFFLINE</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/uv_tool_runner.py</code> (<code>UVToolRunner.install_tool_with_version</code>)</td>
+<td>Add offline flag if UV_OFFLINE environment variable is set (<code>automated_security_helper/utils/uv_tool_runner.py</code>, <code>UVToolRunner.install_tool_with_version</code>)</td>
+</tr>
+<tr>
+<td><code>UV_PYTHON</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/python_child.py</code> (<code>uv_child_overrides</code>)</td>
+<td>- <code>UV_NO_PROJECT=1</code>, unless it names a <code>--project</code> itself; - <code>UV_PYTHON</code> set to ASH's interpreter, unless it names one (<code>--python</code>, <code>-p</code>, <code>--system</code>) or the operator set <code>UV_PYTHON</code> or <code>UV_SYSTEM_PYTHON</code>. (<code>automated_security_helper/utils/python_child.py</code>, <code>uv_child_overrides</code>)</td>
+</tr>
+<tr>
+<td><code>UV_PYTHON_INSTALL_DIR</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>_uv_directories</code>)</td>
+<td>A directory UV_TOOL_DIR or UV_PYTHON_INSTALL_DIR names is screened first (_screened_uv_directory). (<code>automated_security_helper/utils/sandbox/policy.py</code>, <code>_uv_directories</code>)</td>
+</tr>
+<tr>
+<td><code>UV_SYSTEM_PYTHON</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/python_child.py</code> (<code>uv_child_overrides</code>)</td>
+<td>- <code>UV_NO_PROJECT=1</code>, unless it names a <code>--project</code> itself; - <code>UV_PYTHON</code> set to ASH's interpreter, unless it names one (<code>--python</code>, <code>-p</code>, <code>--system</code>) or the operator set <code>UV_PYTHON</code> or <code>UV_SYSTEM_PYTHON</code>. (<code>automated_security_helper/utils/python_child.py</code>, <code>uv_child_overrides</code>)</td>
+</tr>
+<tr>
+<td><code>UV_TOOL_DIR</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>_uv_directories</code>, <code>_uv_tool_locks</code>)</td>
+<td>A directory UV_TOOL_DIR or UV_PYTHON_INSTALL_DIR names is screened first (_screened_uv_directory). (<code>automated_security_helper/utils/sandbox/policy.py</code>, <code>_uv_directories</code>)</td>
+</tr>
+<tr>
+<td><code>WITH_RETRY_DELAY</code></td>
+<td><code>5</code></td>
+<td></td>
+<td><code>automated_security_helper/assets/with-retry.sh</code> (top level)</td>
+<td>Overridable so the retry behaviour can be exercised without waiting out the real backoff. Defaults are what every Dockerfile caller gets. Five attempts, not three. (<code>automated_security_helper/assets/with-retry.sh</code>)</td>
+</tr>
+<tr>
+<td><code>WITH_RETRY_MAX_ATTEMPTS</code></td>
+<td><code>5</code></td>
+<td></td>
+<td><code>automated_security_helper/assets/with-retry.sh</code> (top level)</td>
+<td>Overridable so the retry behaviour can be exercised without waiting out the real backoff. Defaults are what every Dockerfile caller gets. Five attempts, not three. (<code>automated_security_helper/assets/with-retry.sh</code>)</td>
+</tr>
+<tr>
+<td><code>WRITE_CHECK</code></td>
+<td></td>
+<td></td>
+<td><code>ash</code> (top level)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>WRITE_ERROR</code></td>
+<td></td>
+<td></td>
+<td><code>ash</code> (top level)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>WRITE_REASON</code></td>
+<td><code>a file could not be made there</code></td>
+<td></td>
+<td><code>ash</code> (top level)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>XDG_CACHE_HOME</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/cli/mcp/source_delivery.py</code> (<code>resolve_workspace_root</code>)<br><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>uv_cache_directory</code>)</td>
+<td>1. <code>$ASH_MCP_WORKSPACE_ROOT</code> 2. <code>$XDG_CACHE_HOME/ash-mcp/</code> 3. <code>~/.cache/ash-mcp/</code> (<code>automated_security_helper/cli/mcp/source_delivery.py</code>, <code>resolve_workspace_root</code>)</td>
+</tr>
+<tr>
+<td><code>XDG_DATA_HOME</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>_uv_directories</code>, <code>_uv_tool_locks</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>YARN_CACHE_FOLDER</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/offline_mode_validator.py</code> (<code>validate_npm_audit_offline_mode</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>ZSH_VERSION</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>utils/ash_helpers.sh</code> (top level)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>_TYPER_FORCE_DISABLE_TERMINAL</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/console.py</code> (<code>typer_console</code>)</td>
+<td>For what ASH prints in typer's place, a usage error and an escaping exception's traceback, so they look as typer prints them: typer's theme and option highlighter, its color system, a terminal forced under GITHUB_ACTIONS, FORCE_COLOR or PY_COLORS (whose logs show color) and turned off by _TYPER_FORCE_DISABLE_TERMINAL, ... (<code>automated_security_helper/utils/console.py</code>, <code>typer_console</code>)</td>
+</tr>
+<tr>
+<td><code>_TYPER_STANDARD_TRACEBACK</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/cli/entrypoint.py</code> (<code>_ash_traceback</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>bamboo_buildKey</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/log.py</code> (<code>_on_a_ci_runner</code>)</td>
+<td>Variables a CI runner sets, any value counting: GitHub Actions, Azure Pipelines, TeamCity, Jenkins, CodeBuild, GitLab CI, Buildkite, CircleCI, Travis CI, AppVeyor, Bitbucket Pipelines and Bamboo, which can set one of these alone. (<code>automated_security_helper/utils/log.py</code>)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="variables-a-configuration-file-can-read">Variables a configuration file can read<a class="headerlink" href="#variables-a-configuration-file-can-read" title="Permanent link">&para;</a></h2>
+<p>A value in a configuration file that begins with <code>${NAME}</code> or <code>${NAME:default}</code> has the reference replaced by that environment variable. Only names that start with <code>ASH_</code> and these names are substituted: <code>AWS_DEFAULT_REGION</code>, <code>AWS_PROFILE</code>, <code>AWS_REGION</code>. Any other reference is left as written, with a warning. The prefix and the list are defined in <code>automated_security_helper/core/constants.py</code>.</p>
+<h2 id="lookups-that-could-not-be-resolved">Lookups that could not be resolved<a class="headerlink" href="#lookups-that-could-not-be-resolved" title="Permanent link">&para;</a></h2>
+<p>These reads take the variable name from a value the generator cannot resolve without running ASH: a name read from a configuration file, built at run time, or passed in from somewhere it cannot follow. A variable read only through one of these sites is not in the tables above.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>automated_security_helper/config/ash_config.py (resolve_env_references) [environ.get] resolved_var = os.environ.get(var_name, None)
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>automated_security_helper/config/config_sources.py (_empty_key_reference_names.walk) [environ.get] if resolved is None and os.environ.get(name) is not None:
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>automated_security_helper/config/config_validator.py (_reference_variable_is_set) [environ.get] return reference is None or os.environ.get(reference.group(1)) is not None
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>automated_security_helper/config/environment_record.py (_value_read) [environ.get] value = os.environ.get(name)
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>automated_security_helper/core/constants.py (xdg_directory) [environ.get] value = os.environ.get(variable, &quot;&quot;)
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>automated_security_helper/interactions/run_ash_container.py (_carried_values_by_band) [environ.get] value = os.environ.get(name, &quot;&quot;)
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>automated_security_helper/interactions/run_ash_container.py (_runner_marker_args) [environ.get] value = environ.get(name)
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [environ.get] if any(char in environ.get(name, &quot;&quot;) for char in &quot;\n\r\0&quot;):
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [presence check] if name in environ:
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [subscript] handle.write(f&quot;{name}={environ[name]}\n&quot;)
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>automated_security_helper/interactions/run_ash_container.py (run_ash_container) [environ.get] for value in (os.environ.get(name, &quot;&quot;),)
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>automated_security_helper/plugin_modules/ash_builtin/scanners/grype_scanner.py (_declared_grype_db_bound) [presence check] if name not in environ and config_key_for_env.get(name) not in user_config_keys
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>automated_security_helper/utils/log.py (_detect_encoding_issues) [presence check] is_ci = any(name in os.environ for name in (&quot;CI&quot;, *_CI_RUNNER_MARKERS))
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>automated_security_helper/utils/log.py (configure_windows_safe_logging) [presence check] is_ci = any(name in os.environ for name in (&quot;CI&quot;, *_CI_RUNNER_MARKERS))
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>automated_security_helper/utils/process_env.py (apply_environ_overrides) [environ.get] previous = {key: os.environ.get(key) for key in overrides}
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>automated_security_helper/utils/process_env.py (apply_environ_overrides) [environ.pop] os.environ.pop(key, None)
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>automated_security_helper/utils/process_env.py (restore_environ) [environ.pop] os.environ.pop(key, None)
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>automated_security_helper/utils/sandbox/policy.py (_env_named_read_paths) [environ.get] value = os.environ.get(name, &quot;&quot;)
+</span></code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,116.24a6,6,0,0,1-8.48,0L134,54.49V216a6,6,0,0,1-12,0V54.49L60.24,116.24a6,6,0,0,1-8.48-8.48l72-72a6,6,0,0,1,8.48,0l72,72A6,6,0,0,1,204.24,116.24Z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+  
+    
+
+<nav class="ash-pagination" aria-label="Previous and next documentation pages">
+  <div class="ash-wrap ash-pagination__inner">
+    
+    <a href="../configuration/" rel="prev">
+      <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M222,128a6,6,0,0,1-6,6H54.49l61.75,61.76a6,6,0,1,1-8.48,8.48l-72-72a6,6,0,0,1,0-8.48l72-72a6,6,0,0,1,8.48,8.48L54.49,122H216A6,6,0,0,1,222,128Z"/></svg></span><span><span class="ash-pagination__direction">PREVIOUS</span>Configuration</span>
+    </a>
+    
+    
+    <a class="ash-pagination__next" href="../scanners/" rel="next">
+      <span><span class="ash-pagination__direction">NEXT</span>Scanners</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M220.24,132.24l-72,72a6,6,0,0,1-8.48-8.48L201.51,134H40a6,6,0,0,1,0-12H201.51L139.76,60.24a6,6,0,0,1,8.48-8.48l72,72A6,6,0,0,1,220.24,132.24Z"/></svg></span>
+    </a>
+    
+  </div>
+</nav>
+
+  
+  <footer class="ash-footer">
+    <div class="ash-wrap ash-footer__top">
+      <div>
+        <a class="ash-brand" href="../.." aria-label="ASH home">
+          <span class="ash-brand__name">ASH<span class="ash-brand__subtitle">Automated Security Helper</span></span>
+        </a>
+      </div>
+      <div class="ash-footer__links">
+        <div><span>Documentation</span><a href="../../getting-started/local/">Quick start</a><a href="../../how-to/configure/">Configuration</a><a href="../cli/">CLI reference</a></div>
+        <div><span>Integrations</span><a href="../scanners/">Scanners</a><a href="../../getting-started/ci/">CI/CD integration</a><a href="../../plugins/">Plugin development</a></div>
+        <div><span>Project</span><a href="https://github.com/awslabs/automated-security-helper">GitHub <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a><a href="../../contributing/">Contribute</a><a href="https://github.com/awslabs/automated-security-helper/issues">Get help <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a></div>
+      </div>
+    </div>
+    <div class="ash-wrap ash-footer__bottom">
+      <span class="ash-footer-credit">Build with <span class="ash-footer-heart" role="img" aria-label="love">&lt;3</span> at Amazon Web Services</span>
+      <div><button class="ash-motion-toggle" type="button" data-ash-motion aria-pressed="false"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M128,26A102,102,0,1,0,230,128,102.12,102.12,0,0,0,128,26Zm0,192a90,90,0,1,1,90-90A90.1,90.1,0,0,1,128,218ZM110,96v64a6,6,0,0,1-12,0V96a6,6,0,0,1,12,0Zm48,0v64a6,6,0,0,1-12,0V96a6,6,0,0,1,12,0Z"/></svg></span> <span>Pause motion</span></button><a href="https://github.com/awslabs/automated-security-helper/blob/main/LICENSE">License</a><a href="../../contributing/#security-issue-notifications">Security</a></div>
+    </div>
+    <div class="ash-wrap ash-footer__copyright">&copy; Amazon Web Services, Inc. or its affiliates. All rights reserved.</div>
+  </footer>
+  <div class="ash-toast" role="status" aria-live="polite" aria-atomic="true" data-ash-toast></div>
+
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.indexes", "navigation.path", "navigation.top", "navigation.footer", "toc.follow", "content.tabs.link", "search.share", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate", "content.code.select"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../assets/javascripts/ash.js"></script>
+      
+    
+  </body>
+</html>

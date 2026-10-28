@@ -1,0 +1,5240 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Security scanning for code, infrastructure, secrets, and dependencies.">
+      
+      
+      
+        <link rel="canonical" href="https://awslabs.github.io/automated-security-helper/latest/reference/scanners/">
+      
+      
+        <link rel="prev" href="../environment-variables/">
+      
+      
+        <link rel="next" href="../reporters/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="data:,">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Scanners - ASH - Automated Security Helper</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/ash.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  
+  <!-- Phosphor SVG icon license:
+  MIT License
+
+Copyright (c) 2023 Phosphor Icons
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+  -->
+  <meta name="theme-color" content="#0f141a">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Scanners · ASH">
+  <meta property="og:description" content="Security scanning for code, infrastructure, secrets, and dependencies.">
+  <link rel="preload" href="../../assets/fonts/open-sans.woff2" as="font" type="font/woff2" crossorigin>
+  <noscript>
+    <style>
+      .ash-search-trigger, .ash-menu-toggle, .ash-motion-toggle, .ash-copy,
+       .ash-tabs, .ash-mode-picker, .ash-filter, [data-ash-run], [data-scan-controls],
+       [data-ash-drawer], [data-ash-handbook] { display: none !important; }
+      .ash-install-panel[hidden] { display: block !important; margin-top: 1.5rem; }
+       @media (max-width: 960px) {
+        .ash-header { position: relative; height: auto; }
+      }
+    </style>
+  </noscript>
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#scanners-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+        <aside class="md-banner">
+          <div class="md-banner__inner md-grid md-typeset">
+            
+            <span data-ash-notice="unreleased">
+      These docs describe the main branch, which is not released yet, so a feature
+      described here may not be in the latest release.
+      The install commands in this version of the docs install
+      <code>main</code>, not a release.
+      <a href="../../..">Read the docs for the latest release</a>
+      to install a release.
+    </span>
+          </div>
+          
+        </aside>
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+<a class="ash-skip" href="#main-content">Skip to content</a>
+<header class="md-header ash-header" data-md-component="header">
+  <nav class="ash-header__inner md-grid" aria-label="Main navigation">
+    <a class="ash-brand" href="../.." aria-label="ASH home" data-md-component="logo">
+      <span class="ash-brand__name">ASH<span class="ash-brand__subtitle">Automated Security Helper</span></span>
+    </a>
+    <div class="ash-header__links">
+      <a href="../.." >Overview</a>
+      <a href="../../docs/quick-start-guide/" aria-current="true">Documentation</a>
+      <a href="../..#scanners">Scanners</a>
+      <a href="../../integrations/" >Integrations</a>
+    </div>
+    <div class="ash-sr-only md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">ASH - Automated Security Helper</div>
+        <div class="md-header__topic" data-md-component="header-topic">Scanners</div>
+      </div>
+    </div>
+    <div class="ash-header__actions">
+      
+        <button class="ash-handbook-toggle" type="button" data-ash-handbook aria-label="Browse all documentation" aria-haspopup="dialog" aria-controls="ash-handbook" aria-expanded="false" disabled><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232,50H160a38,38,0,0,0-32,17.55A38,38,0,0,0,96,50H24a6,6,0,0,0-6,6V200a6,6,0,0,0,6,6H96a26,26,0,0,1,26,26,6,6,0,0,0,12,0,26,26,0,0,1,26-26h72a6,6,0,0,0,6-6V56A6,6,0,0,0,232,50ZM96,194H30V62H96a26,26,0,0,1,26,26V204.31A37.86,37.86,0,0,0,96,194Zm130,0H160a37.87,37.87,0,0,0-26,10.32V88a26,26,0,0,1,26-26h66ZM160,90h40a6,6,0,0,1,0,12H160a6,6,0,0,1,0-12Zm46,38a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,128Zm0,32a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,160Z"/></svg></span><span>Contents</span></button>
+      
+      <button class="ash-search-trigger" type="button" data-ash-search aria-label="Search documentation" aria-haspopup="dialog" aria-controls="ash-search-dialog" aria-expanded="false" disabled>
+        <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M228.24,219.76l-51.38-51.38a86.15,86.15,0,1,0-8.48,8.48l51.38,51.38a6,6,0,0,0,8.48-8.48ZM38,112a74,74,0,1,1,74,74A74.09,74.09,0,0,1,38,112Z"/></svg></span><span>Search docs</span><kbd data-ash-shortcut>⌘ K</kbd>
+      </button>
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M122,40V16a6,6,0,0,1,12,0V40a6,6,0,0,1-12,0Zm68,88a62,62,0,1,1-62-62A62.07,62.07,0,0,1,190,128Zm-12,0a50,50,0,1,0-50,50A50.06,50.06,0,0,0,178,128ZM59.76,68.24a6,6,0,1,0,8.48-8.48l-16-16a6,6,0,0,0-8.48,8.48Zm0,119.52-16,16a6,6,0,1,0,8.48,8.48l16-16a6,6,0,1,0-8.48-8.48ZM192,70a6,6,0,0,0,4.24-1.76l16-16a6,6,0,0,0-8.48-8.48l-16,16A6,6,0,0,0,192,70Zm4.24,117.76a6,6,0,0,0-8.48,8.48l16,16a6,6,0,0,0,8.48-8.48ZM46,128a6,6,0,0,0-6-6H16a6,6,0,0,0,0,12H40A6,6,0,0,0,46,128Zm82,82a6,6,0,0,0-6,6v24a6,6,0,0,0,12,0V216A6,6,0,0,0,128,210Zm112-88H216a6,6,0,0,0,0,12h24a6,6,0,0,0,0-12Z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232.13,143.64a6,6,0,0,0-6-1.49A90.07,90.07,0,0,1,113.86,29.85a6,6,0,0,0-7.49-7.48A102.88,102.88,0,0,0,54.48,58.68,102,102,0,0,0,197.32,201.52a102.88,102.88,0,0,0,36.31-51.89A6,6,0,0,0,232.13,143.64Zm-42,48.29a90,90,0,0,1-126-126A90.9,90.9,0,0,1,99.65,37.66,102.06,102.06,0,0,0,218.34,156.35,90.9,90.9,0,0,1,190.1,191.93Z"/></svg>
+      </label>
+    
+  
+</form>
+        <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+      
+      <template data-ash-theme-icons>
+        <span data-color-scheme="default"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M122,40V16a6,6,0,0,1,12,0V40a6,6,0,0,1-12,0Zm68,88a62,62,0,1,1-62-62A62.07,62.07,0,0,1,190,128Zm-12,0a50,50,0,1,0-50,50A50.06,50.06,0,0,0,178,128ZM59.76,68.24a6,6,0,1,0,8.48-8.48l-16-16a6,6,0,0,0-8.48,8.48Zm0,119.52-16,16a6,6,0,1,0,8.48,8.48l16-16a6,6,0,1,0-8.48-8.48ZM192,70a6,6,0,0,0,4.24-1.76l16-16a6,6,0,0,0-8.48-8.48l-16,16A6,6,0,0,0,192,70Zm4.24,117.76a6,6,0,0,0-8.48,8.48l16,16a6,6,0,0,0,8.48-8.48ZM46,128a6,6,0,0,0-6-6H16a6,6,0,0,0,0,12H40A6,6,0,0,0,46,128Zm82,82a6,6,0,0,0-6,6v24a6,6,0,0,0,12,0V216A6,6,0,0,0,128,210Zm112-88H216a6,6,0,0,0,0,12h24a6,6,0,0,0,0-12Z"/></svg></span></span>
+        <span data-color-scheme="slate"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232.13,143.64a6,6,0,0,0-6-1.49A90.07,90.07,0,0,1,113.86,29.85a6,6,0,0,0-7.49-7.48A102.88,102.88,0,0,0,54.48,58.68,102,102,0,0,0,197.32,201.52a102.88,102.88,0,0,0,36.31-51.89A6,6,0,0,0,232.13,143.64Zm-42,48.29a90,90,0,0,1-126-126A90.9,90.9,0,0,1,99.65,37.66,102.06,102.06,0,0,0,218.34,156.35,90.9,90.9,0,0,1,190.1,191.93Z"/></svg></span></span>
+      </template>
+      <a class="ash-github" href="https://github.com/awslabs/automated-security-helper" aria-label="ASH on GitHub">
+        <span>GitHub</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span>
+      </a>
+      <button class="ash-menu-toggle" type="button" aria-label="Open navigation" aria-haspopup="dialog" aria-expanded="false" aria-controls="ash-mobile-menu" data-ash-menu disabled>
+        <span class="ash-menu-glyph" aria-hidden="true"><i></i><i></i></span>
+      </button>
+    </div>
+    
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M228.24,219.76l-51.38-51.38a86.15,86.15,0,1,0-8.48,8.48l51.38,51.38a6,6,0,0,0,8.48-8.48ZM38,112a74,74,0,1,1,74,74A74.09,74.09,0,0,1,38,112Z"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M222,128a6,6,0,0,1-6,6H54.49l61.75,61.76a6,6,0,1,1-8.48,8.48l-72-72a6,6,0,0,1,0-8.48l72-72a6,6,0,0,1,8.48,8.48L54.49,122H216A6,6,0,0,1,222,128Z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,195.76a6,6,0,1,1-8.48,8.48L128,136.49,60.24,204.24a6,6,0,0,1-8.48-8.48L119.51,128,51.76,60.24a6,6,0,0,1,8.48-8.48L128,119.51l67.76-67.75a6,6,0,0,1,8.48,8.48L136.49,128Z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+  </nav>
+  <dialog class="ash-mobile-menu" id="ash-mobile-menu" aria-label="Site navigation" hidden>
+    <div class="ash-mobile-menu__heading"><p class="ash-mobile-menu__eyebrow">Navigation</p><button type="button" data-ash-menu-close aria-label="Close navigation"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,195.76a6,6,0,1,1-8.48,8.48L128,136.49,60.24,204.24a6,6,0,0,1-8.48-8.48L119.51,128,51.76,60.24a6,6,0,0,1,8.48-8.48L128,119.51l67.76-67.75a6,6,0,0,1,8.48,8.48L136.49,128Z"/></svg></span></button></div>
+    <a href="../..">Overview <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../../docs/quick-start-guide/">Documentation <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../..#scanners">Scanners <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../../integrations/">Integrations <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="https://github.com/awslabs/automated-security-helper">GitHub <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    
+      <button type="button" data-ash-drawer>Browse all documentation <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232,50H160a38,38,0,0,0-32,17.55A38,38,0,0,0,96,50H24a6,6,0,0,0-6,6V200a6,6,0,0,0,6,6H96a26,26,0,0,1,26,26,6,6,0,0,0,12,0,26,26,0,0,1,26-26h72a6,6,0,0,0,6-6V56A6,6,0,0,0,232,50ZM96,194H30V62H96a26,26,0,0,1,26,26V204.31A37.86,37.86,0,0,0,96,194Zm130,0H160a37.87,37.87,0,0,0-26,10.32V88a26,26,0,0,1,26-26h66ZM160,90h40a6,6,0,0,1,0,12H160a6,6,0,0,1,0-12Zm46,38a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,128Zm0,32a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,160Z"/></svg></span></button>
+    
+  </dialog>
+  <noscript>
+    <nav class="ash-static-navigation" aria-label="Site navigation">
+      <a href="../..">Overview</a>
+      <a href="../../docs/quick-start-guide/">Documentation</a>
+      <a href="../..#scanners">Scanners</a>
+      <a href="../../integrations/">Integrations</a>
+      <a href="https://github.com/awslabs/automated-security-helper">GitHub</a>
+    </nav>
+  </noscript>
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ASH - Automated Security Helper" class="md-nav__button md-logo" aria-label="ASH - Automated Security Helper" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ASH - Automated Security Helper
+  </label>
+  
+    <div class="md-nav__source">
+      
+<a href="https://github.com/awslabs/automated-security-helper" title="ASH on GitHub" class="md-source" aria-label="ASH on GitHub">
+  <span class="ash-icon md-source__icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M230,64a30,30,0,1,0-36,29.4V112a10,10,0,0,1-10,10H96a21.84,21.84,0,0,0-10,2.42v-31a30,30,0,1,0-12,0v69.2a30,30,0,1,0,12,0V144a10,10,0,0,1,10-10h88a22,22,0,0,0,22-22V93.4A30.05,30.05,0,0,0,230,64ZM62,64A18,18,0,1,1,80,82,18,18,0,0,1,62,64ZM98,192a18,18,0,1,1-18-18A18,18,0,0,1,98,192ZM200,82a18,18,0,1,1,18-18A18,18,0,0,1,200,82Z"/></svg></span>
+  <span class="md-source__repository">ASH on GitHub</span>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../getting-started/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_2" id="__nav_2_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/local/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan on your machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add ASH to CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connect an AI agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/platform-teams/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roll out across repositories
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install ASH
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/advanced-usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Manage scanner tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/configure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configure ASH
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/choose-scanners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose scanners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/set-the-gate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Set the gate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/suppress-findings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Suppress findings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/read-results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read scan results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/export-reports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/scanner-sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enable the scanner sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/run-in-a-container/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run in a container
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/run-offline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run offline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose an integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/pre-commit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run ASH with pre-commit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_14" id="__nav_3_14_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CI systems
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    CI systems
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/ci/github-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub Actions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/ci/gitlab-ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitLab CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/ci/other-ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Other CI systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/scale-large-repos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scale to large repositories
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/mcp-server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run the MCP server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/agent-plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install an agent plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/genai-steering-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH GenAI integration guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/deploy-on-aws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deploy on AWS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/troubleshoot/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshoot
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/migrate-from-v2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migrate from v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/how-ash-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How ASH works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/trust-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration trust model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/scanning-untrusted-code/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanning untrusted code
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanner sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/content-databases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Content databases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/suppressions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Suppressions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_5" id="__nav_5_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment-variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanners
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#environment-in-the-sandbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment in the sandbox
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#actionlint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        actionlint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bandit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bandit
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cdk-nag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cdk-nag
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cfn-guard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cfn-guard
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cfn-lint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cfn-lint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cfn-nag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cfn-nag
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkov" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        checkov
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#detect-secrets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        detect-secrets
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gitleaks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gitleaks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#grype" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        grype
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#npm-audit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        npm-audit
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#opengrep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        opengrep
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#semgrep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        semgrep
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#syft" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        syft
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#trivy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        trivy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#zizmor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        zizmor
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ferret-scan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ferret-scan
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#snyk-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        snyk-code
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#trivy-repo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        trivy-repo
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reporters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../converters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Converters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../exit-codes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exit codes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../output-files/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Output files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../coverage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coverage by language
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../python-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../plugins/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugins
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Plugins
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_2" id="__nav_6_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Built-in scanner pages
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Built-in scanner pages
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/actionlint/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    actionlint
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/cfn-lint-and-cfn-guard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cfn-lint and cfn-guard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/gitleaks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/trivy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trivy filesystem scanner (trivy)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/zizmor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    zizmor (GitHub Actions)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_3" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../docs/plugins/community/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Community plugins
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6_3" id="__nav_6_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Community plugins
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/ferret-scan-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH Ferret Scan Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/snyk-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH Snyk Code Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/snyk-plugin-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Snyk Plugin CI/CD Setup Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/trivy-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trivy Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/aws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS reporters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-scanner/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a scanner plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-reporter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a reporter plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-converter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a converter plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/event-subscribers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Subscribe to scan events
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../contributing/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contributing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/documentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/interface-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interface design system
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/interface-review/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interaction surface inventory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/high-end-design-review/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design & UX review
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/releases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#environment-in-the-sandbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment in the sandbox
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#actionlint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        actionlint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bandit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bandit
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cdk-nag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cdk-nag
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cfn-guard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cfn-guard
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cfn-lint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cfn-lint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cfn-nag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cfn-nag
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkov" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        checkov
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#detect-secrets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        detect-secrets
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gitleaks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gitleaks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#grype" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        grype
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#npm-audit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        npm-audit
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#opengrep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        opengrep
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#semgrep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        semgrep
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#syft" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        syft
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#trivy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        trivy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#zizmor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        zizmor
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ferret-scan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ferret-scan
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#snyk-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        snyk-code
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#trivy-repo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        trivy-repo
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+  <nav class="md-path" aria-label="Navigation" >
+    <ol class="md-path__list">
+      
+        
+  
+  
+    <li class="md-path__item">
+      <a href="../.." class="md-path__link">
+        
+  <span class="md-ellipsis">
+    Home
+  </span>
+
+      </a>
+    </li>
+  
+
+      
+      
+        
+  
+  
+    
+    
+      <li class="md-path__item">
+        <a href="../" class="md-path__link">
+          
+  <span class="md-ellipsis">
+    Reference
+  </span>
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ol>
+  </nav>
+
+              
+              <article class="md-content__inner md-typeset">
+                
+  <div class="ash-doc-label">Documentation</div>
+  <div id="main-content" tabindex="-1">
+    
+
+
+  
+  
+
+
+<!--
+  Generated by scripts/generate_scanner_reference.py from the scanner plugins declared under automated_security_helper/plugin_modules.
+  Do not edit this file by hand: change the code or the generator, then run
+    uv run python scripts/generate_scanner_reference.py
+  CI runs `uv run python scripts/generate_scanner_reference.py --check` and fails when this file is stale.
+
+  Anchors: each scanner's heading id is its config name (#bandit, #cdk-nag);
+  each option has <a id> scanners.<name>.options.<option>.
+-->
+
+<h1 id="scanners-reference">Scanners reference<a class="headerlink" href="#scanners-reference" title="Permanent link">&para;</a></h1>
+<p>This page is generated from the scanner plugins in the ASH source code by <code>scripts/generate_scanner_reference.py</code>. Edits made to this file by hand are overwritten the next time it is generated.</p>
+<p>ASH ships 19 scanners. The built-in ones are loaded on every scan. The others are community scanners, each in a plugin module that <code>ash scan</code> loads only when the configuration's <code>ash_plugin_modules</code> (or <code>--ash-plugin-modules</code>) names the module; for the MCP server, see <a href="../../plugins/#what-a-plugin-can-do">What a plugin can do</a>.</p>
+<!-- doctest: options of=scanners -->
+<table>
+<thead>
+<tr>
+<th>Scanner</th>
+<th>Tool type</th>
+<th>Enabled by default</th>
+<th>Provided by</th>
+<th>Command</th>
+<th>Runs with <code>--python-only</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#actionlint"><code>actionlint</code></a></td>
+<td>IAC</td>
+<td>yes</td>
+<td>built in</td>
+<td><code>actionlint</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><a href="#bandit"><code>bandit</code></a></td>
+<td>SAST</td>
+<td>yes</td>
+<td>built in</td>
+<td><code>bandit</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td><a href="#cdk-nag"><code>cdk-nag</code></a></td>
+<td>IAC</td>
+<td>yes</td>
+<td>built in</td>
+<td><code>python</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><a href="#cfn-guard"><code>cfn-guard</code></a></td>
+<td>IAC</td>
+<td>yes</td>
+<td>built in</td>
+<td><code>cfn-guard</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><a href="#cfn-lint"><code>cfn-lint</code></a></td>
+<td>IAC</td>
+<td>yes</td>
+<td>built in</td>
+<td><code>cfn-lint</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td><a href="#cfn-nag"><code>cfn-nag</code></a></td>
+<td>IAC</td>
+<td>yes</td>
+<td>built in</td>
+<td><code>cfn_nag_scan</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><a href="#checkov"><code>checkov</code></a></td>
+<td>IAC</td>
+<td>yes</td>
+<td>built in</td>
+<td><code>checkov</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td><a href="#detect-secrets"><code>detect-secrets</code></a></td>
+<td>SECRETS</td>
+<td>yes</td>
+<td>built in</td>
+<td><code>detect-secrets</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td><a href="#gitleaks"><code>gitleaks</code></a></td>
+<td>SECRETS</td>
+<td>yes</td>
+<td>built in</td>
+<td><code>gitleaks</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><a href="#grype"><code>grype</code></a></td>
+<td>SCA</td>
+<td>yes</td>
+<td>built in</td>
+<td><code>grype</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><a href="#npm-audit"><code>npm-audit</code></a></td>
+<td>SCA</td>
+<td>yes</td>
+<td>built in</td>
+<td><code>npm</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><a href="#opengrep"><code>opengrep</code></a></td>
+<td>SAST</td>
+<td>yes on Linux and macOS; no on Windows</td>
+<td>built in</td>
+<td><code>opengrep</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><a href="#semgrep"><code>semgrep</code></a></td>
+<td>SAST</td>
+<td>yes on Linux and macOS; no on Windows</td>
+<td>built in</td>
+<td><code>semgrep</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td><a href="#syft"><code>syft</code></a></td>
+<td>SBOM</td>
+<td>yes</td>
+<td>built in</td>
+<td><code>syft</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><a href="#trivy"><code>trivy</code></a></td>
+<td>SCA</td>
+<td>yes</td>
+<td>built in</td>
+<td><code>trivy</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><a href="#zizmor"><code>zizmor</code></a></td>
+<td>SAST</td>
+<td>yes</td>
+<td>built in</td>
+<td><code>zizmor</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td><a href="#ferret-scan"><code>ferret-scan</code></a></td>
+<td>SECRETS</td>
+<td>yes</td>
+<td>community module <code>ash_ferret_plugins</code></td>
+<td><code>ferret-scan</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><a href="#snyk-code"><code>snyk-code</code></a></td>
+<td>SAST</td>
+<td>yes</td>
+<td>community module <code>ash_snyk_plugins</code></td>
+<td><code>snyk</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><a href="#trivy-repo"><code>trivy-repo</code></a></td>
+<td>SAST</td>
+<td>yes</td>
+<td>community module <code>ash_trivy_plugins</code></td>
+<td><code>trivy</code></td>
+<td>no</td>
+</tr>
+</tbody>
+</table>
+<p>Tool type is the scanner's own <code>ScannerToolType</code>. <code>--python-only</code> keeps a scanner when its <code>is_python_only()</code> is true: the scanner class's own <code>python_only</code> when it states one; otherwise only when the scanner runs its tool through uv, declares no install commands, and has only pip dependencies. A scanner it does not keep is SKIPPED.</p>
+<h2 id="environment-in-the-sandbox">Environment in the sandbox<a class="headerlink" href="#environment-in-the-sandbox" title="Permanent link">&para;</a></h2>
+<p>When <code>sandbox.mode</code> confines scanners, a scanner process receives only an allowlist of the environment ASH was started with. Every sandboxed scanner gets these names: <code>COLUMNS</code>, <code>CURL_CA_BUNDLE</code>, <code>FORCE_COLOR</code>, <code>GEM_HOME</code>, <code>GEM_PATH</code>, <code>JAVA_HOME</code>, <code>LANG</code>, <code>LANGUAGE</code>, <code>NODE_EXTRA_CA_CERTS</code>, <code>NO_COLOR</code>, <code>PATH</code>, <code>REQUESTS_CA_BUNDLE</code>, <code>SSL_CERT_DIR</code>, <code>SSL_CERT_FILE</code>, <code>SYSTEMROOT</code>, <code>TERM</code>, <code>TZ</code>, <code>VIRTUAL_ENV</code>; and names starting with <code>LC_</code>, <code>ASH_</code>, <code>UV_</code>, <code>PYTHON</code>. A scanner's own prefixes and names, listed with each scanner below, are added to that. A name containing <code>TOKEN</code>, <code>PASSWORD</code>, <code>PASSWD</code>, <code>SECRET</code>, <code>CREDENTIAL</code>, <code>AUTH</code>, <code>APIKEY</code>, <code>API_KEY</code>, <code>PRIVATE_KEY</code>, <code>SESSION</code> is dropped even under an allowed prefix, unless the scanner names it exactly. The proxy variables <code>HTTPS_PROXY</code>, <code>HTTP_PROXY</code>, <code>NO_PROXY</code>, <code>http_proxy</code>, <code>https_proxy</code>, <code>no_proxy</code> are passed only to a scanner that has a network. The lists are in <code>automated_security_helper/utils/sandbox/policy.py</code>.</p>
+<p>The network entry of each scanner below is its default. <code>sandbox.network_scanners</code>, when it is set, replaces every scanner's declared need: only the scanners it names get a network. A config file inside a git checkout or the scanned directory can only take network away, and an offline scan gives no scanner a network.</p>
+<h2 id="actionlint"><code>actionlint</code><a class="headerlink" href="#actionlint" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Scanner page: <a href="../../docs/plugins/builtin/actionlint/"><code>actionlint</code> scanner page</a></li>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner.ActionlintScanner</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>Tool type: IAC</li>
+<li>Command: <code>actionlint</code></li>
+<li>Install: pinned, checksum-verified release of <code>actionlint</code> by <code>ash dependencies install</code>, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64</li>
+<li>Offline strategy: <code>bundled</code></li>
+<li>Network in the sandbox, by default: no</li>
+<li>Environment passed into the sandbox: none beyond the baseline</li>
+<li>Environment set under sandbox-exec: none</li>
+</ul>
+<p>Options, under <code>scanners.actionlint.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=scanners.actionlint -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="scanners.actionlint.options.severity_threshold"></a><code>severity_threshold</code></td>
+<td>one of <code>ALL</code>, <code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code>, or null</td>
+<td><code>null</code></td>
+<td>Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.</td>
+</tr>
+<tr>
+<td><a id="scanners.actionlint.options.scan_timeout"></a><code>scan_timeout</code></td>
+<td>integer or null, at least 1</td>
+<td><code>1800</code></td>
+<td>Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.</td>
+</tr>
+<tr>
+<td><a id="scanners.actionlint.options.offline"></a><code>offline</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.</td>
+</tr>
+<tr>
+<td><a id="scanners.actionlint.options.config_file"></a><code>config_file</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>Path to an actionlint config file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Otherwise actionlint runs with an empty config, and a .github/actionlint.yaml in the scanned repository is not read. A path set here that does not exist fails the scan.</td>
+</tr>
+<tr>
+<td><a id="scanners.actionlint.options.shellcheck"></a><code>shellcheck</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>Command name or path of shellcheck, which actionlint runs on every run: script. Unset (the default) disables the integration so results do not depend on what is installed on the host. Any config may set 'shellcheck', looked up on PATH. Another program, or a path that resolves outside the scanned tree: Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. From such a config it is ignored with a warning. When set and not found, the scanner reports MISSING.</td>
+</tr>
+<tr>
+<td><a id="scanners.actionlint.options.pyflakes"></a><code>pyflakes</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>Command name or absolute path of pyflakes, which actionlint runs on 'shell: python' steps. Unset (the default) disables the integration. Any config may set 'pyflakes', looked up on PATH. Another program, or a path that resolves outside the scanned tree: Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. From such a config it is ignored with a warning. When set and not found, the scanner reports MISSING.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="bandit"><code>bandit</code><a class="headerlink" href="#bandit" title="Permanent link">&para;</a></h2>
+<p>Bandit is a Python source code security analyzer.</p>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner.BanditScanner</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>Tool type: SAST</li>
+<li>Command: <code>bandit</code></li>
+<li>Install: <code>uv tool install</code> on first use (<code>bandit[sarif,toml]&gt;=1.7.0,&lt;2.0.0</code>)</li>
+<li>Offline strategy: <code>bundled</code></li>
+<li>Network in the sandbox, by default: no</li>
+<li>Environment passed into the sandbox: <code>BANDIT_*</code></li>
+<li>Environment set under sandbox-exec: none</li>
+</ul>
+<p>Options, under <code>scanners.bandit.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=scanners.bandit -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="scanners.bandit.options.severity_threshold"></a><code>severity_threshold</code></td>
+<td>one of <code>ALL</code>, <code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code>, or null</td>
+<td><code>null</code></td>
+<td>Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.</td>
+</tr>
+<tr>
+<td><a id="scanners.bandit.options.scan_timeout"></a><code>scan_timeout</code></td>
+<td>integer or null, at least 1</td>
+<td><code>1800</code></td>
+<td>Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.</td>
+</tr>
+<tr>
+<td><a id="scanners.bandit.options.offline"></a><code>offline</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.</td>
+</tr>
+<tr>
+<td><a id="scanners.bandit.options.config_file"></a><code>config_file</code></td>
+<td>path, string, or null</td>
+<td><code>null</code></td>
+<td>Path to Bandit configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. ASH does not look for one by name. A file named exactly <code>.bandit</code> is passed with <code>bandit --ini</code>, and any other file with <code>bandit --configfile</code>. Unless config_file names a <code>.bandit</code> file that exists, ASH passes bandit an empty config file with <code>bandit --ini</code>, so bandit does not read a <code>.bandit</code> file from the scanned tree. A path that is not a file is logged as a warning and ignored.</td>
+</tr>
+<tr>
+<td><a id="scanners.bandit.options.confidence_level"></a><code>confidence_level</code></td>
+<td>string, matches <code>^(all|low|medium|high)$</code></td>
+<td><code>all</code></td>
+<td>Confidence level for bandit scan (all, low, medium, high)</td>
+</tr>
+<tr>
+<td><a id="scanners.bandit.options.ignore_nosec"></a><code>ignore_nosec</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Whether to ignore #nosec comments in the code</td>
+</tr>
+<tr>
+<td><a id="scanners.bandit.options.excluded_paths"></a><code>excluded_paths</code></td>
+<td>list of mapping</td>
+<td><code>[]</code></td>
+<td>List of paths to exclude from the bandit scan</td>
+</tr>
+<tr>
+<td><a id="scanners.bandit.options.additional_formats"></a><code>additional_formats</code></td>
+<td>list of string</td>
+<td><code>[]</code></td>
+<td>Additional output formats to generate (e.g., html, csv, xml)</td>
+</tr>
+<tr>
+<td><a id="scanners.bandit.options.tool_version"></a><code>tool_version</code></td>
+<td>string or null</td>
+<td><code>"&gt;=1.7.0,&lt;2.0.0"</code></td>
+<td>Version constraint for bandit tool installation (e.g., '&gt;=1.7.0'). If not specified, uses '&gt;=1.7.0,&lt;2.0.0' for stability.</td>
+</tr>
+<tr>
+<td><a id="scanners.bandit.options.install_timeout"></a><code>install_timeout</code></td>
+<td>integer</td>
+<td><code>300</code></td>
+<td>Timeout in seconds for tool installation (default: 300)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="cdk-nag"><code>cdk-nag</code><a class="headerlink" href="#cdk-nag" title="Permanent link">&para;</a></h2>
+<p>CDK Nag is a security scanner for AWS CloudFormation templates that applies industry standard checks against AWS infrastructure-as-code.</p>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner.CdkNagScanner</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>Tool type: IAC</li>
+<li>Command: <code>python</code></li>
+<li>Install: none declared</li>
+<li>Offline strategy: <code>bundled</code></li>
+<li>Network in the sandbox, by default: no</li>
+<li>Environment passed into the sandbox: <code>JSII_*</code></li>
+<li>Environment set under sandbox-exec: <code>JSII_RUNTIME_PACKAGE_CACHE=disabled</code></li>
+</ul>
+<p>Options, under <code>scanners.cdk-nag.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=scanners.cdk-nag -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="scanners.cdk-nag.options.severity_threshold"></a><code>severity_threshold</code></td>
+<td>one of <code>ALL</code>, <code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code>, or null</td>
+<td><code>null</code></td>
+<td>Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.</td>
+</tr>
+<tr>
+<td><a id="scanners.cdk-nag.options.scan_timeout"></a><code>scan_timeout</code></td>
+<td>integer or null, at least 1</td>
+<td><code>1800</code></td>
+<td>Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.</td>
+</tr>
+<tr>
+<td><a id="scanners.cdk-nag.options.offline"></a><code>offline</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.</td>
+</tr>
+<tr>
+<td><a id="scanners.cdk-nag.options.nag_packs"></a><code>nag_packs</code></td>
+<td>mapping</td>
+<td>see the section</td>
+<td>CDK Nag packs to enable</td>
+</tr>
+<tr>
+<td><a id="scanners.cdk-nag.options.include_compliant_checks"></a><code>include_compliant_checks</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Include INFO-level findings for compliant resources in the report.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="cfn-guard"><code>cfn-guard</code><a class="headerlink" href="#cfn-guard" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Scanner page: <a href="../../docs/plugins/builtin/cfn-lint-and-cfn-guard/"><code>cfn-guard</code> scanner page</a></li>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_guard_scanner.CfnGuardScanner</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>Tool type: IAC</li>
+<li>Command: <code>cfn-guard</code></li>
+<li>Install: pinned, checksum-verified release of <code>cfn-guard</code>; custom command by <code>ash dependencies install</code>, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64</li>
+<li>Offline strategy: <code>bundled</code></li>
+<li>Network in the sandbox, by default: no</li>
+<li>Environment passed into the sandbox: none beyond the baseline</li>
+<li>Environment set under sandbox-exec: none</li>
+</ul>
+<p>Options, under <code>scanners.cfn-guard.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=scanners.cfn-guard -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="scanners.cfn-guard.options.severity_threshold"></a><code>severity_threshold</code></td>
+<td>one of <code>ALL</code>, <code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code>, or null</td>
+<td><code>null</code></td>
+<td>Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.</td>
+</tr>
+<tr>
+<td><a id="scanners.cfn-guard.options.scan_timeout"></a><code>scan_timeout</code></td>
+<td>integer or null, at least 1</td>
+<td><code>1800</code></td>
+<td>Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.</td>
+</tr>
+<tr>
+<td><a id="scanners.cfn-guard.options.offline"></a><code>offline</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.</td>
+</tr>
+<tr>
+<td><a id="scanners.cfn-guard.options.rule_sets"></a><code>rule_sets</code></td>
+<td>list of string</td>
+<td><code>["wa-Security-Pillar"]</code></td>
+<td>Rule sets from the bundled AWS Guard Rules Registry to evaluate, by file name without the .guard extension, e.g. ['wa-Security-Pillar', 'cis-aws-benchmark-level-1']. Defaults to the Well-Architected Security Pillar set. Set to [] to evaluate only rules_paths. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning and the default set is evaluated.</td>
+</tr>
+<tr>
+<td><a id="scanners.cfn-guard.options.rules_paths"></a><code>rules_paths</code></td>
+<td>list of string</td>
+<td><code>[]</code></td>
+<td>Your own cfn-guard rules: .guard files or directories of them. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Evaluated in addition to rule_sets. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. cfn-guard prints a rules file it cannot parse, so a path the scanned repository chose could put any file the scan can read into the report. Set by such a config, it is ignored with a warning, and an empty rule_sets falls back to wa-Security-Pillar. In a directory, the .guard and .ruleset files are read, recursively; one that resolves outside the directory, through a symlink, is refused.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="cfn-lint"><code>cfn-lint</code><a class="headerlink" href="#cfn-lint" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Scanner page: <a href="../../docs/plugins/builtin/cfn-lint-and-cfn-guard/"><code>cfn-lint</code> scanner page</a></li>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner.CfnLintScanner</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>Tool type: IAC</li>
+<li>Command: <code>cfn-lint</code></li>
+<li>Install: <code>uv tool install</code> on first use (<code>cfn-lint[sarif]&gt;=1.43.3,&lt;2.0.0</code>)</li>
+<li>Offline strategy: <code>bundled</code></li>
+<li>Network in the sandbox, by default: no</li>
+<li>Environment passed into the sandbox: none beyond the baseline</li>
+<li>Environment set under sandbox-exec: none</li>
+</ul>
+<p>Options, under <code>scanners.cfn-lint.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=scanners.cfn-lint -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="scanners.cfn-lint.options.severity_threshold"></a><code>severity_threshold</code></td>
+<td>one of <code>ALL</code>, <code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code>, or null</td>
+<td><code>null</code></td>
+<td>Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.</td>
+</tr>
+<tr>
+<td><a id="scanners.cfn-lint.options.scan_timeout"></a><code>scan_timeout</code></td>
+<td>integer or null, at least 1</td>
+<td><code>1800</code></td>
+<td>Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.</td>
+</tr>
+<tr>
+<td><a id="scanners.cfn-lint.options.offline"></a><code>offline</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.</td>
+</tr>
+<tr>
+<td><a id="scanners.cfn-lint.options.config_file"></a><code>config_file</code></td>
+<td>path, string, or null</td>
+<td><code>null</code></td>
+<td>Path to a cfn-lint configuration file (.cfnlintrc). A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. When unset, ASH gives cfn-lint an empty configuration, so a .cfnlintrc in the scanned repository or the home directory is NOT read: such a file can load Python rules (append_rules) and switch checks off. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree; otherwise it is ignored with a warning.</td>
+</tr>
+<tr>
+<td><a id="scanners.cfn-lint.options.regions"></a><code>regions</code></td>
+<td>list of string</td>
+<td><code>[]</code></td>
+<td>AWS regions to validate templates against, e.g. ['us-east-1', 'eu-west-1'], or ['ALL_REGIONS']. Empty validates against us-east-1, or the regions a template names in its own cfn-lint metadata or config_file names; AWS_REGION and AWS_DEFAULT_REGION are not read.</td>
+</tr>
+<tr>
+<td><a id="scanners.cfn-lint.options.ignore_checks"></a><code>ignore_checks</code></td>
+<td>list of string</td>
+<td><code>[]</code></td>
+<td>cfn-lint rule ids or prefixes to skip, e.g. ['W2001', 'W3']. Prefer ASH suppressions for individual findings; this removes the rule from every template. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.</td>
+</tr>
+<tr>
+<td><a id="scanners.cfn-lint.options.include_checks"></a><code>include_checks</code></td>
+<td>list of string</td>
+<td><code>[]</code></td>
+<td>cfn-lint rule ids or prefixes to enable in addition to the defaults, e.g. ['I'] for informational rules.</td>
+</tr>
+<tr>
+<td><a id="scanners.cfn-lint.options.honor_inline_ignores"></a><code>honor_inline_ignores</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Honor the ignore_checks and configure_rules a template sets for itself in <code>Metadata: cfn-lint: config</code> (ignore_checks also at the resource level). Off by default: every rule outside ignore_checks and the config_file's ignore_checks is passed to cfn-lint as mandatory, and the config_file's configure_rules are passed on the command line, which cfn-lint takes instead of a template's, so a template cannot hide its own findings or the next template's parse errors, which reach ASH, where suppressions are reported and counted. A config_file setting the command line cannot carry (a list of more than one item, or a value with a comma, colon or equals sign) is then left out with a warning, and a config_file that sets merge_configs fails the scan. On, each template is linted by a cfn-lint run of its own, so its settings reach no other template; that adds a cfn-lint start-up per template. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.</td>
+</tr>
+<tr>
+<td><a id="scanners.cfn-lint.options.tool_version"></a><code>tool_version</code></td>
+<td>string or null</td>
+<td><code>"&gt;=1.43.3,&lt;2.0.0"</code></td>
+<td>Version constraint for the cfn-lint installation, in pip requirement syntax. The default is the range the scanner's SARIF handling was verified against. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.</td>
+</tr>
+<tr>
+<td><a id="scanners.cfn-lint.options.install_timeout"></a><code>install_timeout</code></td>
+<td>integer</td>
+<td><code>300</code></td>
+<td>Timeout in seconds for tool installation</td>
+</tr>
+</tbody>
+</table>
+<h2 id="cfn-nag"><code>cfn-nag</code><a class="headerlink" href="#cfn-nag" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner.CfnNagScanner</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>Tool type: IAC</li>
+<li>Command: <code>cfn_nag_scan</code></li>
+<li>Install: none declared</li>
+<li>Offline strategy: <code>bundled</code></li>
+<li>Network in the sandbox, by default: no</li>
+<li>Environment passed into the sandbox: none beyond the baseline</li>
+<li>Environment set under sandbox-exec: none</li>
+</ul>
+<p>Options, under <code>scanners.cfn-nag.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=scanners.cfn-nag -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="scanners.cfn-nag.options.severity_threshold"></a><code>severity_threshold</code></td>
+<td>one of <code>ALL</code>, <code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code>, or null</td>
+<td><code>null</code></td>
+<td>Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.</td>
+</tr>
+<tr>
+<td><a id="scanners.cfn-nag.options.scan_timeout"></a><code>scan_timeout</code></td>
+<td>integer or null, at least 1</td>
+<td><code>1800</code></td>
+<td>Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.</td>
+</tr>
+<tr>
+<td><a id="scanners.cfn-nag.options.offline"></a><code>offline</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="checkov"><code>checkov</code><a class="headerlink" href="#checkov" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner.CheckovScanner</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>Tool type: IAC</li>
+<li>Command: <code>checkov</code></li>
+<li>Install: <code>uv tool install</code> on first use (<code>checkov&gt;=3.2.0,&lt;4.0.0</code>)</li>
+<li>Offline strategy: <code>cache_flags</code></li>
+<li>Network in the sandbox, by default: no</li>
+<li>Environment passed into the sandbox: <code>CHECKOV_*</code></li>
+<li>Environment set under sandbox-exec: none</li>
+</ul>
+<p>Options, under <code>scanners.checkov.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=scanners.checkov -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="scanners.checkov.options.severity_threshold"></a><code>severity_threshold</code></td>
+<td>one of <code>ALL</code>, <code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code>, or null</td>
+<td><code>null</code></td>
+<td>Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.</td>
+</tr>
+<tr>
+<td><a id="scanners.checkov.options.scan_timeout"></a><code>scan_timeout</code></td>
+<td>integer or null, at least 1</td>
+<td><code>1800</code></td>
+<td>Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.</td>
+</tr>
+<tr>
+<td><a id="scanners.checkov.options.offline"></a><code>offline</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Run in offline mode, disabling policy downloads. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.</td>
+</tr>
+<tr>
+<td><a id="scanners.checkov.options.config_file"></a><code>config_file</code></td>
+<td>path, string, or null</td>
+<td><code>null</code></td>
+<td>Path to Checkov configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Defaults to searching for <code>.checkov.yaml</code> and <code>.checkov.yml</code> in the root of the source directory.</td>
+</tr>
+<tr>
+<td><a id="scanners.checkov.options.skip_path"></a><code>skip_path</code></td>
+<td>list of mapping</td>
+<td><code>[]</code></td>
+<td>Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying "dir1" will skip any directory or subdirectory named "dir1". Ignored with -f. Can be specified multiple times.</td>
+</tr>
+<tr>
+<td><a id="scanners.checkov.options.additional_formats"></a><code>additional_formats</code></td>
+<td>list of one of <code>cli</code>, <code>csv</code>, <code>cyclonedx</code>, <code>cyclonedx_json</code>, <code>json</code>, <code>junitxml</code>, <code>github_failed_only</code>, <code>gitlab_sast</code>, <code>sarif</code>, <code>spdx</code></td>
+<td><code>["cyclonedx_json"]</code></td>
+<td>List of additional formats to output. Defaults to including CycloneDX JSON</td>
+</tr>
+<tr>
+<td><a id="scanners.checkov.options.frameworks"></a><code>frameworks</code></td>
+<td>list of one of <code>all</code>, <code>ansible</code>, <code>argo_workflows</code>, <code>arm</code>, <code>azure_pipelines</code>, <code>bicep</code>, <code>bitbucket_pipelines</code>, <code>cdk</code>, <code>circleci_pipelines</code>, <code>cloudformation</code>, <code>dockerfile</code>, <code>github_configuration</code>, <code>github_actions</code>, <code>gitlab_configuration</code>, <code>gitlab_ci</code>, <code>bitbucket_configuration</code>, <code>helm</code>, <code>json</code>, <code>yaml</code>, <code>kubernetes</code>, <code>kustomize</code>, <code>openapi</code>, <code>sca_package</code>, <code>sca_image</code>, <code>secrets</code>, <code>serverless</code>, <code>terraform</code>, <code>terraform_json</code>, <code>terraform_plan</code>, <code>sast</code>, <code>sast_python</code>, <code>sast_java</code>, <code>sast_javascript</code>, <code>sast_typescript</code>, <code>sast_golang</code>, <code>3d_policy</code></td>
+<td><code>["all"]</code></td>
+<td>Specific frameworks to include with Checkov. Defaults to <code>all</code>.</td>
+</tr>
+<tr>
+<td><a id="scanners.checkov.options.skip_frameworks"></a><code>skip_frameworks</code></td>
+<td>list of one of <code>all</code>, <code>ansible</code>, <code>argo_workflows</code>, <code>arm</code>, <code>azure_pipelines</code>, <code>bicep</code>, <code>bitbucket_pipelines</code>, <code>cdk</code>, <code>circleci_pipelines</code>, <code>cloudformation</code>, <code>dockerfile</code>, <code>github_configuration</code>, <code>github_actions</code>, <code>gitlab_configuration</code>, <code>gitlab_ci</code>, <code>bitbucket_configuration</code>, <code>helm</code>, <code>json</code>, <code>yaml</code>, <code>kubernetes</code>, <code>kustomize</code>, <code>openapi</code>, <code>sca_package</code>, <code>sca_image</code>, <code>secrets</code>, <code>serverless</code>, <code>terraform</code>, <code>terraform_json</code>, <code>terraform_plan</code>, <code>sast</code>, <code>sast_python</code>, <code>sast_java</code>, <code>sast_javascript</code>, <code>sast_typescript</code>, <code>sast_golang</code>, <code>3d_policy</code></td>
+<td><code>[]</code></td>
+<td>Specific frameworks to exclude with Checkov. Defaults to none.</td>
+</tr>
+<tr>
+<td><a id="scanners.checkov.options.skip_ash_output_dir"></a><code>skip_ash_output_dir</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Tell Checkov to skip ASH's own output directories inside the scanned directory (this run's output directory and .ash/ash_output), so it does not parse ASH's previous reports. Defaults to true; set to false to let Checkov read them. Either way ASH drops the findings located there after the scan. Has no effect on Windows, where Checkov's --skip-path matching is unreliable.</td>
+</tr>
+<tr>
+<td><a id="scanners.checkov.options.tool_version"></a><code>tool_version</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>Version constraint for checkov installation, in pip requirement syntax. Leave unset to use the scanner's own default constraint.</td>
+</tr>
+<tr>
+<td><a id="scanners.checkov.options.install_timeout"></a><code>install_timeout</code></td>
+<td>integer</td>
+<td><code>300</code></td>
+<td>Timeout in seconds for tool installation</td>
+</tr>
+</tbody>
+</table>
+<h2 id="detect-secrets"><code>detect-secrets</code><a class="headerlink" href="#detect-secrets" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner.DetectSecretsScanner</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>Tool type: SECRETS</li>
+<li>Command: <code>detect-secrets</code></li>
+<li>Install: none declared</li>
+<li>Offline strategy: <code>bundled</code></li>
+<li>Network in the sandbox, by default: no</li>
+<li>Environment passed into the sandbox: none beyond the baseline</li>
+<li>Environment set under sandbox-exec: none</li>
+</ul>
+<p>Options, under <code>scanners.detect-secrets.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=scanners.detect-secrets -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="scanners.detect-secrets.options.severity_threshold"></a><code>severity_threshold</code></td>
+<td>one of <code>ALL</code>, <code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code>, or null</td>
+<td><code>null</code></td>
+<td>Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.</td>
+</tr>
+<tr>
+<td><a id="scanners.detect-secrets.options.scan_timeout"></a><code>scan_timeout</code></td>
+<td>integer or null, at least 1</td>
+<td><code>1800</code></td>
+<td>Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.</td>
+</tr>
+<tr>
+<td><a id="scanners.detect-secrets.options.offline"></a><code>offline</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.</td>
+</tr>
+<tr>
+<td><a id="scanners.detect-secrets.options.baseline_file"></a><code>baseline_file</code></td>
+<td>path, string, or null</td>
+<td><code>null</code></td>
+<td>Path to detect-secrets baseline file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Defaults to searching for <code>.secrets.baseline</code> in the root of the source directory. The settings from the baseline will be overwritten if scan_settings is provided.</td>
+</tr>
+<tr>
+<td><a id="scanners.detect-secrets.options.scan_settings"></a><code>scan_settings</code></td>
+<td>mapping</td>
+<td>see the section</td>
+<td>Settings to use with detect-secrets. Refer to the detect-secrets documentation for formatting information. By default, all plugins will be used and no filters are configured. scan_settings takes precedence over baseline_file</td>
+</tr>
+<tr>
+<td><a id="scanners.detect-secrets.options.skip_generated_lockfiles"></a><code>skip_generated_lockfiles</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Skip machine-generated dependency lockfiles (package-lock.json, yarn.lock, poetry.lock, and similar) before scanning. These are dense with integrity hashes and are regenerated rather than hand-edited, so findings in them are usually noise. Hand-authored dependency declarations such as requirements.txt, Pipfile and environment.yml are always scanned and are not affected by this option. Set to false to scan generated lockfiles as well.</td>
+</tr>
+<tr>
+<td><a id="scanners.detect-secrets.options.max_worker_output_mib"></a><code>max_worker_output_mib</code></td>
+<td>integer, greater than 0, at most 4,096</td>
+<td><code>256</code></td>
+<td>The most of the detect-secrets worker's output read back, in MiB, at most 4096. A finding is about 300 bytes of output, so the default of 256 holds about 900,000 findings. Reading the output costs about three times its size in memory (1024 MiB of output needs about 3 GiB). A scan whose output is larger fails and records no findings, with an error that names this option. Honored only from --config-overrides or a config file outside the scanned tree.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="gitleaks"><code>gitleaks</code><a class="headerlink" href="#gitleaks" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Scanner page: <a href="../../docs/plugins/builtin/gitleaks/"><code>gitleaks</code> scanner page</a></li>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner.GitleaksScanner</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>Tool type: SECRETS</li>
+<li>Command: <code>gitleaks</code></li>
+<li>Install: pinned, checksum-verified release of <code>gitleaks</code> by <code>ash dependencies install</code>, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64</li>
+<li>Offline strategy: <code>bundled</code></li>
+<li>Network in the sandbox, by default: no</li>
+<li>Environment passed into the sandbox: none beyond the baseline</li>
+<li>Environment set under sandbox-exec: none</li>
+</ul>
+<p>Options, under <code>scanners.gitleaks.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=scanners.gitleaks -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="scanners.gitleaks.options.severity_threshold"></a><code>severity_threshold</code></td>
+<td>one of <code>ALL</code>, <code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code>, or null</td>
+<td><code>null</code></td>
+<td>Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.</td>
+</tr>
+<tr>
+<td><a id="scanners.gitleaks.options.scan_timeout"></a><code>scan_timeout</code></td>
+<td>integer or null, at least 1</td>
+<td><code>1800</code></td>
+<td>Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.</td>
+</tr>
+<tr>
+<td><a id="scanners.gitleaks.options.offline"></a><code>offline</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.</td>
+</tr>
+<tr>
+<td><a id="scanners.gitleaks.options.config_file"></a><code>config_file</code></td>
+<td>path, string, or null</td>
+<td><code>null</code></td>
+<td>Path to a gitleaks TOML config. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Its rules and [[allowlists]] apply on top of ASH suppressions. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Unset, gitleaks uses GITLEAKS_CONFIG or GITLEAKS_CONFIG_TOML from the environment if one is set, else its default rules; a .gitleaks.toml in the scanned repository is not read. A path that does not exist fails the scan.</td>
+</tr>
+<tr>
+<td><a id="scanners.gitleaks.options.baseline_path"></a><code>baseline_path</code></td>
+<td>path, string, or null</td>
+<td><code>null</code></td>
+<td>Path to a gitleaks JSON report whose findings gitleaks ignores (gitleaks --baseline-path). A relative path is taken as for config_file. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. A path that does not exist fails the scan.</td>
+</tr>
+<tr>
+<td><a id="scanners.gitleaks.options.honor_inline_ignores"></a><code>honor_inline_ignores</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Honor gitleaks' inline <code>gitleaks:allow</code> comments. Off by default: ASH runs <code>gitleaks --ignore-gitleaks-allow</code>, so every finding reaches ASH, where suppressions are reported and counted. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.</td>
+</tr>
+<tr>
+<td><a id="scanners.gitleaks.options.max_target_megabytes"></a><code>max_target_megabytes</code></td>
+<td>integer or null, at least 1</td>
+<td><code>null</code></td>
+<td>Skip files larger than this many megabytes (gitleaks --max-target-megabytes). Unset scans every file. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="grype"><code>grype</code><a class="headerlink" href="#grype" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner.GrypeScanner</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>Tool type: SCA</li>
+<li>Command: <code>grype</code></li>
+<li>Install: pinned, checksum-verified release of <code>grype</code> by <code>ash dependencies install</code>, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64</li>
+<li>Offline strategy: <code>cache_flags</code></li>
+<li>Network in the sandbox, by default: yes, unless the scan is offline</li>
+<li>Environment passed into the sandbox: <code>GRYPE_*</code></li>
+<li>Environment set under sandbox-exec: none</li>
+</ul>
+<p>Options, under <code>scanners.grype.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=scanners.grype -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="scanners.grype.options.severity_threshold"></a><code>severity_threshold</code></td>
+<td>one of <code>ALL</code>, <code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code>, or null</td>
+<td><code>null</code></td>
+<td>No description in the code.</td>
+</tr>
+<tr>
+<td><a id="scanners.grype.options.scan_timeout"></a><code>scan_timeout</code></td>
+<td>integer or null, at least 1</td>
+<td><code>1800</code></td>
+<td>Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.</td>
+</tr>
+<tr>
+<td><a id="scanners.grype.options.offline"></a><code>offline</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Run in offline mode, disabling database updates and validation. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.</td>
+</tr>
+<tr>
+<td><a id="scanners.grype.options.config_file"></a><code>config_file</code></td>
+<td>path, string, or null</td>
+<td><code>null</code></td>
+<td>Path to Grype configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. ASH does not look for one by name. Without one, grype gets an empty config, so it does not read <code>.grype.yaml</code> from the scanned tree.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="npm-audit"><code>npm-audit</code><a class="headerlink" href="#npm-audit" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner.NpmAuditScanner</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>Tool type: SCA</li>
+<li>Command: <code>npm</code></li>
+<li>Install: none declared</li>
+<li>Offline strategy: <code>skip_offline</code></li>
+<li>Network in the sandbox, by default: yes, unless the scan is offline</li>
+<li>Environment passed into the sandbox: <code>npm_config_*</code>, <code>NPM_CONFIG_*</code>, <code>YARN_IGNORE_PATH</code>, <code>YARN_RC_FILENAME</code></li>
+<li>Environment set under sandbox-exec: none</li>
+</ul>
+<p>Options, under <code>scanners.npm-audit.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=scanners.npm-audit -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="scanners.npm-audit.options.severity_threshold"></a><code>severity_threshold</code></td>
+<td>one of <code>ALL</code>, <code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code>, or null</td>
+<td><code>null</code></td>
+<td>Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.</td>
+</tr>
+<tr>
+<td><a id="scanners.npm-audit.options.scan_timeout"></a><code>scan_timeout</code></td>
+<td>integer or null, at least 1</td>
+<td><code>1800</code></td>
+<td>Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.</td>
+</tr>
+<tr>
+<td><a id="scanners.npm-audit.options.offline"></a><code>offline</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Treat this scanner as offline even if ASH is not. npm, yarn and pnpm audit by asking the registry, so offline npm-audit does not run: it is MISSING for a project with a lockfile and SKIPPED for one without. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="opengrep"><code>opengrep</code><a class="headerlink" href="#opengrep" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner.OpengrepScanner</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes on Linux and macOS; no on Windows</li>
+<li>Tool type: SAST</li>
+<li>Command: <code>opengrep</code></li>
+<li>Install: pinned, checksum-verified release of <code>opengrep</code> by <code>ash dependencies install</code>, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64</li>
+<li>Offline strategy: <code>cache_flags</code></li>
+<li>Network in the sandbox, by default: yes, unless the scan is offline</li>
+<li>Environment passed into the sandbox: <code>OPENGREP_*</code>, <code>SEMGREP_*</code></li>
+<li>Environment set under sandbox-exec: none</li>
+</ul>
+<p>Options, under <code>scanners.opengrep.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=scanners.opengrep -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="scanners.opengrep.options.severity_threshold"></a><code>severity_threshold</code></td>
+<td>one of <code>ALL</code>, <code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code>, or null</td>
+<td><code>null</code></td>
+<td>Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.</td>
+</tr>
+<tr>
+<td><a id="scanners.opengrep.options.scan_timeout"></a><code>scan_timeout</code></td>
+<td>integer or null, at least 1</td>
+<td><code>1800</code></td>
+<td>Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.</td>
+</tr>
+<tr>
+<td><a id="scanners.opengrep.options.offline"></a><code>offline</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Run in offline mode, using locally cached rules. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.</td>
+</tr>
+<tr>
+<td><a id="scanners.opengrep.options.config"></a><code>config</code></td>
+<td>string</td>
+<td><code>p/ci</code></td>
+<td>YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Opengrep registry entry name. Defaults to 'p/ci' for consistent results across online and offline modes.</td>
+</tr>
+<tr>
+<td><a id="scanners.opengrep.options.exclude"></a><code>exclude</code></td>
+<td>list of string</td>
+<td><code>["*-converted.py", "*_report_result.txt"]</code></td>
+<td>Skip any file or directory whose path matches the pattern.</td>
+</tr>
+<tr>
+<td><a id="scanners.opengrep.options.exclude_rule"></a><code>exclude_rule</code></td>
+<td>list of string</td>
+<td><code>[]</code></td>
+<td>Skip any rule with the given id.</td>
+</tr>
+<tr>
+<td><a id="scanners.opengrep.options.severity"></a><code>severity</code></td>
+<td>list of one of <code>INFO</code>, <code>WARNING</code>, <code>ERROR</code></td>
+<td><code>[]</code></td>
+<td>Report findings only from rules matching the supplied severity level.</td>
+</tr>
+<tr>
+<td><a id="scanners.opengrep.options.metrics"></a><code>metrics</code></td>
+<td>one of <code>auto</code>, <code>on</code>, <code>off</code></td>
+<td><code>auto</code></td>
+<td>Configures how usage metrics are sent to the OpenGrep server. Deprecated in Opengrep v1.7.0+. This configuration is ignored if the installed version is &gt;= 1.7.0.</td>
+</tr>
+<tr>
+<td><a id="scanners.opengrep.options.patterns"></a><code>patterns</code></td>
+<td>list of string</td>
+<td><code>[]</code></td>
+<td>Patterns to search for with OpenGrep.</td>
+</tr>
+<tr>
+<td><a id="scanners.opengrep.options.version"></a><code>version</code></td>
+<td>string</td>
+<td><code>v1.30.2</code></td>
+<td>Version of OpenGrep to use.</td>
+</tr>
+<tr>
+<td><a id="scanners.opengrep.options.sha256"></a><code>sha256</code></td>
+<td>mapping of one of <code>linux/amd64</code>, <code>linux/arm64</code>, <code>darwin/amd64</code>, <code>darwin/arm64</code>, <code>windows/amd64</code> to string</td>
+<td><code>{}</code></td>
+<td>SHA256 of the OpenGrep release asset for a custom <code>version</code>, keyed by platform/arch (e.g. linux/amd64). Required for any version other than the one ASH pins; ignored for the pinned version, whose digests ship with ASH. Get it from GitHub's per-asset digest for the release, or by running sha256sum on the downloaded asset.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="semgrep"><code>semgrep</code><a class="headerlink" href="#semgrep" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner.SemgrepScanner</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes on Linux and macOS; no on Windows</li>
+<li>Tool type: SAST</li>
+<li>Command: <code>semgrep</code></li>
+<li>Install: <code>uv tool install</code> on first use (<code>semgrep&gt;=1.125.0,&lt;2.0.0</code>)</li>
+<li>Offline strategy: <code>cache_flags</code></li>
+<li>Network in the sandbox, by default: yes, unless the scan is offline</li>
+<li>Environment passed into the sandbox: <code>SEMGREP_*</code></li>
+<li>Environment set under sandbox-exec: none</li>
+</ul>
+<p>Options, under <code>scanners.semgrep.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=scanners.semgrep -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="scanners.semgrep.options.severity_threshold"></a><code>severity_threshold</code></td>
+<td>one of <code>ALL</code>, <code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code>, or null</td>
+<td><code>null</code></td>
+<td>Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.</td>
+</tr>
+<tr>
+<td><a id="scanners.semgrep.options.scan_timeout"></a><code>scan_timeout</code></td>
+<td>integer or null, at least 1</td>
+<td><code>1800</code></td>
+<td>Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.</td>
+</tr>
+<tr>
+<td><a id="scanners.semgrep.options.offline"></a><code>offline</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Run in offline mode, using locally cached rules. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.</td>
+</tr>
+<tr>
+<td><a id="scanners.semgrep.options.config"></a><code>config</code></td>
+<td>string</td>
+<td><code>p/ci</code></td>
+<td>YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Semgrep registry entry name. Defaults to 'p/ci' for consistent results across online and offline modes.</td>
+</tr>
+<tr>
+<td><a id="scanners.semgrep.options.exclude"></a><code>exclude</code></td>
+<td>list of string</td>
+<td><code>["*-converted.py", "*_report_result.txt"]</code></td>
+<td>Skip any file or directory whose path matches the pattern.</td>
+</tr>
+<tr>
+<td><a id="scanners.semgrep.options.exclude_rule"></a><code>exclude_rule</code></td>
+<td>list of string</td>
+<td><code>[]</code></td>
+<td>Skip any rule with the given id.</td>
+</tr>
+<tr>
+<td><a id="scanners.semgrep.options.severity"></a><code>severity</code></td>
+<td>list of one of <code>INFO</code>, <code>WARNING</code>, <code>ERROR</code></td>
+<td><code>[]</code></td>
+<td>Report findings only from rules matching the supplied severity level.</td>
+</tr>
+<tr>
+<td><a id="scanners.semgrep.options.metrics"></a><code>metrics</code></td>
+<td>one of <code>auto</code>, <code>on</code>, <code>off</code></td>
+<td><code>auto</code></td>
+<td>Configures how usage metrics are sent to the Semgrep server.</td>
+</tr>
+<tr>
+<td><a id="scanners.semgrep.options.tool_version"></a><code>tool_version</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>Version constraint for semgrep installation, in pip requirement syntax. Leave unset to use the scanner's own default constraint.</td>
+</tr>
+<tr>
+<td><a id="scanners.semgrep.options.install_timeout"></a><code>install_timeout</code></td>
+<td>integer</td>
+<td><code>300</code></td>
+<td>Timeout in seconds for tool installation</td>
+</tr>
+</tbody>
+</table>
+<h2 id="syft"><code>syft</code><a class="headerlink" href="#syft" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner.SyftScanner</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>Tool type: SBOM</li>
+<li>Command: <code>syft</code></li>
+<li>Install: pinned, checksum-verified release of <code>syft</code> by <code>ash dependencies install</code>, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64</li>
+<li>Offline strategy: <code>cache_flags</code></li>
+<li>Network in the sandbox, by default: no</li>
+<li>Environment passed into the sandbox: <code>SYFT_*</code></li>
+<li>Environment set under sandbox-exec: none</li>
+</ul>
+<p>Options, under <code>scanners.syft.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=scanners.syft -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="scanners.syft.options.severity_threshold"></a><code>severity_threshold</code></td>
+<td>one of <code>ALL</code>, <code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code>, or null</td>
+<td><code>null</code></td>
+<td>Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.</td>
+</tr>
+<tr>
+<td><a id="scanners.syft.options.scan_timeout"></a><code>scan_timeout</code></td>
+<td>integer or null, at least 1</td>
+<td><code>1800</code></td>
+<td>Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.</td>
+</tr>
+<tr>
+<td><a id="scanners.syft.options.offline"></a><code>offline</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Run in offline mode, disabling update checks. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.</td>
+</tr>
+<tr>
+<td><a id="scanners.syft.options.config_file"></a><code>config_file</code></td>
+<td>path, string, or null</td>
+<td><code>null</code></td>
+<td>Path to Syft configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. ASH does not look for one by name. Without one, syft gets an empty config, so it does not read <code>.syft.yaml</code> from the scanned tree.</td>
+</tr>
+<tr>
+<td><a id="scanners.syft.options.exclude"></a><code>exclude</code></td>
+<td>list of mapping</td>
+<td><code>[]</code></td>
+<td>Paths (files or directories) to skip, each a glob relative to the scanned directory and passed to syft as one --exclude. A glob must start with "./", "*/" or "**/", and syft fails the scan on any other. "*" does not match across "/" and "**" does: "./dir1/**" skips the top-level "dir1", and "**/dir1/**" skips every directory named "dir1".</td>
+</tr>
+<tr>
+<td><a id="scanners.syft.options.additional_outputs"></a><code>additional_outputs</code></td>
+<td>list of one of <code>cyclonedx-json</code>, <code>cyclonedx-xml</code>, <code>github-json</code>, <code>spdx-json</code>, <code>spdx-tag-value</code>, <code>syft-json</code>, <code>syft-table</code>, <code>syft-text</code></td>
+<td><code>["syft-table"]</code></td>
+<td>List of additional formats to output. Defaults to syft-table.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="trivy"><code>trivy</code><a class="headerlink" href="#trivy" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Scanner page: <a href="../../docs/plugins/builtin/trivy/"><code>trivy</code> scanner page</a></li>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner.TrivyScanner</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>Tool type: SCA</li>
+<li>Command: <code>trivy</code></li>
+<li>Install: pinned, checksum-verified release of <code>trivy</code> by <code>ash dependencies install</code>, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64</li>
+<li>Offline strategy: <code>cache_flags</code></li>
+<li>Network in the sandbox, by default: yes, unless the scan is offline</li>
+<li>Environment passed into the sandbox: <code>TRIVY_*</code></li>
+<li>Environment set under sandbox-exec: none</li>
+</ul>
+<p>Options, under <code>scanners.trivy.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=scanners.trivy -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="scanners.trivy.options.severity_threshold"></a><code>severity_threshold</code></td>
+<td>one of <code>ALL</code>, <code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code>, or null</td>
+<td><code>null</code></td>
+<td>Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.</td>
+</tr>
+<tr>
+<td><a id="scanners.trivy.options.scan_timeout"></a><code>scan_timeout</code></td>
+<td>integer or null, at least 1</td>
+<td><code>1800</code></td>
+<td>Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.</td>
+</tr>
+<tr>
+<td><a id="scanners.trivy.options.offline"></a><code>offline</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Run in offline mode: skip database and check updates and use the vulnerability database already in trivy's cache. ASH still fails the scan when that database is past its 24h bound. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.</td>
+</tr>
+<tr>
+<td><a id="scanners.trivy.options.scanners"></a><code>scanners</code></td>
+<td>list of one of <code>vuln</code>, <code>misconfig</code>, <code>secret</code>, <code>license</code>, length at least 1</td>
+<td><code>["vuln"]</code></td>
+<td>Which trivy scanners to run. Defaults to vuln only: ASH's default scanners already cover secrets (detect-secrets) and IaC misconfigurations (checkov, cfn-nag, cdk-nag), and license findings are a compliance question. Add secret, misconfig or license to run trivy's checks for them as well. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, any set but the default is ignored with a warning.</td>
+</tr>
+<tr>
+<td><a id="scanners.trivy.options.license_full"></a><code>license_full</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Look for licenses in source file headers and license files too (trivy --license-full). Only used when scanners includes license.</td>
+</tr>
+<tr>
+<td><a id="scanners.trivy.options.ignore_unfixed"></a><code>ignore_unfixed</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Report only vulnerabilities that have a fixed version (trivy --ignore-unfixed). Off by default: an unfixed vulnerability is still one, and turning this on withholds it from the report.</td>
+</tr>
+<tr>
+<td><a id="scanners.trivy.options.disable_telemetry"></a><code>disable_telemetry</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Disable sending anonymous usage data to Aqua (--disable-telemetry). Only the operator sets it to false, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, may set it to true but not to false. Offline, trivy sends none whatever this says. As for trivy-repo.</td>
+</tr>
+<tr>
+<td><a id="scanners.trivy.options.config_file"></a><code>config_file</code></td>
+<td>path, string, or null</td>
+<td><code>null</code></td>
+<td>A trivy config file (trivy.yaml), passed as --config. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree; otherwise it is ignored with a warning. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Unset or ignored, ASH passes TRIVY_CONFIG when that names a file outside the scanned tree (a relative path in it is taken from the working directory), and otherwise an empty config of its own, so a trivy.yaml in the scanned repository is not read: its settings (severity, scan.skip-files, db.repository, ...) can drop findings with nothing in the report saying so, and module.dir can load WASM modules. A path that does not exist fails the scan.</td>
+</tr>
+<tr>
+<td><a id="scanners.trivy.options.ignore_file"></a><code>ignore_file</code></td>
+<td>path, string, or null</td>
+<td><code>null</code></td>
+<td>A trivy ignore file, passed as --ignorefile. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree; a relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides and the environment variable. Unset, TRIVY_IGNOREFILE is used the same way, and otherwise trivy gets an empty one, so a .trivyignore in the scanned repository does not remove findings. As for trivy-repo.</td>
+</tr>
+<tr>
+<td><a id="scanners.trivy.options.secret_config_file"></a><code>secret_config_file</code></td>
+<td>path, string, or null</td>
+<td><code>null</code></td>
+<td>A trivy secret scanning config (trivy-secret.yaml), passed as --secret-config. Only read when scanners includes secret. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree, and a relative path is taken as for ignore_file. Unset, TRIVY_SECRET_CONFIG is used the same way, and otherwise trivy gets an empty one, so a trivy-secret.yaml in the scanned repository does not disable secret rules. As for trivy-repo.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="zizmor"><code>zizmor</code><a class="headerlink" href="#zizmor" title="Permanent link">&para;</a></h2>
+<p>zizmor finds security issues in GitHub Actions workflows and composite actions.</p>
+<ul>
+<li>Scanner page: <a href="../../docs/plugins/builtin/zizmor/"><code>zizmor</code> scanner page</a></li>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner.ZizmorScanner</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>Tool type: SAST</li>
+<li>Command: <code>zizmor</code></li>
+<li>Install: <code>uv tool install</code> on first use (<code>zizmor&gt;=1.29.0,&lt;2.0.0</code>)</li>
+<li>Offline strategy: <code>bundled</code></li>
+<li>Network in the sandbox, by default: no</li>
+<li>Environment passed into the sandbox: none beyond the baseline</li>
+<li>Environment set under sandbox-exec: none</li>
+</ul>
+<p>Options, under <code>scanners.zizmor.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=scanners.zizmor -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="scanners.zizmor.options.severity_threshold"></a><code>severity_threshold</code></td>
+<td>one of <code>ALL</code>, <code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code>, or null</td>
+<td><code>null</code></td>
+<td>Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.</td>
+</tr>
+<tr>
+<td><a id="scanners.zizmor.options.scan_timeout"></a><code>scan_timeout</code></td>
+<td>integer or null, at least 1</td>
+<td><code>1800</code></td>
+<td>Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.</td>
+</tr>
+<tr>
+<td><a id="scanners.zizmor.options.offline"></a><code>offline</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.</td>
+</tr>
+<tr>
+<td><a id="scanners.zizmor.options.config_file"></a><code>config_file</code></td>
+<td>path, string, or null</td>
+<td><code>null</code></td>
+<td>Path to a zizmor configuration file, passed as <code>zizmor --config</code>. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory; an absolute path is used as given. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Otherwise it runs <code>zizmor --no-config</code>, so a <code>zizmor.yml</code> or <code>.github/zizmor.yml</code> in the scanned repository is not read.</td>
+</tr>
+<tr>
+<td><a id="scanners.zizmor.options.persona"></a><code>persona</code></td>
+<td>one of <code>regular</code>, <code>pedantic</code>, <code>auditor</code></td>
+<td><code>regular</code></td>
+<td>zizmor persona. <code>regular</code> reports the fewest false positives; <code>pedantic</code> adds code-smell findings; <code>auditor</code> reports everything, false positives included.</td>
+</tr>
+<tr>
+<td><a id="scanners.zizmor.options.online_audits"></a><code>online_audits</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Allow zizmor's online audits. Off by default: ASH runs <code>zizmor --offline</code> and any GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN is removed from its environment. When true, ASH does not pass <code>zizmor --offline</code>, those variables reach zizmor unchanged, and zizmor may call the GitHub API with the token. ASH never reads or logs the token. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. It is ignored, with a warning, when ASH runs in offline mode.</td>
+</tr>
+<tr>
+<td><a id="scanners.zizmor.options.honor_inline_ignores"></a><code>honor_inline_ignores</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Honor zizmor's inline <code># zizmor: ignore[...]</code> comments and the <code>ignore</code> rules of the operator's <code>config_file</code>. Off by default: ASH runs <code>zizmor --no-ignores</code>, so every finding reaches ASH, where suppressions are reported and counted. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.</td>
+</tr>
+<tr>
+<td><a id="scanners.zizmor.options.tool_version"></a><code>tool_version</code></td>
+<td>string or null</td>
+<td><code>"&gt;=1.29.0,&lt;2.0.0"</code></td>
+<td>Version constraint for zizmor installation, in pip requirement syntax. The default below is the constraint the scanner enforces. Another value: Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning and the default applies.</td>
+</tr>
+<tr>
+<td><a id="scanners.zizmor.options.install_timeout"></a><code>install_timeout</code></td>
+<td>integer</td>
+<td><code>300</code></td>
+<td>Timeout in seconds for tool installation</td>
+</tr>
+</tbody>
+</table>
+<h2 id="ferret-scan"><code>ferret-scan</code><a class="headerlink" href="#ferret-scan" title="Permanent link">&para;</a></h2>
+<p>Ferret Scan is a sensitive data detection tool that scans files for potential sensitive information such as credit card numbers, passport numbers, SSNs, API keys, and other secrets.</p>
+<ul>
+<li>Scanner page: <a href="../../docs/plugins/community/ferret-scan-plugin/"><code>ferret-scan</code> scanner page</a></li>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.FerretScanScanner</code></li>
+<li>Provided by: community module <code>ash_ferret_plugins</code>, which <code>ash scan</code> loads when <code>ash_plugin_modules</code> names <code>automated_security_helper.plugin_modules.ash_ferret_plugins</code></li>
+<li>Enabled by default: yes</li>
+<li>Tool type: SECRETS</li>
+<li>Command: <code>ferret-scan</code></li>
+<li>Install: none declared</li>
+<li>Offline strategy: <code>bundled</code></li>
+<li>Network in the sandbox, by default: no</li>
+<li>Environment passed into the sandbox: <code>FERRET_*</code></li>
+<li>Environment set under sandbox-exec: none</li>
+</ul>
+<p>Options, under <code>scanners.ferret-scan.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=scanners.ferret-scan -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="scanners.ferret-scan.options.severity_threshold"></a><code>severity_threshold</code></td>
+<td>one of <code>ALL</code>, <code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code>, or null</td>
+<td><code>null</code></td>
+<td>Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.</td>
+</tr>
+<tr>
+<td><a id="scanners.ferret-scan.options.scan_timeout"></a><code>scan_timeout</code></td>
+<td>integer or null, at least 1</td>
+<td><code>1800</code></td>
+<td>Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.</td>
+</tr>
+<tr>
+<td><a id="scanners.ferret-scan.options.offline"></a><code>offline</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.</td>
+</tr>
+<tr>
+<td><a id="scanners.ferret-scan.options.confidence_levels"></a><code>confidence_levels</code></td>
+<td>one of <code>all</code>, <code>high</code>, <code>medium</code>, <code>low</code>, <code>high,medium</code>, <code>high,low</code>, <code>medium,low</code></td>
+<td><code>all</code></td>
+<td>Confidence levels to display: 'high', 'medium', 'low', or combinations</td>
+</tr>
+<tr>
+<td><a id="scanners.ferret-scan.options.checks"></a><code>checks</code></td>
+<td>string</td>
+<td><code>all</code></td>
+<td>Specific checks to run, comma-separated. As of ferret-scan v2.4.5 through v2.5.2: BANK_ACCOUNT, CLOUD_RESOURCES, CREDIT_CARD, DATE_OF_BIRTH, DRIVERS_LICENSE, EMAIL, INTELLECTUAL_PROPERTY, IP_ADDRESS, MEDICAL_ID, METADATA, OTP, PASSPORT, PERSON_NAME, PHONE, PHYSICAL_ADDRESS, SECRETS, SOCIAL_MEDIA, SSN, VIN, or 'all'. The authoritative list for the installed version is 'ferret-scan --help checks'.</td>
+</tr>
+<tr>
+<td><a id="scanners.ferret-scan.options.recursive"></a><code>recursive</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Recursively scan directories</td>
+</tr>
+<tr>
+<td><a id="scanners.ferret-scan.options.config_file"></a><code>config_file</code></td>
+<td>path, string, or null</td>
+<td><code>null</code></td>
+<td>Path to Ferret configuration file (YAML). If not specified, uses the default config bundled with this plugin. Set to a custom path to override the default configuration.</td>
+</tr>
+<tr>
+<td><a id="scanners.ferret-scan.options.use_default_config"></a><code>use_default_config</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Use the default ferret-config.yaml bundled with this plugin. Set to False to disable the default config and rely only on ferret-scan's built-in defaults. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it.</td>
+</tr>
+<tr>
+<td><a id="scanners.ferret-scan.options.profile"></a><code>profile</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>Profile name to use from config file (e.g., 'quick', 'ci', 'security-audit', 'comprehensive'). A profile can run fewer checks and report only higher-confidence findings. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it.</td>
+</tr>
+<tr>
+<td><a id="scanners.ferret-scan.options.exclude_patterns"></a><code>exclude_patterns</code></td>
+<td>list of string</td>
+<td><code>[]</code></td>
+<td>File patterns to exclude from scanning (glob patterns)</td>
+</tr>
+<tr>
+<td><a id="scanners.ferret-scan.options.show_match"></a><code>show_match</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Display the actual matched text in findings. Note: This affects ferret-scan output, not ASH logging.</td>
+</tr>
+<tr>
+<td><a id="scanners.ferret-scan.options.enable_preprocessors"></a><code>enable_preprocessors</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Enable text extraction from documents (PDF, Office files). This allows scanning content within binary document formats.</td>
+</tr>
+<tr>
+<td><a id="scanners.ferret-scan.options.finding_limit"></a><code>finding_limit</code></td>
+<td>integer, at least 0</td>
+<td><code>0</code></td>
+<td>Maximum number of findings ferret-scan will emit, passed as '--limit'. ferret-scan defaults to 200, which silently truncates results on large scans; ASH defaults this to 0 (unlimited) so no findings are dropped from the SARIF report. Set a positive integer to cap output.</td>
+</tr>
+<tr>
+<td><a id="scanners.ferret-scan.options.fail_on_incomplete"></a><code>fail_on_incomplete</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Pass '--fail-on-incomplete' so ferret-scan exits 3 when a file could not be fully scanned (coverage cut short by a timeout/budget, or the file could not be opened). Findings may be missing in that case. The plugin still reports the (partial) findings, and counts the target as failed, so the scanner's row is ERROR and the completeness gate fails the scan. Off by default to match ferret-scan, which otherwise only warns on stderr.</td>
+</tr>
+<tr>
+<td><a id="scanners.ferret-scan.options.respect_gitignore"></a><code>respect_gitignore</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Pass '--respect-gitignore' so ferret-scan honours .gitignore when scanning. Off by default: .gitignore commonly hides files with high secret-scanning value (.env, *.pem, credentials/), so honouring it can suppress exactly what a sensitive-data scan should see.</td>
+</tr>
+<tr>
+<td><a id="scanners.ferret-scan.options.disable_ip_types"></a><code>disable_ip_types</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>Comma-separated INTELLECTUAL_PROPERTY sub-types to skip, passed as '--disable-ip-types': copyright, patent, trademark, trade_secret, internal_url. Useful for codebases with a standard copyright header on every file. Only affects the INTELLECTUAL_PROPERTY check.</td>
+</tr>
+<tr>
+<td><a id="scanners.ferret-scan.options.explain"></a><code>explain</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Pass '--explain' so ferret-scan annotates each finding with a plain-language rationale, a verdict (likely real/test/uncertain), and a drafted suppression reason. Fully offline — no data leaves the host.</td>
+</tr>
+<tr>
+<td><a id="scanners.ferret-scan.options.validator_budget"></a><code>validator_budget</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>Per-validator time budget passed as '--validator-budget', e.g. 'SSN=500ms,IP_ADDRESS=2m' or 'all=2m'. Over-budget validators are stopped and the scan is marked incomplete (see fail_on_incomplete). Default: no budget.</td>
+</tr>
+<tr>
+<td><a id="scanners.ferret-scan.options.max_live_bytes"></a><code>max_live_bytes</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>Cap on total extracted content held in memory across concurrently scanned files, passed as '--max-live-bytes', e.g. '256MB' or '1GB' (units: B, KB, MB, GB; bare number = bytes). Bounds peak memory on constrained hosts. Default: no cap.</td>
+</tr>
+<tr>
+<td><a id="scanners.ferret-scan.options.ferret_debug"></a><code>ferret_debug</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Enable ferret-scan's debug logging (shows preprocessing and validation flow). This controls ferret-scan's own output, not ASH logging.</td>
+</tr>
+<tr>
+<td><a id="scanners.ferret-scan.options.ferret_verbose"></a><code>ferret_verbose</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Enable ferret-scan's verbose output (detailed finding info). This controls ferret-scan's own output, not ASH logging.</td>
+</tr>
+<tr>
+<td><a id="scanners.ferret-scan.options.tool_version"></a><code>tool_version</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>Version constraint for ferret-scan installation (e.g., '&gt;=1.0.0,&lt;2.0.0', '==1.2.0'). If not specified, uses the plugin's default compatible version range: &gt;=2.4.5,&lt;2.6.0. Supported versions: 2.4.5 to 2.6.0 (exclusive).</td>
+</tr>
+<tr>
+<td><a id="scanners.ferret-scan.options.skip_version_check"></a><code>skip_version_check</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Skip version compatibility check. Use with caution - incompatible versions may cause unexpected behavior or errors.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="snyk-code"><code>snyk-code</code><a class="headerlink" href="#snyk-code" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Scanner page: <a href="../../docs/plugins/community/snyk-plugin/"><code>snyk-code</code> scanner page</a></li>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner.SnykCodeScanner</code></li>
+<li>Provided by: community module <code>ash_snyk_plugins</code>, which <code>ash scan</code> loads when <code>ash_plugin_modules</code> names <code>automated_security_helper.plugin_modules.ash_snyk_plugins</code></li>
+<li>Enabled by default: yes</li>
+<li>Tool type: SAST</li>
+<li>Command: <code>snyk</code></li>
+<li>Install: none declared</li>
+<li>Offline strategy: <code>skip_offline</code></li>
+<li>Network in the sandbox, by default: yes, unless the scan is offline</li>
+<li>Environment passed into the sandbox: <code>SNYK_*</code>, <code>SNYK_TOKEN</code></li>
+<li>Environment set under sandbox-exec: none</li>
+</ul>
+<p>Options, under <code>scanners.snyk-code.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=scanners.snyk-code -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="scanners.snyk-code.options.severity_threshold"></a><code>severity_threshold</code></td>
+<td>one of <code>ALL</code>, <code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code>, or null</td>
+<td><code>null</code></td>
+<td>Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.</td>
+</tr>
+<tr>
+<td><a id="scanners.snyk-code.options.scan_timeout"></a><code>scan_timeout</code></td>
+<td>integer or null, at least 1</td>
+<td><code>1800</code></td>
+<td>Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.</td>
+</tr>
+<tr>
+<td><a id="scanners.snyk-code.options.offline"></a><code>offline</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.</td>
+</tr>
+<tr>
+<td><a id="scanners.snyk-code.options.honor_tree_exclusions"></a><code>honor_tree_exclusions</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Let snyk code test apply the exclusion files it finds in the scanned tree: the exclude.code and exclude.global entries of a .snyk file and the rules of a .dcignore file, which leave the files they name out of the analysis. snyk has no option that stops it reading them, so while this is false and the tree has one, snyk-code does not run and its error names the files. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="trivy-repo"><code>trivy-repo</code><a class="headerlink" href="#trivy-repo" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Scanner page: <a href="../../docs/plugins/community/trivy-plugin/"><code>trivy-repo</code> scanner page</a></li>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner.TrivyRepoScanner</code></li>
+<li>Provided by: community module <code>ash_trivy_plugins</code>, which <code>ash scan</code> loads when <code>ash_plugin_modules</code> names <code>automated_security_helper.plugin_modules.ash_trivy_plugins</code></li>
+<li>Enabled by default: yes</li>
+<li>Tool type: SAST</li>
+<li>Command: <code>trivy</code></li>
+<li>Install: pinned, checksum-verified release of <code>trivy</code> by <code>ash dependencies install</code>, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64</li>
+<li>Offline strategy: <code>cache_flags</code></li>
+<li>Network in the sandbox, by default: yes, unless the scan is offline</li>
+<li>Environment passed into the sandbox: <code>TRIVY_*</code></li>
+<li>Environment set under sandbox-exec: none</li>
+</ul>
+<p>Options, under <code>scanners.trivy-repo.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=scanners.trivy-repo -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="scanners.trivy-repo.options.severity_threshold"></a><code>severity_threshold</code></td>
+<td>one of <code>ALL</code>, <code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code>, or null</td>
+<td><code>null</code></td>
+<td>Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.</td>
+</tr>
+<tr>
+<td><a id="scanners.trivy-repo.options.scan_timeout"></a><code>scan_timeout</code></td>
+<td>integer or null, at least 1</td>
+<td><code>1800</code></td>
+<td>Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.</td>
+</tr>
+<tr>
+<td><a id="scanners.trivy-repo.options.offline"></a><code>offline</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Run in offline mode, skipping DB updates and check-update calls. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.</td>
+</tr>
+<tr>
+<td><a id="scanners.trivy-repo.options.scanners"></a><code>scanners</code></td>
+<td>list of one of <code>vuln</code>, <code>misconfig</code>, <code>secret</code>, <code>license</code></td>
+<td><code>["vuln", "secret", "misconfig", "license"]</code></td>
+<td>List of what security issues to detect with Trivy Repo specifically</td>
+</tr>
+<tr>
+<td><a id="scanners.trivy-repo.options.license_full"></a><code>license_full</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Eagerly look for licenses in source code headers and license files</td>
+</tr>
+<tr>
+<td><a id="scanners.trivy-repo.options.ignore_unfixed"></a><code>ignore_unfixed</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Display only fixed vulnerabilities</td>
+</tr>
+<tr>
+<td><a id="scanners.trivy-repo.options.disable_telemetry"></a><code>disable_telemetry</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Disable sending anonymous usage data to Aqua (--disable-telemetry). Only the operator sets it to false, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, may set it to true but not to false. Offline, trivy sends none whatever this says.</td>
+</tr>
+<tr>
+<td><a id="scanners.trivy-repo.options.config_file"></a><code>config_file</code></td>
+<td>path, string, or null</td>
+<td><code>null</code></td>
+<td>A trivy config file (trivy.yaml), passed as --config. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree; otherwise it is ignored with a warning. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Unset or ignored, ASH passes TRIVY_CONFIG when that names a file outside the scanned tree (a relative path in it is taken from the working directory), and otherwise an empty config of its own, so trivy does not load a trivy.yaml from the directory it runs in. A path that does not exist fails the scan.</td>
+</tr>
+<tr>
+<td><a id="scanners.trivy-repo.options.module_dir"></a><code>module_dir</code></td>
+<td>path, string, or null</td>
+<td><code>null</code></td>
+<td>A directory of trivy modules, passed as --module-dir. Unset, ASH passes an empty directory of its own. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The directory is used, and a relative path taken, as for config_file. A path that is not a directory fails the scan.</td>
+</tr>
+<tr>
+<td><a id="scanners.trivy-repo.options.ignore_file"></a><code>ignore_file</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>A trivy ignore file, passed as --ignorefile. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree; a relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides and the environment variable. Unset, TRIVY_IGNOREFILE is used the same way, and otherwise trivy gets an empty one, so a .trivyignore in the scanned repository does not remove findings.</td>
+</tr>
+<tr>
+<td><a id="scanners.trivy-repo.options.secret_config_file"></a><code>secret_config_file</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>A trivy secret scanning config (trivy-secret.yaml), passed as --secret-config. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree; a relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides and the environment variable. Unset, TRIVY_SECRET_CONFIG is used the same way, and otherwise trivy gets an empty one, so a trivy-secret.yaml in the scanned repository does not disable secret rules.</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,116.24a6,6,0,0,1-8.48,0L134,54.49V216a6,6,0,0,1-12,0V54.49L60.24,116.24a6,6,0,0,1-8.48-8.48l72-72a6,6,0,0,1,8.48,0l72,72A6,6,0,0,1,204.24,116.24Z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+  
+    
+
+<nav class="ash-pagination" aria-label="Previous and next documentation pages">
+  <div class="ash-wrap ash-pagination__inner">
+    
+    <a href="../environment-variables/" rel="prev">
+      <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M222,128a6,6,0,0,1-6,6H54.49l61.75,61.76a6,6,0,1,1-8.48,8.48l-72-72a6,6,0,0,1,0-8.48l72-72a6,6,0,0,1,8.48,8.48L54.49,122H216A6,6,0,0,1,222,128Z"/></svg></span><span><span class="ash-pagination__direction">PREVIOUS</span>Environment variables</span>
+    </a>
+    
+    
+    <a class="ash-pagination__next" href="../reporters/" rel="next">
+      <span><span class="ash-pagination__direction">NEXT</span>Reporters</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M220.24,132.24l-72,72a6,6,0,0,1-8.48-8.48L201.51,134H40a6,6,0,0,1,0-12H201.51L139.76,60.24a6,6,0,0,1,8.48-8.48l72,72A6,6,0,0,1,220.24,132.24Z"/></svg></span>
+    </a>
+    
+  </div>
+</nav>
+
+  
+  <footer class="ash-footer">
+    <div class="ash-wrap ash-footer__top">
+      <div>
+        <a class="ash-brand" href="../.." aria-label="ASH home">
+          <span class="ash-brand__name">ASH<span class="ash-brand__subtitle">Automated Security Helper</span></span>
+        </a>
+      </div>
+      <div class="ash-footer__links">
+        <div><span>Documentation</span><a href="../../getting-started/local/">Quick start</a><a href="../../how-to/configure/">Configuration</a><a href="../cli/">CLI reference</a></div>
+        <div><span>Integrations</span><a href="./">Scanners</a><a href="../../getting-started/ci/">CI/CD integration</a><a href="../../plugins/">Plugin development</a></div>
+        <div><span>Project</span><a href="https://github.com/awslabs/automated-security-helper">GitHub <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a><a href="../../contributing/">Contribute</a><a href="https://github.com/awslabs/automated-security-helper/issues">Get help <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a></div>
+      </div>
+    </div>
+    <div class="ash-wrap ash-footer__bottom">
+      <span class="ash-footer-credit">Build with <span class="ash-footer-heart" role="img" aria-label="love">&lt;3</span> at Amazon Web Services</span>
+      <div><button class="ash-motion-toggle" type="button" data-ash-motion aria-pressed="false"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M128,26A102,102,0,1,0,230,128,102.12,102.12,0,0,0,128,26Zm0,192a90,90,0,1,1,90-90A90.1,90.1,0,0,1,128,218ZM110,96v64a6,6,0,0,1-12,0V96a6,6,0,0,1,12,0Zm48,0v64a6,6,0,0,1-12,0V96a6,6,0,0,1,12,0Z"/></svg></span> <span>Pause motion</span></button><a href="https://github.com/awslabs/automated-security-helper/blob/main/LICENSE">License</a><a href="../../contributing/#security-issue-notifications">Security</a></div>
+    </div>
+    <div class="ash-wrap ash-footer__copyright">&copy; Amazon Web Services, Inc. or its affiliates. All rights reserved.</div>
+  </footer>
+  <div class="ash-toast" role="status" aria-live="polite" aria-atomic="true" data-ash-toast></div>
+
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.indexes", "navigation.path", "navigation.top", "navigation.footer", "toc.follow", "content.tabs.link", "search.share", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate", "content.code.select"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../assets/javascripts/ash.js"></script>
+      
+    
+  </body>
+</html>
