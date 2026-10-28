@@ -6007,31 +6007,25 @@ def test_an_invalid_option_is_refused_when_the_reporter_is_built(tmp_path):
     assert "max_retries" in str(raised.value)
 
 
-def test_a_config_read_as_the_base_class_does_not_turn_the_reporter_on(
-    tmp_path, caplog
+def test_a_config_named_for_another_reporter_is_refused_when_the_reporter_is_built(
+    tmp_path,
 ):
-    """A section SecurityHubReporterConfig refuses and ReporterPluginConfigBase
-    accepts (a `name` that is not aws-security-hub) is still read as the base
-    class, whose enabled defaults to True. The reporter turns itself off and
-    report() refuses, naming what was wrong."""
-    with caplog.at_level(logging.ERROR):
-        reporter = SecurityHubReporter(
-            context=PluginContext(
-                source_dir=tmp_path,
-                output_dir=tmp_path / "out",
-                config=AshConfig(project_name="fixture-project"),
-            ),
-            config={"enabled": True, "name": "not-security-hub"},
-        )
-
-    assert isinstance(reporter.config, SecurityHubReporterConfig)
-    assert reporter.config.enabled is False
-    assert "aws-security-hub is disabled" in caplog.text
-
+    """A section whose `name` is not aws-security-hub is validated by this
+    reporter's own config model (config_validated_by_declared_model in
+    base/plugin_config.py), never read as ReporterPluginConfigBase, whose
+    enabled defaults to True. So no reporter is built, and nothing contacts
+    AWS."""
     session = MagicMock(side_effect=AssertionError("AWS was contacted"))
     with patch.object(securityhub_module.boto3, "Session", session):
-        assert _filter_enabled(reporter, reporter.context) == []
-        with pytest.raises(SecurityHubImportError) as raised:
-            reporter.report(_model(_many(1)))
+        with pytest.raises(ValidationError) as raised:
+            SecurityHubReporter(
+                context=PluginContext(
+                    source_dir=tmp_path,
+                    output_dir=tmp_path / "out",
+                    config=AshConfig(project_name="fixture-project"),
+                ),
+                config={"enabled": True, "name": "not-security-hub"},
+            )
     session.assert_not_called()
-    assert "name: Input should be 'aws-security-hub'" in str(raised.value)
+    assert "name" in str(raised.value)
+    assert "aws-security-hub" in str(raised.value)
