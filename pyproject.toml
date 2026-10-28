@@ -356,8 +356,8 @@ version_files = [
     "deploy/terraform/modules/codecommit-gate/examples/basic/main.tf:^\\s+ash_version\\s+=",
     "deploy/terraform/modules/codepipeline-executor/examples/basic/main.tf:^\\s+ash_version\\s+=",
     "deploy/terraform/modules/fargate/examples/basic/main.tf:^\\s+ash_version\\s+=",
-    "examples/AWSCodeBuild/buildspec.yml:ASH_VERSION:",
-    "examples/AWSCodeBuild/README.md:^\\| `ASH_VERSION`",
+    "examples/AWSCodeBuild/buildspec.yml:RELEASE_TAG:",
+    "examples/AWSCodeBuild/README.md:^\\| `RELEASE_TAG`",
 ]
 # Rewriting _base/ is only half the chain: the 17 generated trees are still on
 # the old tag until the transpiler reruns, and `agentic-plugins check` byte-
