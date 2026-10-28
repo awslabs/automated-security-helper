@@ -368,9 +368,9 @@ def test_nonexistent_configured_config_file_warns_and_passes_an_empty_ini(
         "Configured bandit config file does not exist" in r.message
         for r in caplog.records
     ), f"expected a missing-config warning; got {[r.message for r in caplog.records]}"
-    keys = [a.key for a in scanner.args.extra_args]
-    assert "--configfile" not in keys
-    ini = [a.value for a in scanner.args.extra_args if a.key == "--ini"]
+    argv = _scan_argv(scanner, plugin_context)
+    assert "--configfile" not in argv
+    ini = _value_after(argv, "--ini")
     assert len(ini) == 1, ini
     assert ini[0].endswith("bandit-empty.ini"), ini
     assert str(missing) not in ini[0], ini
