@@ -81,6 +81,19 @@ runs:
       # loaded.
       run: uv sync --extra cdk --extra symbols
 
+    # Prints the limits that decide how many processes a macOS job may hold, so the worker
+    # count passed to "Run PyTest shard" below can be read against them instead of guessed.
+    # Every command ends in `|| true`: this step reports and never fails the job.
+    - name: Report the process limits (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        echo "ulimit -u: $(ulimit -u || true)"
+        echo "kern.maxproc / kern.maxprocperuid:"
+        sysctl kern.maxproc kern.maxprocperuid || true
+        echo "hw.logicalcpu: $(sysctl -n hw.logicalcpu || true)"
+        echo "processes owned by $(id -un): $(ps -U "$(id -un)" -o pid= | wc -l || true)"
+
     # ASH_REQUIRE_SYMBOLS_EXTRA and ASH_REQUIRE_CDK_EXTRA turn the skip-when-absent of the
     # tests that need each extra into a hard failure, so a leg that stops installing an extra
     # cannot pass by skipping them. A plain `uv sync` on a contributor's machine sets neither,
@@ -150,12 +163,20 @@ runs:
         ASH_REQUIRE_CDK_EXTRA: "1"
         PYTEST_DEBUG_TEMPROOT: ${{ runner.temp }}
         ASH_TEST_SHARD: ${{ inputs.shard }}
+      # The hosted macOS runners refuse to start new processes once the runner user reaches
+      # its per-user limit, and with `-n auto` every worker holds an `ash mcp` server child
+      # plus its own children, so the MCP server tests fail with "Resource temporarily
+      # unavailable". Four workers keep the process population under that limit. The figure
+      # is a first value, to be re-read against the limits that "Report the process limits
+      # (macOS)" prints. xdist takes the last `-n` it is given, so this overrides pytest.ini.
       run: |
+        extra=""
+        if [ "${RUNNER_OS}" = "macOS" ]; then extra="-n 4"; fi
         uv run pytest \
           --cov=automated_security_helper \
           --cov-config=.coveragerc \
           --cov-report= \
-          --junit-xml=test-results/pytest-shard.junit.xml
+          --junit-xml=test-results/pytest-shard.junit.xml ${extra}
 
     # The shard's coverage data, where the artifact upload below carries it to the
     # unit-coverage job. It runs after a failed test run too, since that run's data is
