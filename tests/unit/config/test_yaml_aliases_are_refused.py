@@ -7,19 +7,35 @@ An alias is a reference to an anchored node, so a few hundred bytes of nested
 aliases stand for gigabytes once the parsed config is walked or serialized: a
 scan writes its config into its results, and MCP get_config returns it. Parsing
 does not expand them, so no read-size bound stops this. ASH's own YAML files use
-no aliases, so every config reader refuses them at parse time, with a message
-that names the alias and its line, and nothing past the parse runs.
+no aliases, so every config reader refuses them at parse time and nothing past
+the parse runs.
+
+The shared loaders (``load_config_yaml`` and ``load_yaml_config``) raise the
+parser's ``ComposerError`` at the first alias, "found the alias *x; ASH
+configuration does not accept YAML aliases, ...", and the first group of cells
+pins those words. Every reader of a config FILE reports the refusal in the
+shared words of ``unparsed_config_reason``: ``<file> could not be parsed
+(ComposerError at line N, column M)``. That gives the parser's type and where
+it stopped, and quotes none of the file (not the alias, not a value), because
+the parser's own message can quote a line of it. The reader cells pin those
+words and that nothing of the file is quoted. The two readers that show a
+document as written, not as a run reads it (``get_config(raw=True)`` and the
+suppression save), read with ``NoRecursiveAliasLoader``, which refuses an alias
+inside its own node only; their cells pin that, and that the config load of the
+same file still refuses it.
 
 One test per reader, plus a static check that every YAML load in the package
-goes through the shared loaders (``load_config_yaml`` and ``load_yaml_config``).
+goes through the shared loaders (``load_config_yaml`` and ``load_yaml_config``),
+or through the one as-written loader named below.
 """
 
 from __future__ import annotations
 
 import ast
 import json
+import re
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import pytest
 import yaml
@@ -51,8 +67,23 @@ def _write(path: Path, text: str) -> Path:
 
 
 def _assert_names_the_alias(text: str) -> None:
+    """The shared loaders' own words, which name the alias (``load_config_yaml``
+    and ``load_yaml_config`` raise the parser's error unreworded)."""
     assert "alias" in text, text
     assert "*name" in text or "*l0" in text, text
+
+
+#: What every reader of a config file says of a file that uses an alias
+#: (``unparsed_config_reason``): the parser's type and where it stopped.
+PARSE_REFUSAL = "could not be parsed (ComposerError at line "
+
+
+def _assert_refused_at_parse(text: str) -> None:
+    """The refusal gives the place the parser stopped and none of the file: not
+    the alias's marker, and not the value the anchor held."""
+    assert PARSE_REFUSAL in text, text
+    assert "*name" not in text and "*l0" not in text, text
+    assert "repeated" not in text, text
 
 
 class TestTheSharedLoaders:
@@ -85,20 +116,24 @@ class TestEveryReaderRefusesAnAlias:
         with pytest.raises(ASHConfigSourceError) as excinfo:
             resolve_config(config_path=path, source_dir=tmp_path)
 
-        _assert_names_the_alias(str(excinfo.value))
+        _assert_refused_at_parse(str(excinfo.value))
 
     def test_a_discovered_config_file(self, tmp_path):
         _write(tmp_path / ".ash" / ".ash.yaml", _chain(4))
 
-        with pytest.raises(ASHConfigSourceError, match="alias"):
+        with pytest.raises(ASHConfigSourceError) as excinfo:
             resolve_config(source_dir=tmp_path)
+
+        _assert_refused_at_parse(str(excinfo.value))
 
     def test_an_extends_base(self, tmp_path):
         _write(tmp_path / "base.yaml", ALIASED)
         child = _write(tmp_path / ".ash.yaml", "extends: base.yaml\n")
 
-        with pytest.raises(ASHConfigSourceError, match="alias"):
+        with pytest.raises(ASHConfigSourceError) as excinfo:
             resolve_config(config_path=child, source_dir=tmp_path)
+
+        _assert_refused_at_parse(str(excinfo.value))
 
     def test_ash_config_get_exits_3(self, tmp_path):
         from automated_security_helper.cli.config import config_app
@@ -108,7 +143,7 @@ class TestEveryReaderRefusesAnAlias:
         result = CliRunner().invoke(config_app, ["get", "--config", str(path)])
 
         assert result.exit_code == 3, result.output
-        assert "alias" in result.output
+        _assert_refused_at_parse(" ".join(result.output.split()))
         assert "Traceback" not in result.output
 
     def test_the_config_validator(self, tmp_path):
@@ -119,7 +154,7 @@ class TestEveryReaderRefusesAnAlias:
         valid, errors = ConfigValidator.validate_config_file(path)
 
         assert valid is False
-        _assert_names_the_alias(" ".join(errors))
+        _assert_refused_at_parse(" ".join(errors))
 
     def test_the_config_linter(self, tmp_path):
         from automated_security_helper.config.config_linter import ConfigLinter
@@ -129,7 +164,7 @@ class TestEveryReaderRefusesAnAlias:
         result = ConfigLinter.lint(config_path=path)
 
         assert result.error_count >= 1
-        _assert_names_the_alias(" ".join(str(issue) for issue in result.issues))
+        _assert_refused_at_parse(" ".join(str(issue) for issue in result.issues))
 
     def test_the_rewrite_check_of_config_update(self, tmp_path):
         """update and wizard look for extends/patch before rewriting a file."""
@@ -142,23 +177,37 @@ class TestEveryReaderRefusesAnAlias:
         )
 
         assert result.exit_code != 0, result.output
-        assert "alias" in result.output
+        _assert_refused_at_parse(" ".join(result.output.split()))
         assert "Traceback" not in result.output
         assert path.read_text(encoding="utf-8") == ALIASED
 
-    def test_saving_a_suppression_into_the_file(self, tmp_path):
+    def test_saving_a_suppression_into_the_file(self, tmp_path, monkeypatch):
+        """The save edits the file's text, and reads it with the as-written
+        loader (``NoRecursiveAliasLoader``) to find where the entry goes, so a
+        shared alias is not its refusal: the entry goes in and the alias is left
+        as the file wrote it. The refusal is the config load's, and the saved
+        file is still refused there, so a scan never runs on it. (An alias
+        inside its own node is the save's refusal; see
+        ``test_a_cyclic_yaml_config_is_refused_by_name.py``.)"""
         from automated_security_helper.config.ash_config import (
             add_suppression_to_config,
         )
         from automated_security_helper.models.core import AshSuppression
 
+        monkeypatch.delenv("ASH_CONFIG", raising=False)
         path = _write(tmp_path / ".ash.yaml", ALIASED)
 
-        with pytest.raises(yaml.YAMLError, match="alias"):
-            add_suppression_to_config(
-                path, AshSuppression(rule_id="B101", path="x.py", reason="r")
-            )
-        assert path.read_text(encoding="utf-8") == ALIASED
+        saved = add_suppression_to_config(
+            path, AshSuppression(rule_id="B101", path="x.py", reason="r")
+        )
+
+        assert saved is True
+        text = path.read_text(encoding="utf-8")
+        assert "ignore_paths: [*name]" in text, text
+        assert "B101" in text, text
+        with pytest.raises(ASHConfigSourceError) as excinfo:
+            resolve_config(config_path=path, source_dir=tmp_path)
+        _assert_refused_at_parse(str(excinfo.value))
 
     def test_an_mcp_operator_profile(self, tmp_path):
         from automated_security_helper.cli.mcp.profile_registry import (
@@ -167,8 +216,10 @@ class TestEveryReaderRefusesAnAlias:
 
         path = _write(tmp_path / "team.yaml", ALIASED)
 
-        with pytest.raises(ValueError, match="alias"):
+        with pytest.raises(ValueError, match=re.escape(PARSE_REFUSAL)) as excinfo:
             register_profiles([f"team={path}"])
+
+        _assert_refused_at_parse(str(excinfo.value))
 
     def test_an_mcp_client_override(self, tmp_path):
         from automated_security_helper.cli.mcp.profile_registry import (
@@ -193,6 +244,12 @@ class TestEveryReaderRefusesAnAlias:
         assert "alias" in result["error"]
 
     def test_mcp_get_config_raw(self, tmp_path, monkeypatch):
+        """``raw=True`` answers the file as written, not as a run reads it, and
+        parses with ``NoRecursiveAliasLoader``: a shared alias is answered with
+        its value written out in each place, under the same expansion budgets
+        the config chain charges (``test_get_config_raw_expansion_bound.py``),
+        and an alias inside its own node is the refusal. The resolved read of
+        the same file is where the alias is refused."""
         from automated_security_helper.cli.mcp_tools import mcp_get_config
 
         path = _write(tmp_path / ".ash.yaml", ALIASED)
@@ -200,16 +257,23 @@ class TestEveryReaderRefusesAnAlias:
 
         result = mcp_get_config(config_path=str(path), raw=True)
 
-        assert result["success"] is False, result
-        assert "alias" in json.dumps(result)
+        assert result == {
+            "project_name": "repeated",
+            "global_settings": {"ignore_paths": ["repeated"]},
+        }, result
+        with pytest.raises(ASHConfigSourceError) as excinfo:
+            resolve_config(config_path=path, source_dir=tmp_path)
+        _assert_refused_at_parse(str(excinfo.value))
 
     def test_a_workspace_policy_file(self, tmp_path):
         from automated_security_helper.workspace.policy import load_workspace_policy
 
         path = _write(tmp_path / "policy.yaml", ALIASED)
 
-        with pytest.raises(Exception, match="alias"):
+        with pytest.raises(Exception, match=re.escape(PARSE_REFUSAL)) as excinfo:
             load_workspace_policy(path)
+
+        _assert_refused_at_parse(str(excinfo.value))
 
     @pytest.mark.parametrize(
         ("content", "reaches_the_check"),
@@ -255,7 +319,7 @@ class TestEveryReaderRefusesAnAlias:
             assert len(checked) == 1, result
         else:
             assert result["valid"] is False, result
-            assert "alias" in json.dumps(result)
+            _assert_refused_at_parse(json.dumps(result))
             assert checked == []
 
     def test_a_trivy_ignore_file_a_client_config_names(self):
@@ -311,6 +375,29 @@ NOT_ASH_CONFIGURATION = {
     "plugin_modules/ash_snyk_plugins/snyk_code_scanner.py",
 }
 
+#: ASH configuration read with a loader of ASH's own that is not one of the two
+#: shared loaders, by file and loader class. ``_KeepsEnvReferences`` reads a
+#: config file the suppression save edits as text, to find where the entry goes,
+#: and keeps an ``!ENV`` scalar as its own text; it refuses an alias inside its
+#: own node (``NoRecursiveAliasLoader``) and nothing else, because the save
+#: leaves the file's text as it was. The config load of the saved file refuses
+#: every alias (``test_saving_a_suppression_into_the_file``). A direct PyYAML
+#: load anywhere else in that file is still an offender.
+AS_WRITTEN_LOADERS = {"config/ash_config.py": "_KeepsEnvReferences"}
+
+
+def loader_names_in(source: str) -> Dict[int, str]:
+    """{line: class name} for each call in ``source`` that passes ``Loader=``
+    a bare class name."""
+    names = {}
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call):
+            continue
+        for keyword in node.keywords:
+            if keyword.arg == "Loader" and isinstance(keyword.value, ast.Name):
+                names[node.lineno] = keyword.value.id
+    return names
+
 
 def yaml_loads_in(source: str) -> List[Tuple[int, str]]:
     """(line, call) for every call to a PyYAML load function in ``source``."""
@@ -350,7 +437,12 @@ class TestEveryYamlLoadUsesTheSharedLoaders:
             relative = path.relative_to(PACKAGE).as_posix()
             if relative in NOT_ASH_CONFIGURATION:
                 continue
-            for line, call in yaml_loads_in(path.read_text(encoding="utf-8")):
+            source = path.read_text(encoding="utf-8")
+            as_written = AS_WRITTEN_LOADERS.get(relative)
+            named = loader_names_in(source) if as_written else {}
+            for line, call in yaml_loads_in(source):
+                if as_written is not None and named.get(line) == as_written:
+                    continue
                 offenders.append(f"{relative}:{line} {call}")
 
         assert offenders == [], (
@@ -374,3 +466,19 @@ class TestEveryYamlLoadUsesTheSharedLoaders:
     def test_control_the_exempt_reader_is_still_where_it_was(self):
         for relative in NOT_ASH_CONFIGURATION:
             assert yaml_loads_in((PACKAGE / relative).read_text(encoding="utf-8"))
+
+    def test_control_an_as_written_load_is_told_from_a_direct_one(self):
+        source = (
+            "import yaml\n"
+            "yaml.load('a', Loader=_KeepsEnvReferences)\n"
+            "yaml.load('a', Loader=yaml.SafeLoader)\n"
+            "yaml.load('a')\n"
+        )
+
+        assert loader_names_in(source) == {2: "_KeepsEnvReferences"}
+        assert [line for line, _ in yaml_loads_in(source)] == [2, 3, 4]
+
+    def test_control_the_as_written_loader_is_still_where_it_was(self):
+        for relative, loader in AS_WRITTEN_LOADERS.items():
+            source = (PACKAGE / relative).read_text(encoding="utf-8")
+            assert loader in loader_names_in(source).values(), relative

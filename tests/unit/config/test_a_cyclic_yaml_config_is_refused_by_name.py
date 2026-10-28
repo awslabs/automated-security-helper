@@ -8,7 +8,20 @@ the load's walks of it (the record of what the file read from the environment
 first) recursed to Python's recursion limit: a raw RecursionError from the
 run load, "maximum recursion depth exceeded" with exit 1 from ``ash config
 validate``. The file is refused as one that does not parse instead, naming
-the problem and its place, and a shared alias of a complete node still loads.
+the problem and its place.
+
+ASH's config loader refuses every YAML alias, not only one inside its own node
+(``_NoAliasSafeLoader``), so the refusal a config load gives is the parser's
+``ComposerError`` at the first alias: ``could not be parsed (ComposerError at
+line N, column M)``, which quotes none of the file. A shared alias of a complete
+node is refused the same way, and the same document written out in each place
+loads. The readers that answer a document as written (``get_config(raw=True)``
+and the suppression save) read with ``NoRecursiveAliasLoader`` instead, which
+refuses only an alias inside its own node, in ``RecursiveAliasError``'s words;
+the cells for those two, and for the loader alone, are unchanged.
+
+Some test names still say "recursive alias" or "shared alias ... loads" from the
+older contract; they are kept so a test's id stays the same across the change.
 """
 
 from __future__ import annotations
@@ -59,7 +72,7 @@ def test_the_run_load_refuses_a_recursive_alias_as_a_parse_error(cyclic):
         load_config_file_for_run(cyclic)
     assert is_config_parse_error(refused.value)
     text = unparsed_config_reason(cyclic, refused.value)
-    assert "could not be parsed (RecursiveAliasError at line" in text, text
+    assert "could not be parsed (ComposerError at line" in text, text
     assert VALUE not in text, text
 
 
@@ -73,7 +86,7 @@ def test_the_scan_resolution_refuses_a_recursive_alias_by_name(cyclic):
             config_path=cyclic, source_dir=cyclic.parent, fallback_to_default=True
         )
     text = str(refused.value)
-    assert "RecursiveAliasError" in text, text
+    assert "could not be parsed (ComposerError at line" in text, text
     assert "RecursionError" not in text and "recursion depth" not in text, text
     assert VALUE not in text, text
 
@@ -83,14 +96,22 @@ def test_config_validate_refuses_a_recursive_alias_with_exit_3(cyclic):
     result = CliRunner().invoke(app, ["config", "validate", "--config", str(cyclic)])
     flat = " ".join(result.output.split())
     assert result.exit_code == 3, (result.exit_code, flat[-800:])
-    assert "RecursiveAliasError" in flat, flat[-800:]
+    assert "could not be parsed (ComposerError at line" in flat, flat[-800:]
     assert "recursion depth" not in flat, flat[-800:]
     assert VALUE not in flat, flat[-800:]
 
 
 def test_a_shared_alias_of_a_complete_node_still_loads(tmp_path, monkeypatch):
-    """The control: an alias of an anchor whose node is complete is a shared
-    value, not a cycle, and loads as it always did."""
+    """An alias of an anchor whose node is complete is a shared value, not a
+    cycle, and it is refused all the same: the config loader accepts no alias.
+    The control is the same document with the shared value written out in each
+    place, which loads."""
+    import yaml
+
+    from automated_security_helper.config.config_sources import (
+        is_config_parse_error,
+        unparsed_config_reason,
+    )
     from automated_security_helper.config.resolve_config import (
         load_config_file_for_run,
     )
@@ -105,7 +126,24 @@ def test_a_shared_alias_of_a_complete_node_still_loads(tmp_path, monkeypatch):
         "  text: *shared\n",
         encoding="utf-8",
     )
-    _, config = load_config_file_for_run(path)
+    with pytest.raises(yaml.YAMLError) as refused:
+        load_config_file_for_run(path)
+    assert is_config_parse_error(refused.value)
+    text = unparsed_config_reason(path, refused.value)
+    assert "could not be parsed (ComposerError at line" in text, text
+    assert "*shared" not in text, text
+
+    written_out = tmp_path / "written-out.yaml"
+    written_out.write_text(
+        "project_name: t\n"
+        "reporters:\n"
+        "  markdown:\n"
+        "    enabled: false\n"
+        "  text:\n"
+        "    enabled: false\n",
+        encoding="utf-8",
+    )
+    _, config = load_config_file_for_run(written_out)
     assert config.project_name == "t"
     assert config.reporters.markdown.enabled is False
     assert config.reporters.text.enabled is False
@@ -220,16 +258,21 @@ def test_mcp_select_profile_refuses_a_recursive_alias_in_override_yaml(
     assert answer.get("success") is False, answer
     error = str(answer.get("error", ""))
     assert error.startswith("override_yaml parse error"), answer
-    assert "RecursiveAliasError at line" in error, answer
+    # override_yaml is parsed with the config loader, which refuses every
+    # alias: the parser's words for it, and where it stopped.
+    assert "does not accept YAML aliases" in error, answer
+    assert "ComposerError at line" in error, answer
     assert "Circular reference" not in error and "error_type" not in answer, answer
 
 
 def test_mcp_select_profile_binds_a_shared_alias_in_override_yaml(
     tmp_path, monkeypatch
 ):
-    """The control for the cell above, through the same tool: an alias of an
-    anchor whose node is complete is a shared value, not a cycle, so the
-    override binds, and each place holds the shared value."""
+    """The cell above, for an alias of an anchor whose node is complete: a
+    shared value, not a cycle, and refused all the same, because override_yaml
+    is parsed with the config loader, which accepts no alias. The control,
+    through the same tool, is the same override with the shared value written
+    out in each place: it binds, and each place holds the value."""
     import asyncio
     import json
 
@@ -242,16 +285,19 @@ def test_mcp_select_profile_binds_a_shared_alias_in_override_yaml(
         set_profile_registry,
     )
 
-    class _Context:
-        headers = {"mcp-session-id": "shared-alias-override"}
+    def _context(session_id):
+        class _Context:
+            headers = {"mcp-session-id": session_id}
 
-        async def info(self, message):
-            return None
+            async def info(self, message):
+                return None
 
-        error = warning = debug = info
+            error = warning = debug = info
 
-        async def report_progress(self, **kwargs):
-            return None
+            async def report_progress(self, **kwargs):
+                return None
+
+        return _Context()
 
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp-workspaces"))
@@ -265,9 +311,9 @@ def test_mcp_select_profile_binds_a_shared_alias_in_override_yaml(
     clear_all_session_state()
     set_profile_registry(register_profiles([f"wide={profile}"]))
     try:
-        answer = asyncio.run(
+        refused = asyncio.run(
             mcp_server.select_profile(
-                _Context(),
+                _context("shared-alias-override"),
                 profile_name="wide",
                 override_yaml=(
                     "project_name: t\nreporters:\n  markdown: &shared\n"
@@ -275,11 +321,28 @@ def test_mcp_select_profile_binds_a_shared_alias_in_override_yaml(
                 ),
             )
         )
-        state = get_session_state("shared-alias-override")
+        answer = asyncio.run(
+            mcp_server.select_profile(
+                _context("written-out-override"),
+                profile_name="wide",
+                override_yaml=(
+                    "project_name: t\nreporters:\n  markdown:\n"
+                    "    enabled: false\n  text:\n    enabled: false\n"
+                ),
+            )
+        )
+        state = get_session_state("written-out-override")
         bound = state.bound_config if state is not None else None
     finally:
         clear_profile_registry()
         clear_all_session_state()
+
+    json.dumps(refused)
+    assert refused.get("success") is False, refused
+    said = str(refused.get("error", ""))
+    assert said.startswith("override_yaml parse error"), refused
+    assert "does not accept YAML aliases" in said, refused
+    assert "ComposerError at line" in said, refused
 
     json.dumps(answer)
     assert answer.get("success") is True, answer
