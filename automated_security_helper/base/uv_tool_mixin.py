@@ -257,8 +257,6 @@ class UVToolMixin:
         Returns:
             Version string if detected, None if version cannot be determined or UV is not available
         """
-        if package_name is None:
-            package_name = self._uv_from_spec()
         if not self.use_uv_tool:
             self._plugin_log(
                 f"UV tool execution is disabled for {tool_name}",
@@ -266,9 +264,14 @@ class UVToolMixin:
             )
             return None
         if _DEFER_VERSION_PROBES.get():
-            # Kept for resolve_deferred_tool_version; see deferred_tool_version_probes.
+            # Kept for resolve_deferred_tool_version with the spec as given: a
+            # None is resolved when the probe runs, so the probe reads the
+            # requirement the dependency check reads then, not the one the
+            # plugin was built with. See deferred_tool_version_probes.
             self._deferred_tool_version_probe = (tool_name, package_name)
             return None
+        if package_name is None:
+            package_name = self._uv_from_spec()
 
         try:
             from automated_security_helper.utils.uv_tool_runner import (
