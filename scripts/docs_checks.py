@@ -5810,7 +5810,7 @@ UNREAD_RESPONSE_EXPLAINED = (
         "get_config",
         "automated_security_helper/config/environment_record.py",
         "_Index._string",
-        "def _string(self, text: str,",
+        "def _string(",
         "2026-12-31",
         "a string-shaping helper of the same dump.",
     ),
@@ -5832,57 +5832,9 @@ UNREAD_RESPONSE_EXPLAINED = (
     ),
     (
         "get_config",
-        "automated_security_helper/config/environment_record.py",
-        "with_written_text_shown",
-        "def with_written_text_shown(",
-        "2026-12-31",
-        "the dump re-rendered with written text shown.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/config/environment_record.py",
-        "with_written_text_shown",
-        "result[shown_key] = with_written_text_shown(",
-        "2026-12-31",
-        "the dump re-rendered with written text shown.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/config/environment_record.py",
-        "with_written_text_shown",
-        "return type(view)(",
-        "2026-12-31",
-        "the dump re-rendered with written text shown.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/cli/mcp_tools.py",
-        "mcp_get_config",
-        "return _yaml.safe_load(path.read_text()) or {}",
-        "2026-12-31",
-        "the tool's own body reshapes the loaded dump for display.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/cli/mcp_tools.py",
-        "mcp_get_config",
-        "return get_default_config().model_dump()",
-        "2026-12-31",
-        "the tool's own body reshapes the loaded dump for display.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/cli/mcp_tools.py",
-        "mcp_get_config",
-        "return resolved.model_dump()",
-        "2026-12-31",
-        "the tool's own body reshapes the loaded dump for display.",
-    ),
-    (
-        "get_config",
         "automated_security_helper/cli/mcp_tools.py",
         "_config_as_written",
-        "return _json.load(f)",
+        'return _json.loads(contents().decode("utf-8-sig"))',
         "2026-12-31",
         "the same dump as the file wrote it.",
     ),
@@ -5890,7 +5842,7 @@ UNREAD_RESPONSE_EXPLAINED = (
         "get_config",
         "automated_security_helper/cli/mcp_tools.py",
         "_config_as_written",
-        "return loader.get_single_data()",
+        "document = loader.get_single_data()",
         "2026-12-31",
         "the same dump as the file wrote it.",
     ),
@@ -5917,78 +5869,6 @@ UNREAD_RESPONSE_EXPLAINED = (
         "return {k: _mark_toml_references(v) for k, v in value.items()}",
         "2026-12-31",
         "the same dump with TOML references marked.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/config/config_sources.py",
-        "read_config_file",
-        "return json.load(f)",
-        "2026-12-31",
-        "the config loader returns the file's own values.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/config/config_sources.py",
-        "parse_config_text",
-        "return json.loads(text)",
-        "2026-12-31",
-        "the config loader returns the file's own values.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/config/config_sources.py",
-        "_resolve_toml_env",
-        "def _resolve_toml_env(",
-        "2026-12-31",
-        "the loader's TOML environment resolution over the same values.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/config/config_sources.py",
-        "_resolve_toml_env",
-        "return {k: _resolve_toml_env(v) for k, v in value.items()}",
-        "2026-12-31",
-        "the loader's TOML environment resolution over the same values.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/config/ash_config.py",
-        "resolve_env_references",
-        "def resolve_env_references(",
-        "2026-12-31",
-        "the loader's environment-reference resolution over the file's values.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/config/ash_config.py",
-        "resolve_env_references",
-        "return full_value.strip()",
-        "2026-12-31",
-        "the loader's environment-reference resolution over the file's values.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/config/ash_config.py",
-        "resolve_env_references",
-        "return value.strip()",
-        "2026-12-31",
-        "the loader's environment-reference resolution over the file's values.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/config/ash_config.py",
-        "load_yaml_config",
-        "return yaml.load(stream, Loader=_AshConfigLoader)",
-        "2026-12-31",
-        "the yaml load of the config file.",
-    ),
-    (
-        "get_config",
-        "automated_security_helper/config/ash_config.py",
-        "_load_single_document",
-        "return loader.get_single_data()",
-        "2026-12-31",
-        "one yaml document of the config file.",
     ),
     # The scan views return the loaded results file reshaped; each tool's
     # refusals are separate dict literals the reader follows.
@@ -6050,39 +5930,6 @@ UNREAD_RESPONSE_EXPLAINED = (
             "the progress record's keys come from the registry entry, whose"
             " failure field is error_message; the tool's refusals are separate"
             " dict literals the reader follows."
-        ),
-    ),
-    (
-        "select_profile",
-        "automated_security_helper/cli/mcp_tools.py",
-        "_materialize_or_error",
-        "return materialize(session_id, config)",
-        "2026-12-31",
-        (
-            "the materialized session record reshaped; refusals are separate"
-            " dict literals the reader follows."
-        ),
-    ),
-    (
-        "select_profile",
-        "automated_security_helper/cli/mcp_server.py",
-        "_with_session",
-        "def _with_session(",
-        "2026-12-31",
-        (
-            "the session record keys the session wrapper adds; refusals are"
-            " separate dict literals the reader follows."
-        ),
-    ),
-    (
-        "set_source_zip_chunk",
-        "automated_security_helper/cli/mcp_server.py",
-        "_with_session",
-        "def _with_session(",
-        "2026-12-31",
-        (
-            "the session record keys the session wrapper adds; refusals are"
-            " separate dict literals the reader follows."
         ),
     ),
 )

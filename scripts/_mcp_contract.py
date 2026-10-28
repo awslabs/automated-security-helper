@@ -26,6 +26,9 @@ Each tool function's ``return`` values are evaluated over the AST, through:
   to their parameters, nested functions, methods on ``self``, and methods on a
   variable whose class follows from a constructor or a return annotation;
 * attributes of an object built in the package (``_Result(error={...})``);
+* a comprehension over a list: a lone name that iterates it is each item of the
+  list, whatever the filters drop; any other target, and an iterable that is not
+  a list, are unread;
 * ``except K as e`` ... ``e.error_type``: the argument of every construction of
   ``K`` and its package subclasses, read in the construction's module, plus two
   forms that scope cannot place. An undecorated module-level helper's parameter
@@ -1387,10 +1390,6 @@ class Evaluator:
 
     def _comprehension(self, node, scope: _Scope) -> Shape:
         names: dict[str, Shape] = {}
-        for generator in node.generators:
-            for target in ast.walk(generator.target):
-                if isinstance(target, ast.Name):
-                    names[target.id] = unread(scope.site(target))
         inner = _Scope(
             module=scope.module,
             owner=scope.owner,
@@ -1398,6 +1397,18 @@ class Evaluator:
             parent=scope,
             bindings=names,
         )
+        for position, generator in enumerate(node.generators):
+            # A lone name iterating a list is each item of that list: the filters
+            # only drop items, so the items are a superset of what is yielded. The
+            # first iterable is read where the comprehension stands, as Python
+            # does; a later one can name an earlier target. Any other target (a
+            # tuple, an attribute) and any iterable that is not a list is unread.
+            iterable = self.evaluate(generator.iter, scope if position == 0 else inner)
+            for target in ast.walk(generator.target):
+                if isinstance(target, ast.Name):
+                    names[target.id] = unread(scope.site(target))
+            if isinstance(generator.target, ast.Name) and iterable.is_list:
+                names[generator.target.id] = iterable.items()
         return one(ListV(self.evaluate(node.elt, inner)))
 
     _eval_ListComp = _comprehension
@@ -3044,20 +3055,44 @@ def enum_values(package_dir: Path, class_name: str) -> set[str]:
 
 
 def exception_class_names(package_dir: Path) -> set[str]:
-    """The builtin exceptions and every exception class the package defines.
+    """The builtin exceptions, every exception class the package defines, and
+    every other class an ``except`` clause in the package names.
 
     A class is an exception when one of its bases is, by name: a builtin exception
-    or another exception class of the package.
+    or another exception class of the package. A class from another library
+    (``zipfile.BadZipFile``) is one the package names in an ``except`` clause: the
+    tool that lets it out returns its name as ``type(e).__name__``. This is a
+    superset of what any one tool lets out, as the rest of the class-name rule is.
+    An imported alias is not the class's name, and a name that is not CapWords
+    (a constant holding a tuple of classes) is not a class's.
     """
     bases: dict[str, set[str]] = {}
+    caught: set[str] = set()
     for module in Source(package_dir).all_modules():
+        aliases = {
+            alias.asname
+            for node in ast.walk(module.tree)
+            if isinstance(node, (ast.Import, ast.ImportFrom))
+            for alias in node.names
+            if alias.asname
+        }
         for node in ast.walk(module.tree):
             if isinstance(node, ast.ClassDef):
                 bases.setdefault(node.name, set()).update(
                     b.attr if isinstance(b, ast.Attribute) else getattr(b, "id", "")
                     for b in node.bases
                 )
+            elif isinstance(node, ast.ExceptHandler) and node.type is not None:
+                named = (
+                    node.type.elts if isinstance(node.type, ast.Tuple) else [node.type]
+                )
+                for expr in named:
+                    if isinstance(expr, ast.Attribute):
+                        caught.add(expr.attr)
+                    elif isinstance(expr, ast.Name) and expr.id not in aliases:
+                        caught.add(expr.id)
     found = set(BUILTIN_EXCEPTIONS)
+    found |= {n for n in caught if n[:1].isupper() and not n.isupper()}
     changed = True
     while changed:
         changed = False
