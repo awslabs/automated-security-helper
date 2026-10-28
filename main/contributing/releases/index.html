@@ -3434,7 +3434,7 @@ request whose title starts with <code>chore(release):</code>, does the rest:</p>
 </ul>
 <h3 id="the-release-app">The release App<a class="headerlink" href="#the-release-app" title="Permanent link">&para;</a></h3>
 <p>A pull request opened with the workflow's <code>GITHUB_TOKEN</code> does not start its own required checks
-(<code>ash / SAST, SCA, and IaC Scan</code>, <code>Validate PR title</code>, <code>required-checks</code>):
+("ash / SAST, SCA, and IaC Scan", <code>Validate PR title</code>, <code>required-checks</code>):
 GitHub creates the runs in an approval-required state, and a maintainer with write
 access has to select <strong>Approve workflows to run</strong> in the pull request's merge box. The
 release pull request says so in its description when that happens. To have the checks

@@ -3374,13 +3374,13 @@ affect.</p>
 <tbody>
 <tr>
 <td><code>ash-version</code></td>
-<td><code>main</code></td>
-<td>Git tag, branch, or commit of ASH to install. The job resolves it to one commit before it installs anything, and every step uses that commit; the job summary names it. A name that is empty, that starts with <code>-</code> or holds a space, that names nothing in <code>ash-repo</code>, or that is both a branch and a tag on different commits fails the job. Every run installs it again.</td>
+<td>empty</td>
+<td>Git tag, branch, or commit of ASH to install. When empty, the job installs the ASH of the commit it was called at: a caller of a release tag gets that release, and a caller of <code>@main</code> gets that commit of main. The job resolves the value to one commit before it installs anything, and every step uses that commit; the job summary names it. A value that starts with <code>-</code> or holds a space, that names nothing in <code>ash-repo</code>, or that is both a branch and a tag on different commits fails the job. Every run installs it again.</td>
 </tr>
 <tr>
 <td><code>ash-repo</code></td>
-<td><code>awslabs/automated-security-helper</code></td>
-<td>Repository (<code>owner/repo</code>) to install ASH from. The owner and the name may hold letters, digits, <code>.</code>, <code>_</code>, and <code>-</code>; any other form fails the job.</td>
+<td>empty</td>
+<td>Repository (<code>owner/repo</code>) to install ASH from. When empty, the job uses the repository the workflow file comes from. A value other than that repository needs <code>ash-version</code> too. The owner and the name may hold letters, digits, <code>.</code>, <code>_</code>, and <code>-</code>; any other form fails the job.</td>
 </tr>
 <tr>
 <td><code>ash-mode</code></td>
@@ -3501,6 +3501,11 @@ affect.</p>
 <td><code>base-ref</code></td>
 <td><code>origin/main</code></td>
 <td>The base for <code>changed-files-only</code> on events other than <code>pull_request</code> and <code>merge_group</code>, which use their own base commit.</td>
+</tr>
+<tr>
+<td><code>artifact-name</code></td>
+<td><code>ash_output</code></td>
+<td>Name of the artifact the scan's output directory is uploaded as. A matrix, or a caller that calls this workflow more than once in one run, must give each call its own name: in the first attempt a second upload under a name already taken fails, and in a re-run it replaces the earlier upload.</td>
 </tr>
 </tbody>
 </table>

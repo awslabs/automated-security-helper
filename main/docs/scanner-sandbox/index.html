@@ -4207,9 +4207,9 @@ another name refers to (see <a href="#what-a-sandboxed-scanner-can-do">What a sa
   So the scanners and converters that read the scan set
   are not given it, and npm-audit does not audit a package whose files link out of
   the tree. The scanners that walk the directory they scan themselves are told to
-  skip each such link in their own exclusion option: bandit's <code>--exclude</code>, one
-  checkov <code>--skip-path</code> each, ferret-scan's <code>--exclude</code>, grype's and syft's
-  <code>--exclude</code>, and trivy-repo's <code>--skip-files</code>. Where a link's path cannot be put in
+  skip each such link in their own exclusion option: <code>bandit --exclude</code>, one
+  <code>checkov --skip-path</code> each, <code>ferret-scan --exclude</code>, <code>grype --exclude</code> and
+  <code>syft --exclude</code>, and <code>trivy --skip-files</code> for trivy-repo. Where a link's path cannot be put in
   that option alone (a comma, a glob character or a line break, or a path another
   file's path holds, for bandit; values checkov's terraform module finder cannot
   compile into its one regex for checkov; a comma, or a path another file's path

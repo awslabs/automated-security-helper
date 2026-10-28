@@ -4455,6 +4455,7 @@ with control characters as escapes and CI command lines broken, give it
 <p><strong>Tip</strong>: The examples below use pinned versions (<code>@main</code>) for reproducibility. You can also use the <code>v3</code> floating tag (<code>@v3</code>) to always get the latest stable v3.x release, though pinned versions are recommended for CI/CD.</p>
 </blockquote>
 <h3 id="github-actions">GitHub Actions<a class="headerlink" href="#github-actions" title="Permanent link">&para;</a></h3>
+<!-- doctest: config kind=github-actions runner=none reason="a workflow for the reader's own repository, which installs ASH from GitHub" -->
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ASH Security Scan</span>
 </span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>
 </span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="nt">on</span><span class="p">:</span>
@@ -4488,6 +4489,7 @@ with control characters as escapes and CI command lines broken, give it
 </span><span id="__span-23-31"><a id="__codelineno-23-31" name="__codelineno-23-31" href="#__codelineno-23-31"></a><span class="w">            </span><span class="no">.ash/ash_output/ash_aggregated_results.json</span>
 </span></code></pre></div>
 <h3 id="gitlab-ci">GitLab CI<a class="headerlink" href="#gitlab-ci" title="Permanent link">&para;</a></h3>
+<!-- doctest: config kind=gitlab-ci runner=none reason="a pipeline for the reader's own project, which installs ASH from GitHub" -->
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="nt">ash-scan</span><span class="p">:</span>
 </span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">python:3.10</span>
 </span><span id="__span-24-3"><a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="w">  </span><span class="nt">script</span><span class="p">:</span>

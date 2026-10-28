@@ -5084,13 +5084,13 @@ message instead of the keys below. Adapt the calls to your MCP client:</p>
 </span></code></pre></div></p>
 <p><strong>Option 2: Project root</strong> (for easy discovery):
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># Download to project root with clear name</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>ash<span class="w"> </span>get-genai-guide<span class="w"> </span>-o<span class="w"> </span>ASH_INTEGRATION_GUIDE.md
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>ash<span class="w"> </span>get-genai-guide<span class="w"> </span>-o<span class="w"> </span>ash-integration-guide.md
 </span></code></pre></div></p>
 <p><strong>Usage</strong>: Reference in <code>.cursorrules</code> or mention in prompts.</p>
 <h4 id="generic-other-tools">Generic / Other Tools<a class="headerlink" href="#generic-other-tools" title="Permanent link">&para;</a></h4>
 <p><strong>Project root</strong> (universal approach):
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Download with descriptive name</span>
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>ash<span class="w"> </span>get-genai-guide<span class="w"> </span>-o<span class="w"> </span>ASH_GENAI_GUIDE.md
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>ash<span class="w"> </span>get-genai-guide<span class="w"> </span>-o<span class="w"> </span>ash-genai-guide.md
 </span></code></pre></div></p>
 <p>Then reference it in your AI tool's context or prompts.</p>
 <h3 id="updating-the-guide">Updating the Guide<a class="headerlink" href="#updating-the-guide" title="Permanent link">&para;</a></h3>
@@ -5198,7 +5198,8 @@ message instead of the keys below. Adapt the calls to your MCP client:</p>
 - <strong>Total Findings</strong>: All findings detected by scanners
 - <strong>Suppressed Findings</strong>: Findings marked as false positives or accepted risks
 - <strong>Actionable Findings</strong>: Total - Suppressed = findings requiring attention</p>
-<p><strong>Always Check</strong>:
+<p><strong>Always Check</strong>:</p>
+<!-- doctest: config kind=ash-output model=automated_security_helper.models.asharp_model.AshAggregatedResults -->
 <div class="language-json highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="p">{</span>
 </span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span><span class="nt">&quot;metadata&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
 </span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">    </span><span class="nt">&quot;summary_stats&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
@@ -5208,7 +5209,7 @@ message instead of the keys below. Adapt the calls to your MCP client:</p>
 </span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="w">    </span><span class="p">}</span>
 </span><span id="__span-14-8"><a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="w">  </span><span class="p">}</span>
 </span><span id="__span-14-9"><a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="p">}</span>
-</span></code></pre></div></p>
+</span></code></pre></div>
 <h2 id="file-structure-and-locations">File Structure and Locations<a class="headerlink" href="#file-structure-and-locations" title="Permanent link">&para;</a></h2>
 <h3 id="output-directory-structure">Output Directory Structure<a class="headerlink" href="#output-directory-structure" title="Permanent link">&para;</a></h3>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>.ash/ash_output/
@@ -5272,15 +5273,17 @@ message instead of the keys below. Adapt the calls to your MCP client:</p>
 </span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>grep<span class="w"> </span>-o<span class="w"> </span><span class="s1">&#39;&quot;critical&quot;: [0-9]*&#39;</span><span class="w"> </span>ash_aggregated_results.json<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-1
 </span></code></pre></div></p>
 <h4 id="strategy-3-streaming-json-parsers-for-large-files">Strategy 3: Streaming JSON Parsers (For Large Files)<a class="headerlink" href="#strategy-3-streaming-json-parsers-for-large-files" title="Permanent link">&para;</a></h4>
-<p><strong>Python with ijson</strong> (streaming parser):
-<div class="language-python highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">ijson</span>
+<p><strong>Python with ijson</strong> (streaming parser, installed separately with <code>pip install ijson</code>):
+<div class="language-python highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">importlib</span>
 </span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>
-</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="c1"># Stream parse - memory efficient</span>
-</span><span id="__span-19-4"><a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="s2">&quot;ash_aggregated_results.json&quot;</span><span class="p">,</span> <span class="s2">&quot;rb&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
-</span><span id="__span-19-5"><a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>    <span class="c1"># Extract just summary stats without loading entire file</span>
-</span><span id="__span-19-6"><a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>    <span class="n">parser</span> <span class="o">=</span> <span class="n">ijson</span><span class="o">.</span><span class="n">items</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="s2">&quot;metadata.summary_stats&quot;</span><span class="p">)</span>
-</span><span id="__span-19-7"><a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a>    <span class="n">summary_stats</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">parser</span><span class="p">)</span>
-</span><span id="__span-19-8"><a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Actionable findings: </span><span class="si">{</span><span class="n">summary_stats</span><span class="p">[</span><span class="s1">&#39;actionable&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="n">ijson</span> <span class="o">=</span> <span class="n">importlib</span><span class="o">.</span><span class="n">import_module</span><span class="p">(</span><span class="s2">&quot;ijson&quot;</span><span class="p">)</span>  <span class="c1"># a third-party package, not part of ASH</span>
+</span><span id="__span-19-4"><a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>
+</span><span id="__span-19-5"><a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="c1"># Stream parse - memory efficient</span>
+</span><span id="__span-19-6"><a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="s2">&quot;ash_aggregated_results.json&quot;</span><span class="p">,</span> <span class="s2">&quot;rb&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+</span><span id="__span-19-7"><a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a>    <span class="c1"># Extract just summary stats without loading entire file</span>
+</span><span id="__span-19-8"><a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a>    <span class="n">parser</span> <span class="o">=</span> <span class="n">ijson</span><span class="o">.</span><span class="n">items</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="s2">&quot;metadata.summary_stats&quot;</span><span class="p">)</span>
+</span><span id="__span-19-9"><a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a>    <span class="n">summary_stats</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">parser</span><span class="p">)</span>
+</span><span id="__span-19-10"><a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Actionable findings: </span><span class="si">{</span><span class="n">summary_stats</span><span class="p">[</span><span class="s1">&#39;actionable&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 </span></code></pre></div></p>
 <p><strong>Python standard library</strong> (load specific sections):
 <div class="language-python highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
@@ -5310,36 +5313,37 @@ message instead of the keys below. Adapt the calls to your MCP client:</p>
 </span><span id="__span-21-10"><a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a>        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">finding</span><span class="p">[</span><span class="s1">&#39;file_path&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">finding</span><span class="p">[</span><span class="s1">&#39;message&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 </span></code></pre></div></p>
 <h3 id="schema-overview">Schema Overview<a class="headerlink" href="#schema-overview" title="Permanent link">&para;</a></h3>
-<div class="language-json highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="p">{</span>
-</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="w">  </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ASH Scan 2026-02-28T10:10:46.211371&quot;</span><span class="p">,</span>
-</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="w">  </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Aggregated security scan results&quot;</span><span class="p">,</span>
-</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="w">  </span><span class="nt">&quot;metadata&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-</span><span id="__span-22-5"><a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="w">    </span><span class="nt">&quot;report_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ASH-20260228151046-3f9c0e2b7d1a&quot;</span><span class="p">,</span>
-</span><span id="__span-22-6"><a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="w">    </span><span class="nt">&quot;generated_at&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-02-28T15:10:46+00:00&quot;</span><span class="p">,</span>
-</span><span id="__span-22-7"><a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="w">    </span><span class="nt">&quot;project_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;my-service&quot;</span><span class="p">,</span>
-</span><span id="__span-22-8"><a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="w">    </span><span class="nt">&quot;tool_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;3.2.2&quot;</span><span class="p">,</span>
-</span><span id="__span-22-9"><a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a><span class="w">    </span><span class="nt">&quot;summary_stats&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-</span><span id="__span-22-10"><a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a><span class="w">      </span><span class="nt">&quot;total&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">156</span><span class="p">,</span>
-</span><span id="__span-22-11"><a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a><span class="w">      </span><span class="nt">&quot;actionable&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">61</span><span class="p">,</span>
-</span><span id="__span-22-12"><a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a><span class="w">      </span><span class="nt">&quot;suppressed&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">95</span><span class="p">,</span>
-</span><span id="__span-22-13"><a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a><span class="w">      </span><span class="nt">&quot;critical&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
-</span><span id="__span-22-14"><a id="__codelineno-22-14" name="__codelineno-22-14" href="#__codelineno-22-14"></a><span class="w">      </span><span class="nt">&quot;high&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
-</span><span id="__span-22-15"><a id="__codelineno-22-15" name="__codelineno-22-15" href="#__codelineno-22-15"></a><span class="w">      </span><span class="nt">&quot;medium&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
-</span><span id="__span-22-16"><a id="__codelineno-22-16" name="__codelineno-22-16" href="#__codelineno-22-16"></a><span class="w">      </span><span class="nt">&quot;low&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">61</span><span class="p">,</span>
-</span><span id="__span-22-17"><a id="__codelineno-22-17" name="__codelineno-22-17" href="#__codelineno-22-17"></a><span class="w">      </span><span class="nt">&quot;info&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
-</span><span id="__span-22-18"><a id="__codelineno-22-18" name="__codelineno-22-18" href="#__codelineno-22-18"></a><span class="w">      </span><span class="nt">&quot;passed&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">9</span><span class="p">,</span>
-</span><span id="__span-22-19"><a id="__codelineno-22-19" name="__codelineno-22-19" href="#__codelineno-22-19"></a><span class="w">      </span><span class="nt">&quot;failed&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
-</span><span id="__span-22-20"><a id="__codelineno-22-20" name="__codelineno-22-20" href="#__codelineno-22-20"></a><span class="w">      </span><span class="nt">&quot;missing&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
-</span><span id="__span-22-21"><a id="__codelineno-22-21" name="__codelineno-22-21" href="#__codelineno-22-21"></a><span class="w">      </span><span class="nt">&quot;skipped&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
-</span><span id="__span-22-22"><a id="__codelineno-22-22" name="__codelineno-22-22" href="#__codelineno-22-22"></a><span class="w">      </span><span class="nt">&quot;duration&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">80.615062</span>
-</span><span id="__span-22-23"><a id="__codelineno-22-23" name="__codelineno-22-23" href="#__codelineno-22-23"></a><span class="w">    </span><span class="p">}</span>
-</span><span id="__span-22-24"><a id="__codelineno-22-24" name="__codelineno-22-24" href="#__codelineno-22-24"></a><span class="w">  </span><span class="p">},</span>
-</span><span id="__span-22-25"><a id="__codelineno-22-25" name="__codelineno-22-25" href="#__codelineno-22-25"></a><span class="w">  </span><span class="nt">&quot;ash_config&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="cm">/* Configuration used for scan */</span><span class="w"> </span><span class="p">},</span>
-</span><span id="__span-22-26"><a id="__codelineno-22-26" name="__codelineno-22-26" href="#__codelineno-22-26"></a><span class="w">  </span><span class="nt">&quot;scanner_results&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="cm">/* Detailed findings by scanner */</span><span class="w"> </span><span class="p">},</span>
-</span><span id="__span-22-27"><a id="__codelineno-22-27" name="__codelineno-22-27" href="#__codelineno-22-27"></a><span class="w">  </span><span class="nt">&quot;converter_results&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="cm">/* File conversion results */</span><span class="w"> </span><span class="p">},</span>
-</span><span id="__span-22-28"><a id="__codelineno-22-28" name="__codelineno-22-28" href="#__codelineno-22-28"></a><span class="w">  </span><span class="nt">&quot;additional_reports&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="cm">/* External reports included */</span><span class="w"> </span><span class="p">},</span>
-</span><span id="__span-22-29"><a id="__codelineno-22-29" name="__codelineno-22-29" href="#__codelineno-22-29"></a><span class="w">  </span><span class="nt">&quot;validation_checkpoints&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="w"> </span><span class="cm">/* Scan validation data */</span><span class="w"> </span><span class="p">]</span>
-</span><span id="__span-22-30"><a id="__codelineno-22-30" name="__codelineno-22-30" href="#__codelineno-22-30"></a><span class="p">}</span>
+<!-- doctest: config kind=ash-output model=automated_security_helper.models.asharp_model.AshAggregatedResults -->
+<div class="language-text highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>{
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>  &quot;name&quot;: &quot;ASH Scan 2026-02-28T10:10:46.211371&quot;,
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>  &quot;description&quot;: &quot;Aggregated security scan results&quot;,
+</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>  &quot;metadata&quot;: {
+</span><span id="__span-22-5"><a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a>    &quot;report_id&quot;: &quot;ASH-20260228151046-3f9c0e2b7d1a&quot;,
+</span><span id="__span-22-6"><a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a>    &quot;generated_at&quot;: &quot;2026-02-28T15:10:46+00:00&quot;,
+</span><span id="__span-22-7"><a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a>    &quot;project_name&quot;: &quot;my-service&quot;,
+</span><span id="__span-22-8"><a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a>    &quot;tool_version&quot;: &quot;3.2.2&quot;,
+</span><span id="__span-22-9"><a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a>    &quot;summary_stats&quot;: {
+</span><span id="__span-22-10"><a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a>      &quot;total&quot;: 156,
+</span><span id="__span-22-11"><a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a>      &quot;actionable&quot;: 61,
+</span><span id="__span-22-12"><a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a>      &quot;suppressed&quot;: 95,
+</span><span id="__span-22-13"><a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a>      &quot;critical&quot;: 0,
+</span><span id="__span-22-14"><a id="__codelineno-22-14" name="__codelineno-22-14" href="#__codelineno-22-14"></a>      &quot;high&quot;: 0,
+</span><span id="__span-22-15"><a id="__codelineno-22-15" name="__codelineno-22-15" href="#__codelineno-22-15"></a>      &quot;medium&quot;: 0,
+</span><span id="__span-22-16"><a id="__codelineno-22-16" name="__codelineno-22-16" href="#__codelineno-22-16"></a>      &quot;low&quot;: 61,
+</span><span id="__span-22-17"><a id="__codelineno-22-17" name="__codelineno-22-17" href="#__codelineno-22-17"></a>      &quot;info&quot;: 0,
+</span><span id="__span-22-18"><a id="__codelineno-22-18" name="__codelineno-22-18" href="#__codelineno-22-18"></a>      &quot;passed&quot;: 9,
+</span><span id="__span-22-19"><a id="__codelineno-22-19" name="__codelineno-22-19" href="#__codelineno-22-19"></a>      &quot;failed&quot;: 0,
+</span><span id="__span-22-20"><a id="__codelineno-22-20" name="__codelineno-22-20" href="#__codelineno-22-20"></a>      &quot;missing&quot;: 1,
+</span><span id="__span-22-21"><a id="__codelineno-22-21" name="__codelineno-22-21" href="#__codelineno-22-21"></a>      &quot;skipped&quot;: 0,
+</span><span id="__span-22-22"><a id="__codelineno-22-22" name="__codelineno-22-22" href="#__codelineno-22-22"></a>      &quot;duration&quot;: 80.615062
+</span><span id="__span-22-23"><a id="__codelineno-22-23" name="__codelineno-22-23" href="#__codelineno-22-23"></a>    }
+</span><span id="__span-22-24"><a id="__codelineno-22-24" name="__codelineno-22-24" href="#__codelineno-22-24"></a>  },
+</span><span id="__span-22-25"><a id="__codelineno-22-25" name="__codelineno-22-25" href="#__codelineno-22-25"></a>  &quot;ash_config&quot;: { /* Configuration used for scan */ },
+</span><span id="__span-22-26"><a id="__codelineno-22-26" name="__codelineno-22-26" href="#__codelineno-22-26"></a>  &quot;scanner_results&quot;: { /* Detailed findings by scanner */ },
+</span><span id="__span-22-27"><a id="__codelineno-22-27" name="__codelineno-22-27" href="#__codelineno-22-27"></a>  &quot;converter_results&quot;: { /* File conversion results */ },
+</span><span id="__span-22-28"><a id="__codelineno-22-28" name="__codelineno-22-28" href="#__codelineno-22-28"></a>  &quot;additional_reports&quot;: { /* External reports included */ },
+</span><span id="__span-22-29"><a id="__codelineno-22-29" name="__codelineno-22-29" href="#__codelineno-22-29"></a>  &quot;validation_checkpoints&quot;: [ /* Scan validation data */ ]
+</span><span id="__span-22-30"><a id="__codelineno-22-30" name="__codelineno-22-30" href="#__codelineno-22-30"></a>}
 </span></code></pre></div>
 <h3 id="key-fields">Key Fields<a class="headerlink" href="#key-fields" title="Permanent link">&para;</a></h3>
 <h4 id="metadatasummary_stats">metadata.summary_stats<a class="headerlink" href="#metadatasummary_stats" title="Permanent link">&para;</a></h4>
@@ -5354,6 +5358,7 @@ message instead of the keys below. Adapt the calls to your MCP client:</p>
 </ul>
 <h4 id="scanner_results">scanner_results<a class="headerlink" href="#scanner_results" title="Permanent link">&para;</a></h4>
 <p>Contains findings organized by scanner name:</p>
+<!-- doctest: config kind=other reason="a simplified sketch of findings grouped by scanner, not the exact layout of the file" -->
 <div class="language-json highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="p">{</span>
 </span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="w">  </span><span class="nt">&quot;scanner_results&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
 </span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="w">    </span><span class="nt">&quot;bandit&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
@@ -5503,6 +5508,7 @@ message instead of the keys below. Adapt the calls to your MCP client:</p>
 - Known vulnerabilities (CVEs)
 - Dependency relationships</p>
 <h3 id="schema-overview_1">Schema Overview<a class="headerlink" href="#schema-overview_1" title="Permanent link">&para;</a></h3>
+<!-- doctest: config kind=other reason="a CycloneDX software bill of materials, a standard format that the Syft scanner writes" -->
 <div class="language-json highlight"><pre><span></span><code><span id="__span-38-1"><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a><span class="p">{</span>
 </span><span id="__span-38-2"><a id="__codelineno-38-2" name="__codelineno-38-2" href="#__codelineno-38-2"></a><span class="w">  </span><span class="nt">&quot;bomFormat&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;CycloneDX&quot;</span><span class="p">,</span>
 </span><span id="__span-38-3"><a id="__codelineno-38-3" name="__codelineno-38-3" href="#__codelineno-38-3"></a><span class="w">  </span><span class="nt">&quot;specVersion&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1.4&quot;</span><span class="p">,</span>
@@ -5737,40 +5743,47 @@ message instead of the keys below. Adapt the calls to your MCP client:</p>
 <li>Third-party code (cannot be modified)</li>
 </ul>
 <h3 id="suppression-best-practices">Suppression Best Practices<a class="headerlink" href="#suppression-best-practices" title="Permanent link">&para;</a></h3>
-<p><strong>1. Always Provide a Reason</strong>:
+<p><strong>1. Always Provide a Reason</strong>:</p>
+<!-- doctest: config kind=ash-fragment at=global_settings -->
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-52-1"><a id="__codelineno-52-1" name="__codelineno-52-1" href="#__codelineno-52-1"></a><span class="nt">suppressions</span><span class="p">:</span>
 </span><span id="__span-52-2"><a id="__codelineno-52-2" name="__codelineno-52-2" href="#__codelineno-52-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;src/utils.py&#39;</span>
 </span><span id="__span-52-3"><a id="__codelineno-52-3" name="__codelineno-52-3" href="#__codelineno-52-3"></a><span class="w">    </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;B603&#39;</span>
 </span><span id="__span-52-4"><a id="__codelineno-52-4" name="__codelineno-52-4" href="#__codelineno-52-4"></a><span class="w">    </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;subprocess.call</span><span class="nv"> </span><span class="s">uses</span><span class="nv"> </span><span class="s">list</span><span class="nv"> </span><span class="s">args</span><span class="nv"> </span><span class="s">(no</span><span class="nv"> </span><span class="s">shell=True),</span><span class="nv"> </span><span class="s">validated</span><span class="nv"> </span><span class="s">inputs</span><span class="nv"> </span><span class="s">only&#39;</span>
-</span></code></pre></div></p>
-<p><strong>2. Be Specific with Paths</strong>:
+</span></code></pre></div>
+<p><strong>2. Be Specific with Paths</strong>:</p>
+<!-- doctest: config kind=ash-fragment at=global_settings.suppressions -->
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-53-1"><a id="__codelineno-53-1" name="__codelineno-53-1" href="#__codelineno-53-1"></a><span class="c1"># Good - specific file</span>
 </span><span id="__span-53-2"><a id="__codelineno-53-2" name="__codelineno-53-2" href="#__codelineno-53-2"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;src/auth/login.py&#39;</span>
 </span><span id="__span-53-3"><a id="__codelineno-53-3" name="__codelineno-53-3" href="#__codelineno-53-3"></a><span class="w">  </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;B201&#39;</span>
-</span><span id="__span-53-4"><a id="__codelineno-53-4" name="__codelineno-53-4" href="#__codelineno-53-4"></a>
-</span><span id="__span-53-5"><a id="__codelineno-53-5" name="__codelineno-53-5" href="#__codelineno-53-5"></a><span class="c1"># Good - specific directory</span>
-</span><span id="__span-53-6"><a id="__codelineno-53-6" name="__codelineno-53-6" href="#__codelineno-53-6"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;tests/**/*.py&#39;</span>
-</span><span id="__span-53-7"><a id="__codelineno-53-7" name="__codelineno-53-7" href="#__codelineno-53-7"></a><span class="w">  </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;B101&#39;</span>
-</span><span id="__span-53-8"><a id="__codelineno-53-8" name="__codelineno-53-8" href="#__codelineno-53-8"></a>
-</span><span id="__span-53-9"><a id="__codelineno-53-9" name="__codelineno-53-9" href="#__codelineno-53-9"></a><span class="c1"># Avoid - too broad</span>
-</span><span id="__span-53-10"><a id="__codelineno-53-10" name="__codelineno-53-10" href="#__codelineno-53-10"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;**/*.py&#39;</span>
-</span><span id="__span-53-11"><a id="__codelineno-53-11" name="__codelineno-53-11" href="#__codelineno-53-11"></a><span class="w">  </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;B201&#39;</span>
-</span></code></pre></div></p>
-<p><strong>3. Use Line Numbers for Precision</strong>:
+</span><span id="__span-53-4"><a id="__codelineno-53-4" name="__codelineno-53-4" href="#__codelineno-53-4"></a><span class="w">  </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;Debug</span><span class="nv"> </span><span class="s">mode</span><span class="nv"> </span><span class="s">is</span><span class="nv"> </span><span class="s">only</span><span class="nv"> </span><span class="s">enabled</span><span class="nv"> </span><span class="s">in</span><span class="nv"> </span><span class="s">the</span><span class="nv"> </span><span class="s">local</span><span class="nv"> </span><span class="s">development</span><span class="nv"> </span><span class="s">server&#39;</span>
+</span><span id="__span-53-5"><a id="__codelineno-53-5" name="__codelineno-53-5" href="#__codelineno-53-5"></a>
+</span><span id="__span-53-6"><a id="__codelineno-53-6" name="__codelineno-53-6" href="#__codelineno-53-6"></a><span class="c1"># Good - specific directory</span>
+</span><span id="__span-53-7"><a id="__codelineno-53-7" name="__codelineno-53-7" href="#__codelineno-53-7"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;tests/**/*.py&#39;</span>
+</span><span id="__span-53-8"><a id="__codelineno-53-8" name="__codelineno-53-8" href="#__codelineno-53-8"></a><span class="w">  </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;B101&#39;</span>
+</span><span id="__span-53-9"><a id="__codelineno-53-9" name="__codelineno-53-9" href="#__codelineno-53-9"></a><span class="w">  </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;assert</span><span class="nv"> </span><span class="s">is</span><span class="nv"> </span><span class="s">how</span><span class="nv"> </span><span class="s">the</span><span class="nv"> </span><span class="s">tests</span><span class="nv"> </span><span class="s">check</span><span class="nv"> </span><span class="s">results&#39;</span>
+</span><span id="__span-53-10"><a id="__codelineno-53-10" name="__codelineno-53-10" href="#__codelineno-53-10"></a>
+</span><span id="__span-53-11"><a id="__codelineno-53-11" name="__codelineno-53-11" href="#__codelineno-53-11"></a><span class="c1"># Avoid - too broad</span>
+</span><span id="__span-53-12"><a id="__codelineno-53-12" name="__codelineno-53-12" href="#__codelineno-53-12"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;**/*.py&#39;</span>
+</span><span id="__span-53-13"><a id="__codelineno-53-13" name="__codelineno-53-13" href="#__codelineno-53-13"></a><span class="w">  </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;B201&#39;</span>
+</span><span id="__span-53-14"><a id="__codelineno-53-14" name="__codelineno-53-14" href="#__codelineno-53-14"></a><span class="w">  </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;Too</span><span class="nv"> </span><span class="s">broad:</span><span class="nv"> </span><span class="s">this</span><span class="nv"> </span><span class="s">hides</span><span class="nv"> </span><span class="s">B201</span><span class="nv"> </span><span class="s">in</span><span class="nv"> </span><span class="s">every</span><span class="nv"> </span><span class="s">Python</span><span class="nv"> </span><span class="s">file&#39;</span>
+</span></code></pre></div>
+<p><strong>3. Use Line Numbers for Precision</strong>:</p>
+<!-- doctest: config kind=ash-fragment at=global_settings -->
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-54-1"><a id="__codelineno-54-1" name="__codelineno-54-1" href="#__codelineno-54-1"></a><span class="nt">suppressions</span><span class="p">:</span>
 </span><span id="__span-54-2"><a id="__codelineno-54-2" name="__codelineno-54-2" href="#__codelineno-54-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;src/app.py&#39;</span>
 </span><span id="__span-54-3"><a id="__codelineno-54-3" name="__codelineno-54-3" href="#__codelineno-54-3"></a><span class="w">    </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;B201&#39;</span>
 </span><span id="__span-54-4"><a id="__codelineno-54-4" name="__codelineno-54-4" href="#__codelineno-54-4"></a><span class="w">    </span><span class="nt">line_start</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">42</span>
 </span><span id="__span-54-5"><a id="__codelineno-54-5" name="__codelineno-54-5" href="#__codelineno-54-5"></a><span class="w">    </span><span class="nt">line_end</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">42</span>
 </span><span id="__span-54-6"><a id="__codelineno-54-6" name="__codelineno-54-6" href="#__codelineno-54-6"></a><span class="w">    </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;Debug</span><span class="nv"> </span><span class="s">mode</span><span class="nv"> </span><span class="s">only</span><span class="nv"> </span><span class="s">enabled</span><span class="nv"> </span><span class="s">in</span><span class="nv"> </span><span class="s">development</span><span class="nv"> </span><span class="s">environment&#39;</span>
-</span></code></pre></div></p>
-<p><strong>4. Set Expiration Dates for Temporary Suppressions</strong>:
+</span></code></pre></div>
+<p><strong>4. Set Expiration Dates for Temporary Suppressions</strong>:</p>
+<!-- doctest: config kind=ash-fragment at=global_settings -->
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-55-1"><a id="__codelineno-55-1" name="__codelineno-55-1" href="#__codelineno-55-1"></a><span class="nt">suppressions</span><span class="p">:</span>
 </span><span id="__span-55-2"><a id="__codelineno-55-2" name="__codelineno-55-2" href="#__codelineno-55-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;src/legacy/old_api.py&#39;</span>
 </span><span id="__span-55-3"><a id="__codelineno-55-3" name="__codelineno-55-3" href="#__codelineno-55-3"></a><span class="w">    </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;B501&#39;</span>
 </span><span id="__span-55-4"><a id="__codelineno-55-4" name="__codelineno-55-4" href="#__codelineno-55-4"></a><span class="w">    </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;Legacy</span><span class="nv"> </span><span class="s">code</span><span class="nv"> </span><span class="s">-</span><span class="nv"> </span><span class="s">will</span><span class="nv"> </span><span class="s">be</span><span class="nv"> </span><span class="s">refactored</span><span class="nv"> </span><span class="s">in</span><span class="nv"> </span><span class="s">Q2</span><span class="nv"> </span><span class="s">2026&#39;</span>
 </span><span id="__span-55-5"><a id="__codelineno-55-5" name="__codelineno-55-5" href="#__codelineno-55-5"></a><span class="w">    </span><span class="nt">expiration</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;2026-06-30&#39;</span>
-</span></code></pre></div></p>
+</span></code></pre></div>
 <h3 id="suppression-workflow">Suppression Workflow<a class="headerlink" href="#suppression-workflow" title="Permanent link">&para;</a></h3>
 <ol>
 <li><strong>Identify the Finding</strong>:</li>
