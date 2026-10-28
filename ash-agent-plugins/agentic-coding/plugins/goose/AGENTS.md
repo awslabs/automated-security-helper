@@ -289,24 +289,22 @@ On failure, `error_type` is one of `invalid_session_id` and `session_identity_re
 
 ## cancel_scan
 
-Stop a running scan. The scanner running at the time is stopped, no further scanner starts, and no reports or results file are written after the cancel.
+Stops a running scan. The scanner tool running at the time is stopped with every process it started (SIGTERM, then SIGKILL after 10 seconds). The scan halts at its next cancel check, and no further scanner, phase, or reporter starts, so a scan canceled before its report phase writes no reports. Work that is not waiting on a child process, such as a scanner parsing its tool's output, can still finish and write under `scanners/` or `converted/`, but `ash_aggregated_results.json` is not written after the cancel. When the output directory held a previous scan's results, they are put back in place of every result the canceled scan wrote; its log, `ash.log`, stays, and an `ash.log.jsonl` already there is left as it was. With no previous results, what the scan wrote before it stopped stays, except that a cancel during the report phase removes the reports that phase wrote. `reports/ash.unused-suppressions.md`, which its reporter writes on its own, stays even then.
 
 <!-- doctest: options of=mcp.cancel_scan -->
 | Param | Type | Notes |
 |-------|------|-------|
-| `scan_id` | string | The scan to stop |
+| `scan_id` | string | The scan to cancel |
 
-Returns `success: true` and `status: cancelled`. A scan that already finished cannot be cancelled: `success` is `false` and `status` is the status it finished with.
-
-The status is `cancelled` at once, while the scan takes up to about 10 seconds to stop and put the previous results back. Until then a new `run_ash_scan` of the same directory is refused as still stopping, with `error_type: MCPResourceError` and `error_category: resource_exhausted` (see `run_ash_scan`); retry after a few seconds.
+Returns `success`, `status`, and `message`. The status is `cancelled` at once. A running scan stops within about 10 seconds; one still waiting for another scan of its session stops when that scan ends. Until it has stopped, `run_ash_scan` refuses another scan of the same directory as still stopping, and the scan counts against `max_concurrent_scans`. A scan that has already ended is not changed, and the response has `success: false` and the scan's status. For a `run_ash_workspace_scan`, `cancel_scan` takes one project's scan id and stops that project, which ends `failed`; the other projects carry on.
 
 On failure, `error_type` is one of `invalid_session_id` and `session_identity_required`, or the class name of an exception.
 
 ## check_installation
 
-Report whether ASH can scan: its version, and for each built-in scanner whether its tool is available. Run before the first scan in a session if you're unsure of the install state. Each scanner's check may run its tool, so the call takes seconds.
+Reports whether ASH can scan: its version and, for each built-in scanner, whether its tool can run. Enabled means enabled in ASH's defaults: the call reads no project's config and checks no plugin scanner. It runs each scanner's dependency check, which can start the tool, so it takes several seconds, and it installs and downloads nothing. The tool of a scanner that ASH installs with uv is installed when `uv tool list` lists it, or when its executable is on `PATH` or in a directory ASH also searches, such as `~/.ash/bin`. A scanner whose tool is not, when the server is online and has uv, is listed in `installs_on_first_scan`, because the first scan installs it with uv, which needs network access. Offline, or without uv, it is listed in `missing_dependencies`. Offline, semgrep is also missing when it has no rules cache.
 
-No parameters. Returns `installed` (at least one enabled scanner can run), `ready` (all of them can), `version`, `scanners` (name, enabled, `dependencies_satisfied`, version) and the enabled scanners in `missing_dependencies` and `undetermined_dependencies`.
+No parameters. Returns `installed` (at least one enabled scanner can run, or will once the first scan installs its tool), `ready` (every enabled scanner can run or will), `version`, `scanners` (each scanner's `name`, `enabled`, `dependencies_satisfied`, `installs_on_first_scan`, and `version`), `installs_on_first_scan`, `missing_dependencies` and `undetermined_dependencies` (the enabled scanners whose tool is missing and that a scan cannot install, or whose check could not run), and `ash_command_available` (whether an `ash` executable is on `PATH`, which the server does not need).
 
 On failure, `error_type` is `invalid_session_id`, or the class name of an exception.
 
