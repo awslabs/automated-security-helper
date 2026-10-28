@@ -1,0 +1,138 @@
+# Launch shapes the child-import guard does not read, one per function. Each starts
+# ASH unrouted and is NOT found; the guard's cells pin that, so a scan that learns a
+# shape goes red there, and its plant then moves to launch_shapes.py.txt. The last
+# function is the other way: routed, and reported anyway. Never run; the guard reads
+# this file as text.
+import concurrent.futures
+import multiprocessing
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from tests.utils.helpers import checkout_env
+
+ASH_MOD = "automated_security_helper.cli.main"
+
+
+def _ash_target():
+    import automated_security_helper  # noqa: F401
+
+
+def test_k01_spawn_context_by_a_name():
+    method = "spawn"
+    multiprocessing.get_context(method).Process(target=_ash_target).start()
+
+
+def test_k02_spawn_context_by_keyword():
+    multiprocessing.get_context(method="forkserver").Process(target=_ash_target).start()
+
+
+def test_k03_default_context_pool():
+    concurrent.futures.ProcessPoolExecutor().submit(_ash_target)
+
+
+def test_k04_realpath_of_the_interpreter():
+    subprocess.run([os.path.realpath(sys.executable), "-m", ASH_MOD])
+
+
+def test_k05_resolved_interpreter_path():
+    subprocess.run([str(Path(sys.executable).resolve()), "-m", ASH_MOD])
+
+
+def test_k06_interpreter_from_a_conditional():
+    python = sys.executable if sys.executable else "python3"
+    subprocess.run([python, "-m", ASH_MOD])
+
+
+def test_k07_interpreter_from_an_or():
+    subprocess.run([os.environ.get("PYTHON") or sys.executable, "-m", ASH_MOD])
+
+
+def test_k08_python3_by_name():
+    subprocess.run(["python3", "-m", ASH_MOD])
+
+
+def test_k09_executable_keyword():
+    subprocess.run(["python", "-m", ASH_MOD], executable=sys.executable)
+
+
+def test_k10_coverage_runs_the_module():
+    subprocess.run([sys.executable, "-m", "coverage", "run", "-m", ASH_MOD])
+
+
+def test_k11_cprofile_runs_the_module():
+    subprocess.run([sys.executable, "-m", "cProfile", "-m", ASH_MOD])
+
+
+class TestK12AttributeHeldCommandLine:
+    def setup_method(self):
+        self.cmd = [sys.executable, "-m", ASH_MOD]
+
+    def test_run(self):
+        subprocess.run(self.cmd)
+
+
+K13_COMMANDS = {"scan": [sys.executable, "-m", ASH_MOD]}
+
+
+def test_k13_command_line_in_a_dict():
+    subprocess.run(K13_COMMANDS["scan"])
+
+
+@pytest.mark.parametrize("cmd", [[sys.executable, "-m", ASH_MOD]])
+def test_k14_parametrized_command_line(cmd):
+    subprocess.run(cmd)
+
+
+def test_k15_code_importing_a_suite_module_that_imports_ash():
+    subprocess.run([sys.executable, "-c", "import tests.conftest"])
+
+
+def test_k16_code_naming_ash_in_two_parts():
+    code = "import importlib; importlib.import_module('automated' + '_security_helper')"
+    subprocess.run([sys.executable, "-c", code])
+
+
+def test_k17_pytester_run_by_an_alias(pytester):
+    run = pytester.runpytest_subprocess
+    run("-p", "no:cacheprovider")
+
+
+def test_k18_command_line_copied():
+    cmd = [sys.executable, "-m", ASH_MOD]
+    argv = cmd.copy()
+    subprocess.run(argv)
+
+
+def test_k19_command_line_unpacked_from_a_tuple():
+    cmd, env = [sys.executable, "-m", ASH_MOD], None
+    subprocess.run(cmd, env=env)
+
+
+def test_k20_percent_mapping_run_by_a_shell():
+    os.system("%(py)s -m %(mod)s" % {"py": sys.executable, "mod": ASH_MOD})
+
+
+def test_k21_format_of_a_template_in_a_name():
+    template = "{} -m {}"
+    os.system(template.format(sys.executable, ASH_MOD))
+
+
+def test_k22_percent_of_a_template_in_a_name():
+    template = "%s -m %s"
+    os.system(template % (sys.executable, ASH_MOD))
+
+
+def test_k23_shell_c_given_an_fstring():
+    subprocess.run(["sh", "-c", f"{sys.executable} -m {ASH_MOD}"])
+
+
+def test_k24_shell_c_given_a_joined_list():
+    subprocess.run(["bash", "-c", " ".join([sys.executable, "-m", ASH_MOD])])
+
+
+def test_k25_routed_env_given_by_position():
+    os.execve(sys.executable, [sys.executable, "-m", ASH_MOD], checkout_env())

@@ -31,6 +31,13 @@ GRANTS_AND_OFF = (
     "  extra_read_paths: ['/']\n"
 )
 
+SCANNER_GRANTS = (
+    "project_name: uploaded\n"
+    "sandbox:\n"
+    "  read_path_scanners: [bandit]\n"
+    "  env_scanners: [bandit]\n"
+)
+
 
 def _write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -67,22 +74,61 @@ def _network(sandbox, scanner: str, declared: bool, tmp: Path) -> bool:
     ).network
 
 
-def test_uploaded_grants_are_dropped_and_the_server_mode_holds(
+def test_uploaded_grants_refuse_the_config(
     layout, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Asking for more than the server gives is refused, naming each setting."""
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
     scanned, upload = layout
     operator = _write(tmp_path / "operator" / "ash.yaml", "sandbox:\n  mode: bwrap\n")
     monkeypatch.setenv("ASH_CONFIG", str(operator))
     uploaded = _write(upload / "ash.yaml", GRANTS_AND_OFF)
 
+    with pytest.raises(ASHConfigFieldDeniedError) as refused:
+        resolve_config(config_path=uploaded, source_dir=scanned, untrusted_config=True)
+    for field in (
+        "sandbox.network_scanners",
+        "sandbox.extra_read_paths",
+        "sandbox.mode",
+    ):
+        assert field in str(refused.value)
+
+
+def test_uploaded_scanner_grants_refuse_the_config(
+    layout, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lists that let scanners read paths and environment variables are held too."""
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
+    scanned, upload = layout
+    operator = _write(tmp_path / "operator" / "ash.yaml", "sandbox:\n  mode: bwrap\n")
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    uploaded = _write(upload / "ash.yaml", SCANNER_GRANTS)
+
+    with pytest.raises(ASHConfigFieldDeniedError) as refused:
+        resolve_config(config_path=uploaded, source_dir=scanned, untrusted_config=True)
+    for field in ("sandbox.read_path_scanners", "sandbox.env_scanners"):
+        assert field in str(refused.value)
+
+
+def test_an_uploaded_list_within_the_servers_is_kept_as_a_limit(
+    layout, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scanned, upload = layout
+    operator = _write(
+        tmp_path / "operator" / "ash.yaml",
+        "sandbox:\n  mode: bwrap\n  network_scanners: [grype, checkov]\n",
+    )
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    uploaded = _write(upload / "ash.yaml", "sandbox:\n  network_scanners: [checkov]\n")
+
     config = resolve_config(
         config_path=uploaded, source_dir=scanned, untrusted_config=True
     )
 
-    assert config.project_name == "uploaded"
     assert config.sandbox.mode == "bwrap"
-    assert config.sandbox.network_scanners is None
-    assert config.sandbox.extra_read_paths == []
+    assert config.sandbox.network_scanners == ["grype", "checkov"]
     # The uploaded list is kept as a limit, which can only take network away.
     assert config.sandbox.network_limit == ["checkov"]
 
@@ -114,7 +160,7 @@ def test_the_trusted_base_supplies_the_grants_and_the_mode(
         "  network_scanners: [grype]\n"
         "  extra_read_paths: ['/opt/ca']\n",
     )
-    uploaded = _write(upload / "ash.yaml", GRANTS_AND_OFF)
+    uploaded = _write(upload / "ash.yaml", "sandbox:\n  network_scanners: []\n")
 
     config = resolve_config(
         config_path=uploaded,
@@ -126,10 +172,8 @@ def test_the_trusted_base_supplies_the_grants_and_the_mode(
     assert config.sandbox.mode == "bwrap"
     assert config.sandbox.network_scanners == ["grype"]
     assert config.sandbox.extra_read_paths == ["/opt/ca"]
-    assert config.sandbox.network_limit == ["checkov"]
-    # checkov is neither granted by the profile nor declared: no network. grype is
-    # granted by the profile but not named by the uploaded limit: no network either.
-    assert _network(config.sandbox, "checkov", False, tmp_path) is False
+    assert config.sandbox.network_limit == []
+    # grype is granted by the profile but the uploaded limit names nothing.
     assert _network(config.sandbox, "grype", True, tmp_path) is False
 
 
@@ -153,12 +197,12 @@ def test_every_file_of_the_uploaded_chain_is_untrusted(layout) -> None:
     )
     uploaded = _write(upload / "ash.yaml", "extends: base.yaml\nproject_name: x\n")
 
-    config = resolve_config(
-        config_path=uploaded, source_dir=scanned, untrusted_config=True
-    )
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
 
-    assert config.sandbox.network_scanners is None
-    assert config.sandbox.extra_read_paths == []
+    with pytest.raises(ASHConfigFieldDeniedError) as refused:
+        resolve_config(config_path=uploaded, source_dir=scanned, untrusted_config=True)
+    # The base asks for the grants; it is refused as the file it is.
+    assert "base.yaml" in str(refused.value)
 
 
 def test_positive_control_a_trusted_config_outside_the_tree_still_grants(
@@ -176,3 +220,18 @@ def test_positive_control_a_trusted_config_outside_the_tree_still_grants(
     assert config.sandbox.network_scanners == ["checkov"]
     assert config.sandbox.extra_read_paths == ["/"]
     assert config.sandbox.network_limit is None
+
+
+def test_positive_control_a_trusted_config_outside_the_tree_keeps_scanner_grants(
+    layout, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The scanner-grant file of the refusal test, not marked untrusted, resolves."""
+    scanned, upload = layout
+    operator = _write(tmp_path / "operator" / "ash.yaml", "sandbox:\n  mode: bwrap\n")
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    config_file = _write(upload / "ash.yaml", SCANNER_GRANTS)
+
+    config = resolve_config(config_path=config_file, source_dir=scanned)
+
+    assert config.sandbox.read_path_scanners == ["bandit"]
+    assert config.sandbox.env_scanners == ["bandit"]

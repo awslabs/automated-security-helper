@@ -492,7 +492,7 @@ profiles:
     no_color: false
     recursive: true
     enable_preprocessors: true
-    show_match: true # Show actual matches for debugging
+    show_match: false # Matched text is masked in ASH's reports either way; see the plugin docs
     show_suppressed: true # Show suppressed findings for debugging
     description: "Debug mode with detailed logging and comprehensive output for troubleshooting"
 
@@ -552,7 +552,7 @@ profiles:
     verbose: true
     no_color: false
     recursive: true
-    show_match: true # Show actual names found for analysis
+    show_match: false # Matched text is masked in ASH's reports either way; see the plugin docs
     description: "Scan only for person names using optimized database-first processing with embedded name databases (98% performance improvement)"
 
   # Enhanced metadata scan profile - focus on metadata validation with preprocessor awareness
@@ -564,7 +564,7 @@ profiles:
     debug: true # Enable debug output to show content routing and validation decisions
     no_color: false
     recursive: true
-    show_match: true # Show actual metadata content for analysis
+    show_match: false # Matched text is masked in ASH's reports either way; see the plugin docs
     description: "Enhanced metadata validation with intelligent file type filtering, preprocessor-aware patterns, and detailed debugging"
 
   # Intellectual property scan profile - only scan for IP references
@@ -606,7 +606,7 @@ profiles:
     verbose: true
     no_color: false
     recursive: true
-    show_match: true # Show actual social media handles/URLs found
+    show_match: false # Matched text is masked in ASH's reports either way; see the plugin docs
     description: "Scan only for social media profiles, usernames, and handles across major platforms"
 
   # GENAI_DISABLED: GenAI profile - enables all AWS AI services for advanced analysis
@@ -749,7 +749,7 @@ profiles:
     no_color: false
     recursive: true
     enable_preprocessors: true
-    show_match: true
+    show_match: false # Matched text is masked in ASH's reports either way; see the plugin docs
     show_suppressed: true
     generate_suppressions: false
     description: "Comprehensive scan with all features and suppression support"
@@ -763,7 +763,7 @@ profiles:
     no_color: true
     recursive: true
     enable_preprocessors: true
-    show_match: true
+    show_match: false # Matched text is masked in ASH's reports either way; see the plugin docs
     description: "Structured JSON output for APIs and programmatic processing"
 
   # CSV export profile - spreadsheet-friendly output for analysis

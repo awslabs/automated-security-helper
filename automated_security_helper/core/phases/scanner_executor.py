@@ -1,33 +1,76 @@
 """ScannerExecutor — owns scanner task lifecycle for ScanPhase."""
 
+import contextvars
 import threading
 import time
-import traceback
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Tuple
 
 from automated_security_helper.base.plugin_base import PluginBase
-from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+from automated_security_helper.base.scanner_plugin import (
+    ScannerPluginBase,
+    plugin_missing_dependency_reason,
+)
 from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerSeverityCount,
 )
-from automated_security_helper.models.scan_results_container import ScanResultsContainer
-from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.sandbox.fs_guard import sweep_writable
+from automated_security_helper.models.scan_results_container import (
+    InputNotScanned,
+    ScanResultsContainer,
+)
+from automated_security_helper.utils.scan_output_dirs import (
+    drop_results_in_ash_output_dirs,
+    mark_converted_results,
+)
+from automated_security_helper.core.cancellation import (
+    ScanCancelled,
+    current_cancel_event,
+    raise_if_cancelled,
+)
+from automated_security_helper.utils.get_shortest_name import home_as_tilde
+from automated_security_helper.utils.error_text import (
+    config_environment_values,
+    error_text,
+    plugin_environment_values,
+    text_without_values,
+    timeout_limit_token,
+    traceback_text,
+)
+from automated_security_helper.utils.log import (
+    ASH_LOGGER,
+    NO_MARKUP,
+    escape_markup,
+)
+from automated_security_helper.utils.threads import ash_thread
+from automated_security_helper.utils.sandbox.fs_guard import (
+    refuse_links_below,
+    sweep_writable,
+)
 from automated_security_helper.utils.sandbox.scope import (
+    SandboxBackendUnavailable,
     SandboxUnavailable,
+    sandbox_refusal_grades_missing,
     sandbox_scope,
     scanner_sandbox_scope,
 )
+from automated_security_helper.utils.subprocess_utils import (
+    COULD_NOT_STOP_ENDING,
+    SPAWN_FAILURE_RETURNCODE,
+    WAS_KILLED_ENDING,
+)
 from automated_security_helper.utils.sarif_utils import (
     apply_suppressions_to_sarif,
+    exclude_output_dir_results,
     sanitize_sarif_paths,
 )
+from automated_security_helper.utils.tool_config_dir import tool_config_scope
+from automated_security_helper.utils.severity_ladder import resolve_scanner_threshold
 
 _ResultsFn = Callable[
     [ScanResultsContainer, AshAggregatedResults], AshAggregatedResults
@@ -65,6 +108,23 @@ _TERMINAL_SCANNER_STATUSES = frozenset(
     }
 )
 
+# The ``status`` values of a returned dict that say its tool completed, compared
+# case-insensitively. Any other status means it did not: ``failed`` is the one the
+# template and the scan phase write, and a dict graded on its zero findings would
+# read as a clean scan.
+_COMPLETED_RESULT_STATUSES = frozenset({"passed", "completed", "success", "ok"})
+
+
+def _refuse_to_grade(container: ScanResultsContainer, reason: str) -> None:
+    """Make the row ERROR with ``reason``, in its errors and in the log."""
+    container.status = ScannerStatus.ERROR
+    ASH_LOGGER.error(reason)
+    container.add_error(reason)
+
+
+def _completed_result_status(status: Any) -> bool:
+    return isinstance(status, str) and status.lower() in _COMPLETED_RESULT_STATUSES
+
 
 # How often a running scanner announces that it is still running. Long enough that
 # a normal scan logs nothing extra (most scanners finish inside a minute), short
@@ -96,8 +156,11 @@ class _ScannerHeartbeat:
         self._interval = interval
         self._started = time.monotonic()
         self._stop = threading.Event()
-        self._thread = threading.Thread(
-            target=self._run,
+        # Made here, in the scanner's own context, and run in a copy of it, so
+        # each "still running" line is this scan's: in the MCP server it goes to
+        # this scan's ash.log and no other session's.
+        self._thread = ash_thread(
+            self._run,
             name=f"ash-heartbeat-{scanner_name}",
             daemon=True,
         )
@@ -138,6 +201,156 @@ def _spawn_failure(scanner_plugin: Any) -> str | None:
     ``_timed_out_after``: only a real string counts."""
     value = getattr(scanner_plugin, "scan_spawn_failure", None)
     return value if isinstance(value, str) and value else None
+
+
+def _post_run_error(scanner_plugin: Any) -> str | None:
+    """Why ASH could not record the output of the plugin's tool, which ran, or
+    None. Coerced like ``_spawn_failure``."""
+    value = getattr(scanner_plugin, "scan_post_run_error", None)
+    return value if isinstance(value, str) and value else None
+
+
+def _kept_flag(scanner_plugin: Any) -> Tuple[str, str] | None:
+    """The flag, and its reason, of the plugin's run that did not finish, or None.
+    Coerced like ``_spawn_failure``: only a pair of real strings counts."""
+    value = getattr(scanner_plugin, "scan_kept_flag", None)
+    if (
+        isinstance(value, tuple)
+        and len(value) == 2
+        and all(isinstance(part, str) and part for part in value)
+    ):
+        return value[0], value[1]
+    return None
+
+
+def _could_not_stop(scanner_plugin: Any) -> str | None:
+    """The recorded reason the plugin's run ended with a tool ASH could not stop,
+    or None. Coerced like ``_spawn_failure``: only a real string counts."""
+    value = getattr(scanner_plugin, "scan_could_not_stop", None)
+    return value if isinstance(value, str) and value else None
+
+
+def _unfinished_run_reason(
+    scanner_name: str,
+    target_type: str,
+    kept: Tuple[str, str],
+    timed_out_after: float | None,
+    values: Iterable[str] = (),
+) -> str:
+    """The scan's error for a run that kept ``kept``'s flag, its reason after it.
+    ``values`` are the run's environment values, for the limit's token."""
+    flag, reason = kept
+    if flag == "timed_out":
+        # The limit through the token every timeout message shares
+        # (timeout_limit_token): a quoted whole number, which redact_values
+        # replaces only where the text quotes it whole, or the option's name
+        # where the environment wrote the limit in another spelling. The
+        # caller redacts the whole text.
+        limit = (
+            f" after {timeout_limit_token(timed_out_after, values)}"
+            if timed_out_after is not None
+            else ""
+        )
+        return f"{scanner_name} timed out{limit} on {target_type}: {reason}"
+    if flag == "cancelled":
+        return f"{scanner_name} was cancelled on {target_type}: {reason}"
+    if flag == "result_rejected":
+        return f"{scanner_name}'s result on {target_type} was rejected: {reason}"
+    return f"{scanner_name} did not finish on {target_type}: {reason}"
+
+
+def _dependencies_recorded_unavailable(scanner_plugin: Any) -> bool:
+    """True when the plugin says its dependencies are unavailable, and something said so.
+
+    A plugin model's ``dependencies_satisfied`` defaults to False before any check
+    runs. ScanPhase assigns the dependency check's answer to every scanner it
+    dispatches, a scanner's own check or scan() may assign it, and so may a test;
+    a pydantic model records each assignment in ``model_fields_set``. A False that
+    nothing assigned says no check ran, not that a tool is absent, so it does not
+    count; neither does an absent attribute. For a plugin that is not a model, an
+    attribute that reads False is taken as recorded. bool() coerces at the boundary
+    for the reason _target_count_attr gives: the plugin is an arbitrary object.
+    """
+    if bool(getattr(scanner_plugin, "dependencies_satisfied", True)):
+        return False
+    fields_set = getattr(scanner_plugin, "model_fields_set", None)
+    if isinstance(fields_set, (set, frozenset)):
+        return "dependencies_satisfied" in fields_set
+    return True
+
+
+def _unevaluated_targets(scanner_plugin: Any) -> List[str]:
+    """The targets the plugin's tool never evaluated, or an empty list.
+
+    Coerced like ``_timed_out_after``: a plugin is an arbitrary object. A single
+    str is one target, never iterated character by character, and anything that
+    is not a str, list or tuple of str answers as no claim.
+    """
+    value = getattr(scanner_plugin, "unevaluated_targets", None)
+    if isinstance(value, str):
+        return [value] if value else []
+    if isinstance(value, (list, tuple)):
+        return [name for name in value if isinstance(name, str) and name]
+    return []
+
+
+def _missing_reason_after_scan(
+    scanner_plugin: Any,
+    scanner_name: str,
+    target_type: str,
+    values: Iterable[str] = (),
+) -> str:
+    """The reason for a container whose ``scan()`` returned a falsy value.
+
+    That return means the scanner found its dependencies unavailable when it ran.
+    The plugin's own explanation is used when it gives one as text; anything else,
+    including the Mock a test double answers with, gets a message naming the scan.
+    Returned as the plugin gave it: the caller logs it so and writes it to the row
+    through home_as_tilde.
+    """
+    reason = plugin_missing_dependency_reason(scanner_plugin, values)
+    if reason:
+        return reason
+    return (
+        f"{scanner_name} reported its dependencies unavailable when it was run on "
+        f"the {target_type} files; ash.log has the scanner's own message"
+    )
+
+
+def _skipped_reason_after_scan(
+    scanner_plugin: Any,
+    scanner_name: str,
+    target_type: str,
+    values: Iterable[str] = (),
+) -> str:
+    """The reason for a container a tracking scanner left with no target attempted.
+
+    The scanner's ``nothing_scanned_reason`` when it states one, so a scanner whose
+    ``nothing_to_scan_reason`` parses both trees is not asked it once per target
+    right after scan() looked at every candidate. The value its scan() recorded for
+    this target (``_nothing_scanned_reason``) comes before the class's.
+    """
+    for_this_target = getattr(scanner_plugin, "_nothing_scanned_reason", None)
+    if isinstance(for_this_target, str) and for_this_target:
+        return for_this_target
+    stated = getattr(type(scanner_plugin), "nothing_scanned_reason", None)
+    if isinstance(stated, str) and stated:
+        return stated
+    ask = getattr(scanner_plugin, "nothing_to_scan_reason", None)
+    if callable(ask):
+        try:
+            reason = ask()
+        except Exception as e:
+            ASH_LOGGER.debug(
+                f"{type(scanner_plugin).__name__}.nothing_to_scan_reason() raised "
+                f"{type(e).__name__}: {error_text(e, values)}; "
+                "recording the generic reason",
+                extra=NO_MARKUP,
+            )
+        else:
+            if isinstance(reason, str) and reason:
+                return reason
+    return f"{scanner_name} ran on the {target_type} files and found nothing it scans"
 
 
 def _target_count_attr(obj: Any, name: str) -> int | None:
@@ -192,6 +405,25 @@ def _target_count_attr(obj: Any, name: str) -> int | None:
     return None
 
 
+def _inputs_not_scanned(obj: Any) -> List[InputNotScanned]:
+    """The inputs a scanner plugin reported it did not scan, as ``{path, reason}``.
+
+    Coerced at the boundary like ``_target_count_attr``: the plugin is an arbitrary
+    object, so only a list of mappings with string ``path`` and ``reason`` counts.
+    """
+    value = getattr(obj, "inputs_not_scanned", None)
+    if not isinstance(value, list):
+        return []
+    entries = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        path, reason = item.get("path"), item.get("reason")
+        if isinstance(path, str) and path and isinstance(reason, str) and reason:
+            entries.append(InputNotScanned(path=path, reason=reason))
+    return entries
+
+
 def _non_negative_int_attr(obj: Any, name: str) -> int:
     """``_target_count_attr`` for a counter whose absence is indistinguishable from zero.
 
@@ -202,6 +434,53 @@ def _non_negative_int_attr(obj: Any, name: str) -> int:
     just as much an accounting defect in a failure count as in an attempt count.
     """
     return _target_count_attr(obj, name) or 0
+
+
+def _tool_lines(
+    lines: Any, values: Tuple[str, ...], *, tilde: bool = False
+) -> List[Any]:
+    """A plugin's ``errors`` or ``output`` lines, as the results keep them.
+
+    The tool's own stdout and stderr: a line can name an option the config
+    read from the environment, a file it could not load say, so each text line
+    is redacted with *values*. With ``tilde``, the home directory in each text
+    line is then written as ``~`` - the one decision for both streams of a
+    failed run's raw_results, redaction first so a value under the home
+    directory still matches. Anything else in the list is kept as it is.
+    """
+    kept: List[Any] = []
+    for line in lines or []:
+        if isinstance(line, str):
+            line = text_without_values(line, values)
+            if tilde:
+                line = home_as_tilde(line)
+        kept.append(line)
+    return kept
+
+
+@contextmanager
+def _cancel_scan_on_interrupt(executor: ThreadPoolExecutor) -> Iterator[None]:
+    """Latch the scan's cancel event when an interrupt reaches the pool's exit.
+
+    Entered on the same ``with`` statement as the ThreadPoolExecutor, after
+    it, so it exits first: a KeyboardInterrupt raised on the main thread (a
+    terminal Ctrl-C) sets the scan's cancel event before the pool's own exit
+    joins the workers. A worker's cancellable spawn watches that event between
+    wait slices, so the tool it is running stops through its existing stop
+    path instead of running to its own end -- nothing else on the CLI path
+    sets the event on SIGINT; the signal handler covers SIGTERM only. The
+    queue shutdown then keeps freed workers from dequeuing further scanners
+    while the interrupt unwinds; one that is dequeued first is stopped by the
+    pre-start cancel check either way.
+    """
+    try:
+        yield
+    except KeyboardInterrupt:
+        event = current_cancel_event()
+        if event is not None:
+            event.set()
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise
 
 
 class ScannerExecutor:
@@ -241,6 +520,13 @@ class ScannerExecutor:
         self._notify_fn = notify_fn
         self._process_fn: _ResultsFn = process_results_fn or (lambda c, a: a)  # type: ignore[assignment]
         self.completed_scanners: List[ScannerPluginBase] = []
+        # Set once any scanner's work raises ScanCancelled, and read beside
+        # raise_if_cancelled before each start: a cancel that reaches one
+        # scanner directly, with the scan's event unset, must still stop the
+        # rest. A worker can dequeue a queued scanner faster than the cancel's
+        # queue-shutdown cancels it; this is the check that refuses the start.
+        # Each run begins with a fresh event.
+        self._cancel_seen = threading.Event()
         # Populated by caller when scanner must respect ignored paths
         self._global_ignore_paths: List[Any] = []
 
@@ -248,12 +534,34 @@ class ScannerExecutor:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _environment_values(self) -> Tuple[str, ...]:
+        """The values the config read from the environment, to redact.
+
+        An exception can name an option the config read from the environment,
+        and what a handler here records of it goes to ash.log, the report and the
+        results files, so each handler redacts these from it.
+        """
+        return config_environment_values(getattr(self.plugin_context, "config", None))
+
+    def _plugin_environment_values(self, scanner_plugin: Any) -> Tuple[str, ...]:
+        """:meth:`_environment_values` and *scanner_plugin*'s own.
+
+        For every handler here that records text the plugin is the source of:
+        what its tool wrote, its reasons, its run's exception and its config. A
+        plugin can know a value the config does not, and that text can quote it
+        (``utils.error_text.plugin_environment_values``).
+        """
+        return plugin_environment_values(scanner_plugin, self._environment_values())
+
     def _notify(self, event_type: Any, **kwargs: Any) -> None:
         if self._notify_fn is not None:
             try:
                 self._notify_fn(event_type, **kwargs)
             except Exception as e:
-                ASH_LOGGER.error(f"Failed to notify event {event_type}: {e}")
+                ASH_LOGGER.error(
+                    f"Failed to notify event {event_type}: {error_text(e)}",
+                    extra=NO_MARKUP,
+                )
 
     def _process_results_fn(
         self,
@@ -263,29 +571,34 @@ class ScannerExecutor:
         """Forward to the injected process function, or no-op if not wired."""
         return self._process_fn(results, aggregated_results)
 
-    def _assess_content_databases(self, scanner_plugin: Any, raw_results: Any) -> None:
+    def _assess_content_databases(self, scanner_plugin: Any, raw_results: Any) -> list:
         """Hold the scanner's content databases to their declared age bounds.
 
         Here, at the one place every scanner's result passes through, rather than in each
         scanner's ``scan()``: trivy overrides ``scan()`` entirely, and a check that lived in
         the base template would silently skip it. Only a SARIF result is assessed; see
         ``utils/content_db_staleness.py`` for what is measured and where it is recorded.
+
+        Returns the records, so the caller can tell a database that does not exist
+        and grade a clean result the policy rejects.
         """
         from automated_security_helper.schemas.sarif_schema_model import SarifReport
         from automated_security_helper.utils.content_db_staleness import (
             assess_scanner,
+            resolve_offline_image_default,
             resolve_overrides,
             resolve_policy,
         )
 
         if not isinstance(raw_results, SarifReport):
-            return
+            return []
         config = getattr(self.plugin_context, "config", None)
-        assess_scanner(
+        return assess_scanner(
             scanner_plugin,
             raw_results,
             resolve_policy(config),
             overrides=resolve_overrides(config),
+            offline_image=resolve_offline_image_default(config),
         )
 
     # ------------------------------------------------------------------
@@ -306,7 +619,22 @@ class ScannerExecutor:
             scanner_config = scanner_plugin.config
             if scanner_config is None:
                 raise ValueError(f"Scanner {scanner_name} has no config")
-            ASH_LOGGER.debug(f"scanner_plugin.config: {scanner_config}")
+            # Which settings, never their values: a value can be one the config
+            # file read from the environment, or a credential, and ash.log keeps
+            # DEBUG lines under --debug.
+            from automated_security_helper.config.environment_record import (
+                setting_names,
+            )
+
+            ash_config = getattr(
+                getattr(scanner_plugin, "context", None), "config", None
+            )
+            names = setting_names(
+                scanner_config,
+                getattr(ash_config, "_environment_references", ()) or (),
+                at=("scanners", str(getattr(scanner_config, "name", "") or "")),
+            )
+            ASH_LOGGER.debug(f"scanner_plugin.config setting: {names}", extra=NO_MARKUP)
 
             for target_info in scan_targets:
                 scan_target = target_info["path"]
@@ -314,7 +642,8 @@ class ScannerExecutor:
 
                 if not scan_target or not Path(scan_target).exists():
                     ASH_LOGGER.debug(
-                        f"Skipping {target_type} directory {scan_target} - does not exist"
+                        f"Skipping {target_type} directory {scan_target} - does not exist",
+                        extra=NO_MARKUP,
                     )
                     continue
 
@@ -326,6 +655,15 @@ class ScannerExecutor:
                 )
 
                 raw_results: Any = None
+                # Set when the scanner's tool reports that a content database it
+                # matches against does not exist; see below.
+                databases_absent: List[str] = []
+                # The content-database records for this target; see below.
+                content_db_records: List[Any] = []
+                # Whether scan() was called on this target. The plugin's exit_code
+                # belongs to the last target it scanned, so a target it never
+                # scanned (disabled, or refused by the sandbox) keeps the row's 0.
+                scan_called = False
                 scanner_config_name: str = (
                     str(scanner_config.name)
                     if scanner_config
@@ -354,9 +692,20 @@ class ScannerExecutor:
                         if isinstance(scanner_plugin, PluginBase):
                             scanner_plugin.clear_scan_timeout()
                             scanner_plugin.clear_scan_spawn_failure()
+                            scanner_plugin.clear_scan_post_run_error()
+                            scanner_plugin.clear_scan_kept_flag()
+                            scanner_plugin.clear_scan_could_not_stop()
+                            scanner_plugin.clear_unevaluated_targets()
                         # Resolved before the scan, so a scanner that cannot be
-                        # sandboxed as requested never starts: it is recorded MISSING
-                        # below, with the reason, rather than run unsandboxed.
+                        # sandboxed as requested never starts and never runs
+                        # unsandboxed. The grade follows what was asked: a
+                        # backend missing under auto is MISSING, like any
+                        # missing dependency, whoever set auto (the split is
+                        # auto vs a named backend, not who chose the mode); a
+                        # backend the operator named that is unavailable is
+                        # ERROR with the start-failure code, and any refusal
+                        # that is not availability is ERROR with the refusal's
+                        # reason.
                         try:
                             sandbox = scanner_sandbox_scope(
                                 scanner_plugin,
@@ -365,14 +714,54 @@ class ScannerExecutor:
                             )
                             sandbox_refusal = None
                         except SandboxUnavailable as refusal:
-                            sandbox, sandbox_refusal = None, str(refusal)
-                        if sandbox_refusal is not None:
+                            sandbox, sandbox_refusal = None, refusal
+                        # The same test ScanPhase used to decide whether to run
+                        # the dependency check, so the two cannot disagree.
+                        if sandbox_refusal is not None and not (
+                            sandbox_refusal_grades_missing(sandbox_refusal)
+                        ):
+                            reason = home_as_tilde(str(sandbox_refusal))
+                            if isinstance(sandbox_refusal, SandboxBackendUnavailable):
+                                # The operator named this backend: the tool could
+                                # not start as requested, with the start-failure
+                                # code.
+                                text = (
+                                    f"{scanner_config_name} could not start its "
+                                    f"tool: {reason}"
+                                )
+                                scanner_plugin.exit_code = SPAWN_FAILURE_RETURNCODE
+                                # scan() is never called, so the carry-over below
+                                # does not reach this row: it takes the code here.
+                                container.exit_code = SPAWN_FAILURE_RETURNCODE
+                            else:
+                                # Refused for a reason that is not availability:
+                                # nothing is missing, and no tool started, so the
+                                # row carries no exit code.
+                                text = (
+                                    f"{scanner_config_name}'s scanner sandbox "
+                                    f"was refused: {reason}"
+                                )
+                                scanner_plugin.exit_code = None
+                            ASH_LOGGER.error(text, extra=NO_MARKUP)
+                            container.add_error(text)
+                            # A failed dict, not the False of the MISSING branch:
+                            # the finally below grades it ERROR, with no
+                            # missing_reason, and the scanner never runs.
+                            raw_results = {"errors": [text], "status": "failed"}
+                        elif sandbox_refusal is not None:
+                            reason = str(sandbox_refusal)
                             ASH_LOGGER.error(
                                 f"{scanner_config_name} not run: scanner sandbox "
-                                f"unavailable: {sandbox_refusal}"
+                                f"unavailable: {reason}",
+                                extra=NO_MARKUP,
                             )
                             container.add_error(
-                                f"Scanner sandbox unavailable: {sandbox_refusal}"
+                                f"Scanner sandbox unavailable: {reason}"
+                            )
+                            # The row's reason. Assigned rather than appended, so the
+                            # per-target report keeps it (see ScanResultsContainer).
+                            container.missing_reason = home_as_tilde(
+                                f"scanner sandbox unavailable: {reason}"
                             )
                             # Recorded on the plugin too: scanner_results reads the
                             # plugin's flag, and a MISSING row claiming satisfied
@@ -380,7 +769,7 @@ class ScannerExecutor:
                             scanner_plugin.dependencies_satisfied = False
                             if hasattr(scanner_plugin, "dependency_unavailable_reason"):
                                 scanner_plugin.dependency_unavailable_reason = (
-                                    f"scanner sandbox unavailable: {sandbox_refusal}"
+                                    f"scanner sandbox unavailable: {reason}"
                                 )
                             raw_results = False
                         else:
@@ -394,9 +783,21 @@ class ScannerExecutor:
                                     f"Scanner sandbox: {scanner_config_name} on "
                                     f"{target_type} runs under {sandbox.backend.name}"
                                 )
+                                # A link already there is refused as ASH's writes
+                                # refuse one; the sweep after each spawn would
+                                # remove it without a word.
+                                refuse_links_below(sandbox.results_dir)
                             heartbeat.start()
-                            with sandbox_scope(sandbox):
+                            # The config files ASH writes for this run's tool live
+                            # in a directory of the run's own, outside the scanned
+                            # tree, which the sandbox lets the scanner read and
+                            # which is removed when the run ends.
+                            with (
+                                sandbox_scope(sandbox),
+                                tool_config_scope(self.plugin_context),
+                            ):
                                 try:
+                                    scan_called = True
                                     raw_results = scanner_plugin.scan(
                                         target=scan_target,
                                         config=scanner_config,
@@ -416,51 +817,170 @@ class ScannerExecutor:
                                         f"{scanner_config_name} could not start its "
                                         f"tool on {target_type}: {spawn_failure}"
                                     )
+                                # Next, a run whose response kept a flag that says
+                                # it did not finish: a timeout (or a stop that did
+                                # not end it), a cancel, a rejected result, a signal
+                                # ASH did not send. What it wrote is not the whole
+                                # scan, so scan() may have read it as clean. This
+                                # gates BEFORE the post-run error, matching the run
+                                # recorder's own flag order: a killed tool commonly
+                                # fails its record step too, and the reason raised
+                                # has to lead with the cause (the run did not
+                                # finish), not that consequence.
+                                kept = _kept_flag(scanner_plugin)
+                                if kept is not None:
+                                    raise ScannerError(
+                                        _unfinished_run_reason(
+                                            scanner_config_name,
+                                            target_type,
+                                            kept,
+                                            _timed_out_after(scanner_plugin),
+                                            self._plugin_environment_values(
+                                                scanner_plugin
+                                            ),
+                                        )
+                                    )
+                                # And for a tool that ran to completion when ASH
+                                # could not record its output: the exit code is
+                                # the tool's own, so scan() may have read the run
+                                # as clean. After the unfinished gate: on a run
+                                # both states describe, the record failure is the
+                                # detail, not the reason.
+                                post_run_error = _post_run_error(scanner_plugin)
+                                if post_run_error is not None:
+                                    raise ScannerError(
+                                        f"{scanner_config_name} ran on {target_type}, "
+                                        "but ASH could not record the scanner's "
+                                        f"output: {post_run_error}"
+                                    )
                                 # Inside the scope: this runs the scanner's own
                                 # binary (`grype db status`), which is that
                                 # scanner's code like any other spawn of it.
-                                self._assess_content_databases(
-                                    scanner_plugin, raw_results
+                                content_db_records = records = (
+                                    self._assess_content_databases(
+                                        scanner_plugin, raw_results
+                                    )
+                                    or []
                                 )
+                                databases_absent = [
+                                    record.message()
+                                    for record in records or []
+                                    if getattr(record, "absent", False)
+                                ]
                             if sandbox is not None:
                                 # Again after the scan, for anything a process that
                                 # outlived its spawn left behind, before the results
                                 # are written into this directory.
-                                sweep_writable([sandbox.results_dir])
+                                sweep_writable(
+                                    [sandbox.results_dir],
+                                    sandbox.environment_values,
+                                    values_unread=sandbox.environment_values_unread,
+                                )
                     else:
-                        ASH_LOGGER.warning(f"{scanner_config_name} is not enabled!")
+                        # NO_MARKUP, as the sibling records: the scanner name is
+                        # data, and a "[/x]" in one is a closing Rich tag that
+                        # raises instead of printing.
+                        ASH_LOGGER.warning(
+                            f"{scanner_config_name} is not enabled!", extra=NO_MARKUP
+                        )
                 except Exception as e:
-                    stack_trace = traceback.format_exc()
+                    # Redacted with the config's environment values and the
+                    # plugin's own: the exception can name an option either read
+                    # from the environment, and this text goes to ash.log, the
+                    # report and the results files.
+                    environment_values = self._plugin_environment_values(scanner_plugin)
+                    described = error_text(e, environment_values)
+                    stack_trace = traceback_text(values=environment_values)
                     ASH_LOGGER.debug(
-                        f"Stack trace for scanner {scanner_name} failure:\n{stack_trace}"
+                        f"Stack trace for scanner {scanner_name} failure:\n{stack_trace}",
+                        extra=NO_MARKUP,
                     )
-                    err_str = f"Failed to execute {scanner_config_name} scanner on {target_type}: {e}"
+                    err_str = f"Failed to execute {scanner_config_name} scanner on {target_type}: {described}"
                     # Lead with the timeout when there was one. A scanner that
                     # overrides scan() reports whatever the missing output caused
                     # -- typically "No such file or directory" -- and only
                     # _run_subprocess saw that the tool was killed.
                     timed_out_after = _timed_out_after(scanner_plugin)
                     spawn_failure = _spawn_failure(scanner_plugin)
-                    if timed_out_after is not None and "timed out" not in str(e):
-                        err_str = (
-                            f"{scanner_config_name} timed out after "
-                            f"{timed_out_after}s on {target_type} and was killed: {e}"
+                    post_run_error = _post_run_error(scanner_plugin)
+                    if timed_out_after is not None and "timed out" not in described:
+                        # The limit through timeout_limit_token (why and how
+                        # redaction reads it: that function's docstring), and
+                        # the line redacted whole. "Was killed" only when the
+                        # stop worked: a timeout whose stop failed left the
+                        # tool running, and the one thing this line must not
+                        # tell the operator is that it is gone.
+                        limit = timeout_limit_token(timed_out_after, environment_values)
+                        ending = (
+                            COULD_NOT_STOP_ENDING
+                            if _could_not_stop(scanner_plugin) is not None
+                            else WAS_KILLED_ENDING
                         )
-                    elif spawn_failure is not None and "could not start" not in str(e):
+                        err_str = text_without_values(
+                            f"{scanner_config_name} timed out after "
+                            f"{limit} on {target_type}{ending}: {described}",
+                            environment_values,
+                        )
+                    elif (
+                        spawn_failure is not None and "could not start" not in described
+                    ):
                         # Same for a tool that never started: the exception is
                         # usually the results file it did not write.
                         err_str = (
                             f"{scanner_config_name} could not start its tool on "
-                            f"{target_type} ({spawn_failure}): {e}"
+                            f"{target_type} "
+                            f"({text_without_values(spawn_failure, environment_values)})"
+                            f": {described}"
                         )
-                    ASH_LOGGER.error(err_str)
+                    elif (
+                        post_run_error is not None
+                        and "could not record" not in described
+                    ):
+                        # And for a tool that ran: the exception is usually what
+                        # its scan() made of the output ASH could not record.
+                        err_str = (
+                            f"{scanner_config_name} ran on {target_type}, but ASH "
+                            "could not record the scanner's output "
+                            f"({text_without_values(post_run_error, environment_values)})"
+                            f": {described}"
+                        )
+                    ASH_LOGGER.error(err_str, extra=NO_MARKUP)
+                    # On the row as well as in raw_results: the row is what says why
+                    # it is ERROR (a rejected exit code, a timeout, a missing file).
+                    container.add_error(err_str)
+                    # Persisted failure text: ASH's own message first, then the
+                    # tool's recorded lines. Every text line is redacted and
+                    # then writes the home directory as a tilde, one decision
+                    # for both streams (_tool_lines' tilde mode).
                     raw_results = {
-                        "errors": [err_str, *scanner_plugin.errors],
-                        "output": scanner_plugin.output,
+                        "errors": [
+                            home_as_tilde(err_str),
+                            *_tool_lines(
+                                scanner_plugin.errors, environment_values, tilde=True
+                            ),
+                        ],
+                        "output": _tool_lines(
+                            scanner_plugin.output, environment_values, tilde=True
+                        ),
                         "status": "failed",
-                        "exception": str(e),
-                        "stack_trace": stack_trace,
+                        "exception": home_as_tilde(described),
+                        "stack_trace": home_as_tilde(stack_trace),
                     }
+                    # A target the tool never evaluated is named on this path
+                    # too: the raise that brought the run here (a kept flag, a
+                    # spawn failure) does not undo the scanner's accounting,
+                    # and on a failed run raw_results holds the row's reasons.
+                    # The name is the plugin's own text: redacted, then the home
+                    # directory written as a tilde, as the lines above are.
+                    for name in _unevaluated_targets(scanner_plugin):
+                        raw_results["errors"].append(
+                            home_as_tilde(
+                                text_without_values(
+                                    f"no rule was evaluated against {name}",
+                                    environment_values,
+                                )
+                            )
+                        )
                     try:
                         from automated_security_helper.plugins.events import (
                             AshEventType,
@@ -482,24 +1002,50 @@ class ScannerExecutor:
                         # so it is not invisible.
                         ASH_LOGGER.debug(
                             f"ERROR notification for {scanner_name} could not be "
-                            f"issued: {notify_error!r}"
+                            f"issued: {notify_error!r}",
+                            extra=NO_MARKUP,
                         )
                 finally:
                     ASH_LOGGER.trace(
-                        f"{scanner_plugin.__class__.__name__} raw_results for {target_type}: {raw_results}"
+                        f"{scanner_plugin.__class__.__name__} raw_results for {target_type}: {raw_results}",
+                        extra=NO_MARKUP,
                     )
                     if raw_results is None:
+                        # ASH's own message first: it is the row's reason
+                        # (unified_metrics.recorded_error reads the first error).
+                        # The tool's stderr is not the cause of a missing result,
+                        # and it can say anything; its lines are kept after it,
+                        # redacted with the plugin's own values too.
+                        environment_values = self._plugin_environment_values(
+                            scanner_plugin
+                        )
+                        no_result = (
+                            f"{scanner_config_name} returned no result on {target_type}"
+                        )
+                        # NO_MARKUP: the text holds the scanner's name, data as
+                        # in the sibling records above.
+                        ASH_LOGGER.error(no_result, extra=NO_MARKUP)
+                        # On the row too, so the row says why it is ERROR.
+                        container.add_error(no_result)
                         raw_results = {
-                            "errors": scanner_plugin.errors or [],
-                            "output": scanner_plugin.output or [],
+                            "errors": [
+                                (
+                                    f"{scanner_config_name} returned no result on "
+                                    f"{target_type}"
+                                ),
+                                *_tool_lines(
+                                    scanner_plugin.errors,
+                                    environment_values,
+                                    tilde=True,
+                                ),
+                            ],
+                            "output": _tool_lines(
+                                scanner_plugin.output, environment_values, tilde=True
+                            ),
                             "status": "failed",
                             "exception": "Scanner returned None",
                         }
                     elif not raw_results:
-                        ASH_LOGGER.debug(
-                            f"Scanner {scanner_plugin.__class__.__name__} returned False for {target_type} "
-                            "-- plugin is missing dependencies"
-                        )
                         container.status = ScannerStatus.MISSING
                         # The status is not the only channel this fact travels on, and the
                         # two must not disagree. ScannerStatisticsCalculator derives
@@ -509,6 +1055,36 @@ class ScannerExecutor:
                         # still claiming satisfied dependencies reports one way or the
                         # other depending on which of those a run happens to produce.
                         container.dependencies_satisfied = False
+                        # A reason already on the container is the sandbox refusal,
+                        # which its own ERROR above logged.
+                        if container.missing_reason is None:
+                            # Redacted with the config's environment values first:
+                            # the plugin's explanation can name an option the config
+                            # read from the environment, and a value under the home
+                            # directory no longer matches once it is written as ~.
+                            # The plugin's own values too.
+                            environment_values = self._plugin_environment_values(
+                                scanner_plugin
+                            )
+                            reason = text_without_values(
+                                _missing_reason_after_scan(
+                                    scanner_plugin,
+                                    scanner_config_name,
+                                    target_type,
+                                    environment_values,
+                                ),
+                                environment_values,
+                            )
+                            # As ScanPhase's dependency WARNING: ash.log keeps the
+                            # reason as the plugin gave it, absolute paths included,
+                            # and the row gets it without the home directory.
+                            ASH_LOGGER.warning(
+                                f"Scanner {scanner_config_name} found its dependencies "
+                                f"unavailable on the {target_type} files, marking as "
+                                f"MISSING: {reason}",
+                                extra=NO_MARKUP,
+                            )
+                            container.missing_reason = home_as_tilde(reason)
 
                     container.start_time = scanner_plugin.start_time
                     container.end_time = scanner_plugin.end_time
@@ -522,20 +1098,55 @@ class ScannerExecutor:
                             ).total_seconds()
                     except Exception as dur_e:
                         ASH_LOGGER.debug(
-                            f"Error calculating duration for scanner {scanner_config_name}: {dur_e}"
+                            f"Error calculating duration for scanner {scanner_config_name}: {dur_e}",
+                            extra=NO_MARKUP,
                         )
                     container.raw_results = raw_results
 
+                    from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import (
+                        CycloneDXReport,
+                    )
                     from automated_security_helper.schemas.sarif_schema_model import (
                         SarifReport,
                     )
 
                     if isinstance(raw_results, SarifReport):
+                        if not raw_results.runs:
+                            # Every field of a SARIF log is optional, so `{}`
+                            # validates. The template refuses it before grading; a
+                            # scan() override can return it as it is, and zero
+                            # findings from no run reads as a clean scan.
+                            _refuse_to_grade(
+                                container,
+                                f"{scanner_config_name} returned a result on "
+                                f"{target_type} that holds no SARIF run, so there is "
+                                "nothing to grade",
+                            )
                         raw_results = sanitize_sarif_paths(
                             raw_results, self.plugin_context.source_dir
                         )
+                        # Before suppressions, and whatever --ignore-suppressions
+                        # says: ASH's own output is not part of the scanned tree.
+                        # Most scanners are told to skip it; this catches the ones
+                        # whose tool has no such option (snyk-code) or was not
+                        # told (bandit, and any third-party scanner).
+                        drop_results_in_ash_output_dirs(
+                            raw_results,
+                            self.plugin_context,
+                            scanner_name=scanner_config_name,
+                        )
+                        # So a converted file's finding keeps its id wherever the
+                        # output directory is.
+                        mark_converted_results(raw_results, self.plugin_context)
                         if not self.plugin_context.ignore_suppressions:
                             raw_results = apply_suppressions_to_sarif(
+                                sarif_report=raw_results,
+                                plugin_context=self.plugin_context,
+                            )
+                        else:
+                            # The flag lifts suppressions and ignore paths, not
+                            # the exclusion of ASH's own output directory.
+                            raw_results = exclude_output_dir_results(
                                 sarif_report=raw_results,
                                 plugin_context=self.plugin_context,
                             )
@@ -545,11 +1156,35 @@ class ScannerExecutor:
                         container.severity_counts = severity_counts
                         container.finding_count = finding_count
                     elif isinstance(raw_results, dict):
-                        if (
-                            "status" in raw_results
-                            and raw_results["status"] == "failed"
+                        if "status" in raw_results and not _completed_result_status(
+                            raw_results["status"]
                         ):
                             container.status = ScannerStatus.ERROR
+                            # "failed" dicts carry their own errors: the template's
+                            # and the scan phase's failure responses.
+                            if raw_results["status"] != "failed":
+                                _refuse_to_grade(
+                                    container,
+                                    f"{scanner_config_name} returned a result on "
+                                    f"{target_type} with status "
+                                    f"{raw_results['status']!r}, which does not say "
+                                    "its tool completed, so it was not graded",
+                                )
+                        elif not (
+                            "status" in raw_results
+                            or "severity_counts" in raw_results
+                            or isinstance(raw_results.get("findings"), list)
+                        ):
+                            # Nothing here to grade: a tool's own JSON that a scanner
+                            # returned because it did not parse. Graded on its zero
+                            # findings it read as a clean scan.
+                            _refuse_to_grade(
+                                container,
+                                f"{scanner_config_name} returned a result on "
+                                f"{target_type} that could not be graded: it is not "
+                                "SARIF and carries no status, severity_counts or "
+                                "findings",
+                            )
                         else:
                             if "severity_counts" in raw_results:
                                 raw_counts = raw_results["severity_counts"]
@@ -580,8 +1215,51 @@ class ScannerExecutor:
                                         except ValueError:
                                             container.severity_counts.increment("info")
                                 container.finding_count = len(raw_results["findings"])
+                    elif raw_results and not (
+                        raw_results is True or isinstance(raw_results, CycloneDXReport)
+                    ):
+                        # Nothing the executor reads: a scan() override's own list,
+                        # string or number. Graded on its zero findings it read as a
+                        # clean scan. A falsy result is MISSING, above.
+                        _refuse_to_grade(
+                            container,
+                            f"{scanner_config_name} returned a result on "
+                            f"{target_type} that could not be graded: a "
+                            f"{type(raw_results).__name__}, not SARIF, CycloneDX or "
+                            "a dict",
+                        )
 
-                    container.exit_code = getattr(scanner_plugin, "exit_code", 0)
+                    # Not for a target scan() never ran on (disabled, or refused by
+                    # the sandbox, where an unavailable named backend records its
+                    # own code): the plugin's exit_code belongs to the last
+                    # target it scanned. Not for a MISSING container: its tool
+                    # never ran, so it has no exit code, and the unset field keeps
+                    # the per-target report and the scanner row from claiming 0.
+                    # Nor when the scanner says it started no tool, with an exit
+                    # code of None (npm-audit with a yarn.lock and no yarn,
+                    # cfn-nag with only a template the model rejects), or attempted
+                    # no target and kept the 0 it started with (a scanner that does
+                    # not reset it and had nothing to scan). A tool that did start
+                    # keeps its code, 0 included.
+                    plugin_exit_code = getattr(scanner_plugin, "exit_code", 0)
+                    never_started = plugin_exit_code is None or (
+                        _target_count_attr(scanner_plugin, "targets_attempted") == 0
+                        and plugin_exit_code == 0
+                    )
+                    if (
+                        scan_called
+                        and container.status != ScannerStatus.MISSING
+                        and not never_started
+                    ):
+                        container.exit_code = plugin_exit_code
+
+                    # Carried across like exit_code, for the same reason: the
+                    # per-target report is where the exit-code floor reads it.
+                    # Assigned only when recorded, so an unset field stays out of
+                    # the exclude_unset dump.
+                    could_not_stop_reason = _could_not_stop(scanner_plugin)
+                    if could_not_stop_reason is not None:
+                        container.could_not_stop = could_not_stop_reason
 
                     # Carried across the same way exit_code is, so the field is closed for
                     # every container rather than only for the falsy-return branch above. A
@@ -596,16 +1274,44 @@ class ScannerExecutor:
                     # flag is recomputed at all, so a plain assignment would restore True over
                     # the False recorded above.
                     #
-                    # An absent attribute defaults to True because absence is not evidence of
-                    # a problem. bool() coerces at the boundary for the same reason
-                    # _target_count_attr does: the plugin is an arbitrary object, the field is
-                    # typed bool, and assignment is not validated.
+                    # Only a flag something recorded counts (_dependencies_recorded_
+                    # unavailable): an absent attribute, or the default no check ever
+                    # replaced, is not evidence of a problem.
                     container.dependencies_satisfied = (
                         container.dependencies_satisfied
-                        and bool(
-                            getattr(scanner_plugin, "dependencies_satisfied", True)
-                        )
+                        and not _dependencies_recorded_unavailable(scanner_plugin)
                     )
+                    # A report returned with the dependencies unsatisfied is a target
+                    # the scanner did not evaluate, and the statistics read it as
+                    # missing (target_report_is_missing). It gets the reason and the
+                    # WARNING a falsy return gets, so its row says why. The branch
+                    # above has already given a falsy return or a sandbox refusal its
+                    # reason.
+                    if (
+                        not container.dependencies_satisfied
+                        and container.missing_reason is None
+                    ):
+                        # Redacted with the config's environment values first,
+                        # and the plugin's own, as for a falsy return above.
+                        environment_values = self._plugin_environment_values(
+                            scanner_plugin
+                        )
+                        reason = text_without_values(
+                            _missing_reason_after_scan(
+                                scanner_plugin,
+                                scanner_config_name,
+                                target_type,
+                                environment_values,
+                            ),
+                            environment_values,
+                        )
+                        ASH_LOGGER.warning(
+                            f"Scanner {scanner_config_name} found its dependencies "
+                            f"unavailable on the {target_type} files, marking as "
+                            f"MISSING: {reason}",
+                            extra=NO_MARKUP,
+                        )
+                        container.missing_reason = home_as_tilde(reason)
 
                     # Carry per-target outcome counts across, following the exit_code pattern
                     # above. This is what lets determine_status distinguish "scanned and found
@@ -626,11 +1332,150 @@ class ScannerExecutor:
                     container.targets_failed = _non_negative_int_attr(
                         scanner_plugin, "targets_failed"
                     )
+                    # Assigned only when there is something to record, so every other
+                    # scanner's serialized report keeps its exact shape (the dump
+                    # excludes unset fields).
+                    not_scanned = _inputs_not_scanned(scanner_plugin)
+                    if not_scanned:
+                        container.inputs_not_scanned = not_scanned
+
+                    # A scan with no database had nothing to match against, so its
+                    # zero findings are not a result. ERROR whatever the staleness
+                    # policy: content_db_staleness relaxes the age bound of a database
+                    # that exists. The SARIF and its records are kept, so the stale
+                    # database is reported as well.
+                    if databases_absent:
+                        container.status = ScannerStatus.ERROR
+                        for message in databases_absent:
+                            container.add_error(message)
 
                     if container.status not in _TERMINAL_SCANNER_STATUSES:
-                        container.status = container.determine_status(
-                            scanner_config.options.severity_threshold
+                        # Graded against the threshold the summary and the scanner
+                        # row use, not the scanner's own option alone: that is None
+                        # unless its config sets one, and None turns the gate off.
+                        threshold, _ = resolve_scanner_threshold(
+                            scanner_config.options.severity_threshold,
+                            getattr(self.plugin_context, "config", None),
                         )
+                        container.status = container.determine_status(threshold)
+                        # A clean result from a database the policy rejects is not a
+                        # clean result: under content_db_staleness: fail the scan fails
+                        # on it, so PASSED here would say the opposite of the exit code.
+                        # ERROR, the status for "no verdict that can be graded", with
+                        # the database named. Findings from such a database are real,
+                        # so a FAILED row stays FAILED, and under warn the operator
+                        # accepted the database and the status is left alone.
+                        if container.status == ScannerStatus.PASSED:
+                            enforced = [
+                                record
+                                for record in content_db_records
+                                if getattr(record, "enforced", False) is True
+                            ]
+                            if enforced:
+                                container.status = ScannerStatus.ERROR
+                                container.rejected_content_databases = [
+                                    record.name for record in enforced
+                                ]
+                                for record in enforced:
+                                    container.add_error(record.message())
+                        # A target the scanner's tool never evaluated is not a clean
+                        # result either, whatever the failure type: a scanner that
+                        # names unevaluated targets keeps the evaluated targets'
+                        # findings, and PASSED here would read as "evaluated and
+                        # clean" for a target nothing evaluated. Each such target is
+                        # named on the container, so the results row says which file
+                        # has no verdict, whatever the status is. The name is the
+                        # plugin's own text, redacted as the timeout line below is,
+                        # then the home directory written as a tilde.
+                        unevaluated = _unevaluated_targets(scanner_plugin)
+                        unevaluated_values = (
+                            self._plugin_environment_values(scanner_plugin)
+                            if unevaluated
+                            else ()
+                        )
+                        for name in unevaluated:
+                            container.add_error(
+                                home_as_tilde(
+                                    text_without_values(
+                                        f"no rule was evaluated against {name}",
+                                        unevaluated_values,
+                                    )
+                                )
+                            )
+                            # SKIPPED is refused like PASSED: the completeness
+                            # gate counts a SKIPPED row complete, and the
+                            # skipped_reason the block below would write
+                            # ("found nothing it scans") contradicts the error
+                            # naming a file with no verdict on the same row.
+                            if container.status in (
+                                ScannerStatus.PASSED,
+                                ScannerStatus.SKIPPED,
+                            ):
+                                container.status = ScannerStatus.ERROR
+                        # A tool-level cause recorded for the run is never dropped by
+                        # the per-target accounting. A timeout that killed one
+                        # target's run among others that rendered used to surface
+                        # through a raise; when scan() returns normally instead, the
+                        # cause still reaches the results, and a run whose tool was
+                        # killed has no verdict that can be graded.
+                        timed_out_after = _timed_out_after(scanner_plugin)
+                        if timed_out_after is not None:
+                            # The limit through timeout_limit_token (why: that
+                            # function's docstring); the line redacted like
+                            # every sibling site. For a PluginBase scanner that
+                            # keeps its kept flag, the acceptance step's raise
+                            # runs before this block; it grades a scanner that
+                            # cleared its flag, or a plugin recording the
+                            # attribute alone.
+                            environment_values = self._plugin_environment_values(
+                                scanner_plugin
+                            )
+                            # The same was-killed contract as the failed-scan
+                            # lead above: a stop that failed left the tool
+                            # running, so this line must not say it is gone.
+                            ending = (
+                                COULD_NOT_STOP_ENDING
+                                if _could_not_stop(scanner_plugin) is not None
+                                else WAS_KILLED_ENDING
+                            )
+                            container.add_error(
+                                text_without_values(
+                                    f"{scanner_config_name} timed out after "
+                                    f"{timeout_limit_token(timed_out_after, environment_values)} "
+                                    f"on {target_type}{ending}",
+                                    environment_values,
+                                )
+                            )
+                            container.status = ScannerStatus.ERROR
+                        if container.status == ScannerStatus.SKIPPED:
+                            # determine_status reaches SKIPPED only for a scanner that
+                            # tracks targets and attempted none. The scanner's own
+                            # answer, when it has one, so a tree that is SKIPPED both
+                            # ways reads the same whether or not its tool was
+                            # installed. cfn-nag and cdk-nag say a template could not
+                            # be parsed only for a file the tool-absent check counts,
+                            # and that tree without the tool is MISSING, not SKIPPED.
+                            # Redacted with the config's environment values and
+                            # the plugin's own: the plugin's stated reason can
+                            # name a configured value, and the row and ash.log
+                            # keep it.
+                            environment_values = self._plugin_environment_values(
+                                scanner_plugin
+                            )
+                            container.skipped_reason = text_without_values(
+                                _skipped_reason_after_scan(
+                                    scanner_plugin,
+                                    scanner_config_name,
+                                    target_type,
+                                    environment_values,
+                                ),
+                                environment_values,
+                            )
+                            ASH_LOGGER.info(
+                                f"Scanner {scanner_config_name} is SKIPPED on the "
+                                f"{target_type} files: {container.skipped_reason}",
+                                extra=NO_MARKUP,
+                            )
                     if isinstance(raw_results, dict) and "metadata" in raw_results:
                         for key, value in raw_results["metadata"].items():
                             container.add_metadata(key, value)
@@ -641,7 +1486,9 @@ class ScannerExecutor:
 
         except Exception as e:
             ASH_LOGGER.error(
-                f"Failed to execute {scanner_plugin.__class__.__name__} scanner: {e}"
+                f"Failed to execute {scanner_plugin.__class__.__name__} scanner: "
+                f"{error_text(e, self._plugin_environment_values(scanner_plugin))}",
+                extra=NO_MARKUP,
             )
             raise
 
@@ -680,27 +1527,51 @@ class ScannerExecutor:
         Returns a tuple of (results, succeeded) where succeeded is False when
         _execute_scanner raised an unhandled exception.  Callers use the flag to
         decide whether to record the scanner in completed_scanners.
+
+        A cancelled scan starts no further scanner: ScanCancelled is raised here,
+        before the try, and is not an Exception, so it ends the scan instead of
+        being recorded as this scanner's failure. Two checks make that true.
+        raise_if_cancelled reads the scan's cancel event. _cancel_seen covers a
+        cancel that reached one scanner directly with that event unset: the
+        scanner's own ScanCancelled sets it, and the next start is refused even
+        when a worker dequeued it before the queue-shutdown could cancel it.
         """
+        raise_if_cancelled()
+        if self._cancel_seen.is_set():
+            raise ScanCancelled(
+                f"the scan was cancelled; scanner {scanner_name} is not started"
+            )
         try:
             return self._execute_scanner(
                 scanner_name, scanner_plugin, scan_targets
             ), True
+        except ScanCancelled:
+            self._cancel_seen.set()
+            raise
         except Exception as e:
-            stack_trace = traceback.format_exc()
-            error_msg = f"Unexpected error in scanner {scanner_name}: {str(e)}"
-            ASH_LOGGER.error(error_msg)
+            # Redacted as the per-target handler redacts: see
+            # _plugin_environment_values.
+            environment_values = self._plugin_environment_values(scanner_plugin)
+            described = error_text(e, environment_values)
+            stack_trace = traceback_text(values=environment_values)
+            error_msg = f"Unexpected error in scanner {scanner_name}: {described}"
+            ASH_LOGGER.error(error_msg, extra=NO_MARKUP)
             ASH_LOGGER.debug(
-                f"Stack trace for scanner {scanner_name} failure:\n{stack_trace}"
+                f"Stack trace for scanner {scanner_name} failure:\n{stack_trace}",
+                extra=NO_MARKUP,
             )
 
             failure_container = ScanResultsContainer.for_failure(
-                scanner_name, errors=[error_msg], exception=e
+                scanner_name,
+                errors=[error_msg],
+                exception=e,
+                values=environment_values,
             )
             failure_container.raw_results = {
-                "errors": [error_msg],
+                "errors": [home_as_tilde(error_msg)],
                 "status": "failed",
-                "exception": str(e),
-                "stack_trace": stack_trace,
+                "exception": home_as_tilde(described),
+                "stack_trace": home_as_tilde(stack_trace),
             }
             try:
                 from automated_security_helper.plugins.events import AshEventType
@@ -717,7 +1588,8 @@ class ScannerExecutor:
                 # kwargs construction.
                 ASH_LOGGER.debug(
                     f"ERROR notification for {scanner_name} could not be issued: "
-                    f"{notify_error!r}"
+                    f"{notify_error!r}",
+                    extra=NO_MARKUP,
                 )
 
             return [failure_container], False
@@ -730,6 +1602,7 @@ class ScannerExecutor:
         self, aggregated_results: AshAggregatedResults
     ) -> AshAggregatedResults:
         """Execute scanner_tasks one at a time."""
+        self._cancel_seen = threading.Event()
         total = len(self.scanner_tasks)
         completed = 0
         all_scanner_names = [t[0] for t in self.scanner_tasks]
@@ -738,13 +1611,8 @@ class ScannerExecutor:
         for scanner_name, scanner_plugin, scan_targets in self.scanner_tasks:
             scanner_task = self.progress_display.add_task(
                 phase=ExecutionPhase.SCAN,
-                description=f"[cyan]({scanner_name}) Scanning directories...",
+                description=f"[cyan]({escape_markup(scanner_name)}) Scanning directories...",
                 total=100,
-            )
-            progress_percent = 40 + (completed / max(total, 1) * 50)
-            self._update_progress(
-                int(progress_percent),
-                f"Running scanner {completed + 1}/{total}: {scanner_name}",
             )
 
             try:
@@ -769,7 +1637,8 @@ class ScannerExecutor:
                     # import and kwargs construction.
                     ASH_LOGGER.debug(
                         f"SCAN_START notification for {scanner_name} could not be "
-                        f"issued: {notify_error!r}"
+                        f"issued: {notify_error!r}",
+                        extra=NO_MARKUP,
                     )
 
                 results_list, scanner_succeeded = self._safe_execute_scanner(
@@ -795,7 +1664,7 @@ class ScannerExecutor:
                         phase=ExecutionPhase.SCAN,
                         task_id=scanner_task,
                         completed=100,
-                        description=f"[red]({scanner_name}) Failed: returned None results",
+                        description=f"[red]({escape_markup(scanner_name)}) Failed: returned None results",
                     )
                 else:
                     for r in results_list:
@@ -815,7 +1684,7 @@ class ScannerExecutor:
                         phase=ExecutionPhase.SCAN,
                         task_id=scanner_task,
                         completed=100,
-                        description=f"[green]({scanner_name}) Completed scan",
+                        description=f"[green]({escape_markup(scanner_name)}) Completed scan",
                     )
                     if scanner_name in remaining_scanners:
                         remaining_scanners.remove(scanner_name)
@@ -846,31 +1715,44 @@ class ScannerExecutor:
                         # local import and kwargs construction.
                         ASH_LOGGER.debug(
                             f"SCAN_COMPLETE notification for {scanner_name} could "
-                            f"not be issued: {notify_error!r}"
+                            f"not be issued: {notify_error!r}",
+                            extra=NO_MARKUP,
                         )
 
             except Exception as e:
-                stack_trace = traceback.format_exc()
+                # Redacted as the per-target handler redacts: see
+                # _plugin_environment_values.
+                environment_values = self._plugin_environment_values(scanner_plugin)
+                described = error_text(e, environment_values)
+                stack_trace = traceback_text(values=environment_values)
                 ASH_LOGGER.debug(
-                    f"Stack trace for scanner {scanner_name} failure:\n{stack_trace}"
+                    f"Stack trace for scanner {scanner_name} failure:\n{stack_trace}",
+                    extra=NO_MARKUP,
                 )
                 self.progress_display.update_task(
                     phase=ExecutionPhase.SCAN,
                     task_id=scanner_task,
                     completed=100,
-                    description=f"[red]({scanner_name}) Failed: {str(e)}",
+                    description=(
+                        f"[red]({escape_markup(scanner_name)}) Failed: {escape_markup(described)}"
+                    ),
                 )
-                ASH_LOGGER.error(f"Scanner failed: {scanner_name} - {str(e)}")
+                ASH_LOGGER.error(
+                    f"Scanner failed: {scanner_name} - {described}", extra=NO_MARKUP
+                )
                 failure_container = ScanResultsContainer.for_failure(
                     scanner_name,
-                    errors=[f"Scanner {scanner_name} failed: {str(e)}"],
+                    errors=[f"Scanner {scanner_name} failed: {described}"],
                     exception=e,
+                    values=environment_values,
                 )
                 failure_container.raw_results = {
-                    "errors": [f"Scanner {scanner_name} failed: {str(e)}"],
+                    "errors": [
+                        home_as_tilde(f"Scanner {scanner_name} failed: {described}")
+                    ],
                     "status": "failed",
-                    "exception": str(e),
-                    "stack_trace": stack_trace,
+                    "exception": home_as_tilde(described),
+                    "stack_trace": home_as_tilde(stack_trace),
                 }
                 try:
                     processed = self._process_results_fn(
@@ -879,7 +1761,8 @@ class ScannerExecutor:
                     aggregated_results = processed
                 except Exception as process_error:
                     ASH_LOGGER.error(
-                        f"Failed to process error results for {scanner_name}: {str(process_error)}"
+                        f"Failed to process error results for {scanner_name}: {str(process_error)}",
+                        extra=NO_MARKUP,
                     )
             finally:
                 completed += 1
@@ -896,6 +1779,7 @@ class ScannerExecutor:
         """Execute scanner_tasks via a ThreadPoolExecutor."""
         import threading
 
+        self._cancel_seen = threading.Event()
         total = len(self.scanner_tasks)
         ASH_LOGGER.debug(f"Total scanners: {total}")
 
@@ -908,14 +1792,17 @@ class ScannerExecutor:
         remaining_scanners = all_scanner_names.copy()
         remaining_scanners_lock = threading.Lock()
 
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+        with (
+            ThreadPoolExecutor(max_workers=self.max_workers) as executor,
+            _cancel_scan_on_interrupt(executor),
+        ):
             futures: List[Future[Tuple[List[ScanResultsContainer], bool]]] = []
 
             for scanner_name, scanner_plugin, scan_targets in self.scanner_tasks:
                 task_key = f"{scanner_name}_task"
                 scanner_task = self.progress_display.add_task(
                     phase=ExecutionPhase.SCAN,
-                    description=f"[magenta]({scanner_name}) Scanning directories...",
+                    description=f"[magenta]({escape_markup(scanner_name)}) Scanning directories...",
                     total=100,
                 )
                 scanner_tasks_map[task_key] = scanner_task
@@ -923,10 +1810,17 @@ class ScannerExecutor:
                     phase=ExecutionPhase.SCAN,
                     task_id=scanner_task,
                     completed=10,
-                    description=f"[blue]({scanner_name}) Queued scan...",
+                    description=f"[blue]({escape_markup(scanner_name)}) Queued scan...",
                 )
                 ASH_LOGGER.debug(f"Submitting {scanner_name} to thread pool")
+                # Run in a copy of this thread's context, which carries the
+                # scanned-tree scope (utils/subprocess_utils.scanning_tree) and
+                # the scan's cancel event (core/cancellation.py) into the
+                # scanner's thread. A pool thread does not inherit context, and
+                # one copy per task, because a context cannot be entered by two
+                # threads at once.
                 future = executor.submit(
+                    contextvars.copy_context().run,
                     self._safe_execute_scanner,
                     scanner_name,
                     scanner_plugin,
@@ -934,14 +1828,72 @@ class ScannerExecutor:
                 )
                 future.scanner_name = scanner_name  # type: ignore[attr-defined]
                 future.scanner_task_key = task_key  # type: ignore[attr-defined]
+                # For the handler below, which redacts with its values.
+                future.scanner_plugin = scanner_plugin  # type: ignore[attr-defined]
                 futures.append(future)
 
-            self._update_progress(
-                50, f"Running {len(futures)} scanner tasks in parallel..."
-            )
+            # A cancel ends the run, but a scanner that had finished by then stays
+            # recorded, as in the sequential loop. Once a future's result is the
+            # scan's ScanCancelled, the loop stops waiting on completions and
+            # works in four steps: cancel the queue, sweep, drain, sweep.
+            # - Cancel the queue (shutdown(wait=False, cancel_futures=True)):
+            #   queued futures are cancelled at once, so no further scanner
+            #   starts. This comes BEFORE the first sweep, because a worker
+            #   freed while that sweep's recording runs dequeues the next
+            #   queued scanner, and the drain then waits on a scan the cancel
+            #   had already ended.
+            # - First sweep: every future already done is recorded AT ONCE, in
+            #   submission order (the completion order is not observable). A
+            #   finished sibling's result can be in hand before the drain --
+            #   as_completed may hand the cancel over first -- and recorded only
+            #   after the drain it sat behind a scanner that cannot see the
+            #   cancel event (busy in pure Python) for as long as it chose to
+            #   run, and an interrupt during that wait threw it away.
+            # - Drain (shutdown(wait=True)): the futures still running are
+            #   waited for once -- their tools see the scan's cancel event, so
+            #   that wait is their stop, not their full scan. The pool's own
+            #   exit performs the same wait either way (shutdown(wait=True)
+            #   in __exit__).
+            # - Second sweep: scanners that finished during the drain, where
+            #   sweeping only before it threw such results away.
+            # One that returned is recorded as usual, and one that failed with
+            # an ordinary error is recorded as that scanner's failure. Then the
+            # cancel is re-raised.
+            cancelled: List[BaseException] = []
+
+            def _futures_to_record() -> Iterable[
+                Future[Tuple[List[ScanResultsContainer], bool]]
+            ]:
+                handed = set()
+
+                def done_and_unhanded() -> Iterable[
+                    Future[Tuple[List[ScanResultsContainer], bool]]
+                ]:
+                    for future in futures:
+                        if future in handed or not future.done() or future.cancelled():
+                            continue
+                        held = future.exception()
+                        # Not one holding a BaseException that is not an Exception:
+                        # another ScanCancelled adds nothing, and a KeyboardInterrupt
+                        # or SystemExit would pass the loop's handlers and replace
+                        # the cancel this run re-raises.
+                        if held is None or isinstance(held, Exception):
+                            handed.add(future)
+                            yield future
+
+                for future in as_completed(futures):
+                    handed.add(future)
+                    yield future
+                    if cancelled:
+                        break
+                if cancelled:
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    yield from done_and_unhanded()
+                    executor.shutdown(wait=True)
+                    yield from done_and_unhanded()
 
             completed_count = 0
-            for future in as_completed(futures):
+            for future in _futures_to_record():
                 scanner_name = future.scanner_name  # type: ignore[attr-defined]
                 task_key = future.scanner_task_key  # type: ignore[attr-defined]
                 task_id = scanner_tasks_map.get(task_key)
@@ -973,7 +1925,7 @@ class ScannerExecutor:
                                 phase=ExecutionPhase.SCAN,
                                 task_id=task_id,
                                 completed=100,
-                                description=f"[red]({scanner_name}) Failed: returned None results",
+                                description=f"[red]({escape_markup(scanner_name)}) Failed: returned None results",
                             )
                     else:
                         ASH_LOGGER.debug(f"Got results from {scanner_name}, processing")
@@ -1004,7 +1956,7 @@ class ScannerExecutor:
                                 phase=ExecutionPhase.SCAN,
                                 task_id=task_id,
                                 completed=100,
-                                description=f"[green]({scanner_name}) Completed scan",
+                                description=f"[green]({escape_markup(scanner_name)}) Completed scan",
                             )
 
                         with remaining_scanners_lock:
@@ -1039,38 +1991,61 @@ class ScannerExecutor:
                                 # the enclosing handler.
                                 ASH_LOGGER.debug(
                                     f"SCAN_COMPLETE notification for {scanner_name} "
-                                    f"could not be issued: {notify_error!r}"
+                                    f"could not be issued: {notify_error!r}",
+                                    extra=NO_MARKUP,
                                 )
 
+                    # A completion: the scanner returned, or returned None and
+                    # was recorded as a failure. The cancel's own future is not
+                    # a completion, so the ScanCancelled arm does not count.
+                    completed_count += 1
+                except ScanCancelled as stop:
+                    # Re-raised after the finished futures are recorded.
+                    cancelled.append(stop)
                 except Exception as e:
-                    stack_trace = traceback.format_exc()
+                    # Redacted as the per-target handler redacts: see
+                    # _plugin_environment_values.
+                    environment_values = self._plugin_environment_values(
+                        getattr(future, "scanner_plugin", None)
+                    )
+                    described = error_text(e, environment_values)
+                    stack_trace = traceback_text(values=environment_values)
                     ASH_LOGGER.debug(
-                        f"Stack trace for scanner {scanner_name} thread failure:\n{stack_trace}"
+                        f"Stack trace for scanner {scanner_name} thread failure:\n{stack_trace}",
+                        extra=NO_MARKUP,
                     )
                     if task_id is not None:
                         self.progress_display.update_task(
                             phase=ExecutionPhase.SCAN,
                             task_id=task_id,
                             completed=100,
-                            description=f"[red]({scanner_name}) Failed: {str(e)}",
+                            description=(
+                                f"[red]({escape_markup(scanner_name)}) Failed: "
+                                f"{escape_markup(described)}"
+                            ),
                         )
                     ASH_LOGGER.error(
-                        f"Scanner execution failed in thread pool: {scanner_name} - {str(e)}"
+                        f"Scanner execution failed in thread pool: {scanner_name} - {described}",
+                        extra=NO_MARKUP,
                     )
                     failure_container = ScanResultsContainer.for_failure(
                         scanner_name,
                         errors=[
-                            f"Scanner {scanner_name} failed in thread pool: {str(e)}"
+                            f"Scanner {scanner_name} failed in thread pool: {described}"
                         ],
                         exception=e,
+                        values=environment_values,
                     )
                     failure_container.raw_results = {
                         "errors": [
-                            f"Scanner {scanner_name} failed in thread pool: {str(e)}"
+                            home_as_tilde(
+                                f"Scanner {scanner_name} failed in thread pool: "
+                                f"{described}"
+                            )
                         ],
                         "status": "failed",
-                        "exception": str(e),
-                        "stack_trace": stack_trace,
+                        "exception": home_as_tilde(described),
+                        "stack_trace": home_as_tilde(stack_trace),
                     }
                     try:
                         processed = self._process_results_fn(
@@ -1079,38 +2054,36 @@ class ScannerExecutor:
                         aggregated_results = processed
                     except Exception as process_error:
                         ASH_LOGGER.error(
-                            f"Failed to process error results for {scanner_name}: {str(process_error)}"
+                            f"Failed to process error results for {scanner_name}: {str(process_error)}",
+                            extra=NO_MARKUP,
                         )
-
-                finally:
+                    # A recorded failure is a completion too.
                     completed_count += 1
-                    if futures:
-                        progress_percent = 50 + (completed_count / len(futures) * 40)
-                        self._update_progress(
-                            int(progress_percent),
-                            f"Completed {completed_count}/{len(futures)} scanner tasks",
-                        )
+
+            if cancelled:
+                # The first cancel to land is not the informative one: a
+                # cancel whose stop could not end its tool carries the
+                # (tool, pid) records the exit line prints, and it can lose
+                # to whichever clean cancel finished first -- including one
+                # held by a future the recording loop never hands over,
+                # since another ScanCancelled adds no new ending. The cancel
+                # raised carries the union of every record collected.
+                sources: List[BaseException] = list(cancelled)
+                for future in futures:
+                    if future.done() and not future.cancelled():
+                        held = future.exception()
+                        if held is not None and not isinstance(held, Exception):
+                            sources.append(held)
+                survivors: Tuple[Tuple[str, int], ...] = ()
+                for source in sources:
+                    for record in getattr(source, "could_not_stop", ()):
+                        if record not in survivors:
+                            survivors = survivors + (record,)
+                first = cancelled[0]
+                if survivors and tuple(getattr(first, "could_not_stop", ())) != (
+                    survivors
+                ):
+                    raise ScanCancelled(str(first), could_not_stop=survivors) from first
+                raise first
 
         return aggregated_results
-
-    # ------------------------------------------------------------------
-    # Progress helper
-    # ------------------------------------------------------------------
-
-    def _update_progress(self, completed: int, description: str) -> None:
-        """No-op when progress_display lacks phase_task."""
-        try:
-            phase_task = getattr(self.progress_display, "phase_task", None)
-            if phase_task is not None:
-                self.progress_display.update_task(
-                    phase=ExecutionPhase.SCAN,
-                    task_id=phase_task,
-                    completed=completed,
-                    description=description,
-                )
-        except Exception as e:
-            # Progress reporting is cosmetic and progress_display is a mock in much
-            # of the test suite, so a display that raises must not fail a scan. The
-            # type stays broad because the display is injected. Logged so a display
-            # that never updates is diagnosable instead of just looking frozen.
-            ASH_LOGGER.debug(f"Progress update skipped: {e!r}")

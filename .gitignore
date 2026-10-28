@@ -39,6 +39,10 @@ automated_security_helper/assets/Dockerfile
 # them would create a second place a digest could be edited.
 automated_security_helper/assets/tool_downloads.py
 automated_security_helper/assets/exceptions.py
+# Copied from docs/content/docs/genai-steering-guide.md by hatch_build.py for the
+# wheel's `ash get-genai-guide`. Ignored so a stale copy never ships beside the one
+# the build stages.
+automated_security_helper/assets/genai-steering-guide.md
 
 ### macOS ###
 # General
@@ -303,3 +307,9 @@ $RECYCLE.BIN/
 
 # Snyk Cache
 .dccache
+
+# Core dumps (core.<pid>) that a crashing process leaves in its working directory,
+# such as tests/integration/sandbox/test_landlock_timeout.py's SIGSEGV probe on a host
+# whose core_pattern is a bare "core". core.[0-9]* rather than core.*, which would
+# also hide a new core.py or core.json.
+core.[0-9]*

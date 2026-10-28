@@ -9,14 +9,30 @@ workspace-level policy into one project, and returns None when the pattern
 cannot possibly match inside that project.
 """
 
+import itertools
+
 import pytest
 
 from automated_security_helper.core.exceptions import WorkspacePatternError
-from automated_security_helper.utils.suppression_matcher import file_path_matches
+from automated_security_helper.utils.suppression_matcher import (
+    file_path_matches,
+    ignore_path_matches,
+)
 from automated_security_helper.utils.workspace_paths import (
+    IGNORE_PATH,
+    SUPPRESSION,
     to_project_pattern,
     to_workspace_pattern,
 )
+
+
+def _down_suppression(pattern, prefix):
+    """``to_project_pattern`` for a suppression.
+
+    The cells that use it check the answer with ``file_path_matches``, a
+    suppression's matcher. ``TestDownConversionPerKind`` covers both kinds.
+    """
+    return to_project_pattern(pattern, prefix, kind=SUPPRESSION)
 
 
 # ---------------------------------------------------------------------------
@@ -263,12 +279,16 @@ class TestDownConversionAnchored:
         ],
     )
     def test_prefix_stripped(self, pattern, prefix, expected):
-        assert to_project_pattern(pattern, prefix) == expected
+        assert _down_suppression(pattern, prefix) == expected
 
-    def test_prefix_matching_is_case_insensitive(self):
-        """Matches how file_path_matches compares paths elsewhere in ASH."""
-        assert to_project_pattern("Project-A/src/x.py", "project-a") == "src/x.py"
-        assert to_project_pattern("project-a/src/x.py", "PROJECT-A") == "src/x.py"
+    def test_prefix_matching_is_case_sensitive(self):
+        """As file_path_matches compares paths: on a case-sensitive filesystem
+        ``Project-A`` is another directory, so a workspace pattern naming it does
+        not apply to the project ``project-a``."""
+        assert _down_suppression("Project-A/src/x.py", "project-a") is None
+        assert _down_suppression("project-a/src/x.py", "PROJECT-A") is None
+        assert _down_suppression("project-a/src/x.py", "project-a") == "src/x.py"
+        assert file_path_matches("project-a/src/x.py", "Project-A/src/x.py") is False
 
     def test_a_pattern_naming_only_the_project_directory_does_not_apply(self):
         """ "project-a" matches the directory, not the files inside it.
@@ -280,8 +300,8 @@ class TestDownConversionAnchored:
         workspace-level pattern never covered.
         """
         assert file_path_matches("project-a/src/x.py", "project-a") is False
-        assert to_project_pattern("project-a", "project-a") is None
-        assert to_project_pattern("project-a/", "project-a") is None
+        assert _down_suppression("project-a", "project-a") is None
+        assert _down_suppression("project-a/", "project-a") is None
 
 
 class TestDownConversionNotApplicable:
@@ -297,18 +317,18 @@ class TestDownConversionNotApplicable:
         ],
     )
     def test_returns_none(self, pattern, prefix):
-        assert to_project_pattern(pattern, prefix) is None
+        assert _down_suppression(pattern, prefix) is None
 
     def test_a_sibling_sharing_a_name_prefix_does_not_match(self):
         """Component-wise, not string-prefix: 'project-abc' is not 'project-a'."""
-        assert to_project_pattern("project-abc/src/x.py", "project-a") is None
+        assert _down_suppression("project-abc/src/x.py", "project-a") is None
 
     def test_a_shorter_path_than_the_prefix_does_not_match(self):
-        assert to_project_pattern("apps/x.py", "apps/web") is None
+        assert _down_suppression("apps/x.py", "apps/web") is None
 
     def test_a_pattern_with_fewer_components_than_the_prefix(self):
         """'apps' cannot address anything inside 'apps/web'."""
-        assert to_project_pattern("apps", "apps/web") is None
+        assert _down_suppression("apps", "apps/web") is None
 
 
 class TestDownConversionWildcardFirstComponent:
@@ -341,15 +361,15 @@ class TestDownConversionWildcardFirstComponent:
         ],
     )
     def test_leading_glob_rewrites(self, pattern, expected):
-        assert to_project_pattern(pattern, "project-a") == expected
+        assert _down_suppression(pattern, "project-a") == expected
 
     def test_a_leading_glob_that_cannot_reach_the_project_is_none(self):
         """ "api*" cannot match a project whose first component is "services"."""
-        assert to_project_pattern("api*/src/x.py", "services/api") is None
+        assert _down_suppression("api*/src/x.py", "services/api") is None
 
     def test_a_trailing_double_star_inside_the_prefix_span_covers_the_project(self):
         """ "api/**" covers everything below "api", so all of "api/sub"."""
-        assert to_project_pattern("api/**", "api/sub") == "**"
+        assert _down_suppression("api/**", "api/sub") == "**"
 
 
 class TestDownConversionRejections:
@@ -357,25 +377,25 @@ class TestDownConversionRejections:
 
     def test_parent_traversal_rejected(self):
         with pytest.raises(WorkspacePatternError):
-            to_project_pattern("project-a/../project-b/x.py", "project-a")
+            _down_suppression("project-a/../project-b/x.py", "project-a")
 
     def test_drive_anchored_rejected(self):
         with pytest.raises(WorkspacePatternError):
-            to_project_pattern("C:/Windows/x.dll", "project-a")
+            _down_suppression("C:/Windows/x.dll", "project-a")
 
     def test_empty_prefix_rejected(self):
         with pytest.raises(WorkspacePatternError):
-            to_project_pattern("project-a/src/x.py", "")
+            _down_suppression("project-a/src/x.py", "")
 
     @pytest.mark.parametrize("degenerate", ["/", "."])
     def test_a_pattern_naming_no_component_is_rejected(self, degenerate):
         with pytest.raises(WorkspacePatternError):
-            to_project_pattern(degenerate, "project-a")
+            _down_suppression(degenerate, "project-a")
 
     @pytest.mark.parametrize("degenerate", ["/", "."])
     def test_a_prefix_naming_no_component_is_rejected(self, degenerate):
         with pytest.raises(WorkspacePatternError):
-            to_project_pattern("project-a/src/x.py", degenerate)
+            _down_suppression("project-a/src/x.py", degenerate)
 
 
 # ---------------------------------------------------------------------------
@@ -388,7 +408,7 @@ class TestDownConversionContract:
 
     For every project-relative path p::
 
-        matches(to_project_pattern(P, R), p)  ==  matches(P, R + "/" + p)
+        matches(_down_suppression(P, R), p)  ==  matches(P, R + "/" + p)
 
     A down-converted pattern has to reach exactly the files the workspace-level
     pattern reached inside that project -- no more, no less. Identity
@@ -450,7 +470,7 @@ class TestDownConversionContract:
     @pytest.mark.parametrize("pattern", PATTERNS)
     def test_contract_holds(self, pattern, prefix):
         try:
-            project_pattern = to_project_pattern(pattern, prefix)
+            project_pattern = _down_suppression(pattern, prefix)
         except WorkspacePatternError:
             pytest.skip("fail-closed class; covered by TestFailClosedIsNecessary")
 
@@ -469,7 +489,7 @@ class TestDownConversionContract:
 
     def test_the_reported_regression(self):
         """The exact case from review: "*/src/x.py" over project "api"."""
-        rewritten = to_project_pattern("*/src/x.py", "api")
+        rewritten = _down_suppression("*/src/x.py", "api")
         # Was returned unchanged, which stopped matching the named file.
         assert file_path_matches("src/x.py", rewritten) is True
         assert file_path_matches("api/src/x.py", "*/src/x.py") is True
@@ -485,7 +505,7 @@ class TestDownConversionContract:
         for pattern in self.PATTERNS:
             for prefix in self.PREFIXES:
                 try:
-                    rewritten = to_project_pattern(pattern, prefix)
+                    rewritten = _down_suppression(pattern, prefix)
                 except WorkspacePatternError:
                     continue
                 if rewritten is None:
@@ -538,7 +558,7 @@ class TestFailClosedIsNecessary:
     )
     def test_no_single_rewrite_satisfies_the_contract(self, pattern, prefix):
         with pytest.raises(WorkspacePatternError):
-            to_project_pattern(pattern, prefix)
+            _down_suppression(pattern, prefix)
 
         # Prove the raise is earned: every candidate rewrite is wrong somewhere.
         for rewrite in self.CANDIDATE_REWRITES(pattern):
@@ -570,7 +590,7 @@ class TestFailClosedIsNecessary:
         assert file_path_matches(path, "**/sub/*.py") is False
         # So the conversion must refuse rather than silently narrow the pattern.
         with pytest.raises(WorkspacePatternError):
-            to_project_pattern("*/sub/*.py", prefix)
+            _down_suppression("*/sub/*.py", prefix)
 
     def test_a_single_component_remainder_still_converts(self):
         """ "*/*.py" is unaffected and must not be rejected reflexively.
@@ -578,7 +598,7 @@ class TestFailClosedIsNecessary:
         With one component there is nothing for "**" to re-anchor, so the
         rewrite is meaning-preserving.
         """
-        assert to_project_pattern("*/*.py", "api") == "**/*.py"
+        assert _down_suppression("*/*.py", "api") == "**/*.py"
         for path in ["x.py", "sub/x.py", "deep/sub/x.py"]:
             assert file_path_matches(path, "**/*.py") == file_path_matches(
                 f"api/{path}", "*/*.py"
@@ -586,19 +606,19 @@ class TestFailClosedIsNecessary:
 
     def test_an_all_literal_remainder_still_converts(self):
         """A literal suffix means the same thing under either matcher."""
-        assert to_project_pattern("*/src/x.py", "api") == "**/src/x.py"
+        assert _down_suppression("*/src/x.py", "api") == "**/src/x.py"
 
     def test_a_wildcard_before_a_literal_is_rejected(self):
         """ "*v2/src" can land the "v2" inside another component's name."""
         assert file_path_matches("apiv2/xv2/src", "*v2/src") is True
         assert file_path_matches("xv2/src", "src") is False
         with pytest.raises(WorkspacePatternError):
-            to_project_pattern("*v2/src", "apiv2")
+            _down_suppression("*v2/src", "apiv2")
 
     def test_a_wildcard_between_literals_is_rejected(self):
         """ "a*b" is pinned to neither end, so its span is ambiguous."""
         with pytest.raises(WorkspacePatternError):
-            to_project_pattern("a*b/src", "a/b")
+            _down_suppression("a*b/src", "a/b")
 
     def test_a_fixed_length_wildcard_alone_is_rejected(self):
         """ "?????????" matches "api/x.txt" by length coincidence alone.
@@ -609,11 +629,11 @@ class TestFailClosedIsNecessary:
         assert file_path_matches("api/x.txt", "?????????") is True
         assert file_path_matches("x.txt", "?????????") is False
         with pytest.raises(WorkspacePatternError):
-            to_project_pattern("?????????", "api")
+            _down_suppression("?????????", "api")
 
     def test_the_error_names_the_pattern_and_the_remedy(self):
         with pytest.raises(WorkspacePatternError) as excinfo:
-            to_project_pattern("*/api/src/x.py", "services/api")
+            _down_suppression("*/api/src/x.py", "services/api")
         message = str(excinfo.value)
         assert "*/api/src/x.py" in message
         assert "services/api" in message
@@ -638,16 +658,16 @@ class TestRoundTrip:
     @pytest.mark.parametrize("prefix", ["project-a", "apps/web", "a/b/c"])
     def test_round_trip_is_identity(self, pattern, prefix):
         workspace = to_workspace_pattern(pattern, prefix)
-        assert to_project_pattern(workspace, prefix) == pattern
+        assert _down_suppression(workspace, prefix) == pattern
 
     def test_round_trip_normalises_a_project_rooted_pattern(self):
         """The leading separator is dropped, since it carries no extra meaning."""
         workspace = to_workspace_pattern("/src/x.py", "project-a")
-        assert to_project_pattern(workspace, "project-a") == "src/x.py"
+        assert _down_suppression(workspace, "project-a") == "src/x.py"
 
     def test_an_up_converted_pattern_never_reaches_another_project(self):
         workspace = to_workspace_pattern("**/*.py", "project-a")
-        assert to_project_pattern(workspace, "project-b") is None
+        assert _down_suppression(workspace, "project-b") is None
 
 
 # ---------------------------------------------------------------------------
@@ -668,3 +688,189 @@ class TestNoConcatenationArtefacts:
     def test_output_never_contains_a_doubled_separator(self):
         for pattern in ("src/x.py", "/src/x.py", "src//x.py", "**//*.py"):
             assert "//" not in to_workspace_pattern(pattern, "project-a"), pattern
+
+
+# ---------------------------------------------------------------------------
+# Tests: the contract for each kind of policy entry
+# ---------------------------------------------------------------------------
+
+_MATCHERS = {IGNORE_PATH: ignore_path_matches, SUPPRESSION: file_path_matches}
+
+#: Every project path of one to three components from these names.
+_PATHS = [
+    "/".join(parts)
+    for length in (1, 2, 3)
+    for parts in itertools.product(["x", "X", "y.py", "sub", "api"], repeat=length)
+]
+
+#: Every pattern of one or two components from these, with and without a
+#: trailing "/": literals that collide with the prefixes and the paths, their
+#: case variants, each glob shape, and ".".
+_PATTERN_PARTS = ["x", "X", "sub", "y.py", "*", "**", "?", "x*", "*.py", "[xX]", "."]
+
+#: The shapes named for this contract, over the project "x" and from the top,
+#: and the two reported defects.
+_NAMED_SHAPES = [
+    anchor + shape
+    for anchor in ("", "x/", "X/", "*/", "**/", "x/sub/")
+    for shape in ("x/", "x/**", "./x", "x/./y", "x", "", "X", "X/", "x//y", "**/")
+] + ["api/vendor/", "./api/x.py"]
+
+_PATTERNS = sorted(
+    set(_NAMED_SHAPES)
+    | {
+        "/".join(parts) + slash
+        for length in (1, 2)
+        for parts in itertools.product(_PATTERN_PARTS, repeat=length)
+        for slash in ("", "/")
+    }
+)
+
+_PREFIXES = ["x", "X", "x/sub", "api", "sub/x", "a/b"]
+
+
+def _outcome(kind, pattern, prefix):
+    """``(rewritten, disagreeing paths)``, or ``None`` when the pattern is refused."""
+    matches = _MATCHERS[kind]
+    try:
+        rewritten = to_project_pattern(pattern, prefix, kind=kind)
+    except WorkspacePatternError:
+        return None
+    disagreeing = [
+        path
+        for path in _PATHS
+        if (False if rewritten is None else matches(path, rewritten))
+        != matches(f"{prefix}/{path}", pattern)
+    ]
+    return rewritten, disagreeing
+
+
+class TestDownConversionPerKind:
+    """The contract with each kind's own matcher, for every pattern and prefix.
+
+    An ignore path is read by ``ignore_path_matches``, where a trailing ``/``
+    names a directory, and a suppression by ``file_path_matches``, where it is
+    literal. A pushed-down pattern has to give its kind's matcher the workspace
+    pattern's answer for every project path, or be refused.
+    """
+
+    @pytest.mark.parametrize("prefix", _PREFIXES)
+    @pytest.mark.parametrize("kind", [IGNORE_PATH, SUPPRESSION])
+    def test_both_sides_agree_or_the_pattern_is_refused(self, kind, prefix):
+        violations = {}
+        for pattern in _PATTERNS:
+            outcome = _outcome(kind, pattern, prefix)
+            if outcome is not None and outcome[1]:
+                violations[pattern] = outcome
+        assert violations == {}
+
+    @pytest.mark.parametrize("kind", [IGNORE_PATH, SUPPRESSION])
+    def test_the_sweep_is_not_vacuous(self, kind):
+        """Hundreds of pairs convert, and both verdicts occur among them.
+
+        Of the 1,764 pairs, 379 suppressions and 427 ignore paths convert; the
+        floor is below both, so a change that refused or dropped everything
+        fails here instead of passing the agreement cells by having no answers.
+        """
+        outcomes = [
+            _outcome(kind, pattern, prefix)
+            for pattern in _PATTERNS
+            for prefix in _PREFIXES
+        ]
+        converted = [o for o in outcomes if o is not None and o[0] is not None]
+        assert len(_PATTERNS) == 294
+        assert len(converted) >= 350
+        verdicts = {
+            _MATCHERS[kind](path, rewritten)
+            for rewritten, _ in converted
+            for path in _PATHS
+        }
+        assert verdicts == {True, False}
+
+    def test_an_ignore_path_keeps_its_directory_form(self):
+        """ "api/vendor/" covers what is inside api/vendor; "vendor" covers a file."""
+        rewritten = to_project_pattern("api/vendor/", "api", kind=IGNORE_PATH)
+        assert rewritten == "vendor/"
+        assert ignore_path_matches("vendor/lib/x.py", rewritten) is True
+        assert ignore_path_matches("api/vendor/lib/x.py", "api/vendor/") is True
+        assert ignore_path_matches("vendor", rewritten) is False
+        assert to_project_pattern("**/vendor/", "api", kind=IGNORE_PATH) == (
+            "**/vendor/"
+        )
+
+    def test_an_ignore_path_naming_the_project_or_an_ancestor_covers_it_all(self):
+        """ "api/" ignores everything below api, so all of project api or api/sub."""
+        for prefix in ("api", "api/sub"):
+            rewritten = to_project_pattern("api/", prefix, kind=IGNORE_PATH)
+            assert rewritten == "**"
+            assert ignore_path_matches(f"{prefix}/src/x.py", "api/") is True
+
+    def test_a_suppression_keeps_its_literal_slash(self):
+        """A file's path never ends in "/", so neither side matches a file."""
+        rewritten = to_project_pattern("api/vendor/", "api", kind=SUPPRESSION)
+        assert rewritten == "vendor/"
+        assert file_path_matches("api/vendor", "api/vendor/") is False
+        assert file_path_matches("vendor", "vendor/") is False
+
+    @pytest.mark.parametrize("pattern", ["api/", "*/", "api*/", "?pi/"])
+    def test_a_suppression_reaching_the_project_root_is_dropped_not_widened(
+        self, pattern
+    ):
+        """ "**/" would be "**", which suppresses the whole project."""
+        assert to_project_pattern(pattern, "api", kind=SUPPRESSION) is None
+
+    @pytest.mark.parametrize("kind", [IGNORE_PATH, SUPPRESSION])
+    @pytest.mark.parametrize(
+        "pattern",
+        ["./api/x.py", "api/./x.py", ".//api/x.py", "./*", "./**", "api//x.py"],
+    )
+    def test_a_dot_or_empty_component_is_refused(self, kind, pattern):
+        """The top-level matcher reads it literally, so it matches no file there.
+
+        Folded away ("./api/x.py" as "api/x.py", "./*" as "*"), the pushed-down
+        ignore path would drop files the top level keeps.
+        """
+        for path in ("api/x.py", "x.py", "api/sub/x.py"):
+            assert _MATCHERS[kind](path, pattern) is False
+        with pytest.raises(WorkspacePatternError) as refused:
+            to_project_pattern(pattern, "api", kind=kind)
+        assert str(refused.value) == (
+            f"pattern '{pattern}' has a '.' or empty component, which ASH's "
+            "matcher reads literally, so it matches no file; remove the extra "
+            "'.' or '/'"
+        )
+
+    @pytest.mark.parametrize("kind", [IGNORE_PATH, SUPPRESSION])
+    @pytest.mark.parametrize("pattern", [".", "./", "/", ".\\"])
+    def test_a_pattern_of_only_dots_and_separators_stays_refused(self, kind, pattern):
+        with pytest.raises(WorkspacePatternError, match="at least one component"):
+            to_project_pattern(pattern, "api", kind=kind)
+
+    @pytest.mark.parametrize(
+        "pattern, prefix",
+        [("???/**", "a/b"), ("???/**/x.py", "a/b"), ("???????/**", "api/sub")],
+    )
+    def test_a_fixed_length_glob_under_double_star_spans_one_component(
+        self, pattern, prefix
+    ):
+        """With "**" in the pattern every "?" stays inside one path component.
+
+        "???" matches the text "a/b", but no component of "a/b/...", so the
+        pattern covers nothing in the project, and "**" would cover all of it.
+        """
+        for path in ("x.py", "sub/x.py"):
+            assert file_path_matches(f"{prefix}/{path}", pattern) is False
+        for kind in (IGNORE_PATH, SUPPRESSION):
+            assert to_project_pattern(pattern, prefix, kind=kind) is None
+
+    def test_one_remainder_component_with_a_wildcard_inside_is_refused(self):
+        """Under fnmatch "a*" in "*/a*" takes "api/sub"; under "**/a*" it cannot."""
+        assert file_path_matches("x/api/sub", "*/a*") is True
+        assert file_path_matches("api/sub", "**/a*") is False
+        for kind in (IGNORE_PATH, SUPPRESSION):
+            with pytest.raises(WorkspacePatternError):
+                to_project_pattern("*/a*", "x", kind=kind)
+
+    def test_an_unknown_kind_is_an_error(self):
+        with pytest.raises(ValueError, match="kind"):
+            to_project_pattern("api/x.py", "api", kind="ignore")  # type: ignore[arg-type]

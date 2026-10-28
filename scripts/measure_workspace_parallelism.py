@@ -277,8 +277,8 @@ def time_once(command: Sequence[str], repo_root: Path, output_dir: Path) -> floa
         check=False,
     )
     elapsed = time.monotonic() - started
-    # A scan that failed outright is not a timing sample. Exit 2 is findings above
-    # threshold, which is the expected outcome for this fixture.
+    # A scan that failed outright is not a timing sample. Exit 2 is findings at or
+    # above threshold, which is the expected outcome for this fixture.
     if completed.returncode not in (0, 2):
         raise RuntimeError(
             f"a timed scan exited {completed.returncode}, so its duration is not a "

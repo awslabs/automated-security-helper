@@ -1,0 +1,13 @@
+name: clean
+description: composite action that passes its input through the environment
+inputs:
+  who:
+    description: who to greet
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        WHO: ${{ inputs.who }}
+      run: echo "hello ${WHO}"

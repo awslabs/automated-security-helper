@@ -23,8 +23,10 @@ tag, which is why `ecr_image_tag_mutability` defaults to `MUTABLE`.
 ## Bootstrap is a manual step
 
 Terraform creates the build project. Running a build is an action, not a
-resource, so Terraform cannot do it. After `apply`:
+resource, so Terraform cannot do it. After `apply`, from a root that exposes this
+module's `codebuild_project_name` output, such as `examples/basic`:
 
+<!-- doctest: illustrative reason="needs AWS credentials and an applied Terraform state" -->
 ```console
 aws codebuild start-build --project-name "$(terraform output -raw codebuild_project_name)"
 ```
@@ -45,8 +47,9 @@ Two stacked Docker builds:
    outside is what makes SHA pinning possible.
 2. A thin wrapper (`files/wrapper.Dockerfile`) adding two scripts:
    - `ash-container-init` (the `ENTRYPOINT`) materializes the base config from
-     SSM to `.ash/.ash.yaml`, resolves the MCP auth header value from Secrets
-     Manager, then `exec`s whatever command it was given.
+     SSM to `/tmp/ash/.ash/.ash.yaml`, points `ASH_CONFIG` at it, resolves the
+     MCP auth header value from Secrets Manager, then `exec`s whatever command it
+     was given.
    - `ash-mcp-serve` (the `CMD`) builds an `ash mcp` command line from
      environment variables and execs it.
 
@@ -64,18 +67,19 @@ The names below in **Contract** are the shared names used across both the
 Terraform and CDK implementations of these targets. Terraform uses `snake_case`;
 the mapping is one to one.
 
+<!-- doctest: options of=terraform:deploy/terraform/modules/ash-image-pipeline complete -->
 | Variable | Contract | Type | Default | Notes |
 |---|---|---|---|---|
-| `ash_version` | `AshVersion` | `string` | *required* | Git ref: release tag, branch, or full commit SHA. No default, so the pin is always deliberate. |
+| `ash_version` | `AshVersion` | `string` | *required* | Git ref: release tag, branch, or full commit SHA. No default, so the pin is always deliberate. Use the release these modules came from, as the examples do; see [Which `AshVersion` to use](../../../README.md#which-ashversion-to-use). |
 | `ash_offline_mode` | `AshOfflineMode` | `bool` | `false` | Builds with `OFFLINE=YES`, vendoring rulesets and setting `ASH_OFFLINE` in the image. |
 | `ash_base_config_yaml` | `AshBaseConfigYaml` | `string` | `null` | Full `.ash.yaml` contents. Stored in SSM, written to `.ash/.ash.yaml` at container start. Capped at 8192 bytes. |
 | `rebuild_schedule` | `RebuildSchedule` | `string` | `"rate(1 day)"` | EventBridge `rate(...)` or `cron(...)`. |
 | `name_prefix` | — | `string` | `"ash"` | Prefix for every created resource name. |
-| `ash_repository_clone_url` | — | `string` | ASH on GitHub | Point at a fork or an internal mirror. |
+| `ash_repository_clone_url` | — | `string` | `"https://github.com/awslabs/automated-security-helper.git"` | ASH on GitHub. Point at a fork or an internal mirror. |
 | `ash_image_target` | — | `string` | `"non-root"` | Dockerfile stage: `core`, `ci`, or `non-root`. |
 | `target_architecture` | — | `string` | `"x86_64"` | `x86_64` or `arm64`. AgentCore requires `arm64`. Selects a native build fleet. |
 | `image_tag` | — | `string` | `"latest"` | The moving tag targets consume. |
-| `ash_version_tag_prefix` | — | `string` | `"ash-"` | Prefix for the per-build immutable audit tag. |
+| `ash_version_tag_prefix` | — | `string` | `"ash-"` | Prefix for the version tag. Each rebuild of the same `ash_version` overwrites it. |
 | `ecr_image_tag_mutability` | — | `string` | `"MUTABLE"` | `IMMUTABLE` breaks the scheduled rebuild. See below. |
 | `ecr_force_delete` | — | `bool` | `false` | Let `destroy` remove a non-empty repository. |
 | `ecr_kms_key_arn` | — | `string` | `null` | Customer managed key for ECR encryption. `null` uses AES256. |
@@ -102,13 +106,17 @@ every rebuild. `IMMUTABLE` makes every scheduled rebuild fail on the push. If yo
 need immutable tags, also set `enable_scheduled_rebuild = false` and advance
 `image_tag` yourself, and accept that patching becomes a Terraform change.
 
-Each build additionally pushes `ash-<sanitized ash_version>`, so a specific build
-stays addressable for rollback even though the moving tag has advanced.
+Each build also pushes `ash-<sanitized ash_version>`. That tag names the ASH
+version, not one build: every rebuild of the same `ash_version` overwrites it, so it
+cannot bring back an earlier build of that version. To roll back to a build, pull it
+by image digest; the lifecycle policy still expires it once `image_retention_count`
+newer images exist.
 
 **Config size ceiling.** SSM caps a parameter value at 4 KB on the Standard tier
-and 8 KB on Advanced. Advanced is the highest tier, so 8 KB is a hard ceiling,
-and `ash_base_config_yaml` is validated against it. A larger configuration has to
-be baked into the image.
+and 8 KB on Advanced. Advanced is the highest tier, so 8 KB is a hard ceiling.
+`ash_base_config_yaml` is checked at plan time against 8,192 characters, so a config
+with multibyte characters can pass that check and still be larger than 8 KB. A
+larger configuration has to be baked into the image.
 
 **Advanced tier is a one-way door.** A parameter can be upgraded from Standard to
 Advanced but never downgraded, and Advanced is billed. `Intelligent-Tiering` is

@@ -8,15 +8,40 @@ permissions:
 on:
   workflow_call:
     inputs:
+      # BEHAVIOR CHANGE -- read this before upgrading if you call this workflow.
+      #
+      # These defaulted to `main` of awslabs/automated-security-helper, so every
+      # caller that left them unset installed whatever main was on the day of the
+      # run: the same caller, at the same workflow ref, scanned with a different
+      # ASH from one run to the next, and with an ASH newer or older than the
+      # steps below were written for.
+      #
+      # Empty now means the ASH of the commit this workflow file was called at:
+      # the "Resolve the ASH to install" step reads job.workflow_sha and
+      # job.workflow_repository. A caller of `@v3.8.0` gets ASH v3.8.0, a caller
+      # of `@main` gets the ASH of that main commit, and a fork's copy installs
+      # from the fork. Setting either input still overrides it.
+      #
+      # GitHub Enterprise Server does not provide job.workflow_*; there the step
+      # fails unless BOTH ash-version and ash-repo are set, rather than guessing
+      # either one. An ash-repo other than the workflow's own repository needs an
+      # ash-version too: the workflow's commit belongs to its own repository, so it
+      # says nothing about which commit of the other one to install.
+      #
+      # The defaults assume the file is called from ASH's repository or a fork of
+      # it. A copy of this file kept in another repository and called from there
+      # (`uses: ./.github/workflows/...`) has that repository as
+      # job.workflow_repository, so empty inputs would install that repository
+      # as ASH. Such a copy must set both inputs.
       ash-version:
-        description: "ASH tag or branch to use. Defaults to a beta release until ASHv3 is released."
+        description: "ASH tag, branch or commit to install. Empty (the default) installs the ASH of the commit this workflow file was called at. Required, with ash-repo, on GitHub Enterprise Server, whenever ash-repo names another repository, and in a copy of this file kept outside ASH's repository or a fork of it."
         required: false
-        default: "main"
+        default: ""
         type: string
       ash-repo:
-        description: "GitHub repository to install ASH from (owner/repo). For fork PRs, pass the fork repo."
+        description: "GitHub repository to install ASH from (owner/repo). Empty (the default) is the repository this workflow file comes from. For fork pull requests, pass the fork together with ash-version. Required, with ash-version, on GitHub Enterprise Server and in a copy of this file kept outside ASH's repository or a fork of it."
         required: false
-        default: "awslabs/automated-security-helper"
+        default: ""
         type: string
       ash-mode:
         description: 'Mode to run ASH in. Defaults to "local" for CI compatibility. Use "container" for full scanner support.'
@@ -28,6 +53,41 @@ on:
         required: false
         default: ""
         type: string
+      config-ref:
+        description: >-
+          Commit, branch or tag of the scanned repository to read the `config` file
+          from, instead of the checkout. Requires `config`. Pass a pull request's
+          base commit and the pull request cannot change the config of the scan that
+          gates it; its config edits apply once merged. A commit without that file
+          fails the scan unless config-ref-missing is `defaults`. The file is
+          passed as a --config outside the scanned tree, so ASH treats it as the
+          operator's config: its sandbox grants and plugin modules apply without the
+          limits ASH puts on a config read from the checkout. Empty (the default)
+          reads the config from the checkout.
+        required: false
+        default: ""
+        type: string
+      config-ref-missing:
+        description: >-
+          What config-ref does when that commit has no file at `config`: `refuse`
+          (the default) fails the scan, `defaults` scans with ASH's default config
+          and says so. `defaults` is for the pull request that adds a repository's
+          first config, which otherwise cannot pass a check that reads the config
+          from its base commit.
+        required: false
+        default: "refuse"
+        type: string
+      skip-unknown-tools:
+        description: >-
+          With config-ref, let `ash dependencies install` name and skip a requested
+          tool that the installed ASH has no plugin for, instead of failing. For a
+          caller whose workflow files can be newer than the ASH it installs, such as
+          ASH's own required check, which runs a pull request's workflow files with
+          the ASH of its base commit. Off, the default, a tool name the installed ASH
+          does not know fails the install, so a typo cannot pass unnoticed.
+        required: false
+        default: false
+        type: boolean
       output-dir:
         description: "Directory where ASH output will be stored"
         required: false
@@ -75,12 +135,12 @@ on:
         default: true
         type: boolean
       ash-args:
-        description: "Additional arguments to pass to ASH"
+        description: "Additional options for ash scan, passed after this workflow's own, one line split on whitespace. Options and their values only: the job fails on any other word, such as an ash subcommand (scan, report and the others) after a flag, or on --, since click would run that subcommand without this workflow's options. A value may name a subcommand (--phases scan, --config config)."
         required: false
         default: ""
         type: string
       collect-sarif-report:
-        description: "Whether to collect the ash.ghas.sarif report using github/codeql-action/upload-sarif for GitHub Advanced Security Code Scanning results. Works on same-repo pull requests only; for other events set this to false and call upload-ash-sarif.yml"
+        description: "Whether to upload the ash.ghas.sarif report to GitHub code scanning with github/codeql-action/upload-sarif. The upload runs on pull_request events, from forks too, the only event where code scanning accepts it without security-events: write; on every other event the step is skipped with a notice. To upload on every event, call upload-ash-sarif.yml in a job that grants security-events: write."
         required: false
         default: true
         type: boolean
@@ -110,7 +170,8 @@ on:
       #     annotations land inline on the offending lines, which is the whole
       #     point of publishing the report.
       #   * Set `collect-junit-xml-report: false` to opt out entirely. The results
-      #     are still in the job summary and in the `ash_output` artifact.
+      #     are still in the job summary and in the artifact-name artifact
+      #     (`ash_output` by default).
       collect-junit-xml-report:
         description: >-
           Whether to publish the ash.junit.xml report as a check run using
@@ -136,45 +197,102 @@ on:
         required: false
         default: "3.12"
         type: string
+      # BEHAVIOR CHANGE -- read this before upgrading if you call this workflow.
+      #
+      # The install-grype, install-syft, install-opengrep and install-cfn-nag
+      # inputs defaulted to false, and each installs the tool behind a scanner
+      # that is enabled by default. A caller that set none of them got grype,
+      # syft, opengrep and cfn-nag reported MISSING, and the incomplete-scan check
+      # (`fail_on_incomplete_scanners`, on by default) failed the job with exit 1
+      # whatever `fail-on-findings` said.
+      #
+      # Every install-* input installs the tool of a builtin scanner that is on by
+      # default and that ASH does not install for itself, so each defaults to true:
+      # an unset input would leave its scanner MISSING in ash-mode: local, which
+      # fails the incomplete-scan gate. The cost is time: the tool installs per
+      # run, cfn-nag's through ruby/setup-ruby and bundler. A caller that does not
+      # want one of these scanners should set its input to false AND exclude the
+      # scanner, through `ash-args: --exclude-scanners <name>` or its config, or
+      # the scan reports it MISSING and fails as incomplete. Sizes measured on
+      # 2026-10-11 against the pinned releases.
+      # tests/unit/test_scan_workflow_installs_default_scanners.py holds every
+      # install-* input to that default.
       install-grype:
-        description: "Whether to install Grype scanner"
+        description: "Whether to install the grype scanner (about 32 MB), which then downloads its vulnerability database during the scan (about 190 MB compressed) unless a cached copy inside grype's bound is restored. Set false when the scan does not need it, for example in ash-mode: container or with scanners.grype.enabled: false."
         required: false
-        default: false
+        default: true
         type: boolean
       install-syft:
-        description: "Whether to install Syft scanner"
+        description: "Whether to install the syft scanner (about 31 MB). Set false when the scan does not need it, for example in ash-mode: container or with scanners.syft.enabled: false."
         required: false
-        default: false
+        default: true
         type: boolean
       install-opengrep:
-        description: "Whether to install OpenGrep scanner"
+        description: "Whether to install the OpenGrep scanner (about 46 MB, reused from the weekly Actions cache when it matches the pin). Set false when the scan does not need it, for example in ash-mode: container or with scanners.opengrep.enabled: false."
         required: false
-        default: false
+        default: true
         type: boolean
       install-cfn-nag:
-        description: "Whether to install the cfn-nag scanner"
+        description: "Whether to install the cfn-nag scanner: sets up Ruby 3.3 and installs cfn-nag's pinned gems (about 2.1 MB, two of them built natively). Set false when the scan does not need it, for example in ash-mode: container or with scanners.cfn-nag.enabled: false."
         required: false
-        default: false
+        default: true
+        type: boolean
+      install-actionlint:
+        description: "Whether to install the actionlint scanner (about 2.4 MB). Set false when the scan does not need it, for example in ash-mode: container or with scanners.actionlint.enabled: false."
+        required: false
+        default: true
+        type: boolean
+      install-cfn-guard:
+        description: "Whether to install the cfn-guard scanner and the rules it evaluates (about 3.4 MB for the binary). Set false when the scan does not need it, for example in ash-mode: container or with scanners.cfn-guard.enabled: false."
+        required: false
+        default: true
+        type: boolean
+      install-gitleaks:
+        description: "Whether to install the gitleaks scanner (about 8.2 MB). Set false when the scan does not need it, for example in ash-mode: container or with scanners.gitleaks.enabled: false."
+        required: false
+        default: true
+        type: boolean
+      install-trivy:
+        description: "Whether to install the trivy scanner (a 52 MB download), which then downloads its vulnerability database during the scan (about 127 MB compressed), so about 180 MB per run. Set false when the scan does not need it, for example in ash-mode: container or with scanners.trivy.enabled: false."
+        required: false
+        default: true
         type: boolean
       changed-files-only:
-        description: "Limit the scan to files changed in the PR (reduces scan time and focuses feedback)"
+        description: "Report only the findings in files changed against the base: the pull request's or merge group's base commit, or base-ref on other events. Every file is still scanned; findings in other files are dropped from the reports, the summary and the exit code. Checks out the repository's whole history to list the changed files. The job fails when the base is not in the checkout or shares no history with the commit being scanned. When base-ref already contains the commit being scanned (origin/main on the default branch), a push diffs against the commit before the push; the job fails rather than report nothing on any other event, and on a push whose previous commit cannot be used: one that created a branch or tag (every release tag), one whose previous commit is not in the checkout, one that rewound the branch, or one whose previous commit shares no history with it. Not supported in container mode (ash-mode container, or --mode container in ash-args), where ASH ignores --changed-files-only and reports the findings in every file; the job fails before the scan instead. Not supported on pull_request_target, which checks out the base branch, so the diff would be the base branch's own changes."
         required: false
         default: false
         type: boolean
       base-ref:
-        description: "Git ref to diff against when changed-files-only is true"
+        description: "Git ref to diff against when changed-files-only is true, on events other than pull_request and merge_group, which diff against their own base commit. On a push where this ref already contains the commit being scanned, the commit before the push is used instead when it can be (see changed-files-only)."
         required: false
         default: "origin/main"
         type: string
+      artifact-name:
+        description: "Name of the artifact the scan's output directory is uploaded as. A matrix, or a caller that calls this workflow more than once in one run, must give each call its own name: in the first attempt a second upload under a name already taken fails, and in a re-run it replaces the earlier upload."
+        required: false
+        default: "ash_output"
+        type: string
+    outputs:
+      # For upload-ash-sarif.yml's artifact-id input, or a caller's own
+      # actions/download-artifact `artifact-ids`. The ID names this run attempt's
+      # upload whichever attempt the consumer runs in.
+      artifact-id:
+        description: >-
+          ID of the artifact (artifact-name, ash_output by default) this run
+          uploaded. Empty if the scan job did not reach the upload (it failed
+          before ASH wrote its reports). A caller job that downloads the artifact,
+          such as one calling upload-ash-sarif.yml, should start only when this is
+          set.
+        value: ${{ jobs.ash.outputs.artifact-id }}
 
 env:
   # The `[cdk]` extra is what makes the cdk-nag scanner available. Without it the
   # scanner's availability check -- a metadata read of cdk_nag, aws-cdk-lib and
   # constructs -- comes up short and cdk-nag reports MISSING, so a consumer with
   # CloudFormation got no IaC findings from the one scanner that produces them.
-  # Neither `ash dependencies install` step below fixes this: both are scoped to a
-  # single --tool, and cdk-nag is a Python dependency rather than a downloaded
-  # binary.
+  # None of the `ash dependencies install` steps below fixes this: each is scoped
+  # to the tools it names, and cdk-nag is a Python dependency rather than a
+  # downloaded binary.
   #
   # Extras on a PEP 508 direct reference, rather than a second install step: the
   # extra's contents are read from pyproject.toml at the pinned ref, so there is no
@@ -185,25 +303,821 @@ env:
   # below quotes it. Unquoted, the shell would split it into three words and pass
   # `@` to uvx as the command to run.
   ASH_UVX_SOURCE: automated-security-helper[cdk] @ git+https://github.com/${{ inputs.ash-repo }}@${{ inputs.ash-version }}
-  ASH_OUTPUT_DIR: ${{ inputs.output-dir }}
-  ASH_CONFIG: ${{ inputs.config }}
+  # Where cfn-nag's Gemfile comes from: the same repo and ref the scan itself is
+  # installed from, so the gem version can never disagree with the ASH that
+  # invokes it, and the scanned checkout never picks it.
+  #
+  # Both of these name ash-version as given. The job's pin step replaces them,
+  # through GITHUB_ENV, with the commit that name resolved to when the job
+  # started; see "Pin the ASH ref to a commit". Neither may be set again in a
+  # step's own `env:`, which would win over that.
+  ASH_ASSETS_URL: https://raw.githubusercontent.com/${{ inputs.ash-repo }}/${{ inputs.ash-version }}/automated_security_helper/assets
+  # No ASH_OUTPUT_DIR here. The steps that use it map it from the input check's
+  # output_dir (see "Refuse an input that could start a workflow command"), so they
+  # use the value that was checked, not the input as given.
+  #
+  # No ASH_CONFIG here. The Run ASH and Show ASH Summary Report steps set it to the
+  # config the scan uses (from config-ref, or the `config` input), and no other
+  # step should see a config path at all.
 
 jobs:
   ash:
     name: SAST, SCA, and IaC Scan
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      # Empty when nothing was uploaded; the report job and the caller's SARIF job
+      # start only when it is set.
+      artifact-id: ${{ steps.ash-output.outputs.artifact-id }}
+      # The checked values the report job uses, so it reads no input as given.
+      output-dir: ${{ steps.inputs.outputs.output_dir }}
+      repository-owner: ${{ steps.inputs.outputs.repository_owner }}
+      artifact-name: ${{ steps.inputs.outputs.artifact_name }}
+    # Read only. This job runs ASH, the scanners and whatever ASH loads, so it holds
+    # no token that can write; the reporting steps are in the `report` job below.
+    permissions:
+      contents: read
     env:
       COLUMNS: 140
+      # NO CACHE IS RESTORED ON A PULL REQUEST OR IN THE MERGE QUEUE
+      #
+      # There, actions/cache searches the run's own scope (refs/pull/<n>/merge, or
+      # the queue branch) before the base branch's. This job never saves on those
+      # events, but another job that runs the pull request's code in the same scope
+      # can: the cache-writing token is held by the runner process, and on a hosted
+      # runner a step can read it. A uv cache entry written in that scope replaces
+      # the ASH that judges the pull request (uv trusts its cache for a pinned
+      # commit), a grype database written there replaces the data grype matches
+      # against, and any archive restored from there can write files outside its
+      # cache path, because @actions/cache extracts with `tar -P`. Hashing the
+      # restored OpenGrep binary checks that one file and nothing else the archive
+      # held.
+      #
+      # So the uv cache, the grype database and the OpenGrep binary are restored
+      # only on other events. On these two each is downloaded and verified as on a
+      # miss; the saves are unchanged (push to the default branch only).
+      RESTORE_CACHES: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
+      # FOR ASH'S OWN REQUIRED CHECK, THE INSTALLED ASH SKIPS TOOLS IT DOES NOT HAVE
+      #
+      # ash-repo-scan.yml installs the pull request's base commit while GitHub runs
+      # the pull request's workflow files. A pull request that adds support for a
+      # tool and asks this job to install it then runs
+      # `ash dependencies install --tool <new tool>` against an ASH that refuses the
+      # name. That ASH has no plugin for the tool, and the base config cannot enable
+      # one, so the scan needs nothing from it: with this set,
+      # `ash dependencies install` names each such tool, skips it and installs the
+      # rest. Job level, so an install step added later gets it without saying so.
+      #
+      # Only when the caller asks (skip-unknown-tools) and reads its config from a
+      # commit (config-ref). Every other caller keeps the refusal, so a tool name it
+      # mistypes fails its install instead of resolving MISSING later.
+      #
+      # Job-level env cannot read a step's outputs, so this reads config-ref as
+      # given, and only whether it is empty. The input check refuses a config-ref
+      # that is only a line feed, so that answer is the same for the checked value.
+      ASH_DEPENDENCIES_UNKNOWN_TOOLS: ${{ (inputs.skip-unknown-tools && inputs.config-ref != '') && 'skip' || '' }}
     steps:
+      # NO STRING INPUT REACHES THE LOG BEFORE THIS STEP HAS CHECKED IT
+      #
+      # The runner reads each line of a step's stdout and stderr, and treats a line
+      # as a workflow command when it starts with `::` or holds `##[` anywhere. It
+      # ends a line at a carriage return as well as at a line feed. So an input
+      # holding a line break, or `##[`, would add a command of the caller's choosing
+      # (a warning, a mask, a stop-commands token) to any line that shows it: this
+      # workflow's own messages, git's and ASH's errors, and the actions that log
+      # their inputs. Every string input is checked here, before any other step
+      # runs, and a refusal names the input without printing it.
+      #
+      # One trailing line feed is dropped first: a YAML block scalar (`ash-args: |`)
+      # always ends in one, and nothing can follow it. Anything else is refused: a
+      # carriage return, a line feed with anything after it (so ash-args of more than
+      # one line, which Run ASH would cut to its first), two trailing line feeds,
+      # `##[`, and a value that is only a line feed (so job-level env, which reads
+      # config-ref as given, agrees with the checked value on whether it is empty).
+      #
+      # The checked value is written as this step's output, named like the input with
+      # `_` for `-` (steps.inputs.outputs.config_ref), and every later step reads that,
+      # never the input as given. The report job reads output-dir and
+      # repository-owner through this job's outputs. ash-version and ash-repo also
+      # reach ASH_UVX_SOURCE and ASH_ASSETS_URL above as given, because workflow env
+      # cannot read a step's output; the pin step replaces both from the checked
+      # values before any step uses them.
+      #
+      # One INPUT_<NAME> variable per string input; a new string input gets a line
+      # here, and the refusal names it by its input name (INPUT_CONFIG_REF is
+      # config-ref).
+      - name: Refuse an input that could start a workflow command
+        id: inputs
+        env:
+          INPUT_ASH_VERSION: ${{ inputs.ash-version }}
+          INPUT_ASH_REPO: ${{ inputs.ash-repo }}
+          INPUT_ASH_MODE: ${{ inputs.ash-mode }}
+          INPUT_CONFIG: ${{ inputs.config }}
+          INPUT_CONFIG_REF: ${{ inputs.config-ref }}
+          INPUT_CONFIG_REF_MISSING: ${{ inputs.config-ref-missing }}
+          INPUT_OUTPUT_DIR: ${{ inputs.output-dir }}
+          INPUT_ASH_ARGS: ${{ inputs.ash-args }}
+          INPUT_REPOSITORY_OWNER: ${{ inputs.repository-owner }}
+          INPUT_PYTHON_VERSION: ${{ inputs.python-version }}
+          INPUT_BASE_REF: ${{ inputs.base-ref }}
+          INPUT_ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        run: |
+          set -euo pipefail
+          # Byte by byte, so the answer is the same whatever locale the runner has: in
+          # the C locale [[:cntrl:]] is the C0 controls and DEL, and the UTF-8 bytes of
+          # the C1 controls (U+0080 to U+009F) and of U+2028 and U+2029 are named
+          # here. In a UTF-8 locale [[:cntrl:]] would match those as well; in C it
+          # would not.
+          export LC_ALL=C
+          for var in "${!INPUT_@}"; do
+            given="${!var}"
+            value="${given%$'\n'}"
+            name="${var#INPUT_}"
+            # tr, not bash's lowercasing expansion: bash 3.2 (macOS runners) has none.
+            name="$(printf '%s' "${name}" | tr '[:upper:]' '[:lower:]')"
+            case "${value}" in
+              *[[:cntrl:]]* | *$'\xc2'[$'\x80'-$'\x9f']* | *$'\xe2\x80'[$'\xa8\xa9']* | *'##['*)
+                echo "::error::the ${name//_/-} input holds a line break, another control character or the legacy command marker, so it is refused without being printed. A block scalar of one line is fine; more than one line is refused."
+                exit 1
+                ;;
+            esac
+            if [ -z "${value}" ] && [ -n "${given}" ]; then
+              echo "::error::the ${name//_/-} input is only a line feed; leave it empty instead."
+              exit 1
+            fi
+            # name=value is safe: the value holds no line feed now.
+            echo "${name}=${value}" >> "${GITHUB_OUTPUT}"
+          done
+          echo "No string input holds a line break, another control character or the legacy command marker."
+
+      # A VALUE PRINTED IN A WORKFLOW COMMAND STAYS ON ITS LINE
+      #
+      # The runner reads a line as a command when it starts with `::` after leading
+      # spaces, or holds `##[` anywhere, and it ends a line at CR as well as LF. A
+      # step that prints a value it has not checked passes it through one_line,
+      # which turns every control character into a space, `::` into `: :` and `##[`
+      # into `# #[`. Each step runs in its own shell, so this step writes the
+      # function once to RUNNER_TEMP, which every step of this job shares, and a
+      # step that needs it loads the file with `. "${RUNNER_TEMP}/ash-one-line.sh"`.
+      # The function reads bytes in the C locale (C0, DEL, C1 and U+2028/U+2029),
+      # so the runner's locale does not change what it replaces.
+      #
+      # The same file holds with_commands_stopped, which every tool this job runs
+      # (git, uv, uvx and so ASH, curl, bundler, gem, cfn_nag_scan) runs through:
+      # what a tool prints comes from the caller's tree, the scanned tree or the
+      # network, so nothing it prints is read as a command. It prints
+      # `::stop-commands::<token>` before the tool and `::<token>::` after it,
+      # GitHub's documented way to do that
+      # (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands,
+      # "Stopping and starting workflow commands"), with a token of 16 bytes from
+      # /dev/urandom made for each call and never printed before the stop line. The
+      # tool's stderr goes to stdout, so the runner reads the stop line, the tool's
+      # output and the resume line from one stream, in order. The resume line
+      # follows a line feed, so it starts a line even after output that does not
+      # end with one. Its exit status is passed on, and commands resume before the
+      # step prints its own annotations. The tool runs in a process group of its
+      # own (setsid), and the resume line comes only once that group is empty, so
+      # nothing the tool started prints after it; a canceled step, or one past its
+      # timeout, still closes its window (tests/utils/workflow_commands.py says how).
+      - name: Write the one_line helper
+        shell: bash
+        run: |
+          cat > "${RUNNER_TEMP}/ash-one-line.sh" <<'EOF'
+          one_line() {
+            local LC_ALL=C
+            local text="${1//[[:cntrl:]]/ }"
+            text="${text//$'\xc2'[$'\x80'-$'\x9f']/ }"
+            text="${text//$'\xe2\x80'[$'\xa8\xa9']/ }"
+            while [[ "${text}" == *::* ]]; do text="${text//::/: :}"; done
+            while [[ "${text}" == *'##['* ]]; do text="${text//'##['/# #[}"; done
+            printf '%s' "${text}"
+          }
+          __wcs_clock() {
+            __wcs_now="${EPOCHREALTIME:-}"
+            __wcs_now="${__wcs_now//[!0-9]/}"
+            if [ -z "${__wcs_now}" ]; then
+              __wcs_now=$((SECONDS * 1000000))
+            fi
+          }
+          __wcs_last_bg() {
+            case "$-" in
+              *u*) set +u; printf '%s' "$!"; set -u ;;
+              *) printf '%s' "$!" ;;
+            esac
+          }
+          __wcs_end_group() {
+            local __wcs_now="" __wcs_until=""
+            if [ -z "${__wcs_pid}" ]; then
+              return 0
+            fi
+            __wcs_clock
+            __wcs_until=$((__wcs_now + $1 * 100000))
+            while kill -0 -- "-${__wcs_pid}" 2>/dev/null && [ "${__wcs_now}" -lt "${__wcs_until}" ]; do
+              sleep 0.1
+              __wcs_clock
+            done
+            if ! kill -0 -- "-${__wcs_pid}" 2>/dev/null; then
+              return 0
+            fi
+            kill -s KILL -- "-${__wcs_pid}" 2>/dev/null || true
+            __wcs_until=$((__wcs_now + 500000))
+            while kill -0 -- "-${__wcs_pid}" 2>/dev/null && [ "${__wcs_now}" -lt "${__wcs_until}" ]; do
+              sleep 0.1
+              __wcs_clock
+            done
+            return 1
+          }
+          __wcs_on_signal() {
+            if [ -z "${__wcs_pid}" ] && [ "$(__wcs_last_bg)" != "${__wcs_before}" ]; then
+              __wcs_pid="$(__wcs_last_bg)"
+            fi
+            if [ -n "${__wcs_pid}" ]; then
+              kill -s "$1" -- "-${__wcs_pid}" 2>/dev/null || kill -s "$1" "${__wcs_pid}" 2>/dev/null || true
+            fi
+            if [ "$1" = TERM ]; then
+              __wcs_end_group 10 || __wcs_left=1
+              if [ -n "${__wcs_open}" ]; then
+                printf '\n::%s::\n' "${__wcs_token}"
+              fi
+              if [ -n "${__wcs_left}" ]; then
+                printf '%s\n' "::error::processes the command started did not end in time, so they were sent SIGKILL and the step fails"
+              fi
+              exit 143
+            fi
+            __wcs_interrupted="$2"
+          }
+          __wcs_exec() {
+            if command -v setsid >/dev/null 2>&1; then
+              exec setsid -w "$@"
+            fi
+            exec perl -MPOSIX -e 'my $s = POSIX::setsid(); exit 127 unless defined $s && $s >= 0; exec { $ARGV[0] } @ARGV; exit 127' -- "$@"
+          }
+          with_commands_stopped() {
+            if [ "${BASH_SUBSHELL:-0}" -gt 0 ]; then
+              printf '%s\n' "::error::with_commands_stopped must run in the step's own shell, the one process the runner signals on a cancel, not in a subshell, a pipeline, a command substitution or a background job. For ( cd DIR && ... ), use env -C DIR, or cd at the top level" >&2
+              kill -s TERM "$$" 2>/dev/null || true
+              return 1
+            fi
+            local __wcs_out="" __wcs_var="" __wcs_file="" __wcs_token __wcs_status=0
+            local __wcs_pid="" __wcs_interrupted="" __wcs_open="" __wcs_left="" __wcs_before="$(__wcs_last_bg)"
+            case "${1:-}" in
+              --stdout) __wcs_out="$2"; shift 2 ;;
+              --capture) __wcs_var="$2"; shift 2 ;;
+            esac
+            __wcs_token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+            if [ "${#__wcs_token}" -ne 32 ]; then
+              printf '%s\n' "::error::no random token could be read for stop-commands, so the command did not run"
+              return 1
+            fi
+            if [ -n "${__wcs_var}" ]; then
+              __wcs_file="$(mktemp "${RUNNER_TEMP:-/tmp}/ash-wcs.XXXXXX")" || return 1
+              __wcs_out="${__wcs_file}"
+            fi
+            trap '__wcs_on_signal INT 130' INT
+            trap '__wcs_on_signal QUIT 131' QUIT
+            trap '__wcs_on_signal TERM 143' TERM
+            __wcs_open=1
+            printf '::stop-commands::%s\n' "${__wcs_token}"
+            if [ -z "${__wcs_interrupted}" ]; then
+              if [ -n "${__wcs_out}" ]; then
+                (trap - INT QUIT TERM; __wcs_exec "$@") 2>&1 > "${__wcs_out}" <&0 &
+              else
+                (trap - INT QUIT TERM; __wcs_exec "$@") 2>&1 <&0 &
+              fi
+              __wcs_pid=$!
+              wait "${__wcs_pid}" || __wcs_status=$?
+            fi
+            if [ -n "${__wcs_interrupted}" ] && [ -n "${__wcs_pid}" ]; then
+              wait "${__wcs_pid}" 2>/dev/null || true
+            fi
+            __wcs_end_group 50 || __wcs_left=1
+            printf '\n::%s::\n' "${__wcs_token}"
+            __wcs_open=""
+            trap - INT QUIT TERM
+            if [ -n "${__wcs_left}" ]; then
+              printf '%s\n' "::error::processes the command started did not end in time, so they were sent SIGKILL and the step fails"
+              if [ "${__wcs_status}" -eq 0 ]; then
+                __wcs_status=1
+              fi
+            fi
+            if [ -n "${__wcs_interrupted}" ]; then
+              exit "${__wcs_interrupted}"
+            fi
+            if [ -n "${__wcs_file}" ]; then
+              printf -v "${__wcs_var}" '%s' "$(cat "${__wcs_file}")"
+              rm -f -- "${__wcs_file}"
+            fi
+            return "${__wcs_status}"
+          }
+          EOF
+
+      # Sets ASH_UVX_SOURCE, which every later step installs or runs ASH from.
+      #
+      # job.workflow_sha and job.workflow_repository name the commit and the
+      # repository of this workflow file, not of the caller: "The commit SHA of the
+      # workflow file that defines the current job" and "The owner/repo of the
+      # repository containing the workflow file that defines the current job", per
+      # https://docs.github.com/en/actions/reference/workflows-and-actions/contexts
+      # (job context), which also says they are "not available on GitHub
+      # Enterprise Server". They are read here, in a step, because the job context
+      # is not available to workflow_call input defaults or to workflow-level env.
+      # They arrive through toJSON(job) rather than as job.workflow_sha: actionlint
+      # 1.7.12, which ash-unified-ci.yml pins, does not know those properties yet and
+      # reports them as undefined, while toJSON(job) carries the same values.
+      #
+      # The `[cdk]` extra is what makes the cdk-nag scanner available. Without it the
+      # scanner's availability check -- a metadata read of cdk_nag, aws-cdk-lib and
+      # constructs -- comes up short and cdk-nag reports MISSING, so a consumer with
+      # CloudFormation got no IaC findings from the one scanner that produces them.
+      # None of the `ash dependencies install` steps below fixes this: each is scoped
+      # to a single --tool, and cdk-nag is a Python dependency rather than a
+      # downloaded binary.
+      #
+      # Extras on a PEP 508 direct reference, rather than a second install step: the
+      # extra's contents are read from pyproject.toml at the resolved ref, so there
+      # is no second list to drift, and the name is not resolved from an index, so
+      # this adds no index-resolved dependency to a workflow whose subject is
+      # supply-chain risk.
+      #
+      # The ` @ ` makes this one requirement string containing spaces, so every use
+      # below quotes it. Unquoted, the shell would split it into three words and pass
+      # `@` to uvx as the command to run.
+      #
+      # Both values reach GITHUB_ENV. ash-version is held to what `git
+      # check-ref-format` accepts for a ref, which refuses a newline, a space and
+      # every other control character, so it cannot add a variable of the caller's
+      # choosing to later steps. A branch name may still carry `@`, `#`, `,`, `=` or
+      # non-ASCII letters; the ref is percent-encoded in the URLs below so that
+      # `@` does not split the URL in the wrong place and `#` does not start a
+      # fragment, and uv decodes it again (measured with uv 0.12.0 against a local
+      # repository with such branch names). ash-repo is held to owner/repo.
+      #
+      # Without a job context (GitHub Enterprise Server) there is nothing to take
+      # either value from, so both inputs are required there, never one with a
+      # guess for the other. With one, an ash-repo other than the workflow's own
+      # needs an ash-version: job.workflow_sha is a commit of the workflow's
+      # repository, and GitHub serves a fork network's commits from any fork's URL,
+      # so installing it from the fork would install the very code the caller named
+      # the fork to replace.
+      - name: Resolve the ASH to install
+        id: ash-source
+        shell: bash
+        env:
+          # The input check's outputs, never the inputs as given.
+          CHECKED_ASH_VERSION: ${{ steps.inputs.outputs.ash_version }}
+          CHECKED_ASH_REPO: ${{ steps.inputs.outputs.ash_repo }}
+          JOB_CONTEXT: ${{ toJSON(job) }}
+        run: |
+          set -euo pipefail
+          # Every value a workflow command below prints goes through one_line. The
+          # job context's commit and repository are printed before anything checks
+          # them.
+          . "${RUNNER_TEMP}/ash-one-line.sh"
+          job_field() {
+            python3 -I -c 'import json, os, sys; print(json.loads(os.environ["JOB_CONTEXT"] or "{}").get(sys.argv[1]) or "")' "$1"
+          }
+          workflow_sha="$(job_field workflow_sha)"
+          workflow_repo="$(job_field workflow_repository)"
+          if [ -n "${CHECKED_ASH_REPO}" ] && ! [[ "${CHECKED_ASH_REPO}" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::ash-repo must be owner/repo; got a value that is not."
+            exit 1
+          fi
+          if [ -z "${workflow_sha}" ] || [ -z "${workflow_repo}" ]; then
+            missing=""
+            [ -n "${CHECKED_ASH_VERSION}" ] || missing="ash-version"
+            [ -n "${CHECKED_ASH_REPO}" ] || missing="${missing:+${missing} and }ash-repo"
+            if [ -n "${missing}" ]; then
+              echo "::error::Cannot tell which ASH to install: this runner provides no job.workflow_sha or job.workflow_repository (GitHub Enterprise Server does not), so both ash-version (the release or commit to install) and ash-repo (the owner/repo to install it from) are required, and $(one_line "${missing}") is unset."
+              exit 1
+            fi
+          fi
+          # tr, not bash's lowercasing expansion: bash 3.2 (macOS runners) has none.
+          checked_repo_lower="$(printf '%s' "${CHECKED_ASH_REPO}" | tr '[:upper:]' '[:lower:]')"
+          workflow_repo_lower="$(printf '%s' "${workflow_repo}" | tr '[:upper:]' '[:lower:]')"
+          if [ -z "${CHECKED_ASH_VERSION}" ] && [ -n "${CHECKED_ASH_REPO}" ] \
+              && [ "${checked_repo_lower}" != "${workflow_repo_lower}" ]; then
+            echo "::error::ash-repo is $(one_line "${CHECKED_ASH_REPO}") but ash-version is empty. An empty ash-version means the commit this workflow file was called at, $(one_line "${workflow_sha}"), which belongs to $(one_line "${workflow_repo}"); installing it from $(one_line "${CHECKED_ASH_REPO}") would not install that repository's code. Set ash-version to the tag, branch or commit to install from $(one_line "${CHECKED_ASH_REPO}")."
+            exit 1
+          fi
+          version="${CHECKED_ASH_VERSION:-${workflow_sha}}"
+          repo="${CHECKED_ASH_REPO:-${workflow_repo}}"
+          if ! [[ "${repo}" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::ash-repo must be owner/repo; got a value that is not."
+            exit 1
+          fi
+          # The prefix keeps a leading `-` from reading as an option and checks every
+          # rule for a ref's components; `@` alone is refused as git refuses it.
+          if [ "${version}" = "@" ] || ! git check-ref-format "refs/ash-version/${version}"; then
+            echo "::error::ash-version must be a git tag, branch or commit that git check-ref-format accepts; got a value it refuses."
+            exit 1
+          fi
+          version_url="$(python3 -I -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe="/"))' "${version}")"
+          echo "Installing ASH from $(one_line "${repo}") at $(one_line "${version}")"
+          {
+            echo "version=${version}"
+            echo "version-url=${version_url}"
+            echo "repo=${repo}"
+          } >> "${GITHUB_OUTPUT}"
+          echo "ASH_UVX_SOURCE=automated-security-helper[cdk] @ git+https://github.com/${repo}@${version_url}" >> "${GITHUB_ENV}"
+
+      # THE ASH REF IS RESOLVED TO ONE COMMIT, ONCE, BEFORE ANYTHING INSTALLS ASH
+      #
+      # ash-version may be a branch or a tag (refs/heads/main in the merge queue;
+      # an empty input was already resolved by the step above to this workflow
+      # file's own commit). ASH_UVX_SOURCE and ASH_ASSETS_URL carry the name,
+      # and every uv/uvx call and the cfn-nag Gemfile fetch resolved it again, so a
+      # merge landing mid-run could give one step one ASH and the next another.
+      # This step resolves the name with `git ls-remote` and writes both variables
+      # with the commit to GITHUB_ENV, which the runner applies over the
+      # workflow-level values for every later step. A full commit id is used as
+      # given; a tag yields its commit, not the tag object. A name that is both a
+      # branch and a tag on different commits, or that matches nothing, is refused,
+      # and so is an abbreviated commit id (7 to 39 hex digits) that is not the name
+      # of a branch or tag, and an ash-repo that is not owner/name, since it is
+      # written into GITHUB_ENV.
+      #
+      # Both values come from the resolve step above, so an empty input arrives
+      # here as the workflow file's own commit, and the repository is already
+      # held to owner/repo.
+      - name: Pin the ASH ref to a commit
+        id: ash-pin
+        env:
+          ASH_REPO: ${{ steps.ash-source.outputs.repo }}
+          ASH_VERSION: ${{ steps.ash-source.outputs.version }}
+        run: |
+          set -euo pipefail
+          # The C locale, so [[:space:]] and [[:cntrl:]] below mean the same bytes on
+          # every runner image.
+          export LC_ALL=C
+          # Every value a workflow command below prints goes through one_line.
+          . "${RUNNER_TEMP}/ash-one-line.sh"
+          # Neither refusal prints the value, so this step prints nothing it has not
+          # checked even when it runs without the input check. The messages after
+          # these two checks print it through one_line.
+          if [[ ! "${ASH_REPO}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+            echo "::error::ash-repo must be owner/name: letters, digits, '.', '_' and '-', one '/' between them."
+            exit 1
+          fi
+          if [[ -z "${ASH_VERSION}" || "${ASH_VERSION}" == -* || "${ASH_VERSION}" =~ [[:space:][:cntrl:]] ]]; then
+            echo "::error::ash-version is not a branch, tag or commit name: it is empty, starts with '-', or holds a space or a control character."
+            exit 1
+          fi
+          if [[ "${ASH_VERSION}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            # tr, not bash's lowercasing expansion: bash 3.2 (macOS runners) has none.
+            COMMIT="$(printf '%s' "${ASH_VERSION}" | tr '[:upper:]' '[:lower:]')"
+          else
+            if [[ "${ASH_VERSION}" == refs/* ]]; then
+              CANDIDATES=("${ASH_VERSION}")
+            else
+              CANDIDATES=("refs/heads/${ASH_VERSION}" "refs/tags/${ASH_VERSION}")
+            fi
+            LISTING="${RUNNER_TEMP}/ash-pin.ls-remote"
+            git ls-remote -- "https://github.com/${ASH_REPO}.git" "${ASH_VERSION}" "${ASH_VERSION}^{}" > "${LISTING}"
+            COMMITS=()
+            for NAME in "${CANDIDATES[@]}"; do
+              FOUND="$(awk -v ref="${NAME}^{}" '$2 == ref { print $1 }' "${LISTING}")"
+              if [ -z "${FOUND}" ]; then
+                FOUND="$(awk -v ref="${NAME}" '$2 == ref { print $1 }' "${LISTING}")"
+              fi
+              if [ -n "${FOUND}" ]; then COMMITS+=("${FOUND}"); fi
+            done
+            rm -f -- "${LISTING}"
+            UNIQUE="$(printf '%s\n' "${COMMITS[@]}" | sort -u | grep -c . || true)"
+            if [ "${UNIQUE}" -gt 1 ]; then
+              echo "::error::ash-version '$(one_line "${ASH_VERSION}")' is both a branch and a tag of $(one_line "${ASH_REPO}"), on different commits. Name one: refs/heads/$(one_line "${ASH_VERSION}") or refs/tags/$(one_line "${ASH_VERSION}")."
+              exit 1
+            elif [ "${UNIQUE}" -eq 1 ]; then
+              COMMIT="${COMMITS[0]}"
+            elif [[ "${ASH_VERSION}" =~ ^[0-9a-fA-F]{7,39}$ ]]; then
+              # 7 to 39 hex digits that name no branch or tag: an abbreviated commit
+              # id. It is not pinned, because it could name more than one commit by
+              # the time uv resolves it, so the job would not run one ASH throughout.
+              echo "::error::ash-version '$(one_line "${ASH_VERSION}")' is an abbreviated commit id and is not a branch or tag of $(one_line "${ASH_REPO}"). Give the full 40-character commit id."
+              exit 1
+            else
+              echo "::error::ash-version '$(one_line "${ASH_VERSION}")' is not a branch, tag or commit of $(one_line "${ASH_REPO}")."
+              exit 1
+            fi
+          fi
+          {
+            echo "ASH_UVX_SOURCE=automated-security-helper[cdk] @ git+https://github.com/${ASH_REPO}@${COMMIT}"
+            echo "ASH_ASSETS_URL=https://raw.githubusercontent.com/${ASH_REPO}/${COMMIT}/automated_security_helper/assets"
+          } >> "$GITHUB_ENV"
+          echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
+          echo "ASH ${ASH_REPO}@${ASH_VERSION} is pinned to ${COMMIT} for this run" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # With changed-files-only, the whole history. ASH lists the changed files with
+      # `git diff --name-only <base>...HEAD`, which needs the base and the merge base
+      # in the checkout; at the default depth of 1 git cannot find them, and ASH falls
+      # back to reporting the findings in every file, so the input changed nothing.
+      # ASH scans every file either way and filters the findings afterwards. A full
+      # fetch also brings the remote branches, such as origin/main. '0' and '1' are
+      # quoted because the number 0 is falsy in an expression, and `&& 0 || 1` would
+      # always give 1.
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: ${{ inputs.changed-files-only && '0' || '1' }}
+
+      # Fails first when the scan would run in container mode, where ASH ignores
+      # --changed-files-only and reports every file's findings.
+      #
+      # The base the changed files are measured from: the pull request's base commit
+      # on pull_request, the merge group's on merge_group, and the base-ref input on
+      # any other event. Fails when that ref is not in the checkout, shares no
+      # history with HEAD, or holds a character ASH's own check refuses
+      # (get_changed_files in automated_security_helper/utils/get_scan_set.py allows
+      # letters, digits and `. _ / ~ ^ @ { } -`), rather than letting ASH quietly
+      # report the findings in every file while the caller believes it reported the
+      # diff's.
+      #
+      # It also fails when the base already contains HEAD. ASH diffs
+      # `<base>...HEAD`, which is then empty by construction, and the scan reports
+      # nothing with exit 0. That is the default on the default branch: after a push
+      # to main, or on a schedule, origin/main is HEAD. A push carries the commit
+      # the branch was at before it (github.event.before), so on a push the step
+      # diffs against that instead, when it can: not for a push that created a
+      # branch or tag (all zeros), nor when that commit is not in the checkout,
+      # already contains HEAD (a rewind) or shares no history with it (a force-push
+      # that replaced it, where `git diff before...HEAD` would fail and ASH would
+      # report every file's findings). The error names which. A configured base
+      # that does give a diff, such as origin/main on a feature-branch push, is
+      # kept: base-ref is what the caller asked for. On pull_request and merge_group
+      # the event's own base is used, so their error does not point at base-ref.
+      # pull_request_target is not supported: it checks out the base branch's tip,
+      # so the diff would be the base branch's own changes.
+      - name: Resolve the base for changed-files-only
+        id: base-ref
+        if: inputs.changed-files-only
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          # The input check's outputs, never the inputs as given.
+          CONFIGURED_BASE_REF: ${{ steps.inputs.outputs.base_ref }}
+          # pull_request synchronize payloads carry `before` too; push only.
+          PUSH_BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
+          ASH_MODE: ${{ steps.inputs.outputs.ash_mode }}
+          ASH_ARGS: ${{ steps.inputs.outputs.ash_args }}
+        run: |
+          set -euo pipefail
+          # Every value a workflow command below prints goes through one_line.
+          . "${RUNNER_TEMP}/ash-one-line.sh"
+          # First, before any git call: in container mode ASH drops
+          # --changed-files-only with a warning ("not supported in container mode;
+          # performing full scan") and reports the findings in every file. The scan
+          # step passes `--mode "${ASH_MODE}"` and then ash-args, split the same way
+          # as here, and --mode is last-value-wins, so the last one given is the
+          # mode the scan runs in. The words are read as Run ASH reads them, with
+          # its copy of the options that take a value: the word after one of those
+          # is its value, so a `--mode` there (`--output-dir --mode`) is not the
+          # mode. A bare word, or anything after `--`, is Run ASH's to refuse.
+          read -r -a args <<< "${ASH_ARGS}"
+          ASH_VALUE_OPTIONS="--ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --output-dir --output-format --output-formats --phases --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
+          mode="${ASH_MODE}"
+          value_of=""
+          for word in ${args[@]+"${args[@]}"}; do
+            if [ -n "${value_of}" ]; then
+              if [ "${value_of}" = "--mode" ]; then
+                mode="${word}"
+              fi
+              value_of=""
+              continue
+            fi
+            case "${word}" in
+              --) break ;;
+              --mode=*) mode="${word#--mode=}" ;;
+              --*=*) ;;
+              --*)
+                if [[ " ${ASH_VALUE_OPTIONS} " == *" ${word} "* ]]; then
+                  value_of="${word}"
+                fi
+                ;;
+              -?*)
+                for ((at = 1; at < ${#word}; at++)); do
+                  if [[ " ${ASH_VALUE_OPTIONS} " == *" -${word:at:1} "* ]]; then
+                    if ((at + 1 == ${#word})); then
+                      value_of="-${word:at:1}"
+                    fi
+                    break
+                  fi
+                done
+                ;;
+            esac
+          done
+          if [ "${mode}" = "container" ]; then
+            echo "::error::changed-files-only: ASH does not support --changed-files-only in container mode and would report the findings in every file. Use ash-mode local (the default) with no --mode container in ash-args, or turn changed-files-only off."
+            exit 1
+          fi
+          base="${PR_BASE_SHA:-${MERGE_GROUP_BASE_SHA:-${CONFIGURED_BASE_REF}}}"
+          if ! [[ "${base}" =~ ^[a-zA-Z0-9._/~^@{}-]+$ ]]; then
+            echo "::error::changed-files-only: ASH accepts a base made of letters, digits and . _ / ~ ^ @ { } - only, and would report the findings in every file for this one. Set base-ref to a ref without other characters."
+            exit 1
+          fi
+          # Each git call runs through with_commands_stopped, so nothing git prints
+          # is read as a workflow command; its messages stay in the log. The helper
+          # returns 1 without running git when it cannot make a token, and an `if`
+          # would take that for git's own answer (for --is-ancestor, "no", and the
+          # step would go on). So git writes a marker as it starts, and a call where
+          # it never started ends the step, after the helper's own error.
+          git_ran="${RUNNER_TEMP}/ash-base-ref-git.ran"
+          stopped_git() {
+            local status=0 out=()
+            if [ "$1" = --stdout ]; then
+              out=(--stdout "$2")
+              shift 2
+            fi
+            rm -f -- "${git_ran}"
+            # The single quotes are deliberate: the inner sh expands $0 and $@.
+            # shellcheck disable=SC2016
+            with_commands_stopped ${out[@]+"${out[@]}"} sh -c ': > "$0" && exec git "$@"' "${git_ran}" "$@" || status=$?
+            [ -e "${git_ran}" ] || exit 1
+            return "${status}"
+          }
+          if ! stopped_git --stdout /dev/null rev-parse --verify --quiet "${base}^{commit}"; then
+            echo "::error::changed-files-only: the base '$(one_line "${base}")' is not in the checkout, so ASH could not tell which files changed and would report the findings in every file. On events other than pull_request and merge_group, set base-ref to a ref the checkout has, such as origin/main."
+            exit 1
+          fi
+          # With no commit in common, `git diff <base>...HEAD` fails as well.
+          if ! stopped_git --stdout /dev/null merge-base "${base}" HEAD; then
+            echo "::error::changed-files-only: the base '$(one_line "${base}")' shares no history with the commit being scanned, so ASH could not tell which files changed and would report the findings in every file. On events other than pull_request and merge_group, set base-ref to a ref on this commit's history, such as origin/main."
+            exit 1
+          fi
+          if stopped_git merge-base --is-ancestor HEAD "${base}"; then
+            if [ -n "${PR_BASE_SHA}" ] || [ -n "${MERGE_GROUP_BASE_SHA}" ]; then
+              # base-ref plays no part on these events, so it is not the advice.
+              if [ -n "${PR_BASE_SHA}" ]; then which="pull request's"; else which="merge group's"; fi
+              echo "::error::changed-files-only: the $(one_line "${which}") base commit $(one_line "${base}") already contains the commit being scanned, so there are no changed files and the scan would report nothing. Turn changed-files-only off for this event."
+              exit 1
+            fi
+            # Why the commit before a push cannot be used, if it cannot.
+            if [ -z "${PUSH_BEFORE}" ]; then
+              why="this event is not a push, so there is no commit before it to diff against"
+            elif ! [[ "${PUSH_BEFORE}" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]]; then
+              # Not printed: until it matches, a newline in it would start a line
+              # of its own, which the runner reads as a workflow command.
+              why="the commit before the push is not a commit id"
+            elif ! [[ "${PUSH_BEFORE}" =~ [1-9a-f] ]]; then
+              why="this push created a branch or tag, so there is no commit before it"
+            elif ! stopped_git --stdout /dev/null rev-parse --verify --quiet "${PUSH_BEFORE}^{commit}"; then
+              why="the commit before the push, ${PUSH_BEFORE}, is not in the checkout (a force-push can leave it unreachable)"
+            elif stopped_git merge-base --is-ancestor HEAD "${PUSH_BEFORE}"; then
+              why="the commit before the push, ${PUSH_BEFORE}, already contains this commit (the push rewound the branch)"
+            elif ! stopped_git --stdout /dev/null merge-base "${PUSH_BEFORE}" HEAD; then
+              # `git diff before...HEAD` would fail, and ASH would report every
+              # file's findings.
+              why="the commit before the push, ${PUSH_BEFORE}, shares no history with this commit (a force-push replaced it)"
+            else
+              why=""
+            fi
+            if [ -n "${why}" ]; then
+              echo "::error::changed-files-only: the base '$(one_line "${base}")' already contains the commit being scanned, so there are no changed files and the scan would report nothing; this is what the default base-ref, origin/main, gives on the default branch. A push diffs against the commit before it instead, but $(one_line "${why}"). Set base-ref to an earlier ref, or turn changed-files-only off for this event."
+              exit 1
+            fi
+            echo "changed-files-only: '$(one_line "${base}")' already contains this commit, so diffing against the commit before the push, $(one_line "${PUSH_BEFORE}")"
+            base="${PUSH_BEFORE}"
+          fi
+          echo "changed-files-only: diffing against $(one_line "${base}")"
+          echo "ref=${base}" >> "${GITHUB_OUTPUT}"
+
+      # THE CONFIG CAN COME FROM ANOTHER COMMIT THAN THE ONE SCANNED
+      #
+      # Without config-ref, ASH reads its config from the checkout: the file `config`
+      # names, or the one it discovers there. On a pull request that is the pull
+      # request's own config, so it could add suppressions or ignore paths to the
+      # scan that gates it. With config-ref, the file `config` names is read from that
+      # commit, written outside the checkout, and handed to the scan and report steps
+      # as --config, which also stops ASH from discovering one in the checkout.
+      # ash-repo-scan.yml passes the pull request's base commit.
+      #
+      # A commit without the file fails the step. The caller named a config, and
+      # ASH's defaults can be a weaker gate than the one asked for (a config that
+      # turns on scanners that are off by default, or lowers the severity
+      # threshold), so a typo or a case variant in `config` must not fall back to
+      # them. config-ref-missing: defaults is the explicit opt-in for the one case
+      # where defaults are right, the pull request that adds a repository's first
+      # config: the scan then uses an empty config, so discovery cannot fall back to
+      # the checkout's either.
+      #
+      # The file lands outside the scanned tree, so ASH treats it like any --config
+      # outside the tree: as the operator's. The caller chose that commit; the
+      # checkout did not.
+      #
+      # The tool config files it names by a relative path
+      # (scanners.<name>.options.config_file) come from the same commit, in the step
+      # after Set up Python. A config that `extends` another file fails to load here.
+      - name: Read the ASH config from config-ref
+        id: config-ref
+        if: steps.inputs.outputs.config_ref != ''
+        env:
+          CONFIG_REF: ${{ steps.inputs.outputs.config_ref }}
+          CONFIG_PATH: ${{ steps.inputs.outputs.config }}
+          CONFIG_REF_MISSING: ${{ steps.inputs.outputs.config_ref_missing }}
+          ASH_VERSION: ${{ steps.inputs.outputs.ash_version }}
+          ASH_REPO: ${{ steps.inputs.outputs.ash_repo }}
+          SCANNED_REPO: ${{ github.repository }}
+          ASH_COMMIT: ${{ steps.ash-pin.outputs.commit }}
+        run: |
+          set -euo pipefail
+          # The C locale, so [[:space:]] and [[:cntrl:]] below mean the same bytes on
+          # every runner image.
+          export LC_ALL=C
+          # Every value a workflow command below prints goes through one_line.
+          . "${RUNNER_TEMP}/ash-one-line.sh"
+          case "${CONFIG_REF_MISSING}" in
+            refuse|defaults|"") ;;
+            *)
+              echo "::error::config-ref-missing must be 'refuse' or 'defaults', not '$(one_line "${CONFIG_REF_MISSING}")'."
+              exit 1
+              ;;
+          esac
+          # git fetch reads a refspec that starts with '-' as an option, wherever it
+          # sits on the command line, and runs the command `--upload-pack=` names for
+          # a local or ssh remote. No branch, tag or commit name starts with '-' or
+          # holds a space, so such a value is refused before git sees it.
+          if [[ "${CONFIG_REF}" == -* || "${CONFIG_REF}" =~ [[:space:][:cntrl:]] ]]; then
+            echo "::error::config-ref is not a branch, tag or commit name: it starts with '-', or holds a space or a control character."
+            exit 1
+          fi
+          if [ -z "${CONFIG_PATH}" ]; then
+            echo "::error::config-ref is set but config is empty. Name the config file to read from $(one_line "${CONFIG_REF}"), for example 'config: .ash/.ash.yaml'."
+            exit 1
+          fi
+          RELATIVE="${CONFIG_PATH#./}"
+          # A path git would read differently from how it is written (absolute, with
+          # an empty, `.` or `..` segment) is refused rather than read as missing.
+          case "/${RELATIVE}/" in
+            *//*|*/./*|*/../*)
+              echo "::error::config must be a plain path inside the repository when config-ref is set, not '$(one_line "${CONFIG_PATH}")'."
+              exit 1
+              ;;
+          esac
+          DEST_ROOT="${RUNNER_TEMP}/ash-config-ref"
+          DEST="${DEST_ROOT}/${RELATIVE}"
+          rm -rf "${DEST_ROOT}"
+          mkdir -p "$(dirname "${DEST}")"
+          # When config-ref names the same ref of the same repository as ash-version,
+          # as in the merge queue, read the commit the pin step pinned ASH to, so
+          # a merge landing in between cannot pair one commit's ASH with another's
+          # config.
+          FETCH="${CONFIG_REF}"
+          # tr, not bash's lowercasing expansion: bash 3.2 (macOS runners) has none.
+          ASH_REPO_LOWER="$(printf '%s' "${ASH_REPO}" | tr '[:upper:]' '[:lower:]')"
+          SCANNED_REPO_LOWER="$(printf '%s' "${SCANNED_REPO}" | tr '[:upper:]' '[:lower:]')"
+          if [ -n "${ASH_COMMIT}" ] && [ "${CONFIG_REF}" = "${ASH_VERSION}" ] \
+              && [ "${ASH_REPO_LOWER}" = "${SCANNED_REPO_LOWER}" ]; then
+            FETCH="${ASH_COMMIT}"
+          fi
+          git fetch --no-tags --no-recurse-submodules --depth=1 origin "${FETCH}"
+          COMMIT="$(git rev-parse FETCH_HEAD)"
+          # -z, because without it git quotes a name holding non-ASCII bytes and the
+          # path comparison below would refuse a regular file. Listed to a file
+          # rather than read through a pipe, so that a failing ls-tree fails the
+          # step instead of reading as "no such file".
+          LISTING="${RUNNER_TEMP}/ash-config-ref.ls-tree"
+          git --literal-pathspecs ls-tree -z "${COMMIT}" -- "${RELATIVE}" > "${LISTING}"
+          ENTRIES=()
+          while IFS= read -r -d '' RECORD; do
+            ENTRIES+=("${RECORD}")
+          done < "${LISTING}"
+          rm -f -- "${LISTING}"
+          if [ "${#ENTRIES[@]}" -eq 0 ]; then
+            if [ "${CONFIG_REF_MISSING}" != "defaults" ]; then
+              echo "::error::$(one_line "${CONFIG_REF}") has no $(one_line "${RELATIVE}"), so the config this scan was asked to use does not exist there; refusing to scan with ASH's defaults instead. Check the config input, or set config-ref-missing: defaults for the pull request that adds the first config."
+              exit 1
+            fi
+            printf '{}\n' > "${DEST}"
+            echo "::warning::$(one_line "${CONFIG_REF}") has no $(one_line "${RELATIVE}"), and config-ref-missing is defaults, so this scan uses ASH's default config, not the checkout's."
+          else
+            ENTRY="${ENTRIES[0]}"
+            ENTRY_PATH="${ENTRY#*$'\t'}"
+            read -r MODE TYPE OBJECT <<< "${ENTRY%%$'\t'*}"
+            if [ "${#ENTRIES[@]}" -ne 1 ] || [ "${TYPE}" != "blob" ] || [ "${MODE}" = "120000" ] || [ "${ENTRY_PATH}" != "${RELATIVE}" ]; then
+              echo "::error::$(one_line "${RELATIVE}") at $(one_line "${CONFIG_REF}") is not a regular file ($(one_line "${MODE}") $(one_line "${TYPE}")); refusing to scan with it."
+              exit 1
+            fi
+            git cat-file blob "${OBJECT}" > "${DEST}"
+            echo "Scanning with ${RELATIVE} as of ${CONFIG_REF} (commit ${COMMIT}, blob ${OBJECT}), not the checkout's copy"
+          fi
+          echo "path=${DEST}" >> "$GITHUB_OUTPUT"
+          echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
 
       - name: Install uv
         id: setup-uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
         with:
-          enable-cache: true
+          # Named here, because with no `version` setup-uv installs the uv that the
+          # checkout's pyproject.toml or uv.toml asks for (`required-version`), and
+          # this uv installs the ASH that scans that checkout. `latest` is what it
+          # installs for a checkout that asks for nothing.
+          version: latest
+          # Off on pull_request and merge_group; see RESTORE_CACHES above.
+          enable-cache: ${{ env.RESTORE_CACHES }}
+          # Named for the same reason as `version`: without it setup-uv takes
+          # `cache-dir` from the checkout's uv.toml or `[tool.uv]` and restores and
+          # saves the cache there. This is the path it uses by default on a hosted
+          # runner, so existing cache entries still match.
+          cache-local-path: ${{ runner.temp }}/setup-uv-cache
           # Save only from a push; a pull request restores its base branch's entry.
           # The same unpruned key as the lint job in ash-unified-ci.yml, which
           # carries the measurement: one ~254 MB copy per open pull request,
@@ -225,9 +1139,383 @@ jobs:
           echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: ${{ inputs.python-version }}
+          python-version: ${{ steps.inputs.outputs.python_version }}
+
+      # THE TOOL CONFIG FILES THAT CONFIG NAMES COME FROM CONFIG-REF TOO
+      #
+      # A scanner option such as scanners.bandit.options.config_file names a file
+      # the scanner's own tool reads, by a path that is relative to the checkout
+      # (bandit resolves it against the working directory, grype against the source
+      # directory). Reading only the config from config-ref would leave those files
+      # to the pull request: an `exclude_dirs` in .ash/bandit.yaml or an `ignore:`
+      # rule in .ash/.grype.yaml would still change its own required check.
+      #
+      # So every relative `config_file` the fetched config names, and every relative
+      # opengrep or semgrep `config` (a rules file or a directory of them; a URL,
+      # `auto` or a registry name is not a path), is read from the same commit,
+      # written beside the config under RUNNER_TEMP, and the config is rewritten to
+      # point at the copies. A path the commit does not have, a symlink anywhere in
+      # it, or a path outside the repository fails the step; nothing falls back to
+      # the checkout's copy. An absolute path is the operator's and is left as it
+      # is. A config that names none of these is passed on byte for byte.
+      #
+      # The copies sit outside the scanned tree, so ASH applies them as operator
+      # files, including a checkov config it refuses inside the tree. Paths written
+      # INSIDE a fetched tool config still resolve in the checkout, so an option
+      # there that loads code from a relative path (checkov's external-checks-dir
+      # and a nested config-file) fails the step; see CODE_LOADING_KEYS.
+      #
+      # The config is parsed with the PyYAML that the installed ASH brings, by code
+      # that does not import ASH, so it works with any ASH revision. The rewritten
+      # copy is YAML, and every string keeps its meaning: what ASH would resolve as
+      # an environment reference (a plain or `!ENV` `${...}` in YAML, any `${...}` in
+      # TOML) is written as one, and what it would read as a literal (a quoted
+      # `${...}` in YAML, any string in JSON) is written quoted.
+      - name: Read the tool config files the config names from config-ref
+        id: config-ref-files
+        if: steps.inputs.outputs.config_ref != ''
+        env:
+          CONFIG_FILE: ${{ steps.config-ref.outputs.path }}
+          CONFIG_COMMIT: ${{ steps.config-ref.outputs.commit }}
+          CONFIG_REF: ${{ steps.inputs.outputs.config_ref }}
+          DEST_ROOT: ${{ runner.temp }}/ash-config-ref
+        run: |
+          set -euo pipefail
+          # Runs in the checkout only so that git reads the fetched commit; -I keeps
+          # the checkout off sys.path and --no-config keeps uv from reading its
+          # settings, as for every other helper in this job.
+          uv run --no-config --no-project --with "${ASH_UVX_SOURCE}" -- python -I - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+          import traceback
+          import unicodedata
+          from pathlib import Path
+
+          import yaml
+
+          config_file = Path(os.environ["CONFIG_FILE"])
+          commit = os.environ["CONFIG_COMMIT"]
+          ref = os.environ["CONFIG_REF"]
+          dest_root = Path(os.environ["DEST_ROOT"])
+
+
+          # The Python form of the one_line helper: the messages below quote paths,
+          # keys and values from the fetched config and its tool configs, so each
+          # printed line passes through it and stays one line with no command in it.
+          def one_line(text):
+              text = "".join(
+                  " " if unicodedata.category(c) in ("Cc", "Zl", "Zp") else c
+                  for c in str(text)
+              )
+              while "::" in text:
+                  text = text.replace("::", ": :")
+              while "##[" in text:
+                  text = text.replace("##[", "# #[")
+              return text
+
+
+          # An error this program does not catch prints a traceback, which can quote the
+          # config: a YAML error shows the line it stopped at. Each line of it goes
+          # through one_line too.
+          def report_through_one_line(kind, error, trace):
+              for line in "".join(traceback.format_exception(kind, error, trace)).splitlines():
+                  print(one_line(line), file=sys.stderr)
+
+
+          sys.excepthook = report_through_one_line
+
+
+          def fail(message):
+              print(f"::error::{one_line(message)}")
+              sys.exit(1)
+
+
+          def plain(value):
+              relative = value[2:] if value.startswith("./") else value
+              parts = relative.split("/")
+              if any(part in ("", ".", "..") for part in parts):
+                  return None
+              return relative
+
+
+          def ls_tree(relative, *flags):
+              listing = subprocess.run(
+                  ["git", "--literal-pathspecs", "ls-tree", "-z", *flags, commit, "--", relative],
+                  check=True,
+                  capture_output=True,
+              ).stdout
+              records = []
+              for record in listing.split(b"\0"):
+                  if record:
+                      meta, _, path = record.partition(b"\t")
+                      mode, kind, oid = meta.decode().split()
+                      records.append((mode, kind, oid, path.decode("utf-8", "surrogateescape")))
+              return records
+
+
+          def regular_file(mode, kind, path):
+              if kind != "blob" or mode == "120000":
+                  fail(f"{path} at {ref} is not a regular file ({mode} {kind}); refusing to scan with it.")
+
+
+          def copy_blob(oid, path):
+              target = dest_root / path
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes(
+                  subprocess.run(["git", "cat-file", "blob", oid], check=True, capture_output=True).stdout
+              )
+              return target
+
+
+          def fetch(relative, directories):
+              """Copy `relative` from the commit to dest_root; None if the commit lacks it."""
+              records = ls_tree(relative)
+              if not records:
+                  return None
+              mode, kind, oid, path = records[0]
+              if len(records) != 1 or path != relative:
+                  fail(f"{relative} at {ref} is not a single path ({len(records)} entries); refusing to scan with it.")
+              if kind == "tree" and directories:
+                  entries = ls_tree(relative, "-r")
+                  for mode, kind, oid, path in entries:
+                      regular_file(mode, kind, path)
+                      if not path.startswith(relative + "/"):
+                          fail(f"{path} at {ref} is not inside {relative}; refusing to scan with it.")
+                      copy_blob(oid, path)
+                  target = dest_root / relative
+                  target.mkdir(parents=True, exist_ok=True)
+                  return target
+              regular_file(mode, kind, path)
+              return copy_blob(oid, path)
+
+
+          # opengrep's and semgrep's `config` is a rules file or directory, or one of
+          # these, none of which is a path: a URL, `auto`, a registry keyword, or a
+          # registry name (p/, r/, s/).
+          def is_rules_path(value):
+              return not (
+                  value in ("auto", "policy", "supply-chain")
+                  or value.startswith(("p/", "r/", "s/"))
+                  or "://" in value
+              )
+
+
+          # Options of a fetched tool config that load code from a path. The copy is
+          # applied as the operator's file, but checkov still resolves a relative path
+          # in it against its working directory, the checkout, so a relative value
+          # would load the pull request's code: `external-checks-dir` loads Python
+          # checks, and a nested `config-file` brings options of its own. An absolute
+          # or home-relative path is the operator's. Both spellings of each key.
+          CODE_LOADING_KEYS = {
+              "checkov": ("external-checks-dir", "external_checks_dir", "config-file", "config_file"),
+          }
+
+
+          def refuse_code_paths(name, relative, target):
+              keys = CODE_LOADING_KEYS.get(name)
+              if not keys:
+                  return
+              try:
+                  tool_config = yaml.safe_load(target.read_text(encoding="utf-8"))
+              except (yaml.YAMLError, UnicodeDecodeError) as error:
+                  fail(f"{relative} at {ref} is not YAML that can be checked for options that load code ({error}); refusing to scan with it.")
+              if tool_config is None:
+                  return
+              if not isinstance(tool_config, dict):
+                  fail(f"{relative} at {ref} is not a mapping, so it cannot be checked for options that load code; refusing to scan with it.")
+              for key in keys:
+                  values = tool_config.get(key)
+                  for value in values if isinstance(values, list) else [values]:
+                      if value is None:
+                          continue
+                      if not isinstance(value, str) or not value.startswith(("/", "~")):
+                          fail(f"{relative} at {ref} sets {key} to '{value}', a path that resolves in the checkout, so {name} would load code from the pull request's tree. Use an absolute path outside the repository, or remove it.")
+
+
+          # (scanner, option, is a path, may be a directory). `config_file` names a
+          # file the scanner's tool reads for every scanner that has the option.
+          OPTIONS = [
+              (None, "config_file", lambda value: True, False),
+              ("opengrep", "config", is_rules_path, True),
+              ("semgrep", "config", is_rules_path, True),
+          ]
+
+
+          # ASH's YAML loader (load_yaml_config) treats a PLAIN scalar that starts with
+          # ${...} as an environment reference and a quoted one as a literal. The same
+          # implicit resolver on both ends keeps that distinction: a reference is read
+          # as EnvTag and written back plain, and a literal string that looks like one
+          # is written back quoted.
+          ENV_REFERENCE = re.compile(r"^\$\{(\w+):?(.*)?\}")
+
+
+          class EnvTag(str):
+              pass
+
+
+          class Loader(yaml.SafeLoader):
+              pass
+
+
+          class Dumper(yaml.SafeDumper):
+              pass
+
+
+          for resolver in (Loader, Dumper):
+              resolver.add_implicit_resolver("!ENV", ENV_REFERENCE, None)
+          Loader.add_constructor("!ENV", lambda loader, node: EnvTag(loader.construct_scalar(node)))
+          Dumper.add_representer(EnvTag, lambda dumper, value: dumper.represent_scalar("!ENV", str(value)))
+
+
+          def references(value):
+              """TOML strings: ASH resolves every one that matches, so all are references."""
+              if isinstance(value, dict):
+                  return {key: references(item) for key, item in value.items()}
+              if isinstance(value, list):
+                  return [references(item) for item in value]
+              if isinstance(value, str) and ENV_REFERENCE.match(value):
+                  return EnvTag(value)
+              return value
+
+          text = config_file.read_text(encoding="utf-8")
+          if config_file.name.endswith(".json"):
+              document = json.loads(text)
+          elif config_file.name.endswith(".toml"):
+              try:
+                  import tomllib
+
+                  parse_toml = tomllib.loads
+              except ModuleNotFoundError:
+                  # tomllib is standard library from Python 3.11, and the python-version
+                  # input accepts 3.10. There ASH reads TOML with the `toml` package it
+                  # declares as a dependency, which the uv environment above installs.
+                  import toml
+
+                  parse_toml = toml.loads
+
+              document = parse_toml(text)
+              if config_file.name == "pyproject.toml":
+                  document = (document.get("tool") or {}).get("ash")
+              document = references(document)
+          else:
+              document = yaml.load(text, Loader=Loader)
+
+          rewritten = []
+          scanners = document.get("scanners") if isinstance(document, dict) else None
+          for name, section in (scanners.items() if isinstance(scanners, dict) else []):
+              options = section.get("options") if isinstance(section, dict) else None
+              if not isinstance(options, dict):
+                  continue
+              for scanner, option, is_path, directories in OPTIONS:
+                  if scanner not in (None, name):
+                      continue
+                  value = options.get(option)
+                  if not isinstance(value, str) or not value or value.startswith("/") or not is_path(value):
+                      continue
+                  where = f"scanners.{name}.options.{option}"
+                  relative = plain(value)
+                  if relative is None:
+                      fail(f"{where} is '{value}', which is not a plain path inside the repository; refusing to scan with it.")
+                  target = fetch(relative, directories)
+                  if target is None:
+                      fail(f"{where} names {relative}, which {ref} does not have; refusing to scan with the checkout's copy instead.")
+                  if option == "config_file":
+                      refuse_code_paths(name, relative, target)
+                  options[option] = str(target)
+                  rewritten.append(f"{where}: {relative} as of {ref}")
+
+          path = config_file
+          if rewritten:
+              path = config_file.with_name(config_file.name + ".config-ref.yaml")
+              path.write_text(yaml.dump(document, Dumper=Dumper, sort_keys=False), encoding="utf-8")
+              for line in rewritten:
+                  print(one_line(line))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"path={path}\n")
+          PY
+
+      # The grype, syft and OpenGrep steps below install with
+      # `ash dependencies install --tool`, which ASH v3.7.0 and v3.7.1 do not have.
+      # A caller that pins either one (`ash-version: v3`, for one, which points at
+      # 3.7.1) with the default install-* inputs would fail at "Install Grype" with
+      # click's "No such option: --tool", which names neither input, so this asks
+      # that ASH's help for the option first.
+      #
+      # It fails rather than turning the installs off with a notice. On 3.7.0 and
+      # 3.7.1 `ash scan` does not fail when a scanner is MISSING, so dropping the
+      # installs would turn the default request into a green scan without three of
+      # its scanners. The caller picks: an ASH that has the option, or the installs
+      # off.
+      #
+      # The help is read with the color codes stripped: rich, which typer prints
+      # help with, colors each dash of `--tool` separately. No pipe into `grep -q`,
+      # whose early exit would hand the writer a SIGPIPE that pipefail reports.
+      - name: Check that this ASH can install the scanner tools
+        id: install-preflight
+        if: inputs.install-grype || inputs.install-syft || inputs.install-opengrep
+        shell: bash
+        env:
+          NO_COLOR: "1"
+        run: |
+          set -uo pipefail
+          shopt -s extglob
+          # This step does not check ASH_UVX_SOURCE (the step that wrote it did), so
+          # every line that prints it prints it through one_line.
+          . "${RUNNER_TEMP}/ash-one-line.sh"
+          # `|| status=$?`, not a bare `status=$?` after it: GitHub runs this shell
+          # with -e, which would end the step at a failed uvx before printing why.
+          #
+          # uvx runs through with_commands_stopped, as every tool here does, and its
+          # output is captured there. --capture keeps only standard output, and
+          # click writes a missing command or option to standard error, which the
+          # check below reads, so `bash -c` sends uvx's standard error into the
+          # capture as well. Its exit status is passed on. The helper returns 1
+          # without running uvx when it cannot make a token, which is no answer
+          # from uvx, so `bash -c` also writes a marker as uvx starts, and a run
+          # where uvx never started ends the step after the helper's own error.
+          status=0
+          help=""
+          uvx_ran="${RUNNER_TEMP}/ash-install-preflight-uvx.ran"
+          rm -f -- "${uvx_ran}"
+          # The step changes to RUNNER_TEMP before uvx starts: `ash dependencies
+          # install` takes its source directory from the working directory, resolves
+          # its config there and imports the plugin modules that config names before
+          # click reads --help, so run from the checkout the scanned repository would
+          # choose what code this preflight runs (the install steps below run from
+          # RUNNER_TEMP for the same reason). The cd is at the step's top level, not
+          # inside the inner bash and not a subshell: with_commands_stopped must run
+          # in the step's own shell, and the test guard that reads where a
+          # tool-installing command runs follows a top-level cd. Nothing after this
+          # line reads a relative path.
+          cd "${RUNNER_TEMP}"
+          # The single quotes are deliberate: the inner bash expands $0 and $@.
+          # shellcheck disable=SC2016
+          with_commands_stopped --capture help bash -c ': > "$0" && exec "$@" 2>&1' "${uvx_ran}" \
+            uvx --from "${ASH_UVX_SOURCE}" ash dependencies install --help || status=$?
+          [ -e "${uvx_ran}" ] || exit 1
+          plain="${help//$'\e'\[*([0-9;])m/}"
+          if [ "${status}" -eq 0 ] && grep -q -e '--tool' <<<"${plain}"; then
+            echo "This ASH installs scanner tools with ash dependencies install --tool."
+            exit 0
+          fi
+          if [ "${status}" -ne 0 ]; then
+            # uv's or ASH's own message is the diagnosis, so it is shown either way,
+            # through with_commands_stopped: uv repeats what it was given and what it
+            # fetched, and the runner reads no line of it as a command.
+            echo "uvx --from '$(one_line "${ASH_UVX_SOURCE}")' ash dependencies install --help exited $(one_line "${status}"); its last lines:"
+            with_commands_stopped tail -n 20 <<<"${plain}" || true
+            if ! grep -q -E "No such (command|option)" <<<"${plain}"; then
+              echo "::error::Could not install or start the ASH this workflow uses ($(one_line "${ASH_UVX_SOURCE##* @ }")); uvx exited $(one_line "${status}"), and its output is above. Check that ash-version names a tag, branch or commit that exists in ash-repo."
+              exit 1
+            fi
+          fi
+          echo "::error::The ASH this workflow installs ($(one_line "${ASH_UVX_SOURCE##* @ }")) has no 'ash dependencies install --tool', which the install-grype, install-syft and install-opengrep steps use; ASH v3.7.0 and v3.7.1 do not have it. Leave ash-version empty to install the ASH of this workflow's own commit, set ash-version to a release after v3.7.1, or set install-grype, install-syft and install-opengrep to false, in which case those three scanners are not installed and the scan runs without them."
+          exit 1
 
       # THE GRYPE DATABASE CACHE IS TIME-BOUNDED BY THE SAME NUMBER GRYPE ENFORCES
       #
@@ -249,6 +1537,17 @@ jobs:
       # If the ASH revision in use predates the registry, the key comes back empty
       # and the grype cache is simply skipped: grype then downloads its database,
       # as it does on any miss.
+      #
+      # Every `uv run` in this job passes --no-config and every python it or the
+      # job starts passes -I, because both run in the checkout. Without
+      # --no-config, `uv run --no-project` still reads `[tool.uv]` in the
+      # checkout's pyproject.toml and its uv.toml, so the scanned repository chose
+      # the package index the helper's dependencies came from. Without -I, `-m`
+      # and `-c` put the working directory first on sys.path, so an
+      # `automated_security_helper/` in the checkout (ASH scanning itself: the pull
+      # request's tree) replaced the one ASH_UVX_SOURCE installed, and a `json.py`
+      # at its root replaced the standard library's. The OpenGrep pin lookup below
+      # has the measurement.
       - name: Compute cache keys
         id: cachekeys
         env:
@@ -259,8 +1558,8 @@ jobs:
           # to one build indefinitely.
           echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
           if [ "${INSTALL_GRYPE}" = "true" ]; then
-            if grype_db="$(uv run --no-project --with "${ASH_UVX_SOURCE}" -- \
-                python -m automated_security_helper.utils.content_databases cache-key grype-db)"; then
+            if grype_db="$(uv run --no-config --no-project --with "${ASH_UVX_SOURCE}" -- \
+                python -I -m automated_security_helper.utils.content_databases cache-key grype-db)"; then
               echo "grype-db=${grype_db}" >> "$GITHUB_OUTPUT"
               echo "grype database cache bucket: ${grype_db}"
             else
@@ -270,7 +1569,7 @@ jobs:
 
       - name: Restore the grype vulnerability database
         id: grype-db-restore
-        if: inputs.install-grype && steps.cachekeys.outputs.grype-db != ''
+        if: inputs.install-grype && steps.cachekeys.outputs.grype-db != '' && env.RESTORE_CACHES == 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           # grype's db.cache-dir default; equivalently GRYPE_DB_CACHE_DIR.
@@ -299,7 +1598,7 @@ jobs:
       # 10 GB quota. Neither step needs a permission, so no caller has to grant one.
       - name: Restore the OpenGrep binary
         id: opengrep-cache
-        if: inputs.install-opengrep
+        if: inputs.install-opengrep && env.RESTORE_CACHES == 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.opengrep/cli/latest
@@ -329,9 +1628,9 @@ jobs:
       # with, treated the redirect as a failure, and left no binary behind.
       #
       # This path resolves the version and SHA256 from
-      # automated_security_helper/utils/tool_downloads.py at the pinned `ash-version`
-      # ref, verifies the digest before installing, and refuses to install on a
-      # mismatch. It is the same table the container image and the nix flake use, so a
+      # automated_security_helper/utils/tool_downloads.py at the ASH ref the "Resolve
+      # the ASH to install" step chose, verifies the digest before installing, and
+      # refuses to install on a mismatch. It is the same table the container image and the nix flake use, so a
       # scan run through this workflow executes the same tool versions as one run any
       # other way -- which the piped script could not promise, since it always
       # installed whatever was newest.
@@ -339,6 +1638,13 @@ jobs:
       # Two steps rather than one, because the two inputs are independent and merging
       # them would mean interpolating booleans into shell to rebuild the condition.
       # The second `uvx` call reuses the environment the first one resolved.
+      #
+      # Both run from RUNNER_TEMP with ASH_CONFIG unset, as Install OpenGrep below
+      # does. `ash dependencies install` takes its source directory from the working
+      # directory, resolves its config from ASH_CONFIG or by discovery there, and
+      # imports every plugin module that config names. Run from the checkout with
+      # the caller's config, the scanned repository chose what this step installed
+      # and what code ran while installing it.
       #
       # ASH_TOOL_BIN is added to PATH the same way the OpenGrep step below does it.
       # The previous form installed into /usr/local/bin, which is already on PATH, so
@@ -350,9 +1656,10 @@ jobs:
           ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
         run: |
           set -euo pipefail
-          uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
-            --tool grype \
-            --bin-path "${ASH_TOOL_BIN}"
+          (cd "${RUNNER_TEMP}" && env -u ASH_CONFIG \
+            uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
+              --tool grype \
+              --bin-path "${ASH_TOOL_BIN}")
           echo "${ASH_TOOL_BIN}" >> "$GITHUB_PATH"
 
       # A restored database is used only if it is inside the declared bound NOW.
@@ -367,14 +1674,17 @@ jobs:
           ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
         run: |
           set -uo pipefail
+          # `built` comes from the downloaded database's metadata, so it is printed
+          # through one_line.
+          . "${RUNNER_TEMP}/ash-one-line.sh"
           built="$("${ASH_TOOL_BIN}/grype" db status -o json 2>/dev/null \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("built",""))' 2>/dev/null)"
-          if [ -n "${built}" ] && uv run --no-project --with "${ASH_UVX_SOURCE}" -- \
-              python -m automated_security_helper.utils.content_databases \
+            | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("built",""))' 2>/dev/null)"
+          if [ -n "${built}" ] && uv run --no-config --no-project --with "${ASH_UVX_SOURCE}" -- \
+              python -I -m automated_security_helper.utils.content_databases \
               check-age grype-db --built "${built}" --for use; then
-            echo "restored grype database built ${built} is inside its bound; using it"
+            echo "restored grype database built $(one_line "${built}") is inside its bound; using it"
           else
-            echo "::warning::discarding the restored grype database (built '${built:-unknown}'): it is not inside the bound ASH declares for it. grype will download a fresh one."
+            echo "::warning::discarding the restored grype database (built '$(one_line "${built:-unknown}")'): it is not inside the bound ASH declares for it. grype will download a fresh one."
             rm -rf ~/.cache/grype/db
           fi
 
@@ -384,9 +1694,69 @@ jobs:
           ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
         run: |
           set -euo pipefail
-          uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
-            --tool syft \
-            --bin-path "${ASH_TOOL_BIN}"
+          (cd "${RUNNER_TEMP}" && env -u ASH_CONFIG \
+            uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
+              --tool syft \
+              --bin-path "${ASH_TOOL_BIN}")
+          echo "${ASH_TOOL_BIN}" >> "$GITHUB_PATH"
+
+      # actionlint, cfn-guard, gitleaks and trivy go through the same verified
+      # installer, in one step: each input only adds its tool to the list. Run from
+      # RUNNER_TEMP and without ASH_CONFIG, as for OpenGrep below, so the scanned
+      # repository's .ash.yaml cannot change what is installed.
+      #
+      # With ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip (skip-unknown-tools with config-ref)
+      # each tool is installed by its own call, and a call the installed ASH refuses
+      # with "Unknown tool(s)" skips that tool. An ASH that has the setting skips such
+      # a name itself; one that predates the setting refuses the whole list, and
+      # that is what this step tolerates: ASH's own required check runs this
+      # workflow file with the ASH of the pull request's base commit, which can be
+      # older than both these tools and the setting. Any other failure of a call
+      # fails the step, as does any failure when the setting is off.
+      #
+      # cfn-guard's rules land next to the bin path, in
+      # ${RUNNER_TEMP}/share/cfn-guard-rules; the Run ASH step points
+      # ASH_CFN_GUARD_RULES_DIR there.
+      - name: Install actionlint, cfn-guard, gitleaks and trivy
+        if: inputs.install-actionlint || inputs.install-cfn-guard || inputs.install-gitleaks || inputs.install-trivy
+        env:
+          ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
+          INSTALL_ACTIONLINT: ${{ inputs.install-actionlint && 'actionlint' || '' }}
+          INSTALL_CFN_GUARD: ${{ inputs.install-cfn-guard && 'cfn-guard' || '' }}
+          INSTALL_GITLEAKS: ${{ inputs.install-gitleaks && 'gitleaks' || '' }}
+          INSTALL_TRIVY: ${{ inputs.install-trivy && 'trivy' || '' }}
+        run: |
+          set -euo pipefail
+          # Every value a workflow command below prints goes through one_line.
+          . "${RUNNER_TEMP}/ash-one-line.sh"
+          tools=()
+          for tool in "${INSTALL_ACTIONLINT}" "${INSTALL_CFN_GUARD}" "${INSTALL_GITLEAKS}" "${INSTALL_TRIVY}"; do
+            if [ -n "${tool}" ]; then tools+=("${tool}"); fi
+          done
+          install_tools() {
+            (cd "${RUNNER_TEMP}" && env -u ASH_CONFIG \
+              uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
+                "$@" \
+                --bin-path "${ASH_TOOL_BIN}")
+          }
+          if [ "${ASH_DEPENDENCIES_UNKNOWN_TOOLS:-}" != "skip" ]; then
+            args=()
+            for tool in "${tools[@]}"; do args+=(--tool "${tool}"); done
+            install_tools "${args[@]}"
+          else
+            output="${RUNNER_TEMP}/ash-install-tool.log"
+            for tool in "${tools[@]}"; do
+              status=0
+              install_tools --tool "${tool}" > "${output}" 2>&1 || status=$?
+              cat "${output}"
+              if [ "${status}" -eq 2 ] && grep -q -F 'Unknown tool(s)' "${output}"; then
+                echo "::notice::$(one_line "${tool}") is not a tool the installed ASH knows, so it is not installed and its scanner does not run (ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip)."
+              elif [ "${status}" -ne 0 ]; then
+                exit "${status}"
+              fi
+            done
+            rm -f -- "${output}"
+          fi
           echo "${ASH_TOOL_BIN}" >> "$GITHUB_PATH"
 
       # OpenGrep goes through the same verified installer as Grype and Syft above.
@@ -397,8 +1767,8 @@ jobs:
       # `[ -x ]` alone, which meant a binary restored from the Actions cache went onto
       # PATH without anyone having hashed it.
       #
-      # Now the version and SHA256 come from tool_downloads.py at the pinned
-      # `ash-version` ref, and nothing reaches PATH until it hashes to that pin:
+      # The version and SHA256 come from tool_downloads.py at the resolved ASH
+      # ref, and nothing reaches PATH until it hashes to that pin:
       #
       #   1. A restored binary is used only if it is a regular file -- not a symlink,
       #      which the previous layout of this cache contained -- and hashes to the pin.
@@ -421,22 +1791,27 @@ jobs:
         if: inputs.install-opengrep
         run: |
           set -euo pipefail
+          # The machine name, the ASH source and the pin are printed through
+          # one_line: a tool reports the first two, and ASH's pin table the third.
+          . "${RUNNER_TEMP}/ash-one-line.sh"
           INSTALL_DIR="$HOME/.opengrep/cli/latest"
           BIN="$INSTALL_DIR/opengrep"
           case "$(uname -m)" in
             x86_64) ARCH=amd64 ;;
             aarch64|arm64) ARCH=arm64 ;;
-            *) echo "::error::no pinned OpenGrep for machine $(uname -m)"; exit 1 ;;
+            *) echo "::error::no pinned OpenGrep for machine $(one_line "$(uname -m)")"; exit 1 ;;
           esac
           # `python -I`: without it `-c` puts the working directory -- the CALLER's
           # checkout -- first on sys.path, so an `automated_security_helper/` directory
           # in the repository being scanned would supply the pin. Measured: run from
           # an ASH checkout, the pin came from the checkout rather than from
-          # ASH_UVX_SOURCE.
-          if ! PINNED="$(uv run --no-project --with "${ASH_UVX_SOURCE}" -- python -I -c \
+          # ASH_UVX_SOURCE. `--no-config` for the same reason one level up: uv
+          # would otherwise resolve the pin lookup's dependencies from whatever
+          # index the checkout's `[tool.uv]` or uv.toml names.
+          if ! PINNED="$(uv run --no-config --no-project --with "${ASH_UVX_SOURCE}" -- python -I -c \
               'import sys; from automated_security_helper.utils.tool_downloads import get_tool_asset; print(get_tool_asset("opengrep", "linux", sys.argv[1]).sha256)' \
               "${ARCH}")" || [ -z "${PINNED}" ]; then
-            echo "::error::this ASH revision (${ASH_UVX_SOURCE}) pins no SHA256 for OpenGrep, so there is nothing to verify the binary against, and it will not be installed unverified. To fix: set the ash-version input to a revision that pins OpenGrep (main, or the first release after v3.7.1), or set install-opengrep: false."
+            echo "::error::this ASH revision ($(one_line "${ASH_UVX_SOURCE}")) pins no SHA256 for OpenGrep, so there is nothing to verify the binary against, and it will not be installed unverified. To fix: set the ash-version input to a revision that pins OpenGrep (main, or the first release after v3.7.1), or set install-opengrep: false."
             exit 1
           fi
           matches_pin() {
@@ -444,10 +1819,10 @@ jobs:
               && [ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "${PINNED}" ]
           }
           if matches_pin; then
-            echo "Reusing cached OpenGrep binary; SHA256 ${PINNED} matches the pin"
+            echo "Reusing cached OpenGrep binary; SHA256 $(one_line "${PINNED}") matches the pin"
           else
             if [ -e "$INSTALL_DIR" ]; then
-              echo "Discarding the restored OpenGrep cache: it does not hold a binary matching the pinned SHA256 ${PINNED}"
+              echo "Discarding the restored OpenGrep cache: it does not hold a binary matching the pinned SHA256 $(one_line "${PINNED}")"
             fi
             rm -rf "$INSTALL_DIR"
             mkdir -p "$INSTALL_DIR"
@@ -462,7 +1837,7 @@ jobs:
           fi
           if ! matches_pin; then
             rm -rf "$INSTALL_DIR"
-            echo "::error::the installed OpenGrep binary does not match the pinned SHA256 ${PINNED}; removed it rather than put it on PATH"
+            echo "::error::the installed OpenGrep binary does not match the pinned SHA256 $(one_line "${PINNED}"); removed it rather than put it on PATH"
             exit 1
           fi
           echo "$INSTALL_DIR" >> "$GITHUB_PATH"
@@ -492,13 +1867,12 @@ jobs:
       # Pinned to a commit rather than to `v1`, which is a moving major tag on this
       # action: .github/scripts/assert-actions-pinned.mjs requires 40 hex characters
       # plus a trailing version comment, the latter because Dependabot reads that
-      # comment to learn which release a sha is. This sha is v1.321.0.
+      # comment to learn which release a sha is. This sha is v1.332.0.
       #
       # No `bundler-cache: true`. That input has the action run `bundle install`
-      # itself against BUNDLE_GEMFILE, and this Gemfile is neither at the repository
-      # root nor reliably present: the step below resolves it to
-      # automated_security_helper/assets/Gemfile or else curls the pin into
-      # RUNNER_TEMP, then installs under sudo with BUNDLE_GEMFILE set explicitly.
+      # itself against BUNDLE_GEMFILE, and this Gemfile is not in the repository at
+      # all: the step below curls the pin into RUNNER_TEMP, then installs with
+      # BUNDLE_GEMFILE set explicitly.
       # Caching an install other than the one that actually runs is worse than not
       # caching. Bundler itself comes from this action by default, and the guard
       # below checks for it rather than assuming it.
@@ -509,30 +1883,55 @@ jobs:
       # and make are still on the image; libyaml-dev is the one to check first.
       - name: Set up Ruby for cfn-nag
         if: inputs.install-cfn-nag
-        uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
+        uses: ruby/setup-ruby@b1da4809b005e0178fe08a1d57317bffc00b7b4c # v1.332.0
         with:
           ruby-version: "3.3"
+          # Neither from the checkout. The action's default `bundler: Gemfile.lock`
+          # installs the Bundler that the BUNDLED WITH section of a Gemfile.lock in
+          # `working-directory` names, and that directory defaults to the checkout,
+          # so a pull request adding one at its root picked the Bundler this job
+          # runs. `default` is the Bundler Ruby 3.3 ships, which is what an absent
+          # Gemfile.lock resolved to before.
+          bundler: default
+          working-directory: ${{ runner.temp }}
 
       - name: Install cfn-nag
         if: inputs.install-cfn-nag
         env:
-          # Same repo and ref the scan itself is installed from, so the gem
-          # version can never disagree with the ASH that invokes it.
-          ASH_ASSETS_URL: https://raw.githubusercontent.com/${{ inputs.ash-repo }}/${{ inputs.ash-version }}/automated_security_helper/assets
+          # Frozen: install exactly what Gemfile.lock records. Without it Bundler
+          # resolves again whenever the Gemfile and the lockfile disagree, or the
+          # lockfile is missing, and installs whatever rubygems.org serves that day.
+          # Frozen, it refuses both before contacting a gem server (measured on
+          # Bundler 2.4.22 against these two files: exit 16 each). The lockfile's
+          # only platform is `ruby`, which Bundler's platform check accepts on any
+          # runner, so frozen mode does not refuse it here.
+          BUNDLE_FROZEN: "true"
         run: |
           set -euo pipefail
           # ASH's own Gemfile and Gemfile.lock are the version pin -- naming
           # 0.8.10 here as well would create a second place to update, and the
           # container image already builds cfn-nag from these two files.
-          GEMFILE="${GITHUB_WORKSPACE}/automated_security_helper/assets/Gemfile"
-          if [ ! -f "${GEMFILE}" ]; then
-            # The checkout is the calling repository, not ASH's, so fetch the pin.
-            GEMFILE="${RUNNER_TEMP}/ash-cfn-nag/Gemfile"
-            mkdir -p "$(dirname "${GEMFILE}")"
-            curl -sSfL "${ASH_ASSETS_URL}/Gemfile" -o "${GEMFILE}"
-            curl -sSfL "${ASH_ASSETS_URL}/Gemfile.lock" -o "${GEMFILE}.lock"
+          #
+          # Always fetched, never taken from the checkout. This step used
+          # ${GITHUB_WORKSPACE}/automated_security_helper/assets/Gemfile whenever the
+          # checkout had one, which is every run where ASH scans itself: on a pull
+          # request that is the pull request's Gemfile, so the pull request chose the
+          # cfn-nag that scanned it, whatever ref ASH itself came from.
+          # Every path this step prints, the ones `command -v` reports included, goes
+          # through one_line.
+          . "${RUNNER_TEMP}/ash-one-line.sh"
+          GEMFILE="${RUNNER_TEMP}/ash-cfn-nag/Gemfile"
+          mkdir -p "$(dirname "${GEMFILE}")"
+          curl -sSfL "${ASH_ASSETS_URL}/Gemfile" -o "${GEMFILE}"
+          curl -sSfL "${ASH_ASSETS_URL}/Gemfile.lock" -o "${GEMFILE}.lock"
+          # Bundler reads the lockfile at "${BUNDLE_GEMFILE}.lock". Checked here so a
+          # fetch that left nothing names the file instead of surfacing as Bundler's
+          # frozen-mode refusal.
+          if [ ! -s "${GEMFILE}.lock" ]; then
+            echo "::error::No Gemfile.lock beside $(one_line "${GEMFILE}"); cfn-nag installs only what that lockfile records." >&2
+            exit 1
           fi
-          echo "Installing cfn-nag from ${GEMFILE}"
+          echo "Installing cfn-nag from $(one_line "${GEMFILE}")"
           # Every tool is resolved with `command -v` as the runner user rather than
           # assumed on PATH. The failure this names -- Ruby absent for the runner
           # user -- is otherwise invisible until the scan reports cfn-nag MISSING,
@@ -549,7 +1948,7 @@ jobs:
           GEM_CMD="$(command -v gem || true)"
           RUBY_CMD="$(command -v ruby || true)"
           if [ -z "${BUNDLE_BIN}" ] || [ -z "${GEM_CMD}" ] || [ -z "${RUBY_CMD}" ]; then
-            echo "::error::Ruby is not on PATH for the runner user (bundle='${BUNDLE_BIN}' gem='${GEM_CMD}' ruby='${RUBY_CMD}'), so cfn-nag cannot be installed and would be reported MISSING. This image no longer ships ruby-full; add a ruby/setup-ruby step." >&2
+            echo "::error::Ruby is not on PATH for the runner user (bundle='$(one_line "${BUNDLE_BIN}")' gem='$(one_line "${GEM_CMD}")' ruby='$(one_line "${RUBY_CMD}")'), so cfn-nag cannot be installed and would be reported MISSING. This image no longer ships ruby-full; add a ruby/setup-ruby step." >&2
             exit 1
           fi
 
@@ -584,19 +1983,17 @@ jobs:
           # which makes their existence a product of this step rather than an
           # inference about where RubyGems might have put one.
           #
-          # Under RUNNER_TEMP rather than beside the Gemfile on purpose. When ASH
-          # scans itself the Gemfile is inside GITHUB_WORKSPACE, and writing four Ruby
-          # scripts there would add them to the tree the very next step scans. The
-          # generated wrapper bakes an absolute-ized BUNDLE_GEMFILE computed from its
-          # own directory, so it does not need to sit next to the Gemfile; verified by
-          # running one from `/` with a PATH holding nothing but the binstub directory
-          # and the system defaults.
+          # Under RUNNER_TEMP, in a directory of their own, and never in
+          # GITHUB_WORKSPACE: writing four Ruby scripts into the checkout would add
+          # them to the tree the very next step scans. The generated wrapper bakes an
+          # absolute-ized BUNDLE_GEMFILE computed from its own directory, so it does
+          # not need to sit next to the Gemfile; verified by running one from `/` with
+          # a PATH holding nothing but the binstub directory and the system defaults.
           #
-          # This does not make the Gemfile's directory untouched: bundler records
-          # settings next to it either way, so `.bundle/config` appears there with
-          # BUNDLE_JOBS from the install above and BUNDLE_BIN from `--path`. That file
-          # predates this change and is one small YAML; what is kept out of the
-          # scanned tree is the executable content.
+          # bundler also records settings next to the Gemfile, so `.bundle/config`
+          # appears in RUNNER_TEMP/ash-cfn-nag with BUNDLE_JOBS from the install above
+          # and BUNDLE_BIN from `--path`. Now that the Gemfile is always fetched, that
+          # file is outside the scanned tree too.
           #
           # --force so a warm RUNNER_TEMP regenerates against the bundle just
           # installed instead of leaving a stale wrapper in place; without it bundler
@@ -607,8 +2004,10 @@ jobs:
           # Printed unconditionally, not folded into a failure branch. When this step
           # failed, the log carried the error and nothing about where it had looked,
           # so the cause could not be read off the record at all.
-          echo "--- binstub directory ${BINSTUB_DIR} ---"
-          ls -la "${BINSTUB_DIR}" || echo "(cannot list '${BINSTUB_DIR}')"
+          echo "--- binstub directory $(one_line "${BINSTUB_DIR}") ---"
+          # ls's own error quotes the path as it is, so it is dropped for the line
+          # below, which prints the path through one_line.
+          ls -la "${BINSTUB_DIR}" 2>/dev/null || echo "(cannot list '$(one_line "${BINSTUB_DIR}")')"
           echo "--- gem environment ---"
           "${GEM_CMD}" environment
 
@@ -620,11 +2019,11 @@ jobs:
           #
           # First, that the name resolves.
           if ! CFN_NAG_SCAN="$(PATH="${BINSTUB_DIR}:${PATH}" command -v cfn_nag_scan)"; then
-            echo "::error::cfn-nag installed but cfn_nag_scan is not on PATH. Looked in '${BINSTUB_DIR}'. ASH invokes it by bare name, so it would report cfn-nag MISSING and pass a tree it never scanned." >&2
+            echo "::error::cfn-nag installed but cfn_nag_scan is not on PATH. Looked in '$(one_line "${BINSTUB_DIR}")'. ASH invokes it by bare name, so it would report cfn-nag MISSING and pass a tree it never scanned." >&2
             "${BUNDLE_BIN}" info cfn-nag || true
             exit 1
           fi
-          echo "cfn_nag_scan resolves to ${CFN_NAG_SCAN}"
+          echo "cfn_nag_scan resolves to $(one_line "${CFN_NAG_SCAN}")"
 
           # Second, that it RUNS. Resolving only proves a file is there; a bundler
           # binstub still has to find its Gemfile and activate the bundle at startup,
@@ -632,8 +2031,13 @@ jobs:
           # again cfn-nag MISSING. `--help` exits 0 and prints the version, so it
           # exercises the whole path without needing a template.
           if ! PATH="${BINSTUB_DIR}:${PATH}" cfn_nag_scan --help >/dev/null 2>&1; then
-            echo "::error::cfn_nag_scan is on PATH at '${CFN_NAG_SCAN}' but will not run. Output follows." >&2
-            PATH="${BINSTUB_DIR}:${PATH}" cfn_nag_scan --help || true
+            echo "::error::cfn_nag_scan is on PATH at '$(one_line "${CFN_NAG_SCAN}")' but will not run. Output follows." >&2
+            # Through one_line a line at a time: what fails here quotes the path it
+            # ran, as bash's own "Permission denied" does.
+            PATH="${BINSTUB_DIR}:${PATH}" cfn_nag_scan --help 2>&1 \
+              | while IFS= read -r line || [ -n "${line}" ]; do
+                  printf '%s\n' "$(one_line "${line}")"
+                done >&2 || true
             exit 1
           fi
           echo "cfn_nag_scan --help exits 0, so the wrapper runs and its bundle activates"
@@ -642,8 +2046,13 @@ jobs:
         id: ash
         shell: bash
         env:
-          ASH_MODE: ${{ inputs.ash-mode }}
-          ASH_ARGS: ${{ inputs.ash-args }}
+          # The config read from config-ref when the caller set one, else the
+          # `config` input as before. Set here as well as passed as --config, so
+          # every part of ASH that reads ASH_CONFIG sees the same file.
+          ASH_CONFIG: ${{ steps.config-ref-files.outputs.path || steps.inputs.outputs.config }}
+          ASH_MODE: ${{ steps.inputs.outputs.ash_mode }}
+          ASH_ARGS: ${{ steps.inputs.outputs.ash_args }}
+          ASH_OUTPUT_DIR: ${{ steps.inputs.outputs.output_dir }}
           # Bare `inputs.fail-on-findings`, not `== 'true'`. GitHub casts
           # mismatched operands to a number before comparing: a Boolean becomes 1
           # or 0, and a string is parsed as a JSON number or else becomes NaN. So
@@ -667,8 +2076,13 @@ jobs:
           # so no `--no-verbose` exists and absence is how false is expressed.
           VERBOSE: ${{ inputs.verbose && '--verbose' || '' }}
           CHANGED_FILES_ONLY: ${{ inputs.changed-files-only == true && '--changed-files-only' || '' }}
-          BASE_REF: ${{ inputs.base-ref }}
+          BASE_REF: ${{ steps.base-ref.outputs.ref }}
+          # Where the install step above put cfn-guard's rules. Empty when it did
+          # not install cfn-guard, and ASH then looks in its default place.
+          ASH_CFN_GUARD_RULES_DIR: ${{ inputs.install-cfn-guard && format('{0}/share/cfn-guard-rules', runner.temp) || '' }}
         run: |-
+          # Every value a workflow command below prints goes through one_line.
+          . "${RUNNER_TEMP}/ash-one-line.sh"
           # ${ASH_ARGS} is last so a flag the caller passes explicitly wins.
           # `click` resolves a boolean flag pair last-occurrence-wins, and while
           # ${ASH_ARGS} sat ahead of ${FAIL_ON_FINDINGS_PARAM} a caller who
@@ -697,6 +2111,10 @@ jobs:
           # derived default is the intended precedence, but it does mean the two
           # inputs can disagree with no warning.
           #
+          # --config is passed when ASH_CONFIG is set (from config-ref or the
+          # `config` input; see the env above) and sits with the derived values, so
+          # `ash-args: --config <path>` still wins over it.
+          #
           # Quoting. Every single value is quoted; the two optional flags expand to
           # nothing when empty via ${VAR:+"$VAR"}, which an empty quoted "$VAR"
           # would not (it passes an empty argument). `ash-args` is a caller-supplied
@@ -705,8 +2123,58 @@ jobs:
           # an argument such as `--exclude *.md` was expanded against the checkout
           # before ASH saw it, and a caller had no way to stop that.
           read -r -a ASH_ARGS_LIST <<< "${ASH_ARGS}"
+          # Options only. `ash` is a click group whose callback is the scan, and
+          # click reads the first bare word after the options as a subcommand,
+          # which then runs with ash-args alone: no --output-dir, no
+          # --fail-on-findings, no --changed-files-only. So the words are read as
+          # click reads them, and every one must be an option or an option's
+          # value. The word after an option that takes a value is that value,
+          # even when it names a subcommand (`--phases scan`, `--config config`);
+          # `--phases=scan` and `-cconfig` carry it in the same word. In a cluster
+          # of short options (`-vc config`) the first letter that takes a value
+          # takes the rest of the word, or the next word when it is last. Any
+          # other word is bare and refused, and so is `--`, after which click
+          # reads every word as bare. ASH_VALUE_OPTIONS is the ash group's options
+          # that take a value; tests/unit/test_reusable_workflow_ash_args.py holds
+          # it to the CLI's. The refusals name the word by position, not by value.
+          ASH_VALUE_OPTIONS="--ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --output-dir --output-format --output-formats --phases --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
+          takes_value=""
+          position=0
+          for word in "${ASH_ARGS_LIST[@]}"; do
+            position=$((position + 1))
+            if [ -n "${takes_value}" ]; then
+              takes_value=""
+              continue
+            fi
+            case "${word}" in
+              --)
+                echo "::error::ash-args word $(one_line "${position}") is --, after which click reads the next word as an ash subcommand, whatever it looks like, and runs it without this workflow's options. ash-args takes options of ash scan only."
+                exit 1
+                ;;
+              --*=*) ;;
+              --*)
+                if [[ " ${ASH_VALUE_OPTIONS} " == *" ${word} "* ]]; then
+                  takes_value="yes"
+                fi
+                ;;
+              -?*)
+                for ((at = 1; at < ${#word}; at++)); do
+                  if [[ " ${ASH_VALUE_OPTIONS} " == *" -${word:at:1} "* ]]; then
+                    if ((at + 1 == ${#word})); then
+                      takes_value="yes"
+                    fi
+                    break
+                  fi
+                done
+                ;;
+              *)
+                echo "::error::ash-args word $(one_line "${position}") is neither an option nor an option's value: click would read it as an ash subcommand and run that, or fail on it, without this workflow's options. ash-args takes options of ash scan only."
+                exit 1
+                ;;
+            esac
+          done
           uvx --reinstall --from "${ASH_UVX_SOURCE}" ash \
-            --source-dir . --output-dir "${ASH_OUTPUT_DIR}" --no-progress "${FAIL_ON_FINDINGS_PARAM}" --build-target ci --mode "${ASH_MODE}" ${VERBOSE:+"${VERBOSE}"} ${CHANGED_FILES_ONLY:+"${CHANGED_FILES_ONLY}" --base-ref "${BASE_REF}"} "${ASH_ARGS_LIST[@]}"
+            --source-dir . --output-dir "${ASH_OUTPUT_DIR}" --no-progress "${FAIL_ON_FINDINGS_PARAM}" --build-target ci --mode "${ASH_MODE}" ${ASH_CONFIG:+--config "${ASH_CONFIG}"} ${VERBOSE:+"${VERBOSE}"} ${CHANGED_FILES_ONLY:+"${CHANGED_FILES_ONLY}" --base-ref "${BASE_REF}"} "${ASH_ARGS_LIST[@]}"
 
       # Default branch only, after the scan, so what is saved is the database grype
       # actually scanned with. The save is refused unless that database is at most
@@ -725,14 +2193,17 @@ jobs:
           ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
         run: |
           set -uo pipefail
+          # `built` comes from the downloaded database's metadata, so it is printed
+          # through one_line.
+          . "${RUNNER_TEMP}/ash-one-line.sh"
           built="$("${ASH_TOOL_BIN}/grype" db status -o json 2>/dev/null \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("built",""))' 2>/dev/null)"
-          if [ -n "${built}" ] && uv run --no-project --with "${ASH_UVX_SOURCE}" -- \
-              python -m automated_security_helper.utils.content_databases \
+            | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("built",""))' 2>/dev/null)"
+          if [ -n "${built}" ] && uv run --no-config --no-project --with "${ASH_UVX_SOURCE}" -- \
+              python -I -m automated_security_helper.utils.content_databases \
               check-age grype-db --built "${built}" --for save; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::not saving the grype database (built '${built:-unknown}'): too close to its bound to be cached."
+            echo "::warning::not saving the grype database (built '$(one_line "${built:-unknown}")'): too close to its bound to be cached."
           fi
 
       - name: Save the grype vulnerability database (default branch only)
@@ -746,11 +2217,22 @@ jobs:
           path: ~/.cache/grype/db
           key: grype-db-${{ runner.os }}-${{ steps.cachekeys.outputs.grype-db }}
 
+      # Not after a failed config-ref step: with no path from them, the expression
+      # below would fall back to the checkout's config, which config-ref exists to
+      # avoid.
+      #
+      # Only after the pin step succeeded: before it, ASH_UVX_SOURCE still holds
+      # ash-repo and ash-version as given, and uvx would print them in its errors.
       - name: Show ASH Summary Report
-        if: success() || failure()
+        if: (success() || failure()) && steps.ash-pin.outcome == 'success' && steps.config-ref.outcome != 'failure' && steps.config-ref-files.outcome != 'failure'
         shell: bash
         env:
           ASH_REPO_CLONE_URL: https://github.com/${{ github.repository }}.git
+          # The same config the scan used. `ash report` resolves a config too, and
+          # loads the plugin modules it names, so without this it would discover the
+          # checkout's.
+          ASH_CONFIG: ${{ steps.config-ref-files.outputs.path || steps.inputs.outputs.config }}
+          ASH_OUTPUT_DIR: ${{ steps.inputs.outputs.output_dir }}
         run: |-
           # No --reinstall here. The Run ASH step above already installed this exact
           # source, so re-forcing a download makes the report step do a second git
@@ -758,26 +2240,115 @@ jobs:
           # (merge_group queue branches are deleted mid-run) that fetch is what
           # fails, after the scan itself has already succeeded.
           uvx --from "${ASH_UVX_SOURCE}" ash \
-            --output-dir "${ASH_OUTPUT_DIR}" report
+            --output-dir "${ASH_OUTPUT_DIR}" report ${ASH_CONFIG:+--config "${ASH_CONFIG}"}
 
+      # The listing holds names the scanned repository chose: an extracted archive
+      # member keeps the name it had in the archive. The runner reads a line as a
+      # workflow command when it holds `##[` anywhere or starts with `::`, and tree
+      # prints both unchanged, so each line of the listing goes through one_line.
       - name: Update step summary
-        if: success() || failure()
+        if: (success() || failure()) && steps.inputs.outcome == 'success'
         shell: bash
+        env:
+          ASH_OUTPUT_DIR: ${{ steps.inputs.outputs.output_dir }}
         run: |-
+          . "${RUNNER_TEMP}/ash-one-line.sh"
           cat "${ASH_OUTPUT_DIR}/reports/ash.summary.md" >> "${GITHUB_STEP_SUMMARY}"
-          tree "${ASH_OUTPUT_DIR}"
+          tree "${ASH_OUTPUT_DIR}" | while IFS= read -r line || [ -n "${line}" ]; do
+            one_line "${line}"
+            printf '\n'
+          done
+
+      # Only reports/ and the aggregated results, which are all the reporting job and
+      # a SARIF upload read, plus their per-project copies when `ash-args` makes this a
+      # workspace scan (`--workspace`). scanners/ and converted/, at the top and under
+      # each project, hold each tool's raw output, not masked, so a secret a scanner
+      # found would be in the artifact in full. With several paths, upload-artifact
+      # roots the artifact at their common parent, so the downloaded layout is the same
+      # as before (reports/ash.sarif and so on).
+      # `overwrite` is on for re-runs only (run_attempt 2 and later), so the first
+      # attempt still fails loudly when a second upload takes a name already taken
+      # (a matrix or a caller that calls this workflow twice must give each call
+      # its own artifact-name), while a re-run of failed jobs replaces its own
+      # earlier upload instead of failing on the name collision.
+      - name: Collect ASH output artifact
+        id: ash-output
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: (success() || failure()) && steps.inputs.outcome == 'success'
+        with:
+          name: ${{ steps.inputs.outputs.artifact_name }}
+          path: |
+            ${{ steps.inputs.outputs.output_dir }}/reports
+            ${{ steps.inputs.outputs.output_dir }}/ash_aggregated_results.json
+            ${{ steps.inputs.outputs.output_dir }}/projects/*/reports
+            ${{ steps.inputs.outputs.output_dir }}/projects/*/ash_aggregated_results.json
+          retention-days: 7
+          if-no-files-found: error
+          overwrite: ${{ github.run_attempt != '1' }}
+
+  # THE REPORTING JOB
+  #
+  # The PR comment, the JUnit check run and the SARIF upload need checks: write and
+  # pull-requests: write. They used to be steps of the scan job, so the job that
+  # runs ASH, the scanners and anything ASH loads held a token that can create a
+  # check run or a comment under any name, the required check's included. The token
+  # is in the persisted checkout credentials and in the runner process, so switching
+  # these inputs off did not take it away; in ash-repo-scan-pr-head.yml that code is
+  # the pull request's own ASH.
+  #
+  # Here they run in a job that runs nothing from the scan: it downloads the scan's
+  # ash_output artifact and hands those files to pinned actions. It runs after a
+  # scan that passed or failed (a scan that fails on findings has still written its
+  # reports) and uploaded its ash_output artifact, so a scan that failed before
+  # writing any (a refused config-ref, say) leaves one red check rather than two;
+  # and only when the caller asked for something to be reported, so a
+  # caller that reports nothing never starts it. Its result is a check run of its
+  # own, `<caller> / Report ASH results`; a reporting failure no longer fails the
+  # scan's check.
+  report:
+    name: Report ASH results
+    needs: ash
+    if: >-
+      !cancelled()
+      && (needs.ash.result == 'success' || needs.ash.result == 'failure')
+      && needs.ash.outputs.artifact-id != ''
+      && (inputs.post-pr-comment || inputs.collect-junit-xml-report || inputs.collect-sarif-report)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    steps:
+      # upload-sarif reads the commit it reports on from a checkout; the other two
+      # steps need none. No credentials are left in it.
+      - name: Checkout
+        if: inputs.collect-sarif-report
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Into the same path the scan wrote, so every output-dir path below reads the
+      # file it always read. That path is the scan job's checked output-dir, not the
+      # input as given.
+      - name: Download ASH output artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.ash.outputs.artifact-name }}
+          path: ${{ needs.ash.outputs.output-dir }}
 
       # GITHUB_TOKEN is read-only for pull requests opened from a fork, whatever
       # `permissions:` the caller declares -- GitHub downgrades it so untrusted
       # code cannot write to the base repository. Commenting therefore cannot
-      # work on a fork PR, and because this job is a required status check, the
-      # failure took the whole check down *after the scan had already passed*:
+      # work on a fork PR, and while this step was in the scan job, which is a
+      # required status check, the failure took the whole check down *after the
+      # scan had already passed*:
       #
       #   ##[error]Resource not accessible by integration
       #   https://docs.github.com/rest/issues/comments#create-an-issue-comment
       #
       # That made every external contributor's PR unmergeable for a cosmetic
-      # reason. The existing `github.repository_owner == inputs.repository-owner`
+      # reason. The existing `github.repository_owner == <repository-owner>`
       # guard does not catch it: for a fork PR *into* this repo the owner is
       # still the base repo's owner, so the guard passes.
       #
@@ -788,12 +2359,12 @@ jobs:
         uses: mshick/add-pr-comment@ec328af66588ab8f77cdeb2c264f14aba45bbf59 # v3.12.0
         if: >-
           inputs.post-pr-comment
-          && github.repository_owner == inputs.repository-owner
+          && github.repository_owner == needs.ash.outputs.repository-owner
           && (github.event_name != 'pull_request'
               || github.event.pull_request.head.repo.full_name == github.repository)
           && (success() || failure())
         with:
-          message-path: ${{ inputs.output-dir }}/reports/ash.summary.md
+          message-path: ${{ needs.ash.outputs.output-dir }}/reports/ash.summary.md
 
       # Say so rather than leaving a contributor wondering why the bot went
       # quiet. The junit publish step below is skipped on the same condition and
@@ -805,17 +2376,10 @@ jobs:
           && github.event.pull_request.head.repo.full_name != github.repository
           && (success() || failure())
         shell: bash
+        # No value in the message: this job has no one_line helper, and the
+        # artifact's name is on the run's summary page.
         run: |
-          echo "::notice::Scan results were not posted as a PR comment: GITHUB_TOKEN is read-only for fork pull requests. The full report is in this job's summary and in the ash_output artifact."
-
-      - name: Collect ASH output artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: success() || failure()
-        with:
-          name: ash_output
-          path: ${{ inputs.output-dir }}
-          retention-days: 7
-          if-no-files-found: error
+          echo "::notice::Scan results were not posted as a PR comment: GITHUB_TOKEN is read-only for fork pull requests. The full report is in this job's summary and in the uploaded ASH output artifact."
 
       # THE CHECKS-PERMISSION PROBE THAT USED TO GATE THIS STEP IS GONE
       #
@@ -848,7 +2412,7 @@ jobs:
       # check for the first time. That is intended, and the trade-off plus the
       # opt-out are written out at the `collect-junit-xml-report` input above.
       - name: Publish JUnit Test Report
-        uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
+        uses: mikepenz/action-junit-report@6ef3fdcfcd5f0b5d14df3e659ef19b8c6820f93d # v6.6.1
         if: >-
           inputs.collect-junit-xml-report
           && (github.event_name != 'pull_request'
@@ -871,7 +2435,7 @@ jobs:
           # The explicit form also honors a caller that overrides output-dir, which
           # the glob only ever did by accident, and it matches how the PR comment and
           # SARIF upload in this same job already address their own report files.
-          report_paths: ${{ inputs.output-dir }}/reports/ash.junit.xml
+          report_paths: ${{ needs.ash.outputs.output-dir }}/reports/ash.junit.xml
           include_passed: true
           check_name: ASH Scan JUnit Test Report
           summary: Skipped means passing, suppressed, or ignored findings that are considered non-actionable.
@@ -886,26 +2450,62 @@ jobs:
           && github.event.pull_request.head.repo.full_name != github.repository
           && (success() || failure())
         shell: bash
+        # No value in the message: this job has no one_line helper, and the
+        # artifact's name is on the run's summary page.
         run: |
-          echo "::notice::The JUnit test report was not published as a check: GITHUB_TOKEN is read-only for fork pull requests, so check runs cannot be created. The results are in this job's summary and in the ash_output artifact."
+          echo "::notice::The JUnit test report was not published as a check: GITHUB_TOKEN is read-only for fork pull requests, so check runs cannot be created. The results are in this job's summary and in the uploaded ASH output artifact."
 
       # This step never holds security-events: write. The `permissions:` block at
       # the top of this file does not list it, and a called workflow can only
       # narrow its caller's token, so a caller that grants it still loses it here.
-      # Uploads from a same-repo pull_request succeed anyway; on workflow_dispatch
-      # the step fails with "Resource not accessible by integration".
+      # Code scanning needs it for an upload except from one event: "code scanning
+      # always allows the uploading of results when the `pull_request` event
+      # triggers the action run" (https://docs.github.com/en/code-security/code-scanning/troubleshooting-code-scanning/resource-not-accessible-by-integration).
+      # So the step runs on every pull_request event, from a fork as well as from
+      # this repository. On push, workflow_dispatch, schedule and the other events
+      # the upload would fail with "Resource not accessible by integration", which
+      # with the default `collect-sarif-report: true` would fail the job on every push
+      # and every manual run there, so the notice step below says what happened.
+      #
+      # merge_group gets its own reason in that notice. Its run is on the merge
+      # queue's temporary gh-readonly-queue branch, which GitHub deletes when the
+      # entry leaves the queue, and it is not a pull_request run, so this step could
+      # not upload there either; the pull request's own run carries the results.
       #
       # The permission is not added to this file, at workflow or job level,
       # because GitHub validates every permission a called workflow declares at
       # startup, including on a job whose `if:` is false. Every caller that does
       # not grant it would fail before any job ran, including those that pass
       # `collect-sarif-report: false`. A caller that wants uploads on every event
-      # should set `collect-sarif-report: false` and call upload-ash-sarif.yml in
-      # a job of its own, granting security-events: write to that job only.
+      # should call upload-ash-sarif.yml in a job of its own, granting
+      # security-events: write to that job only, and may set
+      # `collect-sarif-report: false` so a pull request does not upload the same
+      # report twice.
       - name: Upload ASH SARIF file
-        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
-        if: inputs.collect-sarif-report && github.event_name != 'merge_group' && (success() || failure())
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        if: >-
+          inputs.collect-sarif-report
+          && github.event_name == 'pull_request'
+          && (success() || failure())
         with:
-          sarif_file: ${{ inputs.output-dir }}/reports/ash.ghas.sarif
+          sarif_file: ${{ needs.ash.outputs.output-dir }}/reports/ash.ghas.sarif
           wait-for-processing: true
           category: ash
+
+      - name: Note that the SARIF report was not uploaded
+        if: >-
+          inputs.collect-sarif-report
+          && github.event_name != 'pull_request'
+          && (success() || failure())
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        # No value in either message: this job has no one_line helper (the scan
+        # job's RUNNER_TEMP is not this job's), so a load of it here would fail the
+        # step, and neither the artifact's name nor the event's needs printing.
+        run: |
+          if [ "${EVENT_NAME}" = "merge_group" ]; then
+            echo "::notice::The SARIF report was not uploaded to code scanning on this merge_group event: the run is on the merge queue's temporary branch, which GitHub deletes when the entry leaves the queue, and code scanning takes an upload without security-events: write only from a pull_request run. The pull request's own run uploads the report. It is also in the uploaded ASH output artifact at reports/ash.ghas.sarif."
+          else
+            echo "::notice::The SARIF report was not uploaded to code scanning on this event: this workflow cannot hold security-events: write, which code scanning needs for an upload except from a pull_request run. To upload it, call upload-ash-sarif.yml in a job that grants security-events: write. The report is in the uploaded ASH output artifact at reports/ash.ghas.sarif."
+          fi

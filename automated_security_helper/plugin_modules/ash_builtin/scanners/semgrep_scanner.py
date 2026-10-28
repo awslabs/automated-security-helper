@@ -11,7 +11,7 @@ lives in :mod:`_grep_scanner_base`. This module only customises:
 import logging
 import os
 import platform
-from typing import Annotated, List, Literal, ClassVar
+from typing import Annotated, List, Literal, ClassVar, Optional
 
 from pydantic import Field
 
@@ -27,7 +27,14 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner
     GrepScannerBase,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
+from automated_security_helper.utils.process_env import hold_environ, release_environ
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
+
+#: semgrep's own switch for its version check: the variable its
+#: ``semgrep --enable-version-check`` / ``semgrep --disable-version-check`` option
+#: reads. "0" is off.
+_VERSION_CHECK_ENV = "SEMGREP_ENABLE_VERSION_CHECK"
+_VERSION_CHECK_OFF = "0"
 
 
 class SemgrepScannerConfigOptions(ScannerOptionsBase):
@@ -102,6 +109,10 @@ class SemgrepScannerConfig(ScannerPluginConfigBase):
 class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
     """SemgrepScanner implements code scanning using Semgrep."""
 
+    #: semgrep is a Python package ASH runs through uv. See
+    #: ScannerPluginBase.python_only.
+    python_only: ClassVar[bool | None] = True
+
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         network=True,
         cache_paths=("~/.semgrep",),
@@ -112,6 +123,8 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         # semgrep-core loads root certificates through OCaml's ca-certs, which on
         # macOS runs /usr/bin/security against the system keychains.
         system_trust_roots=True,
+        # The offline rule cache ASH checked before the scan and passes as --config.
+        read_path_env=("SEMGREP_RULES_CACHE_DIR",),
     )
 
     def model_post_init(self, context):
@@ -123,7 +136,10 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         self.tool_type = ScannerToolType.SAST
 
         self._setup_uv_tool_install_commands()
-        self.tool_version = self._get_uv_tool_version("semgrep")
+        # The version probe is recorded here and run once, by the dependency
+        # check, the SARIF step or the inventory (resolve_deferred_tool_version):
+        # construction must start nothing, whoever constructs the scanner.
+        self._deferred_tool_version_probe = ("semgrep", self._uv_from_spec())
         self.args = ToolArgs(
             format_arg=None,
             format_arg_value=None,
@@ -147,10 +163,36 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         return ["p/ci"]
 
     def extra_subprocess_env(self) -> dict | None:
-        """Propagate `SEMGREP_RULES` from the cache dir for offline runs."""
+        """The version check off, and `SEMGREP_RULES` from the cache dir offline.
+
+        semgrep ends `scan` with a version check that opens
+        ``~/.cache/semgrep_version``. Where that file is not readable (a sandbox
+        that grants no path in the home) the open raises, semgrep exits 2 after it
+        has printed its findings, and the scan counts as failed. The check only
+        shows upgrade banners, so it is off for every run, online as well.
+        """
+        env = {_VERSION_CHECK_ENV: _VERSION_CHECK_OFF}
         if self._scanner_offline() and "SEMGREP_RULES_CACHE_DIR" in os.environ:
-            return {"SEMGREP_RULES": f"{os.environ['SEMGREP_RULES_CACHE_DIR']}/*"}
-        return None
+            env["SEMGREP_RULES"] = f"{os.environ['SEMGREP_RULES_CACHE_DIR']}/*"
+        return env
+
+    def _get_uv_tool_version(
+        self, tool_name: str, package_name: Optional[str] = None
+    ) -> Optional[str]:
+        """The version probe, run with semgrep's version check off.
+
+        ``semgrep --version`` prints the version and then runs the same version
+        check as a scan, so under a sandbox that cannot read the check's cache file
+        it exits 2 and the version stays unknown. The probe is started through uv,
+        which takes no argument for this, so the variable is held in ASH's
+        environment for the length of the probe; the hold is counted, so scanners
+        probing at once keep it until the last one is done.
+        """
+        hold_environ(_VERSION_CHECK_ENV, _VERSION_CHECK_OFF)
+        try:
+            return super()._get_uv_tool_version(tool_name, package_name)
+        finally:
+            release_environ(_VERSION_CHECK_ENV)
 
     # ---------------------------------------------------------------
     # Semgrep-specific UV-tool dependency resolution

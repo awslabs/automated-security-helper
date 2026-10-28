@@ -1,20 +1,13 @@
 """Module containing the CDK Nag security scanner implementation."""
 
-import json
 import logging
 import re
-from importlib.metadata import (
-    PackageNotFoundError,
-    distributions,
-    packages_distributions,
-    requires,
-)
 from typing import Annotated, Any, ClassVar, List, Literal, Optional
 from pathlib import Path
-from urllib.parse import urlsplit
-from urllib.request import url2pathname
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
+
+from automated_security_helper.utils.redacted_model import RedactedSection
 from yaml import YAMLError
 
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -44,11 +37,19 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
+from automated_security_helper.utils.ash_install import extra_requirements_from_metadata
 from automated_security_helper.utils.cdk_nag_worker import cdk_nag_worker_batch
-from automated_security_helper.utils.get_ash_version import get_ash_version
-from automated_security_helper.utils.get_scan_set import scan_set
+from automated_security_helper.utils.error_text import error_text, text_without_values
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
-from automated_security_helper.utils.cfn_template_model import describe_parse_error
+from automated_security_helper.utils.cfn_template_model import (
+    cloudformation_candidate_files,
+    NO_CLOUDFORMATION_TEMPLATE,
+    NO_PARSEABLE_CLOUDFORMATION_TEMPLATE,
+    cloudformation_nothing_to_scan_reason,
+    describe_parse_error,
+    holds_cloudformation_template,
+    unevaluable_template_reason,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
@@ -550,215 +551,18 @@ def _reporting_descriptor_for(
     )
 
 
-# Matches the ``extra == "cdk"`` half of a PEP 508 marker. importlib.metadata
-# renders the marker with single quotes while pyproject.toml and pip emit double
-# quotes, so neither style can be assumed.
-_CDK_EXTRA_MARKER = re.compile(r"""\bextra\s*==\s*['"]cdk['"]""")
-
-
-def _local_path_from_file_url(url: object) -> Optional[Path]:
-    """The path on this host that a PEP 610 ``file://`` URL names, or None.
-
-    Slicing the scheme off the front and handing the remainder to ``Path`` is
-    what this used to do inline, and it is wrong twice over. Both mistakes are
-    invisible on Linux, where the leftover text happens to be exactly the path:
-
-    * ``file:///D:/proj`` leaves ``/D:/proj``, which on Windows is *rooted with
-      no drive* -- ``PureWindowsPath("/D:/proj").drive`` is ``""`` -- so it
-      resolves against whichever drive is current and can never equal the real
-      ``D:\\proj``. Every comparison against it missed, which is what took out
-      all four Windows cells: on 3.12 and 3.13 only the two tests that force the
-      declared mapping empty, and on 3.10 and 3.11 the drift guards too, because
-      there this route is the only one that resolves at all.
-    * A directory whose name needs percent-encoding stays encoded, because
-      nothing unquoted it. That one misses on every platform; CI simply never
-      checks out into such a directory.
-
-    ``url2pathname`` is the standard library's inverse of the conversion pip and
-    uv perform when they write the file, and it is platform specific on purpose:
-    on Windows it turns ``/D:/proj`` into ``D:\\proj``, and on POSIX it unquotes
-    and does nothing else. A Windows-shaped URL read on POSIX therefore yields a
-    path that matches nothing, which is the right answer -- ``direct_url.json``
-    is written by the installer that ran on this host, so its URL always names a
-    path here.
-
-    Deliberately not ``workspace.aggregation._strip_file_scheme``, which is
-    textual for a reason of its own: it normalizes scanner-emitted SARIF URIs
-    that are frequently not valid URIs at all, and has to reduce ``file:///C:/x``
-    the same way on every host. This URL is machine-written and well formed, and
-    what is wanted from it is a path on *this* host, so the two cannot share an
-    implementation.
-    """
-    if not isinstance(url, str):
-        return None
-    try:
-        parts = urlsplit(url)
-    except ValueError:
-        # An unterminated IPv6 authority, e.g. "file://[::1/proj". One malformed
-        # sibling distribution must not take out the walk over all of them.
-        return None
-    if parts.scheme != "file":
-        return None
-    # Keep a host authority in the string handed to url2pathname: on Windows that
-    # is what turns "file://server/share/x" into the UNC path \\server\share\x,
-    # and dropping it would silently reinterpret a share as a local directory.
-    # "localhost" is RFC 8089's spelling of "this host" and names no path itself.
-    host = "" if parts.netloc.lower() == "localhost" else parts.netloc
-    try:
-        return Path(url2pathname(f"//{host}{parts.path}" if host else parts.path))
-    except (OSError, ValueError):
-        # nturl2path raises OSError for a drive specifier it cannot parse.
-        return None
-
-
-def _distributions_declaring_this_module(root_package: str) -> List[str]:
-    """Names of installed distributions that ship ``root_package``.
-
-    Two strategies, in order, because the first one silently fails for the
-    install mode this project's own CI uses.
-
-    ``packages_distributions()`` maps a top-level import name to distributions
-    using only what the ``*.dist-info`` declares about its contents, and for an
-    editable install there is nothing usable there. Hatchling writes no
-    ``top_level.txt``, and an editable RECORD lists the import shim rather than
-    the project's own files -- no ``.py`` under the package at all. So:
-
-    * 3.10 reads ``top_level.txt`` and nothing else. Absent, so no mapping, in
-      either install mode.
-    * 3.11 also infers from RECORD but filters on ``suffix == ".py"``, and an
-      editable RECORD has none, so the inferred set is empty. A non-editable
-      install works.
-    * 3.12 dropped that suffix filter, so non-Python files that happen to sit
-      under the package directory yield the name.
-
-    Measured at 804036ba on one editable install: 3.10.20 and 3.11.15 got
-    ``None``, 3.12.13 and 3.13.12 got ``['automated-security-helper']``. That is
-    why ``_cdk_extra_requirements`` had been returning the pinned fallback as its
-    NORMAL path on half the support matrix, and why the guard comparing the two
-    was comparing the fallback against itself and could not fail.
-
-    The second strategy does not ask what a distribution declares it contains. It
-    asks which distribution was installed FROM the directory this module lives
-    in, via the PEP 610 ``direct_url.json`` that pip and uv write for any install
-    from a local path. That file records the project directory as a ``file://``
-    URL -- see ``_local_path_from_file_url`` for why reading one back is not a
-    string slice -- and depends on neither RECORD nor ``top_level.txt``, so it
-    resolves on every version.
-
-    Still never names a distribution literally. A literal name is one someone
-    else can own on a package index, and installing by such a name is the defect
-    this whole path exists to remove -- so the fallback strategy is keyed on a
-    filesystem path this module can see from the inside, not on a string.
-    """
-    try:
-        mapped = packages_distributions().get(root_package) or []
-    except (PackageNotFoundError, OSError) as exc:
-        ASH_LOGGER.debug(
-            f"Could not enumerate the distributions providing {root_package!r} "
-            f"({exc}); trying the install-location strategy instead."
-        )
-        mapped = []
-    if mapped:
-        return list(mapped)
-
-    try:
-        here = Path(__file__).resolve()
-    except OSError:  # pragma: no cover - resolve() on an unreadable cwd
-        return []
-
-    located: List[str] = []
-    try:
-        candidates = list(distributions())
-    except OSError as exc:
-        ASH_LOGGER.debug(
-            f"Could not enumerate installed distributions ({exc}); falling back "
-            f"to the pinned requirement list."
-        )
-        return []
-
-    for dist in candidates:
-        # Every read here is defensive on purpose: this loop walks EVERY
-        # installed distribution, so one malformed sibling must not take out the
-        # command. read_text returns None for an absent file rather than raising.
-        try:
-            raw = dist.read_text("direct_url.json")
-            name = dist.metadata["Name"]
-        except (OSError, KeyError, ValueError):
-            continue
-        if not raw or not name:
-            continue
-        try:
-            url = json.loads(raw).get("url", "")
-        except (ValueError, AttributeError):
-            continue
-        project_dir = _local_path_from_file_url(url)
-        if project_dir is None:
-            continue
-        # Compare resolved paths rather than strings: the URL is absolute but may
-        # differ from this module's path by a symlink or a trailing separator.
-        try:
-            project_dir = project_dir.resolve()
-        except (OSError, ValueError):
-            continue
-        if project_dir == here or project_dir in here.parents:
-            if name not in located:
-                located.append(name)
-
-    if not located:
-        ASH_LOGGER.debug(
-            f"No installed distribution declares or contains {root_package!r}; "
-            f"falling back to the pinned requirement list."
-        )
-    return located
-
-
 def _cdk_extra_requirements_from_metadata() -> Optional[List[str]]:
     """The ``cdk`` extra exactly as the installed metadata declares it, or None.
 
     ``None`` means the metadata could not be read at all. It does NOT mean the
     extra is empty, and the distinction is the whole reason this is a separate
-    function from ``_cdk_extra_requirements`` below.
-
-    Collapsing the two is what hid a real defect. ``_cdk_extra_requirements``
-    returns the pinned fallback when the read fails, so a caller cannot tell
-    "metadata declares this" from "metadata was unreadable, here is the copy".
-    ``test_fallback_matches_installed_metadata`` compared the copy against that
-    return value, so on any interpreter taking the fallback it compared the copy
-    against itself -- a guard that passed for every possible value of the
-    constant, on py3.10 and py3.11, with no skip and no warning. Tests assert
-    against this function so that an unreadable read is visible as ``None``
-    instead of impersonating a successful one.
+    function from ``_cdk_extra_requirements`` below: that one substitutes the
+    pinned fallback, so a caller cannot tell "metadata declares this" from
+    "metadata was unreadable, here is the copy". The read itself is
+    ``ash_install.extra_requirements_from_metadata``, shared with the symbols
+    extra's install hint.
     """
-    root_package = __name__.split(".", 1)[0]
-    accumulated: List[str] = []
-
-    for dist_name in _distributions_declaring_this_module(root_package):
-        try:
-            declared = requires(dist_name)
-        except (PackageNotFoundError, OSError, ValueError) as exc:
-            ASH_LOGGER.debug(
-                f"Could not read requirements from distribution {dist_name!r} "
-                f"providing {root_package!r} ({exc}); skipping it."
-            )
-            continue
-        if declared is None:
-            continue
-        for requirement in declared:
-            if not _CDK_EXTRA_MARKER.search(requirement):
-                continue
-            # Keep the requirement, drop the marker. pip evaluates markers with
-            # ``extra`` undefined, so ``extra == "cdk"`` is false and pip skips
-            # the requirement while still exiting 0 -- an install that reports
-            # success and installs nothing.
-            bare = requirement.split(";", 1)[0].strip()
-            # Deduplicated in place rather than through a set, so the order
-            # pyproject.toml declares is what pip receives. A set would make the
-            # generated command vary run to run, which is noise in any log that
-            # records it.
-            if bare and bare not in accumulated:
-                accumulated.append(bare)
-
-    return accumulated or None
+    return extra_requirements_from_metadata("cdk")
 
 
 def _cdk_extra_requirements() -> List[str]:
@@ -828,7 +632,7 @@ def _cdk_extra_requirements() -> List[str]:
     return list(_CDK_EXTRA_FALLBACK_REQUIREMENTS)
 
 
-class CdkNagPacks(BaseModel):
+class CdkNagPacks(RedactedSection):
     model_config = ConfigDict(extra="allow")
 
     AwsSolutionsChecks: Annotated[
@@ -884,6 +688,10 @@ class CdkNagScannerConfig(ScannerPluginConfigBase):
 class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
     """CDK Nag security scanner, custom CDK-CLI-less implementation."""
 
+    #: cdk-nag evaluates templates through the CDK, which starts Node.js (jsii). See
+    #: ScannerPluginBase.python_only.
+    python_only: ClassVar[bool | None] = False
+
     # The evaluation runs in a child (utils/cdk_nag_worker.py), and jsii starts `node`
     # from it; both reach the network for nothing. JSII_ variables tune that runtime.
     # NODE_OPTIONS is deliberately not passed: a --require preload pointing into the
@@ -897,6 +705,18 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    #: Programs cdk-nag needs that ASH does not install. ``command`` is "python",
+    #: but cdk-nag runs inside ASH's own process, so ``ash dependencies install``
+    #: reads this to tell whether cdk-nag can run after it has installed the
+    #: Python packages.
+    external_executables: ClassVar[tuple[str, ...]] = ("node",)
+
+    #: The "python" of ``command`` is the interpreter running ASH, not a program
+    #: of that name: an install with only ``python3`` (python.org macOS builds,
+    #: Homebrew, Debian without python-is-python3) has none on PATH. The installer
+    #: counts ``sys.executable`` as cdk-nag's tool instead of looking the name up.
+    runs_in_ash_interpreter: ClassVar[bool] = True
 
     def model_post_init(self, context):
         if self.config is None:
@@ -926,32 +746,93 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             # "automated-security-helper[cdk]". That name belongs to an
             # unrelated project on PyPI, so the old hint sent users to install a
             # stranger's package to fix an ASH problem.
+            #
+            # `--tool cdk-nag` so the hint installs only what is missing here, and
+            # the command installs with pip or uv, whichever owns ASH's
+            # environment, so it works in a uv tool, uvx or `uv venv` install too.
             absent = ", ".join(_CDK_MISSING_DISTRIBUTIONS) or ", ".join(
                 _CDK_REQUIRED_DISTRIBUTIONS
             )
-            ASH_LOGGER.warning(
+            reason = (
                 f"CDK dependencies are not usable ({absent} unavailable). "
-                "Install them with: ash dependencies install"
+                "Install them with: ash dependencies install --tool cdk-nag"
             )
+            ASH_LOGGER.warning(reason)
+            self.dependency_unavailable_reason = reason
             self.dependencies_satisfied = False
             return False
-        found = find_executable("node")
-        return found is not None
+        # Availability only. The node jsii starts is looked up again in the worker,
+        # outside the scanned tree; see cdk_nag_wrapper.run_cdk_nag_against_cfn_template.
+        missing = [
+            name for name in self.external_executables if not find_executable(name)
+        ]
+        if missing:
+            # Recorded, not only returned: a bare False left the scanner MISSING
+            # with no reason anywhere in the results.
+            reason = (
+                "Node.js not found on PATH: cdk-nag runs the CDK libraries with "
+                "Node.js (`node`), which ASH does not install. Install Node.js and "
+                "put `node` on PATH."
+            )
+            ASH_LOGGER.warning(reason)
+            self.dependency_unavailable_reason = reason
+            self.dependencies_satisfied = False
+            return False
+        return True
+
+    #: For a target scan() found no template in; see the base class.
+    nothing_scanned_reason: ClassVar[str | None] = NO_CLOUDFORMATION_TEMPLATE
+
+    def nothing_to_scan_reason(self) -> str | None:
+        """None when either tree holds a CloudFormation template; see the base class."""
+        return cloudformation_nothing_to_scan_reason(self.context)
+
+    def missing_dependency_reason(self) -> str:
+        """Name what cdk-nag lacks: the CDK packages, or node.
+
+        The base class would look for this scanner's command, which is ASH's own
+        ``python`` and is always there, so it could only say the check failed. A
+        reason the dependency check recorded in ``dependency_unavailable_reason``
+        comes first, as in the base class: it is what the check found, and the two
+        below are what this method can see from outside it.
+        """
+        if (
+            isinstance(self.dependency_unavailable_reason, str)
+            and self.dependency_unavailable_reason
+        ):
+            return self.dependency_unavailable_reason
+        if not _CDK_AVAILABLE:
+            absent = ", ".join(_CDK_MISSING_DISTRIBUTIONS) or ", ".join(
+                _CDK_REQUIRED_DISTRIBUTIONS
+            )
+            return (
+                f"the CDK packages it needs are not usable ({absent} unavailable); "
+                "install them with `ash dependencies install`"
+            )
+        if find_executable("node") is None:
+            return (
+                "node was not found on PATH; cdk-nag evaluates templates through "
+                "the CDK's JavaScript runtime, so install Node.js or exclude cdk-nag "
+                "with --exclude-scanners"
+            )
+        return super().missing_dependency_reason()
 
     def get_installation_commands(self, platform: str, arch: str) -> List[List[str]]:
         """Install the third-party packages behind ASH's ``cdk`` extra.
 
-        Names aws-cdk-lib, cdk-nag and constructs directly. This method used to
-        install ``automated-security-helper[cdk]`` instead, which made
-        ``ash dependencies install`` resolve a distribution by that name from
-        whatever index pip is pointed at. ASH is not published to any index --
-        it installs from git, as the README documents -- so that name resolves to
-        an unrelated third party's package, and it was being installed by a
-        security scanner running inside CI with repository access. Naming the
-        extra's real contents means this command cannot resolve ASH by name at
-        all, whoever ends up owning that name.
+        Names aws-cdk-lib, cdk-nag and constructs directly rather than asking an
+        index for ASH's own distribution with the extra. ASH is not published to
+        any index -- it installs from git, as the README documents -- and on
+        PyPI its distribution name belongs to an unrelated project, so naming
+        the extra's packages is what makes this command install what the extra
+        declares.
         """
-        import sys
+        # This method used to install "automated-security-helper[cdk]", which
+        # `ash dependencies install` resolved from the configured index, where
+        # that name belongs to an unrelated project.
+        from automated_security_helper.utils.python_installer import (
+            python_package_install_command,
+        )
 
         commands = super().get_installation_commands(platform, arch)
         if not _CDK_AVAILABLE:
@@ -963,19 +844,42 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             # with no arguments and exits non-zero, which is the loud failure this
             # command needs rather than a green run that installed nothing.
             #
-            # One pip invocation, so the three are resolved together. Three
-            # separate installs let a later one downgrade an earlier one's shared
-            # transitive dependency.
-            commands.append(
-                [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "install",
-                    *_cdk_extra_requirements(),
-                ]
-            )
+            # One invocation, so the three are resolved together. Three separate
+            # installs let a later one downgrade an earlier one's shared transitive
+            # dependency.
+            #
+            # pip or uv, whichever owns the environment running ASH: a uv tool,
+            # uvx or `uv venv` environment has no pip, and `python -m pip` failed
+            # there with "No module named pip".
+            commands.append(python_package_install_command(_cdk_extra_requirements()))
         return commands
+
+    def _uncount_a_file_that_holds_no_template(
+        self, candidate: str, scan_root: Path | str
+    ) -> bool:
+        """Take back the attempt counted for ``candidate`` when it is no template.
+
+        Every JSON and YAML file of the scan set is counted as attempted before
+        anything says whether it is a template. Once the worker has answered for a
+        file, the wrapper's answer un-counts one that is not. When the worker cannot
+        answer (cdk-nag does not import, node is refused, the child exits or times
+        out) nothing has said so, and counting the failure would charge a
+        package.json as a template that was not evaluated.
+
+        The question is the one the tool-absent check asks of the same files, and
+        it errs the same way: an unreadable file, a damaged template and a document
+        the model cannot represent all count as templates, so they still fail.
+
+        Returns True when the attempt was taken back; the caller then skips the file.
+        """
+        if holds_cloudformation_template([candidate], scan_root):
+            return False
+        self.targets_attempted -= 1
+        ASH_LOGGER.debug(
+            f"cdk-nag did not evaluate {candidate}, which is not a CloudFormation "
+            "file, so it is not counted as a failed target"
+        )
+        return True
 
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
         """Abstract stub — CdkNag overrides scan() directly; this is unreachable."""
@@ -1001,9 +905,6 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         Raises:
             ScannerError: If scanning fails
         """
-        if global_ignore_paths is None:
-            global_ignore_paths = []
-
         # Per-call state, reset before anything else in the method can return.
         #
         # ``errors`` is reset here for the same reason and by the same argument as the two
@@ -1052,15 +953,28 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # third-party ones -- implements. Threading the container through it is a breaking API
         # change, and stashing it on ``self`` instead would be the same shared mutable state
         # wearing a different name.
+        #
+        # ``exit_code`` is per-call state by the same argument; see
+        # ScannerPluginBase.scan().
         self.targets_attempted = 0
         self.targets_failed = 0
         self.errors = []
+        self.exit_code = 0
+        self._nothing_scanned_reason = None
 
+        # The results' "cdk-nag" component carries cdk-nag's version, not ASH's:
+        # ScanResultProcessor names this driver after the scanner and keeps the
+        # version it declares. Absent when cdk_nag's own version is not known.
+        cdk_nag_version = (
+            self.tool_version
+            if self.tool_version and self.tool_version != "unavailable"
+            else None
+        )
         tool_component = ToolComponent(
             name="ash-cdk-nag-wrapper",
             fullName="awslabs/automated-security-helper",
             organization="Amazon Web Services",
-            version=get_ash_version(),
+            version=cdk_nag_version,
             informationUri=ASH_DOCS_URL,
             downloadUri=ASH_REPO_URL,
         )
@@ -1106,36 +1020,15 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         if not self.dependencies_satisfied:
             return False
 
-        # Find all files to scan from the scan set
-        #
-        # sorted(), because this list decides the order findings are flattened in and therefore
-        # the order of rules[] in the emitted SARIF. Path.glob walks os.scandir, whose order is
-        # filesystem-determined rather than sorted, so two runs over an identical tree could
-        # emit the same rule descriptors in a different order and give ash-cdk-nag.sarif a
-        # non-empty diff. The non-converted branch below already ends in
-        # ``sorted(set(included))`` inside get_scan_set, so only this branch was unordered.
-        orig_scannable = (
-            sorted(self.context.work_dir.glob("**/*.*"))
-            if target_type == "converted"
-            else scan_set(
-                source=self.context.source_dir,
-                output=self.context.output_dir,
-                # filter_pattern=r"\.(yaml|yml|json)$",
-            )
+        # Find all files to scan from the scan set: every JSON and YAML file, sorted,
+        # because this list decides the order findings are flattened in and therefore the
+        # order of rules[] in the emitted SARIF. Shared with cfn-nag and with
+        # nothing_to_scan_reason, which answers from this same selection. The
+        # selection drops the files the global ignore paths ignore and honors the
+        # repository's ignore files as the scan set does.
+        scannable = cloudformation_candidate_files(
+            self.context, target_type, global_ignore_paths
         )
-        ASH_LOGGER.debug(
-            f"Found {len(orig_scannable)} files in scan set. Checking for possible CloudFormation templates"
-        )
-
-        scannable = []
-        for f in orig_scannable:
-            pf = Path(f)
-            if (
-                pf.name.endswith(".json")
-                or pf.name.endswith(".yaml")
-                or pf.name.endswith(".yml")
-            ):
-                scannable.append(pf.as_posix())
 
         # The counters are already at 0 here, set at the top of the method. Deliberately not
         # re-initialized at this point: the empty-scan-set return just below is one of four
@@ -1182,7 +1075,10 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # scan_timeout bounds the child, as it bounds every other scanner's tool; a
         # child killed at it fails the templates it had not answered.
         with cdk_nag_worker_batch(
-            scannable, work_root=outdir, timeout=self._effective_scan_timeout()
+            scannable,
+            work_root=outdir,
+            timeout=self._effective_scan_timeout(),
+            values=self._environment_values(),
         ):
             for cfn_file in scannable:
                 # Refused before it is counted or read: a symlink, or a file outside the
@@ -1264,11 +1160,41 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                         # zero-iteration findings loop, raise nothing, and report the template as
                         # clean. With one template that also defeated the "failed on all N" guard,
                         # since no failure was ever recorded for it to count.
+                        #
+                        # Also named as an unevaluated target, here and at the
+                        # two failure sites below. Before ``determine_status``
+                        # went fail-closed, ``targets_failed`` reached a status
+                        # only when every template failed, so one failed
+                        # template beside a clean one graded PASSED, and the
+                        # named target was the only thing refusing that
+                        # verdict. Any failed target now moves the run's grade
+                        # (ERROR, or FAILED when the evaluated templates'
+                        # findings fail the severity gate); the name is still
+                        # what says WHICH template was never evaluated.
+                        #
+                        # A failure of the worker itself, such as cdk-nag not
+                        # importing, is the same response for every file it was asked
+                        # about, a package.json included, because it is returned
+                        # before the file is read. Only a file that holds a template
+                        # is a template that was never evaluated.
+                        if self._uncount_a_file_that_holds_no_template(
+                            cfn_file, scan_root
+                        ):
+                            continue
                         self.targets_failed += 1
-                        ASH_LOGGER.error(
-                            f"cdk-nag did not evaluate {cfn_file}: {nag_result_dict.failure}"
+                        self.record_unevaluated_target(cfn_file)
+                        # Redacted with the config's environment values: the
+                        # wrapper's failure is the worker's own reason text,
+                        # which can name a configured value (its timeout reason
+                        # names scan_timeout), and both records are kept - the
+                        # errors reach the SARIF exitCodeDescription.
+                        failure = text_without_values(
+                            str(nag_result_dict.failure), self._environment_values()
                         )
-                        self.errors.append(f"{cfn_file}: {nag_result_dict.failure}")
+                        ASH_LOGGER.error(
+                            f"cdk-nag did not evaluate {cfn_file}: {failure}"
+                        )
+                        self.errors.append(f"{cfn_file}: {failure}")
                         continue
 
                     for pack, findings in nag_result_dict.results.items():
@@ -1287,23 +1213,46 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                         append_to_stream="stderr",
                     )
                 except (YAMLError, UnicodeDecodeError) as e:
-                    # NOT a failed target, and NOT silent either. Both halves are the point.
+                    # One exception first. A file whose structure is a template (a
+                    # top-level Resources mapping) that ASH could not evaluate -- the
+                    # parser read its syntax and could not build a value, or it is
+                    # nested deeper than ASH reads -- counts as an
+                    # unevaluated target, like a failure the wrapper reports. It is
+                    # decided, and its reason worded, from the file here: from the
+                    # worker only the exception's name and text cross back, so the
+                    # line of the value would be lost.
+                    reason = unevaluable_template_reason(cfn_file, scan_root)
+                    if reason is not None:
+                        self.targets_failed += 1
+                        self.record_unevaluated_target(cfn_file)
+                        ASH_LOGGER.error(
+                            f"cdk-nag did not evaluate {cfn_file}: {reason}"
+                        )
+                        self.errors.append(f"{cfn_file}: {reason}")
+                        continue
+                    # Every other parse failure: NOT a failed target, and NOT silent
+                    # either. Both halves are the point.
                     #
                     # WHY IT IS NOT A FAILED TARGET
                     # -----------------------------
-                    # A file no YAML or JSON parser can load cannot carry a ``Resources``
-                    # mapping, and carrying one is the single question that separates "not
+                    # A file whose syntax no YAML or JSON parser accepts yields no
+                    # document, so nothing in it can be read as a ``Resources`` mapping,
+                    # and carrying one is the question that separates "not
                     # CloudFormation" from "CloudFormation this model cannot represent" --
-                    # see ``CloudFormationTemplateModelError``. So a parse failure answers
-                    # "this was never a candidate template", which is the skip below, not a
-                    # coverage hole. ``cfn_nag_scanner`` already classifies it exactly this
+                    # see ``CloudFormationTemplateModelError``. A file that parsed but
+                    # whose value could not be built is the exception handled above. So
+                    # such a parse failure answers "ASH cannot tell this is a template",
+                    # which is the skip below, not a coverage hole; the skip reason says
+                    # when it could be a damaged one. ``cfn_nag_scanner`` classifies it this
                     # way over the same scan set through the same
                     # ``get_model_from_template``, and that function's docstring records the
-                    # contract both callers are meant to honor: "Exceptions from
-                    # ``load_yaml`` propagate unchanged ... and the two callers already
-                    # classify that case for themselves." cdk-nag was the caller that did
-                    # not -- the parse error fell through to the broad handler below and
-                    # incremented ``targets_failed``.
+                    # contract both callers are meant to honor: a file that is not
+                    # parseable raises a ``YAMLError``, "and the two callers classify that
+                    # case for themselves." This handler is cdk-nag's: without it the
+                    # parse error would fall through to the broad handler below and
+                    # increment ``targets_failed``. A ``TypeError`` or ``ValueError`` from
+                    # the loader (a Helm template's ``{{ include ... }}``) arrives here
+                    # too, as ``TemplateDocumentError``, and does not reach that handler.
                     #
                     # It matters well beyond two files. This scanner's scan set is every
                     # ``*.json``, ``*.yaml`` and ``*.yml`` file in the tree, most of which
@@ -1354,15 +1303,35 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                         level=logging.INFO,
                         append_to_stream="stderr",
                     )
+                    # A SKIPPED target says a template could not be parsed only when
+                    # this file could be one: the tool-absent check counts it, so the
+                    # same tree without the tool is MISSING. A mkdocs.yml or a Helm
+                    # template it does not count leaves "no CloudFormation template".
+                    if holds_cloudformation_template([cfn_file], scan_root):
+                        self._nothing_scanned_reason = (
+                            NO_PARSEABLE_CLOUDFORMATION_TEMPLATE
+                        )
                 except Exception as e:
+                    # A worker that cannot start raises the same error for every file it
+                    # was asked about (node refused, the child exited or timed out), a
+                    # file that is not a template included. As for a failure response
+                    # above, only a file that holds a template is a template that was
+                    # never evaluated.
+                    if self._uncount_a_file_that_holds_no_template(cfn_file, scan_root):
+                        continue
                     # error, not trace. trace sits below debug, so this was invisible even with
                     # --debug: a scanner failing on every template produced no operator-visible
                     # signal anywhere.
                     self.targets_failed += 1
+                    self.record_unevaluated_target(cfn_file)
+                    # error_text with the config's environment values: the
+                    # exception can name a configured value, and this text goes
+                    # to ash.log and the SARIF exitCodeDescription.
+                    described = error_text(e, self._environment_values())
                     ASH_LOGGER.error(
-                        f"cdk-nag failed to scan {cfn_file}: {type(e).__name__}: {e}"
+                        f"cdk-nag failed to scan {cfn_file}: {type(e).__name__}: {described}"
                     )
-                    self.errors.append(f"{cfn_file}: {type(e).__name__}: {e}")
+                    self.errors.append(f"{cfn_file}: {type(e).__name__}: {described}")
 
         # Every template failed. Say so loudly here as well as through the returned status:
         # this is the one line that distinguishes "your templates are compliant" from "cdk-nag
@@ -1373,14 +1342,23 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # look at, so a scan with an empty template set is a successful run that produced no
         # results. The "nothing was evaluated" signal is carried by the container's SKIPPED
         # status instead, which is what the summary table shows a human.
-        scan_succeeded = (
-            self.targets_attempted <= 0 or self.targets_failed < self.targets_attempted
-        )
+        # Fail-closed over the attempted templates, the rule
+        # ScanResultsContainer.scan_succeeded states: one template that was
+        # never evaluated carries no verdict, so a clean sibling does not make
+        # the run a success.
+        scan_succeeded = self.targets_attempted <= 0 or self.targets_failed == 0
         if not scan_succeeded:
-            ASH_LOGGER.error(
-                f"cdk-nag failed on all {self.targets_attempted} template(s) in {target}. "
-                "No rules were evaluated, so this result is NOT a clean scan."
-            )
+            if self.targets_failed >= self.targets_attempted:
+                ASH_LOGGER.error(
+                    f"cdk-nag failed on all {self.targets_attempted} template(s) in {target}. "
+                    "No rules were evaluated, so this result is NOT a clean scan."
+                )
+            else:
+                ASH_LOGGER.error(
+                    f"cdk-nag failed on {self.targets_failed} of "
+                    f"{self.targets_attempted} template(s) in {target}. No rules were "
+                    "evaluated for the failed templates, so this result is NOT a clean scan."
+                )
 
         self._post_scan(
             target=target,
@@ -1420,7 +1398,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 name="ash-cdk-nag-wrapper",
                 fullName="awslabs/automated-security-helper",
                 organization="Amazon Web Services",
-                version=get_ash_version(),
+                version=cdk_nag_version,
                 informationUri=ASH_DOCS_URL,
                 downloadUri=ASH_REPO_URL,
                 rules=rules,
@@ -1494,10 +1472,18 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 
 
 if __name__ == "__main__":
+    # As npm_audit's block does: a scanner needs a context, and run as a script its
+    # class resolves its "AshConfig" reference only once that name is bound here.
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.config.ash_config import AshConfig
+
+    AshConfig.model_rebuild()
     ASH_LOGGER.debug("Running cdk-nag via __main__")
     scanner = CdkNagScanner(
-        source_dir=Path.cwd(),
-        output_dir=Path.cwd().joinpath(".ash", "ash_output"),
+        context=PluginContext(
+            source_dir=Path.cwd(),
+            output_dir=Path.cwd().joinpath(".ash", "ash_output"),
+        ),
         config=CdkNagScannerConfig(
             options=CdkNagScannerConfigOptions(
                 nag_packs=CdkNagPacks(
@@ -1510,12 +1496,21 @@ if __name__ == "__main__":
             )
         ),
     )
-    report = scanner.scan(target=scanner.source_dir)
+    report = scanner.scan(target=scanner.context.source_dir, target_type="source")
 
-    print(
-        report.model_dump_json(
-            indent=2,
-            by_alias=True,
-            exclude_unset=True,
+    from automated_security_helper.utils.command_safe_stream import (
+        json_commands_broken,
+    )
+    from automated_security_helper.utils.console import echo_raw
+
+    # The SARIF repeats the tree's file names: no "##name[" of theirs is a CI
+    # command where this prints, and the JSON is still the same document.
+    echo_raw(
+        json_commands_broken(
+            report.model_dump_json(
+                indent=2,
+                by_alias=True,
+                exclude_unset=True,
+            )
         )
     )

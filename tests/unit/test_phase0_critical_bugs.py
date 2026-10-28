@@ -40,7 +40,21 @@ from automated_security_helper.schemas.sarif_schema_model import (
 
 
 def test_phase0_bug1_flat_vulnerability_id_is_stable_hash_not_pythonhash():
-    """The same saved occurrence retains its versioned deterministic identity."""
+    """Bug 1: FlatVulnerability ids must be derived from a stable hash.
+
+    ``from_sarif_result`` once built the id with
+    ``f"{scanner}-{ruleId}-{hash(description) % 10000}"``. Python's ``hash()``
+    is randomized per process via PYTHONHASHSEED, so the same SARIF result
+    yielded different ids across runs/processes — breaking dedup downstream.
+
+    The id is a sha256 digest, so it is the same in every process. Since ids
+    became unique per location, the digest is taken over the finding identity in
+    utils/finding_identity.py: the scanner, the rule, and the location, of which
+    this result has none. The expected id is written out rather than recomputed
+    here, so a change to how ids are formed, which changes every id a user has
+    recorded, fails this test instead of passing it. The same result restored from
+    its own JSON gets the same id, so the identity survives a save and reload.
+    """
     description = "test vulnerability description abc"
 
     result = Result(
@@ -50,9 +64,12 @@ def test_phase0_bug1_flat_vulnerability_id_is_stable_hash_not_pythonhash():
 
     vuln = FlatVulnerability.from_sarif_result(result, "bandit", "SAST")
 
+    assert vuln.id == "bandit-RULE001-9c2c64bfb1cf", (
+        f"got id={vuln.id!r}. The id is not the stable sha256-derived value: it "
+        f"either uses Python's randomized hash() or the way ids are formed changed."
+    )
     restored = Result.model_validate_json(result.model_dump_json())
     assert vuln.id == FlatVulnerability.from_sarif_result(restored, "bandit", "SAST").id
-    assert re.fullmatch(r"bandit-RULE001-v2-[0-9a-f]{32}", vuln.id)
 
 
 # -----------------------------------------------------------------------------

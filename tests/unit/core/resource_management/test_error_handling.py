@@ -24,6 +24,7 @@ from automated_security_helper.core.resource_management.error_handling import (
     check_directory_exists,
     create_error_response,
     ErrorCategory,
+    PLUGIN_MODULE_REFUSED_SUGGESTIONS,
 )
 from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
@@ -259,6 +260,31 @@ def test_utility_functions():
 
     # Clean up test files
     test_file.unlink(missing_ok=True)
+
+
+def test_a_mutated_responses_suggestions_poison_no_later_response():
+    """A caller may edit its own response's suggestions list -- append a note,
+    reorder, trim. The default suggestions a refused plugin-module response
+    carries must be each response's own copy: handed out by identity, one
+    caller's edit rewrites the module constant, and every later refusal in the
+    process answers with the poisoned list."""
+    pristine = list(PLUGIN_MODULE_REFUSED_SUGGESTIONS)
+
+    first = create_error_response(
+        ValueError("one"),
+        "get_config",
+        category=ErrorCategory.PLUGIN_MODULE_REFUSED.value,
+    )
+    assert first["suggestions"] == pristine, first["suggestions"]
+    first["suggestions"].append("a caller's own note")
+
+    second = create_error_response(
+        ValueError("two"),
+        "get_config",
+        category=ErrorCategory.PLUGIN_MODULE_REFUSED.value,
+    )
+    assert second["suggestions"] == pristine, second["suggestions"]
+    assert list(PLUGIN_MODULE_REFUSED_SUGGESTIONS) == pristine
 
 
 def main():

@@ -4,14 +4,15 @@ import time
 from typing import Literal
 
 from automated_security_helper.core.enums import ExecutionPhase
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.console import ash_console
+from automated_security_helper.utils.log import ASH_LOGGER, run_handler
 from automated_security_helper.utils.rich_log_handler import (
     LiveDisplayLogHandler,
     RichLogPanel,
 )
+from automated_security_helper.utils.terminal_text import shown_not_obeyed
 
 from rich import box
-from rich.console import Console
 from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
@@ -52,7 +53,7 @@ class LiveProgressDisplay:
             debug: Whether to show debug logs
         """
         self.show_progress = show_progress
-        self.console = Console(color_system=color_system)
+        self.console = ash_console(color_system=color_system)
         self.verbose = verbose
         self.debug = debug
 
@@ -90,8 +91,17 @@ class LiveProgressDisplay:
         self.log_handler = LiveDisplayLogHandler(self.log_panel, level=log_level)
         self.log_handler.setFormatter(logging.Formatter("%(message)s"))
 
-        # Add the handler to the ASH logger
-        ASH_LOGGER.addHandler(self.log_handler)
+        # Add the handler to the ASH logger, marked as ASH's own, so a later
+        # get_logger replaces it as it replaces its own; inside a run it is the
+        # run's, so it shows that run's lines and comes off with the run. Only
+        # when the display will show: the handler feeds the panel and nothing
+        # else, so with show_progress=False it would hold lines nobody is
+        # shown -- and the MCP server's workspace scans build one display per
+        # project on a pool thread with no run's scope, where it joined the
+        # logger unscoped and took every session's lines as their home,
+        # keeping them from the last resort.
+        if show_progress:
+            ASH_LOGGER.addHandler(run_handler(self.log_handler))
 
         # Update layout with the logs (on top) and progress (below)
         self.layout["logs"].update(
@@ -156,10 +166,14 @@ class LiveProgressDisplay:
                 )
                 self.live.__enter__()
             except Exception as e:
-                print(f"ERROR initializing live display: {str(e)}", file=sys.stderr)
+                print(
+                    shown_not_obeyed(f"ERROR initializing live display: {e}"),
+                    file=sys.stderr,
+                )
                 import traceback
 
-                traceback.print_exc()
+                # The traceback quotes the error's text, which can quote a path.
+                print(shown_not_obeyed(traceback.format_exc()), file=sys.stderr, end="")
                 # Fall back to non-progress mode
                 self.show_progress = False
                 ASH_LOGGER.error(f"Failed to initialize progress display: {str(e)}")
@@ -168,11 +182,18 @@ class LiveProgressDisplay:
         # Log a message to show in the log panel
         ASH_LOGGER.info("ASH Security Scan started")
 
-    def stop(self):
-        """Stop the live display if it's running."""
+    def stop(self, interrupted: bool = False):
+        """Stop the live display if it's running.
+
+        *interrupted* for a scan stopped by Ctrl-C, which did not complete.
+        """
         if self.show_progress and self.live:
             # Log a final message
-            ASH_LOGGER.info("ASH Security Scan completed")
+            ASH_LOGGER.info(
+                "ASH Security Scan interrupted"
+                if interrupted
+                else "ASH Security Scan completed"
+            )
 
             # Remove our log handler before stopping the display
             if hasattr(self, "log_handler") and self.log_handler in ASH_LOGGER.handlers:

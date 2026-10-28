@@ -1,0 +1,19 @@
+#!/bin/sh
+# A stand-in OCI runner for the SIGTERM cells: it runs no container.
+#
+# Container mode's short queries (`docker buildx version`) get a quick clean
+# exit. The long-lived subcommand -- any invocation carrying the word named by
+# ASH_FAKE_BLOCK_ON, `build` when unset -- records this pid where
+# ASH_FAKE_RUNNER_PID_FILE points and blocks in a plain `sleep`, standing in
+# for the child the scan sits in while a SIGTERM arrives: the image build, or,
+# with ASH_FAKE_BLOCK_ON=run, the container run step, which an earlier clean
+# `build` exit lets the scan reach. `exec` keeps the recorded pid the sleeping
+# process's own.
+BLOCK_ON="${ASH_FAKE_BLOCK_ON:-build}"
+for word in "$@"; do
+    if [ "$word" = "${BLOCK_ON}" ]; then
+        printf '%s' "$$" > "${ASH_FAKE_RUNNER_PID_FILE}"
+        exec sleep 60
+    fi
+done
+exit 0

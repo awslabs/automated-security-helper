@@ -35,6 +35,7 @@ Nothing here touches the network. Downloads are served from bytes built in the
 test, and the pinned digests are patched to describe those bytes.
 """
 
+import sys
 import hashlib
 import io
 import os
@@ -57,6 +58,7 @@ from automated_security_helper.utils.download_utils import (
     find_verified_pinned_executable,
     install_pinned_tool,
     pinned_install_already_satisfied,
+    receipt_root,
 )
 from automated_security_helper.utils.tool_downloads import (
     _ASSET_TABLES,
@@ -64,6 +66,18 @@ from automated_security_helper.utils.tool_downloads import (
     _EXECUTABLE_DIGESTS,
     get_tool_asset,
 )
+
+pytestmark = pytest.mark.usefixtures("receipt_home")
+
+
+def test_receipts_from_this_module_stay_out_of_the_real_home(tmp_path):
+    """An install writes its receipt under Path.home(), here the test's own home.
+
+    This module wrote nine grype.json receipts into the developer's real
+    ~/.ash/install-receipts.
+    """
+    assert receipt_root().is_relative_to(tmp_path), receipt_root()
+
 
 PINNED_GRYPE = b"\x7fELF pinned grype v0.111.0 build\n"
 OTHER_VERSION_GRYPE = b"\x7fELF grype v0.110.0 build\n"
@@ -247,8 +261,16 @@ class TestIdenticalBinaryIsNotReinstalled:
         monkeypatch.setenv("ASH_BIN_PATH", "/some/ash/bin")
         dirs = subprocess_utils.path_independent_dirs()
         assert dirs[0] == Path("/some/ash/bin")
+        # Then the directories of ASH's own environment: the interpreter's, and its
+        # scripts directory when that is another one (a Windows Python outside a
+        # venv). A directory an earlier `ash dependencies install --bin-path` used
+        # is not on the list.
+        own = subprocess_utils.own_environment_dirs()
+        assert own[0] == Path(sys.executable).parent
         if subprocess_utils.platform.system().lower() != "windows":
-            assert dirs[1:] == [Path("/usr/local/bin")]
+            assert dirs[1:] == [*own, Path("/usr/local/bin")]
+        else:
+            assert dirs[1:] == own
 
 
 class TestADifferentBinaryIsStillInstalled:
@@ -478,15 +500,21 @@ class TestTheExecutableDigestTable:
     def test_a_bare_executable_asset_is_its_own_executable_digest(self):
         """An asset that is the executable needs no second digest.
 
-        No asset in the table is shaped like this yet; the property reads an
-        ``archive`` attribute when one exists, and this pins what it does then.
+        opengrep publishes the executable itself (``archive`` is False), so the
+        digest of the download is the digest of the bytes that run. An archived
+        asset without an executable digest stays None: it is never a match.
         """
-        bare = SimpleNamespace(executable_sha256=None, archive=False, sha256="ab" * 32)
-        assert tool_downloads.ToolAsset.executable_digest.fget(bare) == "ab" * 32
+        opengrep = get_tool_asset("opengrep", "linux", "amd64")
+        assert opengrep.archive is False
+        assert opengrep.executable_digest == opengrep.sha256
+        assert "opengrep_manylinux_x86" not in _EXECUTABLE_DIGESTS
+
         archived = SimpleNamespace(
             executable_sha256=None, archive=True, sha256="ab" * 32
         )
         assert tool_downloads.ToolAsset.executable_digest.fget(archived) is None
+        bare = SimpleNamespace(executable_sha256=None, archive=False, sha256="ab" * 32)
+        assert tool_downloads.ToolAsset.executable_digest.fget(bare) == "ab" * 32
 
 
 class TestRecognizingAPinnedInstallCommand:
@@ -534,16 +562,29 @@ class TestTheVerdictForAVerifiedTool:
         assert self._outcome(commands_satisfied=1).declared_no_commands is False
 
     def test_a_verified_tool_missing_afterwards_is_named(self):
-        """Verified, then not found by the post-install sweep: say so."""
-        from automated_security_helper.cli.dependencies import _report_and_exit
+        """Verified, then not found by the post-install sweep: say so, and fail.
+
+        A needed tool absent after the install fails the run whether or not it
+        was named with --tool.
+        """
+        import typer
+
+        from automated_security_helper.cli.dependencies import (
+            EXIT_INSTALL_FAILED,
+            _report_and_exit,
+        )
 
         panels = io.StringIO()
-        with patch.object(
-            dependencies_module,
-            "console",
-            Console(file=panels, width=240, no_color=True),
+        with (
+            patch.object(
+                dependencies_module,
+                "console",
+                Console(file=panels, width=240, no_color=True),
+            ),
+            pytest.raises(typer.Exit) as exc,
         ):
             _report_and_exit([self._outcome(commands_satisfied=1)], requested_tools=[])
+        assert exc.value.exit_code == EXIT_INSTALL_FAILED
         printed = panels.getvalue()
         assert "Install ran but tool not found on PATH: grype" in printed
         assert "No install path on this platform" not in printed
@@ -567,6 +608,11 @@ class TestDependenciesInstall:
         monkeypatch.setattr(
             dependencies_module, "clear_find_executable_cache", lambda: None
         )
+        # The panels go to a buffer at width 240, off a terminal: a caller's
+        # FORCE_COLOR or TTY_COMPATIBLE made Rich treat it as one, and under
+        # TERM=dumb lay it out at 80 columns, which wrapped "VERIFIED PRESENT".
+        for name in ("FORCE_COLOR", "TTY_COMPATIBLE", "TTY_INTERACTIVE"):
+            monkeypatch.delenv(name, raising=False)
         self.panels = io.StringIO()
         monkeypatch.setattr(
             dependencies_module,

@@ -19,6 +19,7 @@ from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
 from automated_security_helper.core.resource_management.scan_registry import (
+    DEFAULT_SCAN_SESSION,
     get_scan_registry,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -28,15 +29,40 @@ from automated_security_helper.utils.log import ASH_LOGGER
 _logger = ASH_LOGGER
 
 
-async def list_active_scans() -> List[Dict[str, Any]]:
+def _scoped(session_id: Optional[str]) -> Dict[str, str]:
+    """The registry keyword that scopes a lookup to ``session_id``, if one is given.
+
+    An unscoped call passes nothing, so it reaches the registry's unscoped
+    lookup.
+    """
+    return {} if session_id is None else {"session_id": session_id}
+
+
+def session_holds_scan(scan_id: str, session_id: Optional[str]) -> bool:
+    """Whether the registry holds scan ``scan_id`` for ``session_id``.
+
+    A session lookup, never the unscoped one: another session's scan answers
+    exactly like an id that was never issued, and ``None`` names the stdio
+    session (``DEFAULT_SCAN_SESSION``), not every session. Synchronous, for a
+    caller that decides whether a file belongs to a running scan of the session
+    (``cli.mcp.sandbox``).
+    """
+    entry = get_scan_registry().get_scan(scan_id, session_id or DEFAULT_SCAN_SESSION)
+    return entry is not None
+
+
+async def list_active_scans(session_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     List all active scans.
+
+    Args:
+        session_id: When given, only that session's scans are listed.
 
     Returns:
         List of active scan information dictionaries
     """
     registry = get_scan_registry()
-    return registry.list_scans(active_only=True)
+    return registry.list_scans(active_only=True, **_scoped(session_id))
 
 
 async def list_all_scans() -> List[Dict[str, Any]]:
@@ -50,12 +76,14 @@ async def list_all_scans() -> List[Dict[str, Any]]:
     return registry.list_scans()
 
 
-async def cancel_scan(scan_id: str) -> Dict[str, Any]:
+async def cancel_scan(scan_id: str, session_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Cancel a running scan.
 
     Args:
         scan_id: ID of the scan to cancel
+        session_id: When given, another session's scan answers exactly like an
+            unknown id: same response, nothing cancelled.
 
     Returns:
         Dictionary with cancellation result information, or the error response
@@ -84,7 +112,7 @@ async def cancel_scan(scan_id: str) -> Dict[str, Any]:
     registry = get_scan_registry()
 
     # Get scan information before cancellation
-    entry = registry.get_scan(scan_id)
+    entry = registry.get_scan(scan_id, **_scoped(session_id))
     if entry is None:
         error = MCPResourceError(
             f"Scan {scan_id} not found",
@@ -119,7 +147,7 @@ async def cancel_scan(scan_id: str) -> Dict[str, Any]:
 
     try:
         # Try to cancel the scan
-        success = registry.cancel_scan(scan_id)
+        success = registry.cancel_scan(scan_id, **_scoped(session_id))
 
         if success:
             return {
@@ -426,12 +454,16 @@ async def get_scan_by_directory(directory_path: str) -> Optional[Dict[str, Any]]
     return None
 
 
-async def check_scan_progress(scan_id: str) -> Dict[str, Any]:
+async def check_scan_progress(
+    scan_id: str, session_id: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Check the progress of a scan.
 
     Args:
         scan_id: ID of the scan to check
+        session_id: When given, another session's scan is reported exactly as an
+            unknown id is.
 
     Returns:
         Dictionary with scan progress information, or, on any failure, the
@@ -461,7 +493,7 @@ async def check_scan_progress(scan_id: str) -> Dict[str, Any]:
 
     try:
         registry = get_scan_registry()
-        return registry.check_scan_progress(scan_id)
+        return registry.check_scan_progress(scan_id, **_scoped(session_id))
     except MCPResourceError as e:
         # Add operation context to the error
         return create_error_response(error=e, operation="check_scan_progress")

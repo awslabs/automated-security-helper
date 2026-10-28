@@ -122,26 +122,29 @@ def load_community_suppressions():
     return suppressions
 
 
+def suppression_covers(suppression, rel_path, line_num, rule_id):
+    """Check if one suppression entry covers a file:line:rule combo.
+
+    An entry without line_start covers every line of the files its path matches.
+    """
+    if suppression.get("rule_id", "") != rule_id:
+        return False
+    if not fnmatch.fnmatch(str(rel_path), suppression.get("path", "")):
+        return False
+    # If suppression has line range, check it
+    s_start = suppression.get("line_start")
+    s_end = suppression.get("line_end")
+    if s_start is not None:
+        if line_num < s_start:
+            return False
+        if s_end is not None and line_num > s_end:
+            return False
+    return True
+
+
 def has_matching_suppression(rel_path, line_num, rule_id, suppressions):
     """Check if a file:line:rule combo is covered by a suppression entry."""
-    rel_str = str(rel_path)
-    for s in suppressions:
-        s_path = s.get("path", "")
-        s_rule = s.get("rule_id", "")
-        if s_rule != rule_id:
-            continue
-        if not fnmatch.fnmatch(rel_str, s_path):
-            continue
-        # If suppression has line range, check it
-        s_start = s.get("line_start")
-        s_end = s.get("line_end")
-        if s_start is not None:
-            if line_num < s_start:
-                continue
-            if s_end is not None and line_num > s_end:
-                continue
-        return True
-    return False
+    return any(suppression_covers(s, rel_path, line_num, rule_id) for s in suppressions)
 
 
 COMMUNITY_SUPPRESSIONS = load_community_suppressions()
@@ -619,38 +622,25 @@ def check_suppression_coverage():
                     or "don't" in line.lower()
                 ):
                     continue
-            # This line triggers SECRET-SECRET-KEYWORD — check for suppression
-            if not has_matching_suppression(
-                rel, i, "SECRET-SECRET-KEYWORD", COMMUNITY_SUPPRESSIONS
-            ):
-                # No suppression — this is only a problem if the hit can't be
-                # eliminated from source. Check #1 already flags unsuppressed
-                # hits, so this check focuses on verifying that suppressions
-                # that DO exist have line numbers.
-                pass
-            else:
-                # Suppression exists — verify it has line_start/line_end
-                rel_str = str(rel)
-                for s in COMMUNITY_SUPPRESSIONS:
-                    if s.get("rule_id") != "SECRET-SECRET-KEYWORD":
-                        continue
-                    if not fnmatch.fnmatch(rel_str, s.get("path", "")):
-                        continue
-                    s_start = s.get("line_start")
-                    if s_start is not None and s_start <= i:
-                        s_end = s.get("line_end")
-                        if s_end is None or i <= s_end:
-                            # Matching suppression found — verify it has line numbers
-                            if s_start is None:
-                                fail(
-                                    "SUPPRESSION-COVERAGE",
-                                    rel,
-                                    i,
-                                    f"Suppression for SECRET-SECRET-KEYWORD at {rel}:{i} "
-                                    f"is missing line_start/line_end — add line numbers "
-                                    f"for precision",
-                                )
-                            break
+            # This line triggers SECRET-SECRET-KEYWORD. Check #1 already flags a
+            # hit that no suppression covers, so this check only looks at hits
+            # that one does cover, and verifies that a covering suppression has
+            # line numbers. An entry without line_start excuses the rule for the
+            # whole file, which also hides every later hit there.
+            covering = [
+                s
+                for s in COMMUNITY_SUPPRESSIONS
+                if suppression_covers(s, rel, i, "SECRET-SECRET-KEYWORD")
+            ]
+            if covering and all(s.get("line_start") is None for s in covering):
+                fail(
+                    "SUPPRESSION-COVERAGE",
+                    rel,
+                    i,
+                    f"Suppression for SECRET-SECRET-KEYWORD at {rel}:{i} "
+                    f"is missing line_start/line_end — add line numbers "
+                    f"for precision",
+                )
 
 
 if __name__ == "__main__":

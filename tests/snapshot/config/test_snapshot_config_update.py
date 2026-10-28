@@ -69,26 +69,25 @@ def test_config_update_dry_run_leaves_file(
     assert text_snapshot("txt") == run.document
 
 
-@pytest.mark.parametrize("host", CONFIG_HOSTS, ids=lambda h: h.id)
-def test_config_update_skips_malformed_modification(
-    host, project_dir, monkeypatch, text_snapshot
-):
-    """A --set without '=' is reported and skipped; the rest still apply and save."""
-    with simulated_host(monkeypatch, host):
-        run = run_cli(
-            [
-                "config",
-                "update",
-                "ash.yaml",
-                "--set",
-                "fail_on_findings",
-                "--set",
-                "fail_on_findings=false",
-            ]
-        )
+def test_config_update_refuses_malformed_modification(project_dir, text_snapshot):
+    """A --set without '=' changes nothing and exits 3, as a malformed
+    --config-overrides does for a scan; the valid --set beside it is not applied
+    either."""
+    run = run_cli(
+        [
+            "config",
+            "update",
+            "ash.yaml",
+            "--set",
+            "fail_on_findings",
+            "--set",
+            "fail_on_findings=false",
+        ]
+    )
 
-    assert run.exit_code == 0, run.output
-    assert "Invalid modification format: fail_on_findings." in run.output
+    assert run.exit_code == 3, run.output
+    assert "Invalid config override: 'fail_on_findings'" in run.output
+    assert (project_dir / "ash.yaml").read_text(encoding="utf-8") == STARTING_CONFIG
     assert text_snapshot("txt") == run.document
 
 
@@ -97,11 +96,11 @@ def test_config_update_skips_malformed_modification(
     [
         pytest.param(["config", "update", "ash.yaml"], 0, id="no-modifications"),
         pytest.param(
-            ["config", "update", "missing.yaml", "--set", "a=b"], 1, id="missing-file"
+            ["config", "update", "missing.yaml", "--set", "a=b"], 3, id="missing-file"
         ),
         pytest.param(
             ["config", "update", "ash.yaml", "--set", "fail_on_findings=maybe"],
-            1,
+            3,
             id="invalid-value",
         ),
         # Not JSON, so the list parser splits on every comma.
@@ -113,7 +112,7 @@ def test_config_update_skips_malformed_modification(
                 "--set",
                 "global_settings.ignore_paths+=[{path: 'dist/**', reason: 'x'}]",
             ],
-            1,
+            3,
             id="non-json-object-in-list",
         ),
     ],

@@ -1,0 +1,97 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Fixture for ResourcePolicyStarAccessVerbPolicyRule (automated_security_helper/assets/appsec_cfn_rules).
+  One domain per action shape. The rule used to look only for an action that ends in ":*",
+  so the bare action "*", which grants every action of every service, was not reported.
+
+  Reported by the rule: BareStar, ListOnlyBareStar, ListWithBareStar and ServiceStar.
+  Not reported: ScopedActions and DeniedBareStar.
+
+  ServiceStar is the control that must stay reported: "es:*" is the shape the rule has
+  always matched. The principal is one account on every statement, so
+  StarResourceAccessPolicyRule reports nothing on this template and the two rules can be
+  told apart.
+
+Resources:
+  BareStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-bare-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action: "*"
+            Resource: "*"
+
+  ListOnlyBareStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-list-only-bare-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - "*"
+            Resource: "*"
+
+  ListWithBareStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-list-with-bare-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - "es:ESHttpGet"
+              - "*"
+            Resource: "*"
+
+  ServiceStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-service-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action: "es:*"
+            Resource: "*"
+
+  ScopedActions:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-scoped-actions
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - "es:ESHttpGet"
+              - "es:ESHttpHead"
+            Resource: "*"
+
+  DeniedBareStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-denied-bare-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Deny
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action: "*"
+            Resource: "*"

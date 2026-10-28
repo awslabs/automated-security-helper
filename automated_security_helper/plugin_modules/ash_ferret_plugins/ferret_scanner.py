@@ -3,13 +3,12 @@
 
 """Module containing the Ferret Scan sensitive data detection scanner implementation."""
 
+import bisect
 import json
-import shlex
 import logging
 import os
 import re
 import subprocess  # nosec B404 — ferret-scan is an external CLI tool invoked via subprocess
-import sys
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, List, Literal, Optional, Tuple
 from urllib.parse import urljoin
@@ -19,19 +18,24 @@ from pydantic import Field, PrivateAttr, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.config.path_trust import (
     cwd_outside_scanned_tree,
+    derived_roots,
     honored_path,
     resolved_path,
 )
+from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
+from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.base.options import (
     ScannerOptionsBase,
     tool_version_constraint,
 )
 from automated_security_helper.base.plugin_base import pep440_requirement
-from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.uv_tool_runner import checked_requirement
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.models.core import ToolArgs, ToolExtraArg
-from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+from automated_security_helper.base.scanner_plugin import (
+    ScannerPluginBase,
+    redacted_command_record,
+)
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
@@ -40,8 +44,11 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Invocation,
     SarifReport,
 )
+from automated_security_helper.base.uv_tool_mixin import guarded_values_read
+from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
+from automated_security_helper.utils.scanned_tree import REASON_LINK_LEAVES_TREE
 from automated_security_helper.utils.subprocess_utils import find_executable, spawn_run
 from automated_security_helper.utils.process_env import snapshot_environ
 
@@ -108,7 +115,8 @@ FERRET_SUBPROCESS_ENV_OVERRIDES = {"FERRET_PRECOMMIT": "0"}
 #
 # SUPPRESSION OPTIONS (ASH has its own suppression system):
 #   --generate-suppressions, --show-suppressed, --suppressions-file
-#       Reason: ASH manages suppressions centrally via .ash/suppressions.yaml
+#       Reason: ASH manages suppressions centrally, in global_settings.suppressions
+#       in the ASH config file
 #
 # TEXT EXTRACTION MODE (Preprocessing, not scanning):
 #   --extract-text
@@ -136,9 +144,9 @@ UNSUPPORTED_FERRET_OPTIONS = {
     "redaction_audit_log": "Redaction is not supported in ASH integration. Use ferret-scan CLI directly for redaction.",
     "memory_scrub": "Redaction is not supported in ASH integration. Use ferret-scan CLI directly for redaction.",
     # Suppression options - ASH has its own system
-    "generate_suppressions": "ASH manages suppressions centrally. Use .ash/suppressions.yaml instead.",
-    "show_suppressed": "ASH manages suppressions centrally. Use 'ash inspect suppressions' instead.",
-    "suppressions_file": "ASH manages suppressions centrally. Use .ash/suppressions.yaml instead.",
+    "generate_suppressions": "ASH manages suppressions centrally. Add them to global_settings.suppressions in the ASH config file (for example .ash/.ash.yaml) instead.",
+    "show_suppressed": "ASH manages suppressions centrally. ASH's reports count suppressed findings, and ash scan --ignore-suppressions reports them as findings.",
+    "suppressions_file": "ASH manages suppressions centrally. Add them to global_settings.suppressions in the ASH config file (for example .ash/.ash.yaml) instead.",
     # Text extraction mode - not scanning
     "extract_text": "Text extraction mode is not supported. Use ferret-scan CLI directly for text extraction.",
     # Debug/verbose - use ferret_debug/ferret_verbose instead
@@ -149,6 +157,155 @@ UNSUPPORTED_FERRET_OPTIONS = {
     "pre_commit_mode": "Pre-commit mode is not applicable in ASH integration. ASH manages output formatting and exit codes centrally. Use ASH's own pre-commit hook instead.",
     "list_profiles": "List-profiles mode only prints available profiles and exits; it produces no scan results. Run 'ferret-scan --list-profiles' directly.",
 }
+
+
+#: The most bytes of ``--exclude`` value the global ignore paths may bring it to. The
+#: value is one argument, and Linux refuses to start a program with an argument
+#: over 128 KiB (MAX_ARG_STRLEN), so ignore patterns past this are left out: ferret-scan
+#: reads those files, and ASH drops their findings after the scan.
+_EXCLUDE_VALUE_BUDGET = 100_000
+
+
+def _ignore_exclude_patterns(
+    target: Path,
+    source_dir: Path | str | None,
+    ignore_paths: List[Any],
+    walk: Tuple[List[str], List[str]],
+    value: List[str],
+) -> Tuple[List[str], List[str]]:
+    """``--exclude`` patterns for what the global ignore paths ignore below ``target``,
+    and the ignored paths left without one.
+
+    The paths are ``ignored_entries``: each ignore path matched as ASH matches it when
+    it drops findings, a fully ignored directory once. An ignore path is not passed as
+    written: ferret-scan 2.4.x also tests a pattern as a substring of the full path
+    (DEVELOPMENT.md section 9), so ``.`` or ``api`` would leave out nearly every
+    file. A file is its full path with its glob characters escaped
+    (``escape_for_pattern``), and a directory is that, the separator and ``*``: the
+    form ASH's output directories take here, measured on 2.4.5 and 2.5.2 to skip the
+    directory and everything below it and nothing else.
+
+    An ignored path is left without a pattern, so ferret-scan reads it and ASH drops
+    its findings after the scan, when its path holds a comma (``--exclude`` splits on
+    commas), when another walked file that nothing ignores holds its pattern (2.4.x
+    would leave that file out too), or when the pattern would take ``value``, the
+    patterns already given, past ``_EXCLUDE_VALUE_BUDGET``. None on Windows, where the
+    escaped form was not measured, and none for a target that is not the source
+    directory or below it (``ignored_entries``).
+    """
+    from automated_security_helper.utils.link_exclusions import ignored_entries
+    from automated_security_helper.utils.scan_output_dirs import (
+        PatternSyntax,
+        escape_for_pattern,
+    )
+
+    if os.sep != "/" or source_dir is None or not ignore_paths:
+        return [], []
+    files, _ = walk
+    entries = ignored_entries(target, source_dir, ignore_paths, files)
+    if not entries:
+        return [], []
+    whole_dirs = {entry for entry in entries if entry.endswith("/")}
+    ignored_files = set(entries) - whole_dirs
+
+    def _ignored(relative: str) -> bool:
+        parts = relative.split("/")
+        return relative in ignored_files or any(
+            "/".join(parts[:depth]) + "/" in whole_dirs
+            for depth in range(1, len(parts))
+        )
+
+    root = os.fspath(target)
+    kept = sorted(
+        os.fspath(Path(target).joinpath(relative))
+        for relative in files
+        if not _ignored(relative)
+    )
+    # A kept path holds a pattern, which starts with the root, at its start, or
+    # further in only where the root's text comes again below it.
+    root_again = [path for path in kept if path.find(root, 1) != -1]
+
+    def _held_by_a_kept_path(pattern: str) -> bool:
+        index = bisect.bisect_left(kept, pattern)
+        if index < len(kept) and kept[index].startswith(pattern):
+            return True
+        return any(pattern in path for path in root_again)
+
+    size = len(",".join(value).encode("utf-8"))
+    count = len(value)
+    patterns: List[str] = []
+    left_out: List[str] = []
+    for entry in entries:
+        full_path = os.fspath(Path(target).joinpath(entry.rstrip("/")))
+        pattern = escape_for_pattern(full_path, PatternSyntax.GLOB)
+        if entry.endswith("/"):
+            pattern += os.sep + "*"
+        grown = size + len(pattern.encode("utf-8")) + (1 if count else 0)
+        if (
+            "," in full_path
+            or _held_by_a_kept_path(pattern)
+            or grown > _EXCLUDE_VALUE_BUDGET
+        ):
+            left_out.append(entry)
+            continue
+        patterns.append(pattern)
+        size, count = grown, count + 1
+    return patterns, left_out
+
+
+def _link_exclude_patterns(
+    target: Path, walk: Tuple[List[str], List[str]] | None = None
+) -> List[str]:
+    """``--exclude`` patterns for each link to a file whose target leaves ``target``.
+
+    ferret-scan walks the directory it is given. How it treats a link was not
+    measured, so every link to a file whose target, every link resolved, leaves
+    ``target`` is excluded: found by ``file_links_leaving_tree``, which does not
+    descend links to directories and ignores ignore files. Each pattern is the
+    link's full path with its glob characters escaped, the form ASH's own output
+    directories take here (``utils/scan_output_dirs.escape_for_pattern``): 2.4.x
+    and 2.5.x both match a pattern as a glob against the whole path, and 2.5.x
+    matches a pattern without a ``/`` against each base name too, so a path
+    relative to the target would also leave out an in-tree file of the same name.
+    2.4.x also leaves out every path a pattern is a substring of (``isExcluded``
+    in its ``cmd/main.go``; DEVELOPMENT.md section 9), so a pattern is used only
+    when no other walked file's path contains it: for a link ``conf.py`` it would
+    also leave out ``conf.py.bak`` and everything below ``conf.py.d/``. ``walk`` is
+    ``walked_files(target)``, for a caller that has it already.
+
+    Raises:
+        ScannerError: Naming the first such link whose path holds a comma, which
+            the comma-separated ``--exclude`` value cannot carry, or whose pattern
+            another walked file's path contains. ferret-scan is then not run on
+            ``target``, rather than read the file it points at or leave out files
+            it should read.
+    """
+    from automated_security_helper.utils.link_exclusions import walked_files
+    from automated_security_helper.utils.scan_output_dirs import (
+        PatternSyntax,
+        escape_for_pattern,
+    )
+
+    files, links = walk if walk is not None else walked_files(target)
+    walked = [os.fspath(Path(target).joinpath(relative)) for relative in files]
+    patterns = []
+    for relative in links:
+        full_path = os.fspath(Path(target).joinpath(relative))
+        if "," in full_path:
+            raise ScannerError(
+                f"Not running ferret-scan on {Path(target).as_posix()}: {relative!r}: "
+                f"{REASON_LINK_LEAVES_TREE}, and ferret-scan's --exclude cannot carry "
+                "its path, so ferret-scan might read the file it points at."
+            )
+        pattern = escape_for_pattern(full_path, PatternSyntax.GLOB)
+        if any(pattern in other for other in walked if other != full_path):
+            raise ScannerError(
+                f"Not running ferret-scan on {Path(target).as_posix()}: {relative!r}: "
+                f"{REASON_LINK_LEAVES_TREE}, and ferret-scan's --exclude cannot leave "
+                "out that file alone: another file's path holds its path."
+            )
+        patterns.append(pattern)
+    return patterns
 
 
 def parse_version(version_str: str) -> Tuple[int, ...]:
@@ -325,7 +482,8 @@ class FerretScannerConfigOptions(ScannerOptionsBase):
         bool,
         Field(
             description="Use the default ferret-config.yaml bundled with this plugin. "
-            "Set to False to disable the default config and rely only on ferret-scan's built-in defaults."
+            "Set to False to disable the default config and rely only on ferret-scan's built-in defaults. "
+            f"{SET_BY_THE_OPERATOR}"
         ),
     ] = True
 
@@ -333,7 +491,8 @@ class FerretScannerConfigOptions(ScannerOptionsBase):
         str | None,
         Field(
             description="Profile name to use from config file (e.g., 'quick', 'ci', "
-            "'security-audit', 'comprehensive')"
+            "'security-audit', 'comprehensive'). A profile can run fewer checks and "
+            f"report only higher-confidence findings. {SET_BY_THE_OPERATOR}"
         ),
     ] = None
 
@@ -376,9 +535,9 @@ class FerretScannerConfigOptions(ScannerOptionsBase):
             description="Pass '--fail-on-incomplete' so ferret-scan exits 3 when a file "
             "could not be fully scanned (coverage cut short by a timeout/budget, or the "
             "file could not be opened). Findings may be missing in that case. The plugin "
-            "still returns the (partial) SARIF; exit 3 is recorded as an unsuccessful, "
-            "incomplete invocation rather than a hard error. Off by default to match "
-            "ferret-scan, which otherwise only warns on stderr."
+            "still reports the (partial) findings, and counts the target as failed, so "
+            "the scanner's row is ERROR and the completeness gate fails the scan. Off by "
+            "default to match ferret-scan, which otherwise only warns on stderr."
         ),
     ] = False
 
@@ -545,6 +704,9 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         MAX_SUPPORTED_VERSION=MAX_SUPPORTED_VERSION,
     )
 
+    #: ferret-scan is a native binary. See ScannerPluginBase.python_only.
+    python_only: ClassVar[bool | None] = False
+
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
     # The absolute target of the scan in progress, set by scan() and read by
@@ -628,19 +790,25 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         the case that needs correcting, and pip will downgrade it to satisfy
         the constraint.
         """
+        from automated_security_helper.utils.python_installer import (
+            python_package_install_command,
+        )
+
         commands = super().get_installation_commands(platform, arch)
+        # pip or uv, whichever owns the environment running ASH; see
+        # utils/python_installer.py.
         commands.append(
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "install",
-                checked_requirement(
-                    pep440_requirement(
-                        "ferret-scan", self._get_tool_version_constraint() or "latest"
+            python_package_install_command(
+                [
+                    checked_requirement(
+                        pep440_requirement(
+                            "ferret-scan",
+                            self._get_tool_version_constraint() or "latest",
+                        ),
+                        "the ferret-scan install requirement",
                     )
-                ),
-            ]
+                ]
+            )
         )
         return commands
 
@@ -807,13 +975,14 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         # Config file. Always passed: without --config, ferret-scan loads a
         # ferret.yaml from its working directory, the source directory (measured
         # with ferret-scan 2.5.3), so a run with no config of its own gets an
-        # empty one ASH writes, which ferret-scan treats as its defaults.
-        config_file_path = (
-            self._find_config_file(options.config_file) or self._empty_config_file()
-        )
-        self.args.extra_args.append(
-            ToolExtraArg(key="--config", value=str(config_file_path))
-        )
+        # empty one ASH writes, which ferret-scan treats as its defaults. That one
+        # is added when the arguments are resolved for a scan (_resolve_arguments),
+        # not here, where constructing the scanner would write it.
+        config_file_path = self._find_config_file(options.config_file)
+        if config_file_path is not None:
+            self.args.extra_args.append(
+                ToolExtraArg(key="--config", value=str(config_file_path))
+            )
 
         # Profile
         if options.profile:
@@ -830,9 +999,10 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         # Show match (tool-specific behavior option)
         if options.show_match:
             self._plugin_log(
-                "show_match is enabled — matched sensitive data (credit cards, SSNs, "
-                "API keys, etc.) will appear in SARIF output and log files. "
-                "Disable this option in production environments.",
+                "show_match is enabled: ferret-scan writes each matched value into "
+                "its own results file under scanners/ferret-scan/ and its log output. "
+                "ASH masks the values in its reports. Disable this option unless "
+                "that directory is protected.",
                 level=logging.WARNING,
             )
             self.args.extra_args.append(ToolExtraArg(key="--show-match", value=None))
@@ -912,28 +1082,59 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             Path to config file if found, None otherwise
         """
         # A config file inside the scanned tree is not passed to ferret-scan,
-        # whether the option names it or it is found by name below; see
+        # whether the option names it or it is found by name below, and neither
+        # is one the scan derived from the repository (under the output or work
+        # directory) unless the operator's own configuration names it; see
         # config/path_trust.py. The bundled default is used instead. The path
         # returned is the one honored_path checked, never one rebuilt from the
         # option's value.
         source_dir = self.context.source_dir
+        context_config = getattr(self.context, "config", None)
 
         # 1. Check explicitly specified config file
         if config_file:
+            from automated_security_helper.config.operator_only_options import (
+                operator_wrote_value,
+            )
+
             if not resolved_path(config_file, source_dir).exists():
                 self._plugin_log(
-                    f"Specified config file not found: "
-                    f"{resolved_path(config_file, source_dir)}",
+                    text_without_values(
+                        f"Specified config file not found: "
+                        f"{resolved_path(config_file, source_dir)}. Ferret-scan "
+                        "will run with the empty config file ASH writes; no "
+                        "config file is discovered from the scanned tree in its "
+                        "place.",
+                        self._values_to_redact(),
+                    ),
                     level=logging.WARNING,
                 )
                 return None
             path = honored_path(
                 config_file,
                 source_dir=source_dir,
-                config=getattr(self.context, "config", None),
+                config=context_config,
                 key="scanners.ferret-scan.options.config_file",
+                derived_dirs=derived_roots(self.context),
+                operator_written=operator_wrote_value(
+                    context_config,
+                    "scanner",
+                    "ferret-scan",
+                    ("options", "config_file"),
+                    config_file,
+                    config_from_context=self._config_from_context,
+                ),
             )
             if path is None:
+                # Refused: the bundled default is ASH's own input, and no
+                # config file is discovered from the scanned tree instead.
+                self._plugin_log(
+                    "Specified config file was not used because it is "
+                    "repository-influenced. Ferret-scan will run with the "
+                    "default config bundled with ASH; no config file is "
+                    "discovered from the scanned tree in its place.",
+                    level=logging.WARNING,
+                )
                 return self._bundled_config()
             self._plugin_log(
                 f"Using explicitly specified config file: {path}",
@@ -954,12 +1155,16 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         for candidate in possible_paths:
             if not resolved_path(candidate, source_dir).exists():
                 continue
+            # A candidate found by name is the checkout's, never the
+            # operator's own write.
             path = honored_path(
                 candidate,
                 source_dir=source_dir,
-                config=getattr(self.context, "config", None),
+                config=context_config,
                 key="ferret-scan config file "
                 + candidate.relative_to(source_dir).as_posix(),
+                derived_dirs=derived_roots(self.context),
+                operator_written=False,
             )
             if path is not None:
                 self._plugin_log(
@@ -990,12 +1195,10 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         )
 
     def _empty_config_file(self) -> Path:
-        """An empty ferret-scan config in this scanner's results directory."""
-        path = Path(self.results_dir) / "ferret-empty-config.yaml"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open_for_write(path) as handle:
-            handle.write("{}\n")
-        return path.resolve()
+        """An empty ferret-scan config, written outside the scanned tree."""
+        return empty_tool_config(
+            "ferret-empty-config.yaml", "{}\n", context=self.context
+        ).resolve()
 
     def _bundled_config(self) -> Path | None:
         """The config bundled with this plugin, when use_default_config allows it."""
@@ -1022,6 +1225,10 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         """
         # Process configuration options
         self._process_config_options()
+        if not any(arg.key == "--config" for arg in self.args.extra_args):
+            self.args.extra_args.append(
+                ToolExtraArg(key="--config", value=str(self._empty_config_file()))
+            )
 
         # Build command
         args = [self.command]
@@ -1072,8 +1279,8 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             raw dict    — JSON parsed but SARIF validation failed (fallback)
             raise ScannerError — fatal failure
 
-        See docs/_investigation/ash-scanner-return-contract.md for the full
-        contract derived from all built-in and community scanners.
+        How ASH records each of these is decided in
+        ``core/phases/scanner_executor.py`` (``ScannerExecutor._execute_scanner``).
 
         Args:
             target: Path to scan
@@ -1089,6 +1296,11 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         """
         if global_ignore_paths is None:
             global_ignore_paths = []
+        # Per target; see ScannerPluginBase.scan(). No target claim unless this run
+        # lost coverage (exit 3, below).
+        self.exit_code = 0
+        self.targets_attempted = None
+        self.targets_failed = 0
         # Check if the target directory is empty or doesn't exist
         if not target.exists() or (target.is_dir() and not any(target.iterdir())):
             message = (
@@ -1127,12 +1339,60 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             results_file = target_results_dir.joinpath("ferret-scan.sarif")
             target_results_dir.mkdir(exist_ok=True, parents=True)
 
-            # Add exclude patterns for global ignore paths (use a local copy to
-            # avoid mutating self.config.options.exclude_patterns across calls)
+            # A local copy, so self.config.options.exclude_patterns is not changed
+            # across calls. The global ignore paths come last
+            # (_ignore_exclude_patterns), resolved to the paths ASH ignores.
             exclude_patterns = list(self.config.options.exclude_patterns)
-            for ignore_path in global_ignore_paths:
-                if hasattr(ignore_path, "path"):
-                    exclude_patterns.append(str(ignore_path.path))
+            # ASH's own output directories, as the escaped full path followed by
+            # the separator and "*". 2.4.x tests a pattern as a glob and as a
+            # substring of the full path, 2.5.x as a glob only (DEVELOPMENT.md
+            # section 9); measured on 2.4.5 and 2.5.2, this form skips the
+            # directory and everything under it on both, and nothing else, while
+            # the unescaped "<path>/" form 2.5.2 read as a glob: "out[1]/" skipped
+            # a directory out1. The value is comma-separated with no escape for a
+            # comma, so a path with one is not passed; ASH drops ferret-scan's
+            # findings there after the scan.
+            from automated_security_helper.utils.scan_output_dirs import (
+                PatternSyntax,
+                escape_for_pattern,
+            )
+
+            for relative in self._ash_output_dirs_inside(target):
+                output_path = os.fspath(target.joinpath(relative))
+                if "," in output_path:
+                    self._plugin_log(
+                        f"Not excluding ASH's output directory {output_path} from "
+                        "ferret-scan: its --exclude value is comma-separated, and the "
+                        "path has a comma. ASH drops ferret-scan's findings there "
+                        "after the scan.",
+                        target_type=target_type,
+                        level=logging.WARNING,
+                    )
+                    continue
+                exclude_patterns.append(
+                    escape_for_pattern(output_path, PatternSyntax.GLOB) + os.sep + "*"
+                )
+            from automated_security_helper.utils.link_exclusions import walked_files
+
+            walk = walked_files(target)
+            exclude_patterns.extend(_link_exclude_patterns(target, walk))
+            ignore_patterns, left_out = _ignore_exclude_patterns(
+                target,
+                getattr(self.context, "source_dir", None),
+                global_ignore_paths,
+                walk,
+                exclude_patterns,
+            )
+            exclude_patterns.extend(ignore_patterns)
+            if left_out:
+                self._plugin_log(
+                    f"Not excluding {len(left_out)} ignored path(s) from ferret-scan "
+                    "(a comma in the path, another file's path holding its pattern, "
+                    "or no room left in the --exclude value); ASH drops their "
+                    f"findings after the scan: {', '.join(map(repr, left_out[:20]))}",
+                    target_type=target_type,
+                    level=logging.DEBUG,
+                )
 
             # Temporarily swap in the extended list for argument resolution
             original_patterns = self.config.options.exclude_patterns
@@ -1145,14 +1405,35 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             # Restore original patterns to prevent state pollution
             self.config.options.exclude_patterns = original_patterns
 
-            self._plugin_log(
-                f"Running command: {' '.join(final_args)}",
-                target_type=target_type,
-                level=logging.DEBUG,
-            )
+            # The values hook is overridable and is read once, guarded, for the
+            # log line and both SARIF records. When it raised or gave no usable
+            # answer nothing can be redacted, so every record carries only the
+            # command's name.
+            read = guarded_values_read(self)
+            redact_values = read.values
+            if redact_values is None:
+                shown_command = str(self.command)
+                recorded_command_line = shown_command
+                recorded_arguments: List[str] = []
+                self._plugin_log(
+                    f"Running command: {shown_command} (the arguments are not "
+                    f"shown: the plugin's values hook {read.failure()})",
+                    target_type=target_type,
+                    level=logging.DEBUG,
+                )
+            else:
+                shown_command = text_without_values(" ".join(final_args), redact_values)
+                recorded_command_line, recorded_arguments = redacted_command_record(
+                    final_args, redact_values
+                )
+                self._plugin_log(
+                    f"Running command: {shown_command}",
+                    target_type=target_type,
+                    level=logging.DEBUG,
+                )
 
             # Run ferret-scan with output to file
-            self._run_subprocess(
+            response = self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
                 stdout_preference="write",
@@ -1163,11 +1444,17 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             )
 
             self._post_scan(target=target, target_type=target_type)
+            # Exit 1 is ferret-scan's error code; see success_exit_codes.
+            self._record_target_exit_code(response)
+            self._refuse_rejected_exit_code(results_file)
 
             # --fail-on-incomplete makes ferret-scan exit 3 when coverage was cut short.
-            # The SARIF is still valid (partial); surface it as a warning so missing
-            # findings are not silent.
+            # The SARIF is still valid (partial) and is graded, but the target counts
+            # as failed, which the completeness gate reads: the row is ERROR with its
+            # findings, rather than PASSED over files that were not fully scanned.
             if self.exit_code == 3:
+                self.targets_attempted = 1
+                self.targets_failed = 1
                 self._plugin_log(
                     "ferret-scan reported incomplete coverage (exit 3, "
                     "--fail-on-incomplete): some files were not fully scanned and "
@@ -1203,8 +1490,8 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                     scanner_name=self.config.name,
                     scanner_version=getattr(self, "tool_version", None),
                     invocation_details={
-                        "command_line": " ".join(final_args),
-                        "arguments": final_args[1:],
+                        "command_line": shown_command,
+                        "arguments": recorded_arguments,
                         "working_directory": get_shortest_name(input=target),
                         "start_time": self.start_time.isoformat()
                         if self.start_time
@@ -1219,8 +1506,8 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 if sarif_report.runs:
                     sarif_report.runs[0].invocations = [
                         Invocation(
-                            commandLine=shlex.join(final_args),
-                            arguments=final_args[1:],
+                            commandLine=recorded_command_line,
+                            arguments=recorded_arguments,
                             startTimeUtc=self.start_time,
                             endTimeUtc=self.end_time,
                             executionSuccessful=self.exit_code == 0,

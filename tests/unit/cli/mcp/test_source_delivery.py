@@ -8,6 +8,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import os
+import sys
 import zipfile
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -15,9 +17,20 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from automated_security_helper.cli.mcp import source_delivery as sd
+from automated_security_helper.utils.git_command import GIT_SAFETY_OPTIONS
 
 
 _SESSION = "session-test"
+
+#: What ``_git_executable`` answers in the tests that replace ``subprocess.run``, so
+#: the argv they assert is the same on every machine.
+GIT = "/opt/git/bin/git"
+_REAL_GIT_EXECUTABLE = sd._git_executable
+
+
+@pytest.fixture(autouse=True)
+def resolved_git(monkeypatch):
+    monkeypatch.setattr(sd, "_git_executable", lambda: GIT)
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +151,7 @@ class TestSetSourceGit:
             res.stderr = ""
             return res
 
-        with patch.object(sd.subprocess, "run", side_effect=fake_run):
+        with patch.object(sd, "_run_git", side_effect=fake_run):
             target = sd.set_source_git(
                 url="https://example.com/foo.git",
                 workspace_root=tmp_path,
@@ -146,13 +159,97 @@ class TestSetSourceGit:
             )
 
         assert target == tmp_path / _SESSION / "source"
-        assert called["cmds"][0][0:4] == ["git", "clone", "--depth", "1"]
+        clone = called["cmds"][0]
+        # git by the absolute path it resolved to, never by name.
+        assert clone[0] == GIT
+        # The -c options git runs with come before the subcommand; see
+        # test_set_source_git_uses_no_server_credentials.py for what they do.
+        at = clone.index("clone")
+        assert clone[at : at + 3] == ["clone", "--depth", "1"]
         # "--" fences the url off from git's option parsing, so it sits after
         # the end-of-options marker rather than directly after the depth.
-        assert called["cmds"][0][4] == "--"
-        assert called["cmds"][0][5] == "https://example.com/foo.git"
+        assert clone[at + 3] == "--"
+        assert clone[at + 4] == "https://example.com/foo.git"
         # Workspace was recorded.
         assert sd.get_session_source_dir(_SESSION) == target
+        sd.clear_source(_SESSION, workspace_root=tmp_path)
+
+    def test_every_git_run_gets_no_stdin(self, tmp_path):
+        """A clone source can be a repository on this machine, and git reads the
+        files it names: cloning a linked worktree whose admin commondir was
+        linked to /dev/stdin, git waited on an open stdin (git 2.50.1, measured)
+        and returned at once on /dev/null. On the stdio transport the server's
+        stdin carries the client's requests."""
+        seen = []
+
+        class _FakeProcess:
+            returncode = 0
+            pid = 1
+
+            def communicate(self, timeout=None):
+                return "", ""
+
+        def fake_popen(cmd, **kw):
+            seen.append((cmd, kw))
+            return _FakeProcess()
+
+        # _run_git starts git through subprocess.Popen, so that is the seam
+        # where the stdin it hands the child is visible.
+        with patch.object(sd.subprocess, "Popen", side_effect=fake_popen):
+            sd.set_source_git(
+                url="https://example.com/foo.git",
+                ref="main",
+                workspace_root=tmp_path,
+                session_id=_SESSION,
+            )
+
+        # Past git and git_argv's options, then past -C <dir> where it is given.
+        subcommands = []
+        for cmd, _ in seen:
+            rest = cmd[1 + len(GIT_SAFETY_OPTIONS) :]
+            # Every command carries one more -c setting (_GIT_CONFIG),
+            # before -C <dir> and the subcommand.
+            while rest[0] == "-c":
+                rest = rest[2:]
+            subcommands.append(rest[0] if rest[0] != "-C" else rest[2])
+        assert subcommands == ["clone", "fetch", "checkout"]
+        assert all(kw.get("stdin") is sd.subprocess.DEVNULL for _, kw in seen)
+        sd.clear_source(_SESSION, workspace_root=tmp_path)
+
+    def test_every_git_run_carries_the_network_flags(self, tmp_path):
+        """The clone, the fetch and the checkout each carry
+        ``-c http.followRedirects=false`` before their subcommand and run with
+        ``GIT_LFS_SKIP_SMUDGE=1`` in their environment. The checkout does not
+        usually reach the network, so the flags ride every command rather than
+        only the ones documented as contacting the remote."""
+        seen = []
+
+        def fake_run(cmd, **kw):
+            seen.append((list(cmd), kw))
+            res = MagicMock()
+            res.returncode = 0
+            res.stdout = ""
+            res.stderr = ""
+            return res
+
+        with patch.object(sd, "_run_git", side_effect=fake_run):
+            sd.set_source_git(
+                url="https://example.com/foo.git",
+                ref="main",
+                workspace_root=tmp_path,
+                session_id=_SESSION,
+            )
+
+        assert len(seen) == 3, seen
+        for subcommand in ("clone", "fetch", "checkout"):
+            hit = next(((cmd, kw) for cmd, kw in seen if subcommand in cmd), None)
+            assert hit is not None, (subcommand, seen)
+            cmd, kw = hit
+            setting = cmd.index("http.followRedirects=false")
+            assert cmd[setting - 1] == "-c", cmd
+            assert setting < cmd.index(subcommand), cmd
+            env = kw.get("env") or {}
+            assert env.get("GIT_LFS_SKIP_SMUDGE") == "1", (subcommand, env)
         sd.clear_source(_SESSION, workspace_root=tmp_path)
 
     def test_clone_failure_raises_runtime_error(self, tmp_path):
@@ -163,7 +260,7 @@ class TestSetSourceGit:
             res.stdout = ""
             return res
 
-        with patch.object(sd.subprocess, "run", side_effect=fake_run):
+        with patch.object(sd, "_run_git", side_effect=fake_run):
             with pytest.raises(RuntimeError, match="git clone failed"):
                 sd.set_source_git(
                     url="https://bogus/repo.git",
@@ -181,7 +278,8 @@ class TestSetSourceGit:
             res = MagicMock()
             res.stdout = ""
             res.stderr = ""
-            if cmd[:2] == ["git", "clone"]:
+            # git's -c options precede the subcommand, so match it by name.
+            if cmd[0] == GIT and "clone" in cmd:
                 res.returncode = 0
             elif "checkout" in cmd:
                 res.returncode = 1
@@ -191,7 +289,7 @@ class TestSetSourceGit:
                 res.returncode = 1
             return res
 
-        with patch.object(sd.subprocess, "run", side_effect=fake_run):
+        with patch.object(sd, "_run_git", side_effect=fake_run):
             with pytest.raises(RuntimeError, match="git checkout"):
                 sd.set_source_git(
                     url="https://example.com/foo.git",
@@ -200,6 +298,80 @@ class TestSetSourceGit:
                     session_id=_SESSION,
                 )
         sd.clear_source(_SESSION, workspace_root=tmp_path)
+
+    def test_every_git_call_uses_the_resolved_path(self, tmp_path):
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            res = MagicMock()
+            res.returncode = 0
+            res.stdout = ""
+            res.stderr = ""
+            return res
+
+        with patch.object(sd, "_run_git", side_effect=fake_run):
+            sd.set_source_git(
+                url="https://example.com/foo.git",
+                ref="v1.2.3",
+                workspace_root=tmp_path,
+                session_id=_SESSION,
+            )
+
+        assert [cmd[0] for cmd in calls] == [GIT, GIT, GIT]
+        sd.clear_source(_SESSION, workspace_root=tmp_path)
+
+    def test_no_git_on_path_fails_before_anything_runs(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sd, "_git_executable", _REAL_GIT_EXECUTABLE)
+        empty = tmp_path / "empty-bin"
+        empty.mkdir()
+        monkeypatch.setenv("PATH", str(empty))
+        from automated_security_helper.utils import subprocess_utils
+
+        monkeypatch.setattr(
+            subprocess_utils, "path_independent_dirs", lambda: [tmp_path / "ash-bin"]
+        )
+        subprocess_utils.clear_find_executable_cache()
+        try:
+            with (
+                patch.object(sd, "_run_git") as run,
+                pytest.raises(RuntimeError, match="git was not found on PATH"),
+            ):
+                sd.set_source_git(
+                    url="https://example.com/foo.git",
+                    workspace_root=tmp_path,
+                    session_id=_SESSION,
+                )
+        finally:
+            subprocess_utils.clear_find_executable_cache()
+
+        run.assert_not_called()
+        assert not (tmp_path / _SESSION / "source").exists()
+
+    def test_git_resolves_to_an_absolute_path_on_path(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sd, "_git_executable", _REAL_GIT_EXECUTABLE)
+        bin_dir = tmp_path / "usr" / "bin"
+        bin_dir.mkdir(parents=True)
+        git = bin_dir / ("git.exe" if sys.platform == "win32" else "git")
+        git.write_text("#!/bin/sh\nexit 0\n")
+        git.chmod(0o755)
+        # A git in the working directory, which Windows would look in first.
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        (cwd / git.name).write_text("#!/bin/sh\nexit 0\n")
+        (cwd / git.name).chmod(0o755)
+        monkeypatch.chdir(cwd)
+        monkeypatch.setenv("PATH", os.pathsep.join([".", str(bin_dir)]))
+        from automated_security_helper.utils import subprocess_utils
+
+        monkeypatch.setattr(
+            subprocess_utils, "path_independent_dirs", lambda: [tmp_path / "ash-bin"]
+        )
+        subprocess_utils.clear_find_executable_cache()
+        try:
+            assert sd._git_executable() == str(git)
+        finally:
+            subprocess_utils.clear_find_executable_cache()
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +433,7 @@ class TestGitArgumentInjectionDefenses:
     )
     def test_option_like_url_is_rejected_before_spawning_git(self, tmp_path, bad_url):
         with (
-            patch.object(sd.subprocess, "run") as run,
+            patch.object(sd, "_run_git") as run,
             pytest.raises(ValueError, match="must not begin with"),
         ):
             sd.set_source_git(url=bad_url, workspace_root=tmp_path, session_id=_SESSION)
@@ -271,7 +443,7 @@ class TestGitArgumentInjectionDefenses:
     def test_command_executing_transport_is_rejected(self, tmp_path, bad_url):
         """ext:: is matched case-insensitively; git accepts either casing."""
         with (
-            patch.object(sd.subprocess, "run") as run,
+            patch.object(sd, "_run_git") as run,
             pytest.raises(ValueError, match="transport"),
         ):
             sd.set_source_git(url=bad_url, workspace_root=tmp_path, session_id=_SESSION)
@@ -280,7 +452,7 @@ class TestGitArgumentInjectionDefenses:
     @pytest.mark.parametrize("bad_ref", ["--upload-pack=touch /tmp/pwned", "-x"])
     def test_option_like_ref_is_rejected_before_spawning_git(self, tmp_path, bad_ref):
         with (
-            patch.object(sd.subprocess, "run") as run,
+            patch.object(sd, "_run_git") as run,
             pytest.raises(ValueError, match="must not begin with"),
         ):
             sd.set_source_git(
@@ -294,7 +466,7 @@ class TestGitArgumentInjectionDefenses:
     def test_rejection_leaves_no_session_directory_behind(self, tmp_path):
         """Validation runs before any mkdir, so a rejected call is inert."""
         with (
-            patch.object(sd.subprocess, "run") as run,
+            patch.object(sd, "_run_git") as run,
             pytest.raises(ValueError),
         ):
             sd.set_source_git(
@@ -600,6 +772,8 @@ class TestMcpWrappers:
             return target
 
         monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path))
+        # The tool clones only from hosts the operator lists.
+        monkeypatch.setenv("ASH_MCP_GIT_ALLOWED_HOSTS", "example.com")
         with patch.object(sd, "set_source_git", side_effect=fake_clone):
             r = mcp_tools.mcp_set_source_git(
                 url="https://example.com/foo.git",
@@ -616,6 +790,7 @@ class TestMcpWrappers:
         from automated_security_helper.cli import mcp_tools
 
         monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path))
+        monkeypatch.setenv("ASH_MCP_GIT_ALLOWED_HOSTS", "example.com")
         with patch.object(sd, "set_source_git", side_effect=RuntimeError("boom")):
             r = mcp_tools.mcp_set_source_git(
                 url="https://example.com/x.git",

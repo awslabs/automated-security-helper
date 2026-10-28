@@ -48,6 +48,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.helpers import importing_this_checkout
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # Raising from find_spec is what makes the module genuinely unimportable. Setting
@@ -76,7 +78,7 @@ def _run_probe(body: str) -> dict:
     """Run *body* in a clean interpreter with detect_secrets unimportable."""
     script = _BLOCKER + textwrap.dedent(body)
     proc = subprocess.run(
-        [sys.executable, "-c", script],
+        [sys.executable, "-c", importing_this_checkout(script)],
         capture_output=True,
         text=True,
         cwd=str(REPO_ROOT),

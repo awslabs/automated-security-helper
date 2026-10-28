@@ -15,9 +15,13 @@ says which version to move to.
 The indexes here are recorded: trimmed copies of the real bookworm,
 bookworm-updates, bookworm-security and NodeSource node_22.x ``Packages`` files
 for amd64 and arm64, taken 2026-10-07 and cut down to the stanzas of the pinned
-packages, under ``tests/test_data/apt_indices/<host>/<path>``. The Debian ones are
+packages, under ``tests/test_data/apt_indices/<host>/<path>``. The
+bookworm-security ca-certificates stanza was refreshed on 2026-10-27, when the
+archive replaced 20250419~deb12u1 with 20250419~deb12u2 and the image build
+started failing on the old pin. The Debian ones are
 served xz-compressed, as the archive serves them, so the decompression path runs
-too. No test reaches the network: ``urlopen`` fails the test if anything calls it.
+too. No test reaches the network: the HTTP and HTTPS transports fail the test if
+anything reaches them.
 
 Each assertion that the real Dockerfile is clean is paired with a negative
 control that removes or changes one thing and shows the same check going red.
@@ -27,6 +31,7 @@ from __future__ import annotations
 
 import importlib.util
 import lzma
+import socket
 import sys
 import urllib.request
 from pathlib import Path
@@ -56,7 +61,13 @@ def _no_network(monkeypatch):
     def refuse(*args, **kwargs):
         raise AssertionError("a unit test reached the network")
 
-    monkeypatch.setattr(urllib.request, "urlopen", refuse)
+    # At the transport, which every opener goes through, urlopen's and the script's
+    # own redirect-checking opener alike.
+    monkeypatch.setattr(urllib.request.HTTPSHandler, "https_open", refuse)
+    monkeypatch.setattr(urllib.request.HTTPHandler, "http_open", refuse)
+    monkeypatch.setattr(urllib.request.FTPHandler, "ftp_open", refuse)
+    # A backstop beneath every transport, the ones not patched above included.
+    monkeypatch.setattr(socket, "getaddrinfo", refuse)
 
 
 def _fixture_path(url: str) -> Path:
@@ -333,17 +344,31 @@ class TestMain:
         monkeypatch.setattr(
             checker, "APT_INDEX_FETCHER", lambda url: recorded(url, overrides)
         )
+
+        def pinned(project: str) -> str:
+            return {
+                p.project: p.version
+                for p in checker.enumerate_pins(checker.load_pins_module())
+            }[project]
+
+        def gem_releases(project: str) -> "list[dict[str, object]]":
+            # A RubyGems versions answer listing only the pinned release.
+            return [
+                {
+                    "number": pinned(project),
+                    "prerelease": False,
+                    "platform": "ruby",
+                    "ruby_version": ">= 0",
+                }
+            ]
+
         monkeypatch.setattr(
             checker,
             "DEFAULT_FETCHERS",
             {
-                eco: (
-                    lambda project: {
-                        p.project: p.version
-                        for p in checker.enumerate_pins(checker.load_pins_module())
-                    }[project]
-                )
-                for eco in (checker.GITHUB, checker.PYPI, checker.RUBYGEMS)
+                checker.GITHUB: pinned,
+                checker.PYPI: pinned,
+                checker.RUBYGEMS: gem_releases,
             },
         )
         code = checker.main(list(argv))

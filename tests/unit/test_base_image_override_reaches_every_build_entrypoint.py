@@ -95,6 +95,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.host_ids import with_fixed_ids
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ASH_SCRIPT = REPO_ROOT / "ash"
 PS1 = REPO_ROOT / "utils" / "ash_helpers.ps1"
@@ -155,11 +157,16 @@ def _build_argv(recording_runner, tmp_path, override: str | None) -> str:
     source_dir.mkdir(exist_ok=True)
     argv_log = tmp_path / "argv"
 
-    env = {
-        **os.environ,
-        "OCI_RUNNER": str(recording_runner),
-        "ARGV_LOG": str(argv_log),
-    }
+    # An unprivileged `id`, so the default non-root build reaches the runner when the
+    # suite itself runs as root.
+    env = with_fixed_ids(
+        {
+            **os.environ,
+            "OCI_RUNNER": str(recording_runner),
+            "ARGV_LOG": str(argv_log),
+        },
+        tmp_path / "fixed-id-bin",
+    )
     # Set explicitly in both directions rather than inherited: a developer who exported this
     # while debugging the fallback would otherwise flip the negative test.
     env.pop(OVERRIDE, None)
@@ -265,7 +272,7 @@ class TestThePowerShellEntrypoint:
         )
         assert f'"--build-arg", "BASE_IMAGE=$($env:{OVERRIDE})"' in body, (
             "the override must be appended as a --build-arg/value pair in the same idiom as "
-            "the other build args, so it survives the Invoke-Expression join"
+            "the other build args: two elements of the argument array the runner is given"
         )
 
     def test_it_is_emitted_before_the_callers_own_build_args(self, body: str):

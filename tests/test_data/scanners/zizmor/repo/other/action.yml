@@ -1,0 +1,4 @@
+# A file named action.yml that is not a GitHub Actions definition.
+tool: some-other-tool
+steps:
+  - build

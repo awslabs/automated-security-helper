@@ -13,6 +13,9 @@ ASH's real behavior.
 
 from __future__ import annotations
 
+import json
+import os
+
 import pytest
 
 from tests.snapshot.container.conftest import FakeStep
@@ -32,9 +35,15 @@ SCAN = [
 #: The host prints "ASH Scan Completed in <duration>" from its own wall clock.
 pytestmark = pytest.mark.snapshot_masking(mask_durations=True)
 
+#: The snapshots are POSIX text by construction: they name /nonexistent/ash-test/docker.
+_POSIX_TEXT = pytest.mark.skipif(
+    os.name == "nt",
+    reason="the recorded text is POSIX by construction: it names /nonexistent/ash-test/docker",
+)
+
 
 @pytest.fixture(autouse=True)
-def _src(in_tmp, local_checkout, monkeypatch):
+def _src(in_tmp, project_build_files_in_cwd, monkeypatch):
     (in_tmp / "src").mkdir()
     # The summary prints the absolute output directory, whose length is the
     # machine's, so at 100 columns rich would fold each path at a different place.
@@ -48,6 +57,7 @@ def results_json(fixture_model) -> str:
     return fixture_model.model_dump_json()
 
 
+@_POSIX_TEXT
 @pytest.mark.parametrize("returncode", [0, 1, 2])
 def test_verdict_status_with_results(
     returncode, run_cli, snapshot, fake_docker, results_json
@@ -58,21 +68,73 @@ def test_verdict_status_with_results(
     assert fake_docker.calls == ["run"]
 
 
+@_POSIX_TEXT
+@pytest.mark.parametrize("returncode", [0, 2])
+def test_results_the_container_did_not_mark_completed(
+    returncode, run_cli, snapshot, fake_docker, results_json
+):
+    # As an image built from an older ASH leaves them: the host does not read them
+    # back, whatever the container's status, and exits 1 naming the file.
+    fake_docker.run = FakeStep(
+        returncode=returncode, results_json=results_json, marks_completion=False
+    )
+    assert run_cli(SCAN) == snapshot
+
+
+@_POSIX_TEXT
 def test_success_status_without_results(run_cli, snapshot, fake_docker):
     fake_docker.run = FakeStep(returncode=0, stdout="container wrote nothing\n")
     assert run_cli(SCAN) == snapshot
 
 
+@_POSIX_TEXT
 def test_unparseable_results(run_cli, snapshot, fake_docker):
     fake_docker.run = FakeStep(returncode=0, results_json="{not json")
     assert run_cli(SCAN) == snapshot
 
 
+#: A key or value of a results file, with what a terminal or a CI runner obeys.
+SECRET = "wJalrXUtnFEMIK7MDENG"
+HOSTILE = SECRET + "\x1b[31m\n::error title=scan::" + SECRET
+
+
+@pytest.mark.parametrize(
+    "results_json, reason",
+    [
+        pytest.param('{"T": ' + SECRET, "Invalid JSON", id="not-json"),
+        pytest.param(
+            json.dumps({"scanner_results": {HOSTILE: 5}}),
+            "Invalid value at 'scanner_results.<key>'",
+            id="key",
+        ),
+        # Written with surrogateescape: the file holds the byte 0xff.
+        pytest.param('{"name": "ok\udcff"}', "not UTF-8 at byte offset", id="not-utf8"),
+    ],
+)
+def test_unparseable_results_are_not_quoted(run_cli, fake_docker, results_json, reason):
+    """The results file holds finding data. pydantic's text quotes it
+    (input_value='...'), its locations name the file's keys, and a decode error
+    prints the byte; Rich read the quoting part as a tag and dropped it, and once
+    log messages print as text it reached the console. A decode error escaped
+    the parse handler as a traceback."""
+    fake_docker.run = FakeStep(returncode=0, results_json=results_json)
+    result = run_cli(SCAN)
+
+    shown = result["stdout"] + result["stderr"]
+    assert result["exit_code"] == 1, shown
+    assert "Failed to parse results file" in shown, shown
+    assert reason in shown, shown
+    assert SECRET not in shown, shown
+    assert "\x1b[31m" not in shown and "\n::" not in shown, repr(shown)
+
+
+@_POSIX_TEXT
 @pytest.mark.parametrize(
     "returncode",
     [
         pytest.param(3, id="3-invalid-config"),
         pytest.param(4, id="4-workspace-error"),
+        pytest.param(5, id="5-usage-error"),
         pytest.param(125, id="125-runner-failed-before-entrypoint"),
         pytest.param(137, id="137-killed"),
     ],
@@ -88,6 +150,7 @@ def test_non_verdict_status(returncode, run_cli, snapshot, fake_docker, results_
     assert run_cli(SCAN) == snapshot
 
 
+@_POSIX_TEXT
 def test_host_recomputes_the_verdict(run_cli, snapshot, fake_docker, results_json):
     # The container said 0, but the host applies its own options to the results it
     # reads back: with the incomplete-scanner gate off, the fixture's actionable

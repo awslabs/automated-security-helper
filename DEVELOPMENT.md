@@ -1,131 +1,151 @@
-# Local Development Setup Guide
+# Development
 
-This guide will help you set up your local development environment for the Automated Security Helper project.
+The development guide is part of the documentation site, under Contributing:
 
-## Prerequisites
+- [Contribute to ASH](docs/content/contributing/index.md): set up a development checkout, the project layout, running
+  ASH from your checkout, pull requests, commit messages, what CI runs, code style, and the pre-commit hooks.
+- [Test your change](docs/content/contributing/testing.md): the unit, integration, and snapshot tests, the rules the
+  suite enforces on new tests, and testing an MCP change locally.
+- [Test the documentation](docs/content/contributing/documentation.md): how the docs are checked and how to mark
+  a code block.
+- [Releases and versions](docs/content/contributing/releases.md): versions, the changelog, cutting a release, tags, and
+  the version-pinned pages.
 
-- Python 3.10 or later
-- UV (Python package manager) - **Note: Project has migrated from Poetry to UV**
+The short version, from a git clone:
 
-## Setting up UV
-
-1. Install UV on your system
-
-[Official instructions](https://docs.astral.sh/uv/getting-started/installation/)
-
-Linux, macOS, Windows (WSL)
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-Windows PowerShell:
-
-```ps1
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-
-2. Verify UV installation:
-
-```bash
-uv --version
-```
-
-### Windows: Enable Long Paths
-
-Windows has a 260-character path limit that can cause `git clone` or `git reset` failures due to deeply nested test file paths. Run this once before cloning:
-
-```ps1
-git config --global core.longpaths true
-```
-
-## Project Setup
-
-### Option 1: Manual Setup
-
-1. Clone the repository:
-
-```bash
-git clone https://github.com/awslabs/automated-security-helper.git
-cd automated-security-helper
-```
-
-2. Install project dependencies:
-
+<!-- doctest: illustrative reason="installs packages from the network and runs the full test suite" -->
 ```bash
 uv sync
+uv run pytest                                      # everything
+uv run pytest tests/unit/cli                       # one directory
+uv run pytest tests/unit/cli/test_config_init.py   # one file
 ```
 
-This command will:
-- Create a virtual environment
-- Install all dependencies from pyproject.toml and uv.lock
-- Set up the project in development mode
+`pytest.ini` runs one worker per CPU (`-n auto`) and measures no coverage, so a run of
+part of the suite passes or fails on its own tests.
 
-3. Activate the virtual environment:
+On Linux and macOS, tests do not write into your home directory, except into uv's
+cache. `tests/conftest.py` points `HOME`, `USERPROFILE` and the `XDG_*` base directories
+at a temporary directory for each test and unsets uv's own directory variables
+(`UV_TOOL_DIR` and the like); `UV_CACHE_DIR` stays on your cache, so uv does not
+download again. On Windows, `%APPDATA%` and `%LOCALAPPDATA%` are not moved, so what
+tools keep there still lands in yours.
+On Linux and macOS your user-level `uv.toml`, `pip.conf`, `.npmrc` and `~/.netrc` are in
+your home, so tests don't read them (on Windows only `.npmrc` and the netrc file are
+missed; `%APPDATA%\uv` and `%APPDATA%\pip` are still read). Behind a package mirror,
+export it before running the tests instead: `UV_DEFAULT_INDEX` (or `UV_INDEX_URL`),
+`UV_EXTRA_INDEX_URL`, `PIP_INDEX_URL` and `npm_config_registry` reach every test
+unchanged. For a mirror that needs credentials, point `NETRC` at your netrc file, or give
+uv the index's as `UV_INDEX_<NAME>_USERNAME` and `UV_INDEX_<NAME>_PASSWORD` rather than
+in the URL.
+Tools in `~/.ash/bin` are not found either, since that is in each test's home. To run
+the integration tests that need them against yours, put the directory on `PATH`:
+`PATH="$HOME/.ash/bin:$PATH" uv run pytest ...`, or first, in PowerShell,
+`$env:PATH = "$HOME\.ash\bin;$env:PATH"`, and in cmd
+`set "PATH=%USERPROFILE%\.ash\bin;%PATH%"`. Don't set `ASH_BIN_PATH` to it: tests
+that install to the default directory install into `ASH_BIN_PATH`, and the run refuses
+an installer it can see heading into your home. A test that writes under your `~/.ash`
+some other way (a path from the passwd database, say) is refused the write and fails at
+teardown. Mark a test
+`@pytest.mark.real_home` if it really needs the real home.
 
+A plain `uv sync` installs neither optional extra. The tests that need the `cdk` extra
+(cdk-nag) or the `symbols` extra (tree-sitter, for symbol-scoped suppressions) skip
+without it, and the skip reason names the extra. To run them:
+
+The [design system](docs/content/developer-guide/interface-design.md) covers the
+website, terminal, TUI, and human reports. The [surface review](docs/content/developer-guide/high-end-design-review.md)
+records the navigation architecture, motion vocabulary, and platform decisions.
+
+Follow the [preview workflow](docs/ui-tests/README.md) to generate representative
+reports and terminal screens, build the documentation, run browser checks, and
+inspect the gallery. Review the affected theme, width, keyboard, empty, and
+error states. The generated GitHub comment preview approximates GitHub's native
+renderer.
+
+Edit versioned content in its `.md.template` and regenerate the output with
+`uv run python scripts/version_template_manager.py generate`. Editor and agent
+content has its own canonical source in
+`ash-agent-plugins/agentic-coding/transpiler/_base/`.
+
+Refresh the README's report and terminal images with `npm run capture -- --readme`
+in `docs/ui-tests`. Rebuild the local MIT animation module with `npm run vendor:motion`
+after changing its pinned dependency.
+
+## Devfile environments
+
+`devfile.yaml` defines `install`, `build`, and `test` commands for IDEs that read
+devfiles (see [Devfile environments](docs/content/contributing/index.md#devfile-environments)).
+To run them by hand, for example when the IDE integration fails:
+
+<!-- doctest: illustrative reason="installs uv and packages from the network" -->
 ```bash
-source .venv/bin/activate
+uv sync --extra cdk --extra symbols
 ```
 
-Or use UV's built-in environment management:
+Integration tests and slow tests are skipped unless you ask for them:
 
+<!-- doctest: illustrative reason="runs this repository's tests, whose --run-integration option comes from the repository's own tests/conftest.py, so it needs a checkout of this repository" -->
 ```bash
-uv run <command>
+uv run pytest tests/integration --run-integration
+uv run pytest tests/integration/scanners --run-integration
+uv run pytest --run-slow
 ```
 
-### Option 2: Using Development Containers
+CI's unit-test step (`.github/actions/run-unit-tests/action.yml`) installs both extras,
+fails instead of skipping when a test cannot find its extra, and fails the run when total
+coverage is below 80%. To run the suite the way it does:
 
-If you're using an IDE that supports devfiles (like Eclipse Che, Red Hat OpenShift Dev Spaces, or other devfile-compatible environments), you can use the provided `devfile.yaml`:
-
-The devfile includes pre-configured commands:
-- `install`: Sets up UV and installs dependencies
-- `build`: Builds the project using UV
-- `test`: Runs the test suite
-
-This provides a consistent development environment across different platforms and IDEs.
-
-## Testing
-
-Run the test suite:
-
+<!-- doctest: illustrative reason="installs the extras from this repository's pyproject.toml and runs its test suite, so it needs a checkout of this repository" -->
 ```bash
-uv run pytest
+uv sync --extra cdk --extra symbols
+ASH_REQUIRE_CDK_EXTRA=1 ASH_REQUIRE_SYMBOLS_EXTRA=1 uv run pytest \
+  --cov=automated_security_helper --cov-config=.coveragerc \
+  --cov-report=term-missing --cov-fail-under=80
 ```
 
-Run specific test categories:
+The 80% threshold applies to the full suite only. Pass `pytest --cov` options to a partial
+run to see its coverage, but leave out `pytest --cov-fail-under`, or the run fails on code
+it did not exercise.
 
+## Pre-commit hooks
+
+`.pre-commit-config.yaml` runs these hooks:
+
+- `generate-schemas` regenerates the JSON schemas under `automated_security_helper/schemas/`.
+- `sync-cdk-extra-fallback` rewrites `_CDK_EXTRA_FALLBACK_REQUIREMENTS` in
+  `cdk_nag_scanner.py` from the `cdk` extra in `pyproject.toml`. It runs the script on
+  Python 3.13 with `uv run --no-project`, so it leaves your `.venv` and its extras alone.
+- `pretty-format-json` formats hand-written JSON.
+- `ruff-check` (with `--fix`) and `ruff-format`.
+- `commitizen` checks the commit message (commit-msg stage).
+- `ash` runs an ASH scan of the checkout, only when asked:
+  `uv run pre-commit run --hook-stage manual ash`.
+
+Install the hooks, the commit-message one included, and run them over the whole tree:
+
+<!-- doctest: illustrative reason="installs and runs this repository's pre-commit hooks, so it needs a checkout of this repository" -->
 ```bash
-# Unit tests
-uv run pytest tests/unit/ -v
-
-# Integration tests
-uv run pytest tests/integration/ -v
-
-# Scanner-specific integration tests
-uv run pytest tests/integration/scanners/ -v
+uv run pre-commit install --hook-type pre-commit --hook-type commit-msg
+uv run pre-commit run --all-files
 ```
+
+On a clean checkout the second command changes nothing. The JSON formatter skips files a
+tool writes or a check compares byte for byte: the agent plugin outputs and vendored
+schemas under `ash-agent-plugins/`, the synthesized CDK templates, the npm manifests and
+the snapshot files. Change those with the tool that owns them, for example
+`uv run --project ash-agent-plugins/agentic-coding/transpiler agentic-plugins build` for
+the plugin outputs.
 
 ## Snapshot tests
 
-What ASH prints and writes is pinned by snapshot tests, so a change to user-visible
-output fails CI until someone has looked at it and said why it changed.
+Moved to [Snapshot tests](docs/content/contributing/testing.md#snapshot-tests).
 
-### What is snapshotted
+## Release line
 
-- `tests/snapshot/`: syrupy snapshot tests of CLI output, reports and other rendered
-  output. Snapshots live next to their test module, in
-  `tests/snapshot/**/__snapshots__/<test_module>.ambr` for structured data and
-  `__snapshots__/<test_module>/<test_name>.<ext>` for whole rendered documents.
-- `.github/actions/validate-mcp/tool_surface.golden.json`: the MCP tool surface a client
-  sees, compared against the live server by the `validate-mcp` action.
+Moved to [The release line](docs/content/contributing/releases.md#the-release-line).
 
-The Snapshot-Update rule below also covers the other committed files that a generator
-writes in full and CI regenerates and compares: the JSON schemas in
-`automated_security_helper/schemas/*.json`, `docs/content/docs/cli-reference-generated.md`,
-and the MCP tool reference in
-`ash-agent-plugins/agentic-coding/transpiler/_base/references/tool-reference.md`. The full
-list, and why each candidate is in or out, is the `GOLDEN` table in
-`.github/scripts/check-snapshot-trailers.py`.
+## Release App setup
 
 ### Normalization
 
@@ -150,6 +170,7 @@ only after the test has been shown to differ between runs or between time zones 
 several times, and under `TZ=Pacific/Kiritimati` and `TZ=America/Adak`), opt in to
 masking for that test or module:
 
+<!-- doctest: illustrative reason="one line for a test module, which needs pytest imported and a test file to put it in" -->
 ```python
 pytestmark = pytest.mark.snapshot_masking(mask_instants=True, mask_durations=True)
 ```
@@ -175,6 +196,7 @@ timezone.
 
 1. Run the tests and read the diff syrupy prints:
 
+   <!-- doctest: illustrative reason="runs this repository's snapshot tests, so it needs a checkout of this repository" -->
    ```bash
    uv run pytest tests/snapshot
    ```
@@ -182,6 +204,7 @@ timezone.
 2. Decide whether the new output is what you intended. If it is not, fix the code.
 3. If it is, rewrite the snapshots for the tests you changed:
 
+   <!-- doctest: illustrative reason="rewrites this repository's snapshot files, so it needs a checkout of this repository" -->
    ```bash
    uv run pytest tests/snapshot/<area>/test_snapshot_<area>_<topic>.py -n 0 --snapshot-update
    ```
@@ -198,6 +221,7 @@ timezone.
 5. Commit the code change and its snapshots together, with a trailer saying why the
    output changed:
 
+   <!-- doctest: illustrative reason="commits the changes staged in a contributor's clone, and nothing is staged here" -->
    ```bash
    git commit --trailer "Snapshot-Update: the summary table now shows suppressed findings"
    ```
@@ -215,11 +239,11 @@ Then run `git push --force-with-lease`. Pull requests are squash-merged with eve
 message kept, and the check reads trailers from each commit's section of the squash
 message, so the trailer survives the merge.
 
-CI never passes `--snapshot-update`, and `tests/snapshot/conftest.py` refuses it when the
+CI never passes `pytest --snapshot-update`, and `tests/snapshot/conftest.py` refuses it when the
 `CI` or `GITHUB_ACTIONS` environment variable equals `true` (exactly that string, so
 `CI=1` does not trigger the refusal). `tests/snapshot/test_snapshot_policy.py` fails if
-any workflow, action, script or pytest configuration passes `--snapshot-update` or
-`--snapshot-warn-unused`. A missing snapshot fails.
+any workflow, action, script or pytest configuration passes `pytest --snapshot-update`
+or `pytest --snapshot-warn-unused`. A missing snapshot fails.
 
 ### Orphaned snapshots
 
@@ -230,7 +254,9 @@ its snapshot file, so `check-snapshot-trailers.py --orphans` (in CI, and in
 directory belongs to a `<test_module>.py` next to that directory, and that no
 `__snapshots__` directory is empty. When you rename a module, move its snapshots with it;
 when you delete one, delete its snapshots. Either change needs a `Snapshot-Update:`
-trailer like any other.
+trailer like any other. The check takes its list from git: tracked snapshots and untracked
+ones that are not ignored, so a snapshot not yet added is checked, and anything under an
+ignored directory, such as `tests/pytest-temp`, is not. It needs a git work tree.
 
 ### Output that differs by operating system
 
@@ -248,13 +274,13 @@ in-process, with only the runner process or the `nix develop` call replaced, und
 `tests/snapshot/container/`. What only a real runtime can produce (output from inside
 the image, a real container or Nix scan, the `./ash` and `ash_helpers.ps1` wrappers) is
 in `tests/snapshot/container/runtime/`, marked `container_runtime` or `nix_runtime`.
-`tests/conftest.py` deselects those unless `--run-container-snapshots` or
-`--run-nix-snapshots` is passed, which the scan-validation container legs and the Nix
-legs do after their scans. Keep such modules in `runtime/`: syrupy reads every file in a
+`tests/conftest.py` deselects those unless `pytest --run-container-snapshots` or
+`pytest --run-nix-snapshots` is passed, which the scan-validation container legs and the
+Nix legs do after their scans. Keep such modules in `runtime/`: syrupy reads every file in a
 `__snapshots__` directory once one test beside it runs, so a deselected module's
 snapshots next to collected ones would fail the default run as unused. To update them,
-build the image (or have Nix) and run the module with its flag, `-n 0` and
-`--snapshot-update`; see the module docstrings for the environment they read.
+build the image (or have Nix) and run the module with `pytest -n 0 --snapshot-update`
+and its flag; see the module docstrings for the environment they read.
 
 ## Development Commands
 
@@ -267,6 +293,7 @@ uv run ruff format .
 
 - Run a specific script:
 
+<!-- doctest: illustrative reason="runs ash from this repository's own environment, so it needs a checkout of this repository" -->
 ```bash
 uv run ash
 ```
@@ -280,6 +307,34 @@ Dependencies are managed in `pyproject.toml`. Key groups:
 
 Scanner tools (Bandit, Checkov, Semgrep) are managed via UV tool isolation at runtime — they're not project dependencies.
 
+### Pinned tool versions
+
+`automated_security_helper/utils/tool_downloads.py` pins every tool ASH provisions
+itself. The weekly ASH - Pinned Tool Versions workflow compares those pins with each
+upstream's latest release; to run the same check locally:
+
+<!-- doctest: illustrative reason="runs a script from this repository's scripts directory that asks GitHub for each tool's latest release" -->
+```bash
+uv run python scripts/check_pinned_tool_versions.py
+uv run python scripts/check_pinned_tool_versions.py --fail-on-outdated --markdown
+```
+
+For each pin that is behind it lists every value the bump has to change: the entries
+in `tool_downloads.py`, the Dockerfile ARG, and each tracked file that repeats one of
+the pin's digests, found with `git grep` (nix's SRI copies, a CI install check, test
+fixtures). A gem (cfn-nag, Bundler) is compared with the newest release the image's
+Ruby can run, read from the Dockerfile's `ruby=` apt pin; a newer release that needs
+a newer Ruby is named in the report but does not count as outdated.
+
+It exits 0 when nothing is behind, and also when a pin is behind but
+`check_pinned_tool_versions.py --fail-on-outdated` was not asked for. It exits 1 when a
+pin is behind with that flag or a Dockerfile apt pin is no longer installable, and
+2 when a lookup failed or the pins could not be read. GitHub allows 60 anonymous API
+requests an hour per address; set `GITHUB_TOKEN` or `GH_TOKEN` to lift that. A lookup
+GitHub refuses with 403 while the token is set is retried once without it, and GitHub's
+error message goes to stderr. The token is never printed, and it is sent across a
+redirect only to the same scheme, host and port.
+
 ## Troubleshooting
 
 If you encounter any issues:
@@ -292,6 +347,7 @@ python --version
 
 2. Try cleaning and rebuilding the environment:
 
+<!-- doctest: illustrative reason="removes and reinstalls this repository's virtual environment over the network, so it needs a checkout of this repository" -->
 ```bash
 rm -rf .venv
 uv sync
@@ -299,6 +355,7 @@ uv sync
 
 3. Update UV and dependencies:
 
+<!-- doctest: illustrative reason="updates uv itself over the network and upgrades this repository's dependencies" -->
 ```bash
 uv self update
 uv sync --upgrade
@@ -306,36 +363,17 @@ uv sync --upgrade
 
 4. If using a devfile-compatible IDE and encountering issues, try running the devfile commands manually:
 
+<!-- doctest: illustrative reason="downloads the uv installer over the network, then builds and tests this repository" -->
 ```bash
 # Install dependencies
-curl -LsSf https://astral.sh/uv/install.sh | sh && source $HOME/.cargo/env && uv sync
+curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR="$HOME/.local/bin" sh && export PATH="$HOME/.local/bin:$PATH" && uv sync
 
 # Build the project
-uv build
+export PATH="$HOME/.local/bin:$PATH" && uv build
 
 # Run tests
-uv run pytest
+export PATH="$HOME/.local/bin:$PATH" && uv run pytest
 ```
-
-### Migration Validation
-
-The project includes a migration validator to help diagnose UV-related issues:
-
-```bash
-# Check migration status
-uv run python -m automated_security_helper.utils.migration_validator
-
-# Get detailed JSON output for debugging
-uv run python -m automated_security_helper.utils.migration_validator --json
-```
-
-The validator checks:
-
-- UV installation and version compatibility
-- Project configuration (pyproject.toml) structure
-- Dependency resolution capability
-- CLI tool availability via UV tool run
-- Build system configuration
 
 ## Version Management
 
@@ -346,12 +384,13 @@ ASH uses [Semantic Versioning](https://semver.org/). The version is defined in `
 - `pyproject.toml` is the single source of truth for the version.
 - Documentation files that reference the version (README, install guides, etc.) have corresponding `.template` files containing `{{VERSION}}` placeholders.
 - The `scripts/version_bump.py` script updates `pyproject.toml` and regenerates all documentation from templates.
+- Text that is only true from a later release on goes in a version block of the template, `{{#after 3.7.1}}` ... `{{else}}` ... `{{/after}}`, each marker on its own line; `generate` keeps the first part when the version is after the one named and the `{{else}}` part (optional) otherwise. The docs publish on every push to `main`, so this is how a page can describe a feature `main` has without telling readers of the current release that it is theirs. A malformed or unclosed block stops `generate`.
 
 ### Commit Messages
 
 PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/) format. A required check ("Validate PR title") enforces this. Since PRs are squash-merged, the PR title becomes the commit message that drives changelog generation.
 
-```
+```text
 feat: add OpenGrep scanner support
 fix(detect-secrets): apply global_ignore_paths
 chore: bump dependencies
@@ -359,6 +398,19 @@ feat!: redesign plugin API (breaking change)
 ```
 
 A pre-commit hook (`commitizen`) also validates local commit messages.
+
+### The ASH scan of this repository
+
+ASH scans its own repository on every pull request, in two workflows:
+
+- "ash / SAST, SCA, and IaC Scan" (`.github/workflows/ash-repo-scan.yml`) is a required check. On a pull request it installs ASH, and the cfn-nag Gemfile it pins, from this repository at the pull request's base commit, for same-repository and fork pull requests alike. In the merge queue it installs from the branch the queue merges into (`merge_group.base_ref`), the default branch here. The job's first step resolves that ref to a commit, and every later step, the config fetch included, uses that commit, so a merge that lands mid-run cannot mix two versions of ASH or pair one version's ASH with another's config. A pull request is therefore never judged by the ASH it changes: a change that makes a scanner stop reporting, or the gate exit 0, has no effect on its own required check. On a pull request and in the merge queue the scan job also restores no cache (no uv cache, grype database or OpenGrep binary): another job running the pull request's code in the same cache scope could have written those entries. Each is downloaded and verified instead, which costs one uncached ASH install and one grype database download per run.
+- `ash (pull request head, informational only -- does not gate) / SAST, SCA, and IaC Scan` (`.github/workflows/ash-repo-scan-pr-head.yml`) runs the pull request's own ASH against the same tree. It is not a required check and must not be added to a ruleset. It posts no PR comment, publishes no JUnit check and uploads no SARIF, and the job that runs the pull request's ASH holds a read-only token, so neither its inputs nor its code can post a result under the required scan's name; its findings are in the job summary and in the run's `ash_output` artifact. (In the reusable workflow the scan job always holds `contents: read` only; the PR comment, the JUnit check and the SARIF upload run in a separate job, `Report ASH results`, which downloads the scan's artifact and runs nothing from it.) When you change ASH itself, this is the run that shows what your change does.
+
+The required check also reads its ASH config from the base commit, not from the pull request: `.ash/.ash.yaml` as of the pull request's base commit (in the merge queue, as of the branch the queue merges into) is fetched outside the checkout and passed as `--config`. Every tool config file that config names by a relative path (`scanners.<name>.options.config_file`, here `.ash/bandit.yaml`, `.ash/.checkov.yaml` and `.ash/.grype.yaml`), and opengrep's or semgrep's `config` when it names a rules file or directory, is read from the same commit, and the scan fails if that commit lacks one. The fetched copies sit outside the checkout, so they apply as operator files: ASH honors them where it refuses a tool config file inside the scanned tree, such as `.ash/.checkov.yaml`. Paths written inside them still resolve in the checkout, so a fetched checkov config whose `external-checks-dir` or `config-file` is relative, which would load code from the pull request's tree, fails the scan; use an absolute path outside the repository. A pull request therefore cannot change `.ash/.ash.yaml`, or the tool config files it names, for the check that gates it. Config edits in a pull request affect the required check only after they are merged; until then the informational check, which scans with the pull request's own config, shows their effect. What still comes from the pull request: its `.gitignore` and `.ignore` files, which shrink the set of files ASH scans; config files a scanner finds by name in the scanned tree when the config names none; and inline suppression markers such as `# nosec` and `# pragma: allowlist secret`. Review changes to those like any other change to the gate. The reusable workflow exposes this as the `config-ref` input, which other callers can set the same way. If the base commit has no file at the configured path, the required check fails rather than scanning with ASH's defaults; a caller whose first config is still in a pull request can set `config-ref-missing: defaults` for that pull request.
+
+Because the required check runs the base commit's ASH, a workflow change that depends on an ASH change in the same pull request can fail its own required check. A new tool does not: `ash-repo-scan.yml` passes `skip-unknown-tools: true`, so the scan job sets `ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip` and the base commit's ASH names and skips a `--tool` it has no plugin for (the base config cannot enable a scanner that ASH lacks), and the pull request's own ASH installs and runs the tool in the informational check. A base commit's ASH that predates the setting refuses the whole list instead; under the setting the workflow's install step installs each tool by its own call and skips the ones that ASH refuses as unknown, so the check passes with that ASH too. Other callers of `run-ash-security-scan.yml` keep the refusal unless they pass the input too. Anything else the base commit's ASH does not know yet, such as a new `ash` flag the workflow passes, still fails. Land that kind of change in two pull requests, the ASH change first and the workflow change that uses it after. The same split works against you when the ASH on `main` cannot scan this repository at all (it crashes, or a scanner always ends in ERROR): every pull request's required check and every merge-queue run uses that ASH, including the pull request that fixes it. The way out is to merge the fix as the repository role that the "Protect main" ruleset exempts from its required checks, which the note at the top of `ash-unified-ci.yml` describes; the informational check on the fix's pull request shows whether its own ASH scans the repository again.
+
+On `pull_request`, GitHub runs the workflow files from the pull request's merge commit, so a pull request that edits `ash-repo-scan.yml` or `run-ash-security-scan.yml` still changes its own gate. Review changes to `.github/workflows/` with that in mind; nothing inside a workflow file can prevent it. The control for that gap sits outside the workflow files: a repository ruleset's required workflow, which GitHub runs from a ref the ruleset pins rather than from the pull request.
 
 ### Releasing
 
@@ -374,9 +426,11 @@ After merging the release PR, a second workflow automatically:
 - Publishes a GitHub Release whose body is the version's `CHANGELOG.md` entry followed by GitHub's auto-generated notes
 - Updates the floating major tag for the released version -- `v3` for a 3.x release, `v4` for a 4.x one, creating it if it does not exist yet
 
+The documentation site is published by the `deploy-docs` job of `.github/workflows/ash-repo-docs.yml`, the only job there with `contents: write`, from every push to `main`. The release PR's merge publishes the release's docs that way. No tag push publishes them, and a hand-pushed release tag no longer republishes the site: the workflow has no tag trigger, and the job's `if:` admits only `refs/heads/main`. That holds for commits that carry the current workflow file. A tag pushed on an older commit runs that commit's copy, which still triggers on every tag, so tag creation and updates should be limited to the release path by a tag ruleset; nothing in a workflow file can cover those commits.
+
 #### Release App setup
 
-The release PR's required checks (`ash / SAST, SCA, and IaC Scan`, `Validate PR title`, `required-checks`) run on `pull_request`. When the PR is opened with the workflow's `GITHUB_TOKEN`, GitHub creates those runs in an approval-required state, and nothing starts until a maintainer with write access selects **Approve workflows to run** in the PR's merge box. The release PR says so in its description when that happens. To have the checks start on their own, the workflow opens the PR with a GitHub App token instead, which needs this one-time setup by a repository admin:
+The release PR's required checks ("ash / SAST, SCA, and IaC Scan", `Validate PR title`, `required-checks`) run on `pull_request`. When the PR is opened with the workflow's `GITHUB_TOKEN`, GitHub creates those runs in an approval-required state, and nothing starts until a maintainer with write access selects **Approve workflows to run** in the PR's merge box. The release PR says so in its description when that happens. To have the checks start on their own, the workflow opens the PR with a GitHub App token instead, which needs this one-time setup by a repository admin:
 
 1. Create a GitHub App owned by the organization. It needs no webhook and no callback URL.
 2. Repository permissions: **Pull requests: Read and write**. Metadata read is implicit; GitHub adds it automatically. No Contents permission, not even read, and nothing else. The branch push stays on `GITHUB_TOKEN`, so the App only opens the PR. The workflow requests exactly `pull-requests: write` when it mints the token, so the mint step fails if the App lacks it, and it would also fail if the workflow asked for a permission the App was not granted.
@@ -394,6 +448,7 @@ To confirm the setup, run the release workflow and check that the **Mint a GitHu
 
 ### Manual Version Bumping
 
+<!-- doctest: illustrative reason="bumps the version of this repository with commitizen, so it needs a checkout of this repository and its commit history" -->
 ```bash
 # Show current version
 uv run cz version --project
@@ -420,6 +475,7 @@ To cut 4.0.0 once v4 is on `main`: set `RELEASE_LINE` to `auto` in the change th
 
 Preview either line locally:
 
+<!-- doctest: illustrative reason="previews a version bump of this repository with commitizen, so it needs a checkout of this repository and its commit history" -->
 ```bash
 uv run cz bump --dry-run --changelog --increment MINOR   # what RELEASE_LINE 3.x produces when a major is detected
 uv run cz bump --dry-run --changelog                     # what RELEASE_LINE auto produces
@@ -431,15 +487,25 @@ When developing custom scanner plugins for ASH, follow these guidelines:
 
 ### Base Scanner Plugin
 
-All scanner plugins should inherit from `ScannerPluginBase` and implement the required methods:
+All scanner plugins should inherit from `ScannerPluginBase` and implement the required
+methods. The template below builds as written (a test executes it from this file):
 
 ```python
+from pathlib import Path
+from typing import List, Literal, Optional, Tuple
+
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
+from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
-from typing import Optional
+
+
+class MyCustomScannerConfig(ScannerPluginConfigBase):
+    """The `scanners.my-tool` section of the ASH config."""
+
+    name: str = "my-tool"
 
 
 @ash_scanner_plugin
@@ -447,10 +513,18 @@ class MyCustomScanner(ScannerPluginBase[MyCustomScannerConfig]):
     def model_post_init(self, context):
         # Initialize scanner properties
         self.command = "my-tool"
-        self.use_uv_tool = True  # Enable UV tool management if needed
         self.tool_type = "SAST"  # Scanner type
 
-        # Set up UV tool installation if using UV tool management
+        # use_uv_tool opts into the uv-managed tool path. The helpers below
+        # live on UVToolMixin (automated_security_helper/base/uv_tool_mixin.py),
+        # which every plugin inherits through PluginBase: the dependency check
+        # can then install the tool with `uv tool`, read its version, and run
+        # it through uv. Left False (the default), the scanner runs
+        # self.command straight from PATH as it is: nothing installs the tool,
+        # `ash dependencies install --tool my-tool` has no install route to it
+        # and exits 1 without the version check ever being asked, and
+        # validate_plugin_dependencies below must find the tool itself.
+        self.use_uv_tool = True
         if self.use_uv_tool:
             self._setup_uv_tool_install_commands()
             self.tool_version = self._get_uv_tool_version("my-tool")
@@ -458,18 +532,36 @@ class MyCustomScanner(ScannerPluginBase[MyCustomScannerConfig]):
         super().model_post_init(context)
 
     def validate_plugin_dependencies(self) -> bool:
-        # Implement validation logic
+        # Decide whether the tool can run (PATH lookup, version pin, ...).
         return True
 
-    def scan(self, target, target_type, global_ignore_paths=None, config=None):
-        # Implement scanning logic
-        pass
+    def _execute_scan(
+        self,
+        target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List[IgnorePathWithReason],
+    ) -> Tuple[List[str], Path, Optional[dict]]:
+        # Build the tool invocation; the base class's scan() template runs
+        # it, bounds it with the scan timeout, and reads results_file back.
+        # Scanners with their own flow (Python-API scanners) override scan()
+        # directly instead and keep a one-line _execute_scan stub.
+        results_file = self.results_dir.joinpath(target_type, "my_tool.sarif")
+        results_file.parent.mkdir(parents=True, exist_ok=True)
+        final_args = [
+            self.command,
+            "scan",
+            str(target),
+            "--output",
+            str(results_file),
+        ]
+        return final_args, results_file, None
 ```
 
 ### UV Tool Version Constraints (Optional)
 
 The `_get_tool_version_constraint()` method is **optional** and only needs to be implemented if your scanner requires specific version constraints for UV tool installation:
 
+<!-- doctest: illustrative reason="a method for a scanner plugin class, shown without the class around it" -->
 ```python
 def _get_tool_version_constraint(self) -> Optional[str]:
     """Get version constraint for tool installation.
@@ -505,10 +597,11 @@ When testing custom scanner plugins:
 1. Unit tests: test scanner logic in isolation
 2. Integration tests: test with actual tool execution
 
+<!-- doctest: illustrative reason="runs this repository's own unit and integration tests, so it needs a checkout of this repository" -->
 ```bash
 # Run scanner-specific unit tests
 uv run pytest tests/unit/plugin_modules/ -v
 
-# Run scanner integration tests
-uv run pytest tests/integration/scanners/ -v
+# Run scanner integration tests (skipped without --run-integration)
+uv run pytest tests/integration/scanners/ --run-integration -v
 ```

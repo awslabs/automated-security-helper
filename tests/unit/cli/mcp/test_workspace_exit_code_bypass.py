@@ -138,7 +138,13 @@ def _valid_workspace(root: Path) -> Path:
     return _workspace(root, ["api", "web"])
 
 
-def _patch_both(monkeypatch, defining_module, attribute: str, replacement) -> None:
+def _patch_both(
+    monkeypatch,
+    defining_module,
+    attribute: str,
+    replacement,
+    consumer: str = MODULE_UNDER_TEST,
+) -> None:
     """Replace *attribute* on its defining module and on the module under test.
 
     This package binds imported names both ways. ``cli/mcp_server.py`` imports
@@ -149,9 +155,18 @@ def _patch_both(monkeypatch, defining_module, attribute: str, replacement) -> No
     consuming module does nothing under the second. Doing both works under
     either, and leaves the assertion -- not the patch target -- deciding the
     outcome.
+
+    The consumer is imported BEFORE the defining module is patched. Imported
+    after, a consumer that binds the name at module scope -- the module under
+    test does -- would take the replacement as its import-time binding, the
+    patch below would record the replacement as the value to restore, and every
+    later test on that worker would read this test's error: one test's
+    resolution or execution failure would leak into unrelated cells under
+    xdist, whenever a patched test was the first on its worker to import the
+    module.
     """
+    module = importlib.import_module(consumer)
     monkeypatch.setattr(defining_module, attribute, replacement)
-    module = importlib.import_module(MODULE_UNDER_TEST)
     if hasattr(module, attribute):
         monkeypatch.setattr(module, attribute, replacement)
 
@@ -355,7 +370,7 @@ class TestExceptionToExitCodeMapping:
 
         assert response["success"] is False
         assert response["exit_code"] == int(WorkspaceExitCode.INVALID_PROJECT_CONFIG)
-        assert _documented(response["exit_code"]) == "invalid config"
+        assert _documented(response["exit_code"]) == "invalid config or refused input"
         assert "project 'api' has a bad config" in response["error"]
         assert no_cli_entry_point == []
 
@@ -452,3 +467,85 @@ class TestSuccessIsReportedAsSuccess:
         assert response["success"] is True
         assert response["exit_code"] == int(WorkspaceExitCode.SUCCESS)
         assert _documented(response["exit_code"]) == "success"
+
+
+# ---------------------------------------------------------------------------
+# 5. The dry run and the scan agree on an unreadable config
+# ---------------------------------------------------------------------------
+
+
+class TestAnUnreadableConfigIsOneRefusalFromEitherTool:
+    """An OSError escaping resolution is a config the resolver could
+    not read (the resolver refuses an unreadable workspace file, policy or
+    project folder itself, as a definition). The scan tool answers it with
+    exit 3; the dry run answered the same failure with exit 1, so a client
+    checking the plan before N repository scans read a different verdict than
+    the scan it was about to run."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("tool_name", TOOL_NAMES)
+    async def test_an_os_error_from_resolution_is_exit_3(
+        self, tmp_path, monkeypatch, tool_name
+    ):
+        workspace = _valid_workspace(tmp_path)
+
+        def raises(*args, **kwargs):
+            raise PermissionError("a project config the resolver could not read")
+
+        monkeypatch.setattr(
+            importlib.import_module(MODULE_UNDER_TEST), "_resolve", raises
+        )
+
+        response = await _call(_tool(tool_name), workspace_file=str(workspace))
+
+        assert response["success"] is False
+        assert response["exit_code"] == int(WorkspaceExitCode.INVALID_PROJECT_CONFIG)
+
+
+# ---------------------------------------------------------------------------
+# 6. The patch helper leaves no binding behind
+# ---------------------------------------------------------------------------
+
+
+def test_a_consumer_first_imported_under_the_patch_gets_the_original_back(
+    tmp_path, monkeypatch
+):
+    """The cross-test leak, made deterministic.
+
+    Under xdist, whichever test was first on its worker to import the module
+    under test did so inside ``_patch_both``. A consumer that binds the name at
+    module scope then took the replacement at import, the patch recorded it as
+    the value to restore, and every later test on the worker raised the first
+    test's error. Here a planted consumer that is not yet imported plays that
+    module: after the test's patches are undone it must hold the original.
+    """
+    import sys
+    import types
+
+    defining = types.ModuleType("leakprobe_defining")
+
+    def original():
+        return "original"
+
+    defining.target = original
+    monkeypatch.setitem(sys.modules, "leakprobe_defining", defining)
+    (tmp_path / "leakprobe_consumer.py").write_text(
+        "from leakprobe_defining import target\n", encoding="utf-8"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.delitem(sys.modules, "leakprobe_consumer", raising=False)
+
+    patches = pytest.MonkeyPatch()
+    try:
+        _patch_both(
+            patches, defining, "target", lambda: "replaced", "leakprobe_consumer"
+        )
+        assert sys.modules["leakprobe_consumer"].target() == "replaced"
+    finally:
+        patches.undo()
+
+    assert defining.target is original
+    assert sys.modules["leakprobe_consumer"].target is original, (
+        "the consumer kept the replacement after the patch was undone"
+    )
+    sys.modules.pop("leakprobe_consumer", None)

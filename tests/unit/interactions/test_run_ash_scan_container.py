@@ -80,7 +80,7 @@ def test_run_ash_container_basic(
     mock_get_host_gid.return_value = 1000
 
     # Mock subprocess_utils.find_executable
-    mock_find_executable.return_value = "/usr/bin/docker"
+    mock_find_executable.return_value = "/nonexistent/ash-test/docker"
 
     # Mock validate_path to return the path as-is
     mock_validate_path.return_value = "/test/source"
@@ -135,14 +135,20 @@ def test_run_ash_container_build_only(
     mock_get_host_uid,
     mock_run_command,
     mock_find_executable,
+    monkeypatch,
 ):
     """Test run_ash_container with build only."""
+    # Inside a GitHub Actions run, or a runner that mimics one, the layer-cache gate
+    # probes the runner with ``<runner> buildx version`` through run_command; without
+    # the token the gate returns before that probe, which is what this test assumes.
+    monkeypatch.delenv("ACTIONS_RUNTIME_TOKEN", raising=False)
+
     # Mock get_host_uid and get_host_gid
     mock_get_host_uid.return_value = 1000
     mock_get_host_gid.return_value = 1000
 
     # Mock subprocess_utils.find_executable
-    mock_find_executable.return_value = "/usr/bin/docker"
+    mock_find_executable.return_value = "/nonexistent/ash-test/docker"
 
     # Use context manager to patch run_cmd_direct
     with patch(
@@ -194,7 +200,7 @@ def test_run_ash_container_run_only(
     mock_get_host_gid.return_value = 1000
 
     # Mock subprocess_utils.find_executable
-    mock_find_executable.return_value = "/usr/bin/docker"
+    mock_find_executable.return_value = "/nonexistent/ash-test/docker"
 
     # Mock validate_path to return the path as-is
     mock_validate_path.return_value = "/test/source"

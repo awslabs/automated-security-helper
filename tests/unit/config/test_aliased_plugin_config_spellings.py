@@ -24,6 +24,11 @@ kept its defaults. Two things went wrong from there:
 Every case is parametrized over the aliased fields read from the segments'
 ``model_fields``, not a list written here, so a newly aliased plugin is covered
 without editing this file.
+
+The probe is a key the plugin declares, with a value other than its default: a
+reporter's ``extension``, a scanner's ``options.severity_threshold``. Neither an
+option nor a section key the plugin does not declare can be used: both refuse
+the config.
 """
 
 from pathlib import Path
@@ -104,6 +109,24 @@ def _runtime_lookup_name(plugin_type: str, config_cls: type) -> str:
     raise AssertionError(f"no registered {plugin_type} uses {config_cls.__name__}")
 
 
+#: Per segment: the probe as YAML lines at section level, its override path
+#: below the section, and how to read it back, with three distinct values.
+PROBES = {
+    "scanners": (
+        "    options:\n      severity_threshold: {value}\n",
+        "options.severity_threshold",
+        lambda resolved: resolved["options"]["severity_threshold"],
+        ("LOW", "HIGH", "CRITICAL"),
+    ),
+    "reporters": (
+        "    extension: {value}\n",
+        "extension",
+        lambda resolved: resolved["extension"],
+        ("from-the-file", "alias", "from-the-override"),
+    ),
+}
+
+
 def _load(tmp_path: Path, yaml_text: str) -> AshConfig:
     path = tmp_path / ".ash.yaml"
     path.write_text(yaml_text, encoding="utf-8")
@@ -131,16 +154,11 @@ def test_either_spelling_loads_and_resolves_the_same(
     tmp_path, segment, plugin_type, field_name, alias, config_cls, spelling
 ):
     key = alias if spelling == "alias" else field_name
+    lines, _path, read, (value, _, _) = PROBES[segment]
     config = _load(
         tmp_path,
-        f"""
-project_name: probe
-{segment}:
-  {key}:
-    enabled: false
-    options:
-      probe_marker: from-the-file
-""",
+        f"project_name: probe\n{segment}:\n  {key}:\n    enabled: false\n"
+        + lines.format(value=value),
     )
     field = getattr(getattr(config, segment), field_name)
     assert isinstance(field, config_cls)
@@ -150,7 +168,7 @@ project_name: probe
     assert not (getattr(config, segment).__pydantic_extra__ or {})
     resolved = _resolved(config, plugin_type, field_name, alias, config_cls)
     assert resolved["enabled"] is False
-    assert resolved["options"]["probe_marker"] == "from-the-file"
+    assert read(resolved) == value
 
 
 @pytest.mark.parametrize("spelling", ["alias", "field_name"])
@@ -185,23 +203,17 @@ project_name: probe
 def test_both_spellings_merge_with_the_alias_winning(
     tmp_path, segment, plugin_type, field_name, alias, config_cls
 ):
+    lines, _path, read, (by_field_name, by_alias, _) = PROBES[segment]
     config = _load(
         tmp_path,
-        f"""
-project_name: probe
-{segment}:
-  {field_name}:
-    enabled: false
-    options:
-      probe_marker: field-name
-  {alias}:
-    options:
-      probe_marker: alias
-""",
+        f"project_name: probe\n{segment}:\n  {field_name}:\n    enabled: false\n"
+        + lines.format(value=by_field_name)
+        + f"  {alias}:\n"
+        + lines.format(value=by_alias),
     )
     resolved = _resolved(config, plugin_type, field_name, alias, config_cls)
     # Set by both: the documented spelling wins.
-    assert resolved["options"]["probe_marker"] == "alias"
+    assert read(resolved) == by_alias
     # Set only under the field name: kept.
     assert resolved["enabled"] is False
     assert not (getattr(config, segment).__pydantic_extra__ or {})
@@ -223,11 +235,12 @@ project_name: probe
     enabled: false
 """,
     )
+    _lines, path, read, (_, _, override) = PROBES[segment]
     overridden = apply_config_overrides(
-        config, [f"{segment}.{alias}.options.probe_marker=from-the-override"]
+        config, [f"{segment}.{alias}.{path}={override}"]
     )
     resolved = _resolved(overridden, plugin_type, field_name, alias, config_cls)
-    assert resolved["options"]["probe_marker"] == "from-the-override"
+    assert read(resolved) == override
     assert resolved["enabled"] is False
 
 
@@ -260,7 +273,9 @@ def test_an_invalid_value_is_rejected_when_the_config_loads(
     and the bad value was ignored (or failed later, when the plugin was built).
     """
     key = alias if spelling == "alias" else field_name
-    with pytest.raises(ValidationError) as excinfo:
+    # from_file describes the model's refusal field by field (pydantic's own
+    # text quotes every input); the refusal is still the model's.
+    with pytest.raises(ASHConfigValidationError) as excinfo:
         _load(
             tmp_path,
             f"""
@@ -270,6 +285,7 @@ project_name: probe
     enabled: not-a-bool
 """,
         )
+    assert isinstance(excinfo.value.validation_error, ValidationError)
     assert f"{segment}.{alias}.enabled" in str(excinfo.value)
 
 

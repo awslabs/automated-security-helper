@@ -29,7 +29,8 @@ def mock_plugin_context(tmp_path):
 # H5: trivy_repo_scanner severity flag
 # ---------------------------------------------------------------------------
 class TestTrivySeverityFlag:
-    """--severity-threshold does not exist in Trivy. Must use --severity with an inclusion list."""
+    """--severity-threshold does not exist in Trivy, and --severity is not passed: the
+    threshold is ASH's, applied after the scan."""
 
     @pytest.fixture
     def _make_scanner(self, mock_plugin_context):
@@ -69,31 +70,14 @@ class TestTrivySeverityFlag:
         assert "--severity" not in ea
         assert "--severity-threshold" not in ea
 
-    @pytest.mark.parametrize(
-        "threshold,expected_value",
-        [
-            ("LOW", "LOW,MEDIUM,HIGH,CRITICAL"),
-            ("MEDIUM", "MEDIUM,HIGH,CRITICAL"),
-            ("HIGH", "HIGH,CRITICAL"),
-            ("CRITICAL", "CRITICAL"),
-        ],
-    )
-    def test_severity_inclusion_list(self, _make_scanner, threshold, expected_value):
+    @pytest.mark.parametrize("threshold", ["LOW", "MEDIUM", "HIGH", "CRITICAL"])
+    def test_a_threshold_is_never_a_trivy_filter(self, _make_scanner, threshold):
+        """ASH applies the threshold after the scan, as for every scanner: trivy
+        --severity would drop the lower findings before they were reported."""
         scanner = _make_scanner(threshold)
         ea = self._extra_args_dict(scanner)
-        # Must use --severity, not --severity-threshold
-        assert "--severity-threshold" not in ea, (
-            "--severity-threshold is not a valid Trivy flag"
-        )
-        assert "--severity" in ea
-        assert ea["--severity"] == expected_value
-
-    def test_no_lowercase_conversion(self, _make_scanner):
-        """Trivy expects uppercase severity names."""
-        scanner = _make_scanner("HIGH")
-        ea = self._extra_args_dict(scanner)
-        val = ea["--severity"]
-        assert val == val.upper()
+        assert "--severity" not in ea
+        assert "--severity-threshold" not in ea
 
 
 # ---------------------------------------------------------------------------

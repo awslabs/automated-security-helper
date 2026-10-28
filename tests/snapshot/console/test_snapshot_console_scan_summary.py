@@ -80,11 +80,17 @@ def finished_clock(monkeypatch):
 
 
 @pytest.fixture
-def layout(tmp_path):
-    """A scanned tree with ASH's default output directory inside it."""
+def layout(tmp_path, monkeypatch):
+    """A scanned tree with ASH's default output directory inside it, run from its root.
+
+    The working directory is the tree, as when ``ash`` runs at a repository's root:
+    report paths are printed relative to the working directory, and a temporary
+    directory's absolute path would make the snapshot depend on its length.
+    """
     source = tmp_path / "repo"
     output = source / ".ash" / "ash_output"
     output.mkdir(parents=True)
+    monkeypatch.chdir(source)
     return source, output
 
 
@@ -146,8 +152,9 @@ def _project(key: str, status: ProjectRunStatus, **fields) -> WorkspaceProjectRe
 def test_workspace_summary(layout, finished_clock, text_snapshot, monkeypatch):
     """One line per project, in workspace order, for every outcome a project can have.
 
-    Rendered unwrapped: the workspace and output lines print absolute paths, because
-    ``ScanOptions`` makes ``output_dir`` absolute, so their length depends on the machine.
+    Rendered unwrapped, so a path outside the working directory, which prints
+    absolute, could not wrap at a machine-dependent column. Here the layout runs from
+    the tree's root, so every path prints relative to it.
     """
     console = recording_console(WIDE, soft_wrap=True)
     route_rich_print(monkeypatch, console)

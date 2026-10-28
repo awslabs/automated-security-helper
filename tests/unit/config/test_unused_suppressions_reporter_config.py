@@ -28,6 +28,7 @@ import pytest
 from pydantic import ValidationError
 
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
     UnusedSuppressionsReporterConfig,
 )
@@ -62,7 +63,8 @@ def _resolved(config: AshConfig) -> dict:
 def test_its_output_format_option_is_validated_at_load(tmp_path, key):
     """Before the field was declared, this config loaded and the value sat
     unvalidated in the segment's extras until the reporter was built."""
-    with pytest.raises(ValidationError) as excinfo:
+    # from_file describes the model's refusal (pydantic's text quotes inputs).
+    with pytest.raises(ASHConfigValidationError) as excinfo:
         _load(
             tmp_path,
             f"""
@@ -73,6 +75,7 @@ reporters:
       output_format: 5
 """,
         )
+    assert isinstance(excinfo.value.validation_error, ValidationError)
     assert "reporters.unused-suppressions.options.output_format" in str(excinfo.value)
 
 

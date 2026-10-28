@@ -865,6 +865,8 @@ def generate_html_report(
     html.append("</body>")
     html.append("</html>")
 
-    # Write the HTML file
-    with open(output_path, mode="w", encoding="utf-8") as f:
+    # Write the HTML file; below an output directory, never through a link there.
+    from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
+    with open_for_write(output_path) as f:
         f.write("\n".join(html))

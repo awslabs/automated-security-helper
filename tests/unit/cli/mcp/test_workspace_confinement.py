@@ -75,6 +75,18 @@ def _workspace(root: Path, folders, name: str = "dev.code-workspace") -> Path:
     return path
 
 
+def _central_policy(tmp_path: Path) -> Path:
+    """A policy file outside every scan root, as an operator keeps one centrally."""
+    policy = tmp_path / "central" / "policy.yaml"
+    policy.parent.mkdir(parents=True)
+    # 'max_severity_threshold', which is what WorkspacePolicyConfig calls the
+    # ceiling. The project-level field is named 'severity_threshold' and the
+    # policy schema forbids extras, so the wrong one is a hard refusal rather
+    # than an ignored key.
+    policy.write_text("workspace:\n  max_severity_threshold: HIGH\n", encoding="utf-8")
+    return policy
+
+
 def _project(root: Path, relative: str) -> Path:
     project = root / relative
     project.mkdir(parents=True, exist_ok=True)
@@ -323,23 +335,17 @@ class TestTheWorkspaceFileIsNotConfined:
 
         The policy file is the other config input the tool accepts, and it is
         the one an operator is most likely to keep centrally -- one policy file
-        governing several checkouts is the point of having it. Confining it
-        would make that arrangement impossible.
+        governing several checkouts is the point of having it. Confining it to
+        the scan roots would make that arrangement impossible. The operator sets
+        its directory aside with ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` instead, which
+        is what makes a policy the client names the operator's.
         """
         root = tmp_path / "work"
         _project(root, "repos/api")
         workspace = _workspace(root, ["repos/api"])
-        policy = tmp_path / "central" / "policy.yaml"
-        policy.parent.mkdir(parents=True)
-        # 'max_severity_threshold', which is what WorkspacePolicyConfig calls
-        # the ceiling. The project-level field is named 'severity_threshold' and
-        # the policy schema forbids extras, so the wrong one is a hard refusal
-        # rather than an ignored key.
-        policy.write_text(
-            "workspace:\n  max_severity_threshold: HIGH\n",
-            encoding="utf-8",
-        )
+        policy = _central_policy(tmp_path)
         monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(root / "repos"))
+        monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(policy.parent))
 
         assert validate_scan_target(policy.parent) is not None
 
@@ -351,6 +357,42 @@ class TestTheWorkspaceFileIsNotConfined:
             f"the workspace policy file's location was treated as a scan "
             f"target: {response.get('error')!r}"
         )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("where", ["central", "beside the definition"])
+    async def test_a_policy_the_operator_did_not_set_aside_is_refused(
+        self, tmp_path, monkeypatch, isolated_registry, executions, where
+    ):
+        """A policy outside ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` is the client's choice.
+
+        Named by the client, or found beside a definition the client named, the
+        file is not one the operator chose: the operator let the server scan the
+        checkouts, not take their config as its own. A policy sets suppressions
+        and ignore paths for every project, so it is refused, as a delivered one
+        is.
+        """
+        root = tmp_path / "work"
+        _project(root, "repos/api")
+        workspace = _workspace(root, ["repos/api"])
+        if where == "central":
+            policy = _central_policy(tmp_path)
+            named = {"workspace_config": str(policy)}
+        else:
+            (workspace.parent / "ash-workspace.yaml").write_text(
+                "workspace:\n  max_severity_threshold: HIGH\n", encoding="utf-8"
+            )
+            named = {}
+        monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(root))
+        monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
+
+        response = await _tool("mcp_scan_workspace")(
+            workspace_file=str(workspace), **named
+        )
+
+        assert response["success"] is False
+        assert "workspace policy file" in response["error"], response["error"]
+        assert "ASH_MCP_ALLOWED_CONFIG_ROOTS" in response["error"]
+        assert executions == []
 
 
 # ---------------------------------------------------------------------------

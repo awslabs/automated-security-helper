@@ -56,6 +56,9 @@ from typing import Any, Dict, List, Tuple
 
 import pytest
 
+from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.client_config_policy import rules_from
+
 from automated_security_helper.core.enums import (
     ExecutionPhase,
     ExecutionStrategy,
@@ -173,6 +176,7 @@ def _opts(tmp_path: Path) -> ScanOptions:
         # and project_timeout and breaks two unrelated entries in the table.
         config=str(root / ".ash.yaml"),
         config_overrides=["global_settings.severity_threshold=HIGH"],
+        client_overrides=True,
         offline=True,
         strategy=ExecutionStrategy.SEQUENTIAL,
         scanners=["bandit", "semgrep"],
@@ -195,7 +199,26 @@ def _opts(tmp_path: Path) -> ScanOptions:
         mode=RunMode.precommit,
         ash_plugin_modules=["my_plugins"],
         allow_missing_projects=True,
+        client_config_policy=_RULES,
+        # The registered profile the MCP server passes when a client patched the
+        # session's copy, which ``config`` then names. Not read here, only carried.
+        trusted_config_path=str(tmp_path / "operator" / "profile.yaml"),
+        # A remote MCP caller's run: which project configs resolve no !ENV.
+        remote_client=True,
+        # The session's gate on where each project's config may resolve to.
+        config_base_gate=_GATE,
+        keep_previous_results=True,
+        selection_origin="mcp",
     )
+
+
+#: Non-None, so the entry discriminates against the dataclass default.
+_RULES = rules_from(AshConfig())
+
+
+def _GATE(path: Path) -> bool:
+    """A stand-in session gate; only its identity is compared."""
+    return True
 
 
 def _expected(tmp_path: Path) -> Dict[str, Any]:
@@ -213,6 +236,7 @@ def _expected(tmp_path: Path) -> Dict[str, Any]:
         "excluded_scanners": ("cdk-nag",),
         "output_formats": ("csv", "html"),
         "config_overrides": ("global_settings.severity_threshold=HIGH",),
+        "client_overrides": True,
         "ash_plugin_modules": ("my_plugins",),
         "strategy": "sequential",
         "offline": True,
@@ -237,6 +261,15 @@ def _expected(tmp_path: Path) -> Dict[str, Any]:
         "project_timeout": 90.0,
         "allow_missing_projects": True,
         "default_config_path": str(tmp_path / "work" / ".ash.yaml"),
+        "trusted_config_path": str(tmp_path / "operator" / "profile.yaml"),
+        "client_config_rules": _RULES,
+        "remote_client": True,
+        "config_base_gate": _GATE,
+        # True only from the MCP workspace tool; the CLI leaves it False.
+        "keep_previous_results": True,
+        # "mcp" only from the MCP workspace tool; the CLI leaves it "cli". It decides
+        # whether a SKIPPED row and the selection refusals name flags or parameters.
+        "selection_origin": "mcp",
     }
 
 
@@ -503,19 +536,19 @@ class TestTheSchedulingKnobsComeFromTheWorkspaceRoot:
         assert settings.max_parallel_projects == 4
         assert settings.project_timeout is None
 
-    def test_an_unreadable_config_falls_back_rather_than_raising(
+    def test_a_config_that_cannot_be_loaded_refuses_with_the_config_exit_code(
         self, tmp_path, monkeypatch
     ):
-        """These are scheduling knobs, so a bad config must not refuse the scan.
-
-        ``_resolve_workspace_execution_config`` warns and uses the defaults. The
-        builder inherits that, and the MCP path depends on it: raising here would
-        be an exception with no workspace-level meaning, which the exit-code
-        mapping would have to report as an internal error for what is really a
-        typo in a config file.
+        """The file was meant to configure the run, so the builder refuses it, as
+        the same file refuses a single-directory scan, rather than scanning with
+        the defaults. The MCP path reports the refusal with the code the CLI exits
+        with for an invalid configuration, 3, not as an internal error.
 
         CPU count patched for the same reason as the test above.
         """
+        from automated_security_helper.cli.mcp.workspace import _exit_code_for
+        from automated_security_helper.core.exceptions import ASHConfigValidationError
+
         monkeypatch.setattr("os.cpu_count", lambda: 8)
         root = tmp_path / "broken"
         root.mkdir()
@@ -524,10 +557,10 @@ class TestTheSchedulingKnobsComeFromTheWorkspaceRoot:
         )
         opts = _opts(tmp_path).model_copy(update={"source_dir": root, "config": None})
 
-        settings = _builder()(opts)
+        with pytest.raises(ASHConfigValidationError, match=r"\.ash\.yaml") as refused:
+            _builder()(opts)
 
-        assert settings.max_parallel_projects == 4
-        assert settings.project_timeout is None
+        assert _exit_code_for(refused.value) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -662,3 +695,88 @@ class TestBothCallersUseTheSharedBuilder:
             "the MCP workspace tool built its own ProjectScanSettings instead "
             "of calling build_project_scan_settings"
         )
+
+
+def test_an_mcp_workspace_scans_overrides_are_marked_as_the_clients(tmp_path):
+    # A tool path a client's config_overrides name is not the operator's
+    # (config/path_trust.py), so the MCP path marks them.
+    from automated_security_helper.workspace.plan import WorkspacePlan
+
+    module = importlib.import_module(MODULE_UNDER_TEST)
+    # Only workspace_root is read; the rest of a plan is beside the point here.
+    plan = WorkspacePlan.model_construct(workspace_root=str(tmp_path))
+    opts = module._scan_options(
+        plan,
+        output_dir=None,
+        config_overrides=["scanners.checkov.options.config_file=/x.yaml"],
+        scanners=None,
+        excluded_scanners=None,
+        offline=False,
+        allow_missing_projects=False,
+    )
+    assert opts.client_overrides is True
+    none = module._scan_options(
+        plan,
+        output_dir=None,
+        config_overrides=None,
+        scanners=None,
+        excluded_scanners=None,
+        offline=False,
+        allow_missing_projects=False,
+    )
+    assert none.client_overrides is False
+
+
+class TestEachCallerNamesItsSelectionOrigin:
+    """The MCP tool's options say "mcp"; options built without an origin say "cli".
+
+    The origin decides whether a SKIPPED row and the workspace's selection refusals
+    name the CLI's flags or the MCP tool's parameters. A tool that left it at the
+    default would tell its client about flags the client never passed.
+    """
+
+    @staticmethod
+    def _record_options(monkeypatch, tmp_path: Path) -> List[Any]:
+        output_dir = tmp_path / "sentinel-output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sentinel = ProjectScanSettings(output_dir=output_dir)
+        seen: List[Any] = []
+
+        def _fake_builder(opts):
+            seen.append(opts)
+            return sentinel
+
+        monkeypatch.setattr(
+            importlib.import_module(RUN_ASH_SCAN_MODULE),
+            "build_project_scan_settings",
+            _fake_builder,
+        )
+        mcp_module = importlib.import_module(MODULE_UNDER_TEST)
+        if hasattr(mcp_module, "build_project_scan_settings"):
+            monkeypatch.setattr(
+                mcp_module, "build_project_scan_settings", _fake_builder
+            )
+        return seen
+
+    @pytest.mark.asyncio
+    async def test_the_mcp_workspace_scan_says_mcp(self, tmp_path, monkeypatch):
+        workspace_file, _plan = TestBothCallersUseTheSharedBuilder._plan(tmp_path)
+        seen = self._record_options(monkeypatch, tmp_path)
+        TestBothCallersUseTheSharedBuilder._capture_executions(monkeypatch)
+
+        module = importlib.import_module(MODULE_UNDER_TEST)
+        response = await module.mcp_scan_workspace(
+            workspace_file=str(workspace_file),
+            scanners=["bandit", "semgrep"],
+            excluded_scanners=["semgrep"],
+        )
+
+        assert response["success"] is True, response.get("error")
+        assert len(seen) == 1, seen
+        assert getattr(seen[0], "selection_origin", None) == "mcp", seen[0]
+
+    def test_options_built_without_an_origin_say_cli(self, tmp_path):
+        """What the CLI builds: it names no origin, so it gets the flags' wording."""
+        opts = ScanOptions(source_dir=tmp_path, output_dir=tmp_path / "out")
+
+        assert getattr(opts, "selection_origin", None) == "cli"

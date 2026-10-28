@@ -3,7 +3,9 @@
 
 """Regression test: ``Invoke-ASH`` without ``-OCIRunner`` discovers a runner on PATH.
 
-``-OCIRunner`` is a ``[string]`` parameter defaulting to ``$env:ASH_OCI_RUNNER``.
+``-OCIRunner`` is a ``[string]`` parameter defaulting to ``$env:OCI_RUNNER`` (it read
+``$env:ASH_OCI_RUNNER`` when this test was written; see
+``test_powershell_wrapper_matches_ash.py`` for that rename).
 With that variable unset PowerShell binds ``""``, not ``$null``, so the
 ``$null -ne $OCIRunner`` test always chose the one-element list ``@("")``,
 ``Get-Command`` rejected the empty name, and every call that did not name a runner
@@ -24,22 +26,22 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.pwsh_env import inherited_env, scratch_home
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HELPERS = REPO_ROOT / "utils" / "ash_helpers.ps1"
 PWSH = shutil.which("pwsh")
 
-_IN_CI = "true" in (os.environ.get("CI"), os.environ.get("GITHUB_ACTIONS"))
-
 
 @pytest.fixture(autouse=True)
-def _require_pwsh():
+def _require_pwsh(in_ci: bool):
     """Skip only on a developer machine without pwsh; in CI a missing pwsh is a failure.
 
     Every hosted runner image ships pwsh, so its absence in CI means the runner
     changed and this regression test would otherwise stop running unnoticed.
     """
     if PWSH is None:
-        if _IN_CI:
+        if in_ci:
             pytest.fail("pwsh is not on PATH; CI runners must run this regression test")
         pytest.skip("pwsh is not on PATH (local run only; CI fails instead)")
 
@@ -47,11 +49,16 @@ def _require_pwsh():
 def _invoke(tmp_path: Path, env: dict[str, str]) -> subprocess.CompletedProcess:
     assert PWSH is not None
     (tmp_path / "src").mkdir(exist_ok=True)
+    # A HOME and XDG directories of the test's own, with telemetry and update checks
+    # off: pwsh writes caches under them and phones home otherwise.
+    env = {**env, **scratch_home(tmp_path)}
     # 'Stop' so that an error which sets no $LASTEXITCODE (a parameter that fails
     # validation, say) ends the process non-zero instead of falling through to
-    # `exit 0`, which would read as a pass.
+    # `exit 0`, which would read as a pass. The HOME line is what
+    # test_pwsh_runs_with_a_home_of_the_tests_own reads.
     script = (
-        f"$ErrorActionPreference = 'Stop'; . '{HELPERS.as_posix()}'; "
+        f"$ErrorActionPreference = 'Stop'; Write-Output \"pwsh HOME: $HOME\"; "
+        f". '{HELPERS.as_posix()}'; "
         "Invoke-ASH -NoBuild -NoRun -SourceDir src -OutputDir out -Verbose; "
         "exit [int]$LASTEXITCODE"
     )
@@ -69,7 +76,13 @@ def _invoke(tmp_path: Path, env: dict[str, str]) -> subprocess.CompletedProcess:
 
 @pytest.fixture
 def path_with_only_docker(tmp_path) -> str:
-    """A PATH whose only OCI runner is a stand-in ``docker`` that does nothing."""
+    """A PATH whose only OCI runner is a stand-in ``docker`` that does nothing.
+
+    pwsh's own directory is not on it on POSIX, because it can hold a real runner
+    (/usr/bin does on many hosts), and a wrapper that ignored the runner a test named
+    would then find that one. A link to pwsh in a directory of its own stands in. The
+    fixture fails rather than return a PATH on which any real runner resolves.
+    """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     if os.name == "nt":
@@ -80,12 +93,39 @@ def path_with_only_docker(tmp_path) -> str:
         runner.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         runner.chmod(0o755)
     assert PWSH is not None
-    return os.pathsep.join([bin_dir.as_posix(), Path(PWSH).resolve().parent.as_posix()])
+    if os.name == "nt":
+        pwsh_dir = Path(PWSH).resolve().parent
+    else:
+        pwsh_dir = tmp_path / "pwsh-bin"
+        pwsh_dir.mkdir()
+        (pwsh_dir / "pwsh").symlink_to(Path(PWSH).resolve())
+    path = os.pathsep.join([bin_dir.as_posix(), pwsh_dir.as_posix()])
+    for name in ("finch", "docker", "nerdctl", "podman"):
+        found = shutil.which(name, path=path)
+        if found is not None and Path(found).parent != bin_dir:
+            pytest.fail(f"a real {name} is reachable on the test PATH: {found}")
+    return path
 
 
-def test_unset_ash_oci_runner_falls_back_to_discovery(tmp_path, path_with_only_docker):
-    env = {k: v for k, v in os.environ.items() if k not in ("ASH_OCI_RUNNER", "PATH")}
-    env["PATH"] = path_with_only_docker
+def _env(path: str, **overrides: str) -> dict[str, str]:
+    """The developer's environment without the runner variables or a shell startup
+    file, on ``path``."""
+    return {
+        **inherited_env("OCI_RUNNER", "ASH_OCI_RUNNER", "PATH"),
+        "PATH": path,
+        **overrides,
+    }
+
+
+def test_pwsh_runs_with_a_home_of_the_tests_own(tmp_path, path_with_only_docker):
+    result = _invoke(tmp_path, _env(path_with_only_docker))
+    assert f"pwsh HOME: {tmp_path / 'pwsh-home'}" in result.stdout.splitlines(), (
+        result.stdout
+    )
+
+
+def test_unset_oci_runner_falls_back_to_discovery(tmp_path, path_with_only_docker):
+    env = _env(path_with_only_docker)
 
     result = _invoke(tmp_path, env)
 
@@ -94,10 +134,8 @@ def test_unset_ash_oci_runner_falls_back_to_discovery(tmp_path, path_with_only_d
     assert "Resolved OCI_RUNNER to: docker" in result.stdout + result.stderr
 
 
-def test_empty_ash_oci_runner_falls_back_to_discovery(tmp_path, path_with_only_docker):
-    env = {k: v for k, v in os.environ.items() if k != "PATH"}
-    env["ASH_OCI_RUNNER"] = ""
-    env["PATH"] = path_with_only_docker
+def test_empty_oci_runner_falls_back_to_discovery(tmp_path, path_with_only_docker):
+    env = _env(path_with_only_docker, OCI_RUNNER="")
 
     result = _invoke(tmp_path, env)
 
@@ -108,9 +146,7 @@ def test_empty_ash_oci_runner_falls_back_to_discovery(tmp_path, path_with_only_d
 def test_a_named_runner_that_is_absent_is_still_refused(
     tmp_path, path_with_only_docker
 ):
-    env = {k: v for k, v in os.environ.items() if k != "PATH"}
-    env["ASH_OCI_RUNNER"] = "no-such-oci-runner"
-    env["PATH"] = path_with_only_docker
+    env = _env(path_with_only_docker, OCI_RUNNER="no-such-oci-runner")
 
     result = _invoke(tmp_path, env)
 

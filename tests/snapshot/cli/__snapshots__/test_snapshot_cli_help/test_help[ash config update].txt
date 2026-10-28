@@ -6,22 +6,31 @@
  This command applies changes to an ASH configuration file using the same syntax as
  --config-overrides.
 
+ Nothing is written, and the command exits 3, when the file is not a valid
+ configuration or a --set cannot be applied. A file that uses extends or
+ patch, or reads the environment (${VAR} or !ENV references), or a TOML
+ file, is refused with exit 1: rewriting it would lose what those express.
+
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   config_path      <str>  The path to the configuration file to update. By default, ASH looks    │
-│                           for the following config file names in the source directory of a scan: │
-│                           ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml',          │
-│                           'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml',    │
-│                           '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml',              │
-│                           'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the         │
-│                           tool.ash table of pyproject.toml at the root; the first found is used. │
+│   config_path      <str>  The configuration file, as a positional argument. Same as --config,    │
+│                           which is preferred; when both are given they must name the same file.  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --set                        <str>  Configuration modifications specified as key-value pairs     │
-│                                     (e.g., 'global_settings.severity_threshold=LOW'). Supports   │
-│                                     lists with , append mode with key+=, and JSON syntax.        │
-│ --verbose    --no-verbose           Enable verbose logging [default: no-verbose]                 │
-│ --debug      --no-debug             Enable debug logging [default: no-debug]                     │
-│ --color      --no-color             Enable/disable colorized output [default: color]             │
-│ --dry-run    --no-dry-run           Show changes without writing to file [default: no-dry-run]   │
-│ --help                              Show this message and exit.                                  │
+│ --config   -c                  <str>  The path to the configuration file. By default, the config │
+│                                       a scan of the current directory would use: ['.ash.yml',    │
+│                                       '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml',           │
+│                                       'ash.json'] (each at the root, then in .ash/), then        │
+│                                       ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml',               │
+│                                       '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml',    │
+│                                       'ashrc.json'] at the root, then the tool.ash table of      │
+│                                       pyproject.toml at the root; the first found is used.       │
+│                                       [env var: ASH_CONFIG]                                      │
+│ --set                          <str>  Configuration modifications specified as key-value pairs   │
+│                                       (e.g., 'global_settings.severity_threshold=LOW'). Supports │
+│                                       lists with , append mode with key+=, and JSON syntax.      │
+│ --verbose  -v  --no-verbose           Enable verbose logging [default: no-verbose]               │
+│ --debug    -d  --no-debug             Enable debug logging [default: no-debug]                   │
+│ --color        --no-color             Enable/disable colorized output [default: color]           │
+│ --dry-run      --no-dry-run           Show changes without writing to file [default: no-dry-run] │
+│ --help                                Show this message and exit.                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

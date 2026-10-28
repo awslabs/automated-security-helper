@@ -4,14 +4,20 @@ from datetime import datetime, timezone
 import json
 import logging
 import os
-from pydantic import Field
+from pydantic import Field, model_validator
 import boto3
 import botocore.exceptions
 
 from typing import Annotated, Literal, TYPE_CHECKING
 
+from automated_security_helper.utils.error_text import error_text
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
+    MAX_RETRIES,
+    MAX_RETRY_DELAY_SECONDS,
+    check_retry_delays,
+    report_missing_setting,
+    reporter_client_config,
     retry_with_backoff,
 )
 
@@ -58,6 +64,7 @@ class CloudWatchLogsReporterConfigOptions(ReporterOptionsBase):
     max_retries: Annotated[
         int,
         Field(
+            le=MAX_RETRIES,
             default=3,
             description="Maximum number of retry attempts for CloudWatch API calls",
         ),
@@ -65,6 +72,7 @@ class CloudWatchLogsReporterConfigOptions(ReporterOptionsBase):
     base_delay: Annotated[
         float,
         Field(
+            le=MAX_RETRY_DELAY_SECONDS,
             default=1.0,
             description="Base delay in seconds between retry attempts",
         ),
@@ -72,10 +80,15 @@ class CloudWatchLogsReporterConfigOptions(ReporterOptionsBase):
     max_delay: Annotated[
         float,
         Field(
+            le=MAX_RETRY_DELAY_SECONDS,
             default=60.0,
             description="Maximum delay in seconds between retry attempts",
         ),
     ] = 60.0
+
+    @model_validator(mode="after")
+    def _retry_delays_are_bounded(self):
+        return check_retry_delays(self)
 
 
 class CloudWatchLogsReporterConfig(ReporterPluginConfigBase):
@@ -93,19 +106,23 @@ class CloudWatchLogsReporterConfig(ReporterPluginConfigBase):
             description="File extension for CloudWatch Logs output files",
         ),
     ] = "cwlog.json"
+    # Off by default: this reporter sends findings to an AWS service with the
+    # operator's credentials, so only the operator's config turns it on.
     enabled: Annotated[
         bool,
         Field(
-            default=True,
+            default=False,
             description="Whether the CloudWatch Logs reporter is enabled",
         ),
-    ] = True
+    ] = False
+    # A factory, so the environment defaults are read when the config is built.
     options: Annotated[
         CloudWatchLogsReporterConfigOptions,
         Field(
+            default_factory=CloudWatchLogsReporterConfigOptions,
             description="Configuration options for CloudWatch Logs reporter",
         ),
-    ] = CloudWatchLogsReporterConfigOptions()
+    ]
 
 
 @ash_reporter_plugin
@@ -140,6 +157,17 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
     """
 
     workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
+    # Sends findings to AWS with the host's credentials.
+    sends_off_host = True
+    destination_options = (
+        "aws_region",
+        "log_group_name",
+        "log_stream_name",
+        # How long it keeps calling CloudWatch Logs with the operator's credentials.
+        "max_retries",
+        "base_delay",
+        "max_delay",
+    )
 
     def model_post_init(self, context):
         if self.config is None:
@@ -149,18 +177,28 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
     def validate_plugin_dependencies(self) -> bool:
         """Validate reporter configuration and requirements."""
         self.dependencies_satisfied = False
-        if (
-            self.config.options.aws_region is None
-            or self.config.options.log_group_name is None
-        ):
+        missing = False
+        if self.config.options.aws_region is None:
+            report_missing_setting(
+                self.config.name, "aws_region", ("AWS_REGION", "AWS_DEFAULT_REGION")
+            )
+            missing = True
+        if self.config.options.log_group_name is None:
+            report_missing_setting(
+                self.config.name, "log_group_name", ("ASH_CLOUDWATCH_LOG_GROUP_NAME",)
+            )
+            missing = True
+        if missing:
             return self.dependencies_satisfied
         try:
             sts_client = boto3.client("sts", region_name=self.config.options.aws_region)
             caller_id = sts_client.get_caller_identity()
             self.dependencies_satisfied = "Account" in caller_id
         except Exception as e:
+            # error_text with the config's environment values: botocore's
+            # exceptions name the region, group or stream they were given.
             self._plugin_log(
-                f"Error when calling STS: {e}",
+                f"Error when calling STS: {error_text(e, self._environment_values())}",
                 level=logging.WARNING,
                 target_type="source",
                 append_to_stream="stderr",
@@ -181,8 +219,17 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
         if isinstance(self.config, dict):
             self.config = CloudWatchLogsReporterConfig.model_validate(self.config)
 
-        # Create CloudWatch Logs client
-        cwlogs_client = boto3.client("logs", region_name=self.config.options.aws_region)
+        # Create CloudWatch Logs client. The calls below repeat a failure
+        # themselves (retry_with_backoff), so the client makes one attempt per
+        # call: botocore does not resend inside the reporter's retries. The
+        # reporter's own retries still repeat a read timeout, a closed
+        # connection and a 5xx answer, which can come after PutLogEvents was
+        # accepted, so an event can be written up to max_retries + 1 times.
+        cwlogs_client = boto3.client(
+            "logs",
+            region_name=self.config.options.aws_region,
+            config=reporter_client_config(),
+        )
 
         # Create log stream with retry logic
         self._create_log_stream_with_retry(cwlogs_client)
@@ -193,8 +240,11 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
             "message": output,
         }
 
+        # The destination is named by its options, not their values, which a
+        # config file can read from the environment.
         ASH_LOGGER.verbose(
-            f"Publishing event to CloudWatch Logs log group {self.config.options.log_group_name}@{self.config.options.aws_region}",
+            "Publishing event to CloudWatch Logs, to the log group and region in "
+            "the reporter's log_group_name and aws_region options",
         )
         ASH_LOGGER.verbose(output)
 
@@ -208,12 +258,16 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
             )
             return json.dumps({"message": output_dict, "response": resp}, default=str)
         except Exception as e:
+            # Redacted once, for the line and for the text returned as the
+            # report, which ReportPhase writes to a file.
+            described = error_text(e, self._environment_values())
             self._plugin_log(
-                f"Error when publishing results to CloudWatch Logs after retries: {e}",
+                "Error when publishing results to CloudWatch Logs after retries: "
+                f"{described}",
                 level=logging.WARNING,
                 append_to_stream="stderr",
             )
-            return str(e)
+            return described
 
     def _create_log_stream_with_retry(self, cwlogs_client):
         """Create log stream with retry logic."""
@@ -238,18 +292,22 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
                 e.response.get("Error", {}).get("Code")
                 == "ResourceAlreadyExistsException"
             ):
+                # Redacted: the stream name is configured, and ash.log keeps
+                # DEBUG lines under --debug.
                 ASH_LOGGER.debug(
-                    f"Log stream already exists: {self.config.options.log_stream_name}"
+                    "The log stream the log_stream_name option names already exists"
                 )
             else:
                 self._plugin_log(
-                    f"Error when creating log stream: {e}",
+                    "Error when creating log stream: "
+                    f"{error_text(e, self._environment_values())}",
                     level=logging.WARNING,
                     append_to_stream="stderr",
                 )
         except Exception as e:
             self._plugin_log(
-                f"Error when creating log stream: {e}",
+                "Error when creating log stream: "
+                f"{error_text(e, self._environment_values())}",
                 level=logging.WARNING,
                 append_to_stream="stderr",
             )

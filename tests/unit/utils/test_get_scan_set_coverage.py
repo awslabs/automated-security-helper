@@ -146,15 +146,16 @@ def ash_records_stay_off_stdout(caplog):
     land on stdout.
 
     Whether the leak is *visible* turns on two further process-globals this test
-    cannot see. ``cli/mcp/__init__.py`` sets ``ASH_LOG_TO_STDERR=1`` and never
-    restores it, after which every later ``get_logger`` builds a stderr Console
-    and the leaked handler is harmless; and ``cli/main.py``'s
-    ``reset_logging_config`` clears the handler list outright. Both happen to sit
-    between the contaminator and this test in serial collection order, which is
-    why the suite is green with ``-n0`` and green in most CI cells. Under xdist's
-    ``--dist load`` the worker packing decides which of the adder, the
-    stderr-flipper and the remover share a process with this test, so one commit
-    passed seventeen of eighteen matrix cells and failed the eighteenth.
+    cannot see. ``cli/mcp/__init__.py`` restores ``ASH_LOG_TO_STDERR`` when the
+    command returns; left set, every later ``get_logger`` would build a stderr
+    Console and the leaked handler would be harmless.
+    And ``cli/main.py``'s ``reset_logging_config`` clears the handler
+    list outright. Both happened to sit between the contaminator and this test in
+    serial collection order, which is why the suite was green with ``-n0`` and
+    green in most CI cells. Under xdist's ``--dist load`` the worker packing
+    decided which of the adder, the stderr-flipper and the remover shared a
+    process with this test, so one commit passed seventeen of eighteen matrix
+    cells and failed the eighteenth.
 
     What this fixture deliberately does not do. It does not reset logging for the
     suite. A blanket autouse reset would also silence the next test that depends
@@ -249,7 +250,8 @@ def test_debug_echo_only_logs_when_debug_is_enabled():
         logger.debug.assert_not_called()
 
         assert debug_echo("loud", debug=True) == "loud"
-        logger.debug.assert_called_once_with("loud")
+        # With markup off: the message is the caller's text, often a path.
+        logger.debug.assert_called_once_with("loud", extra={"markup": False})
 
 
 # ---------------------------------------------------------------------------
@@ -537,9 +539,41 @@ def _completed(returncode=0, stdout=""):
 
 def test_git_repository_root_returns_the_resolved_toplevel(tmp_path):
     with patch.object(
-        gss.subprocess, "run", return_value=_completed(0, f"{tmp_path}\n")
+        gss.subprocess,
+        "run",
+        return_value=_completed(0, os.fsencode(f"{tmp_path}\n")),
     ):
         assert git_repository_root(tmp_path) == tmp_path.resolve()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Windows drops a trailing space from a name"
+)
+def test_git_repository_root_removes_only_the_newline(tmp_path):
+    """A root whose name ends in a space keeps the space."""
+    root = tmp_path / "repo "
+    root.mkdir()
+    with patch.object(
+        gss.subprocess, "run", return_value=_completed(0, os.fsencode(f"{root}\n"))
+    ):
+        assert git_repository_root(tmp_path) == root.resolve()
+
+
+@pytest.mark.parametrize(
+    ("platform", "output", "line"),
+    [
+        ("linux", b"/repo\n", "/repo"),
+        ("linux", b"/repo\r\n", "/repo\r"),
+        ("linux", b"/repo \n", "/repo "),
+        ("win32", b"C:/repo\r\n", "C:/repo"),
+        ("win32", b"C:/repo\n", "C:/repo"),
+        ("linux", b"/repo", "/repo"),
+    ],
+)
+def test_a_git_path_line_loses_only_its_line_ending(platform, output, line):
+    """A carriage return is a line ending only where no file name holds one."""
+    with patch.object(gss.sys, "platform", platform):
+        assert gss._git_path_line(output) == line
 
 
 @pytest.mark.parametrize(
@@ -556,14 +590,53 @@ def test_git_repository_root_returns_none_when_git_cannot_run(tmp_path, exc):
         assert git_repository_root(tmp_path) is None
 
 
+def test_git_is_resolved_to_an_absolute_path_on_path(tmp_path, monkeypatch):
+    from automated_security_helper.utils import subprocess_utils
+
+    bin_dir = tmp_path / "usr" / "bin"
+    bin_dir.mkdir(parents=True)
+    git = bin_dir / ("git.exe" if sys.platform == "win32" else "git")
+    git.write_text("#!/bin/sh\nexit 0\n")
+    git.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir))
+    monkeypatch.setattr(
+        subprocess_utils, "path_independent_dirs", lambda: [tmp_path / "ash-bin"]
+    )
+    subprocess_utils.clear_find_executable_cache()
+    try:
+        assert gss._git_executable() == str(git)
+    finally:
+        subprocess_utils.clear_find_executable_cache()
+
+
+def test_git_repository_root_runs_git_by_its_resolved_path(tmp_path, monkeypatch):
+    """Not by name: on Windows a name is looked for in the working directory first."""
+    monkeypatch.setattr(gss, "_git_executable", lambda: "/opt/git/bin/git")
+    with patch.object(
+        gss.subprocess, "run", return_value=_completed(0, f"{tmp_path}\n")
+    ) as run:
+        git_repository_root(tmp_path)
+    assert run.call_args.args[0][0] == "/opt/git/bin/git"
+
+
+def test_git_repository_root_runs_nothing_when_git_is_not_found(tmp_path, monkeypatch):
+    monkeypatch.setattr(gss, "_git_executable", lambda: None)
+    with patch.object(gss.subprocess, "run") as run:
+        assert git_repository_root(tmp_path) is None
+    run.assert_not_called()
+
+
 def test_git_repository_root_returns_none_on_a_nonzero_exit(tmp_path):
     with patch.object(gss.subprocess, "run", return_value=_completed(128, "")):
         assert git_repository_root(tmp_path) is None
 
 
-def test_git_repository_root_returns_none_on_empty_output(tmp_path):
-    """rc==0 with nothing on stdout is not a repository root."""
-    with patch.object(gss.subprocess, "run", return_value=_completed(0, "  \n")):
+@pytest.mark.parametrize("stdout", [b"", b"\n", b"  \n", b"relative/dir\n"])
+def test_git_repository_root_returns_none_unless_git_printed_an_absolute_path(
+    tmp_path, stdout
+):
+    """rc==0 with no absolute path on stdout is not a repository root."""
+    with patch.object(gss.subprocess, "run", return_value=_completed(0, stdout)):
         assert git_repository_root(tmp_path) is None
 
 
@@ -577,20 +650,42 @@ def test_git_repository_root_returns_none_on_empty_output(tmp_path):
     ["origin/main; rm -rf x", "$(whoami)", "ref with spaces", "back`tick`", ""],
 )
 def test_get_changed_files_rejects_a_ref_that_fails_the_allowlist(bad_ref):
-    """An unsafe ref falls back to a full scan rather than reaching subprocess."""
+    """An unsafe ref is refused with an error and never reaches subprocess."""
     with patch.object(gss.subprocess, "run") as run:
-        assert get_changed_files(base_ref=bad_ref) is None
+        with pytest.raises(gss.InvalidBaseRefError):
+            get_changed_files(base_ref=bad_ref)
 
     run.assert_not_called()
 
 
 def test_get_changed_files_accepts_a_conventional_ref_and_parses_the_diff(tmp_path):
-    with patch.object(
-        gss.subprocess, "run", return_value=_completed(0, "a/b.py\n\nc.py\n")
+    # git runs by the absolute path _git_executable resolves, never the bare name.
+    resolved_git = "/opt/resolved/bin/git"
+    with (
+        patch.object(gss, "_git_executable", return_value=resolved_git),
+        patch.object(
+            gss.subprocess, "run", return_value=_completed(0, b"a/b.py\0 c.py\0")
+        ) as run,
     ):
         changed = get_changed_files(base_ref="origin/main", cwd=tmp_path)
 
-    assert changed == [Path("a/b.py"), Path("c.py")]
+    # git_argv's options come right after git, then the diff's own, and the
+    # trailing "--" that keeps git reading the range only as revisions.
+    assert run.call_args.args[0] == [
+        resolved_git,
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "core.quotepath=false",
+        "diff",
+        "--name-only",
+        "-z",
+        "origin/main...HEAD",
+        "--",
+    ]
+    assert changed == [Path("a/b.py"), Path(" c.py")]
 
 
 def test_get_changed_files_returns_none_when_git_is_absent():
@@ -681,7 +776,7 @@ def test_scan_set_writes_both_report_files_and_creates_the_output_directory(tmp_
     (source / "app.py").write_text("a = 1\n")
     output = tmp_path / "nested" / "out"
 
-    result = scan_set(source=str(source), output=str(output))
+    result = scan_set(source=str(source), output=str(output), write_lists=True)
 
     assert output.is_dir()
     assert (output / IGNORE_REPORT_NAME).is_file()
@@ -691,8 +786,30 @@ def test_scan_set_writes_both_report_files_and_creates_the_output_directory(tmp_
     assert {Path(p).name for p in result} == {"app.py"}
 
 
-def test_scan_set_reuses_previously_written_report_files_without_rewalking(tmp_path):
-    """Both artifacts present means the walk is skipped and the cache is trusted."""
+def test_scan_set_reuses_the_report_files_its_run_wrote_without_rewalking(tmp_path):
+    """Both artifacts written by this run means the walk is skipped and they are
+    read back as written."""
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "real.py").write_text("r = 1\n")
+    output = tmp_path / "out"
+    run_id = gss.new_run_id()
+    written = scan_set(source=str(source), output=str(output), run_id=run_id)
+    ignore_report = (output / IGNORE_REPORT_NAME).read_text()
+
+    with patch.object(
+        gss, "_collect_ignorefiles_and_all_files", side_effect=AssertionError("walked")
+    ):
+        result = scan_set(source=str(source), output=str(output), run_id=run_id)
+
+    assert result == written
+    # The artifacts are not rewritten when they are read back.
+    assert (output / IGNORE_REPORT_NAME).read_text() == ignore_report
+
+
+def test_scan_set_does_not_trust_report_files_no_record_of_its_run_names(tmp_path):
+    """Both artifacts present, from an earlier run or a commit, are not read: the
+    walk runs and its result replaces them."""
     source = tmp_path / "src"
     source.mkdir()
     (source / "real.py").write_text("r = 1\n")
@@ -702,32 +819,30 @@ def test_scan_set_reuses_previously_written_report_files_without_rewalking(tmp_p
     cached_file = str(source / "from-cache.py")
     (output / SCAN_SET_NAME).write_text(f"{cached_file}\n")
 
-    with patch.object(
-        gss, "_collect_ignorefiles_and_all_files", side_effect=AssertionError("walked")
-    ):
-        result = scan_set(source=str(source), output=str(output))
+    result = scan_set(source=str(source), output=str(output), run_id=gss.new_run_id())
 
-    assert result == [cached_file]
-    # The cached artifacts are not overwritten with freshly computed content.
-    assert (output / IGNORE_REPORT_NAME).read_text() == "######### CACHED #########\n"
+    assert {Path(p).name for p in result} == {"real.py"}
+    assert "from-cache.py" not in (output / SCAN_SET_NAME).read_text()
 
 
-def test_scan_set_regenerates_the_scan_set_when_only_the_ignore_report_is_cached(
-    tmp_path,
-):
+def test_scan_set_replaces_an_ignore_report_left_without_a_scan_set(tmp_path):
+    """An ignore report with no scan-set list beside it, and no record, is not read:
+    the walk runs, and the run's own pair replaces it."""
     source = tmp_path / "src"
     source.mkdir()
     (source / "real.py").write_text("r = 1\n")
     output = tmp_path / "out"
     output.mkdir()
-    (output / IGNORE_REPORT_NAME).write_text(
-        "######### START CONTENTS: ASH_INCLUSIONS #########\n"
-    )
+    planted = "######### START CONTENTS: PLANTED #########\n"
+    (output / IGNORE_REPORT_NAME).write_text(planted)
 
-    result = scan_set(source=str(source), output=str(output))
+    result = scan_set(source=str(source), output=str(output), run_id=gss.new_run_id())
 
     assert {Path(p).name for p in result} == {"real.py"}
-    assert (output / SCAN_SET_NAME).is_file()
+    report = (output / IGNORE_REPORT_NAME).read_text()
+    assert "PLANTED" not in report
+    assert "ASH_INCLUSIONS" in report
+    assert (output / SCAN_SET_NAME).read_text() == "\n".join(result)
 
 
 def test_scan_set_prints_each_selected_file_when_asked(tmp_path, capsys):

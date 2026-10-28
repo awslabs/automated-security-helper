@@ -45,7 +45,11 @@ def _make_opts(tmp_path, *, fail_on_findings=None, mode_str="container"):
 
 
 def _write_config(tmp_path, *, fail_on_findings: bool) -> Path:
-    config_path = tmp_path / ".ash.yaml"
+    # Inside the source directory: container mode refuses a --config outside
+    # it (the mounts are /src and /out only), and these cells measure the
+    # host-read race, not that refusal.
+    (tmp_path / "src").mkdir(parents=True, exist_ok=True)
+    config_path = tmp_path / "src" / ".ash.yaml"
     config_path.write_text(
         f"fail_on_findings: {'true' if fail_on_findings else 'false'}\n",
         encoding="utf-8",
@@ -80,6 +84,7 @@ class TestContainerReceivesResolvedFailOnFindings:
         results_file = opts.output_dir / "ash_aggregated_results.json"
 
         captured_kwargs: dict = {}
+        read_back = MagicMock()
 
         def fake_run_ash_container(**kwargs):
             captured_kwargs.update(kwargs)
@@ -88,6 +93,13 @@ class TestContainerReceivesResolvedFailOnFindings:
             # the test would be indistinguishable from one left by an earlier run. A
             # real container writes it while running, which is what this models.
             results_file.write_text('{"sarif": null, "scanners": []}', encoding="utf-8")
+            # With the marker the in-container run writes when it completes.
+            read_back.validation_checkpoints = [
+                {
+                    "type": "run_completed",
+                    "metadata": {"run_id": kwargs["outer_run_id"]},
+                }
+            ]
             return fake_result
 
         with (
@@ -97,7 +109,7 @@ class TestContainerReceivesResolvedFailOnFindings:
             ),
             patch(
                 "automated_security_helper.interactions.run_ash_scan.AshAggregatedResults.model_validate_json",
-                return_value=MagicMock(),
+                return_value=read_back,
             ),
         ):
             _run_container_mode(opts, MagicMock(), resolved_fail_on_findings=resolved)

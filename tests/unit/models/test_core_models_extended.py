@@ -148,7 +148,7 @@ def test_suppression_model_invalid_expiration_format():
             expiration="01/01/2025",  # Wrong format
         )
 
-    assert "Invalid expiration date format" in str(excinfo.value)
+    assert "Invalid expiration date format. Use YYYY-MM-DD" in str(excinfo.value)
 
 
 def test_suppression_model_past_expiration():

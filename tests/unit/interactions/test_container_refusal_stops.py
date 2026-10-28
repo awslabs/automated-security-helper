@@ -52,14 +52,16 @@ def runtime(monkeypatch, tmp_path) -> Dict[str, Any]:
 
     monkeypatch.setattr(subprocess_utils, "get_host_uid", lambda: 1000)
     monkeypatch.setattr(subprocess_utils, "get_host_gid", lambda: 1000)
-    monkeypatch.setattr(rac, "_find_runner", lambda _name: "/usr/bin/docker")
-    monkeypatch.setattr(rac, "get_ash_revision", lambda: "LOCAL")
+    monkeypatch.setattr(
+        rac, "_find_runner", lambda _name: "/nonexistent/ash-test/docker"
+    )
+    monkeypatch.setattr(rac, "get_ash_revision", lambda quiet=False: "LOCAL")
     monkeypatch.setattr(rac, "_find_dockerfile", lambda _rev: dockerfile)
 
     def fake_build(**_kwargs):
         seen["build"] += 1
 
-    def fake_execute(cmd, debug=False):
+    def fake_execute(cmd, debug=False, env=None):
         seen["executed"] += 1
         return create_completed_process(args=list(cmd), returncode=0)
 
@@ -89,7 +91,9 @@ class TestARefusalEndsTheScan:
     def test_non_numeric_uid(self, runtime):
         result = CliRunner().invoke(app, [*SCAN, "--container-uid", "root"])
 
-        _assert_stopped_after_refusal(result, "Container UID must be a numeric value")
+        _assert_stopped_after_refusal(
+            result, "Container UID must be a numeric value", exit_code=3
+        )
 
     def test_unsafe_revision(self, runtime):
         result = CliRunner().invoke(

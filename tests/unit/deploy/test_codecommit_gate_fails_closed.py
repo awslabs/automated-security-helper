@@ -39,6 +39,14 @@ from typing import Any, Dict, List
 
 import pytest
 
+from tests.unit.deploy.buildspec_extraction import (
+    GATE_HANDLER_MARKER,
+    heredoc_body,
+    joined_buildspec_document,
+    sole_command_containing,
+    templates_with_joined_buildspec_marker,
+)
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 GATE_PATH = (
     REPO_ROOT
@@ -82,6 +90,8 @@ def test_the_scan_argv_forces_incomplete_scanners_to_fail(gate, monkeypatch, tmp
     # value is not asserted here -- this test is about argv -- but a stub that
     # refused the keyword would fail on the signature rather than on the property.
     def _fake_run(argv, cwd=None, env=None):
+        if list(argv) == ["ash", "scan", "--help"]:
+            return SimpleNamespace(returncode=0, stdout=SCAN_HELP, stderr="")
         captured.append(list(argv))
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -121,17 +131,26 @@ def _resolve_scan_params(argv: list[str]) -> dict[str, Any]:
     return scan_command.make_context("scan", argv[2:], resilient_parsing=False).params
 
 
+#: What the gate's probe of ``ash scan --help`` is answered with: an ASH that has
+#: the completeness option. test_codecommit_gate_completeness_probe.py covers the
+#: other answers.
+SCAN_HELP = "  --fail-on-incomplete-scanners / --no-fail-on-incomplete-scanners\n"
+
+
 def _capture_argv(gate, monkeypatch, tmp_path) -> list[list[str]]:
-    """Point the gate's subprocess runner at a list, and return that list."""
+    """Point the gate's subprocess runner at a list, and return that list.
+
+    The help probe is answered and not recorded: it is not a scan.
+    """
     captured: list[list[str]] = []
-    monkeypatch.setattr(
-        gate,
-        "_run",
-        lambda argv, cwd=None, env=None: (
-            captured.append(list(argv))
-            or SimpleNamespace(returncode=0, stdout="", stderr="")
-        ),
-    )
+
+    def _fake_run(argv, cwd=None, env=None):
+        if list(argv) == ["ash", "scan", "--help"]:
+            return SimpleNamespace(returncode=0, stdout=SCAN_HELP, stderr="")
+        captured.append(list(argv))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(gate, "_run", _fake_run)
     monkeypatch.setattr(gate, "WORK_ROOT", tmp_path / "ash-gate")
     return captured
 
@@ -504,10 +523,11 @@ def test_a_reserved_option_would_really_have_narrowed_the_scan(
 
     A refusal is only worth its cost to an operator if the token it refuses would have changed
     what ASH does. Each case here is resolved through the real CLI, so the assertion is on the
-    value ASH would have used rather than on a token being present in a list. ``ash scan`` sets
-    ignore_unknown_options, so a spelling ASH does not declare leaves the parameter at its
-    default and these assertions fail -- which is what makes this a control and not a
-    restatement.
+    value ASH would have used rather than on a token being present in a list. A spelling ASH
+    does not declare is a usage error, so resolving it raises and the case fails -- which is
+    what makes this a control and not a restatement. (While ``ash scan`` set
+    ignore_unknown_options, such a spelling left the parameter at its default, and the
+    assertion failed instead.)
 
     The last two cases are why ``-c`` is matched by prefix rather than by equality: ``click``
     resolves ``-c/tmp/none.yaml`` to the same value as ``-c /tmp/none.yaml``, and no amount of
@@ -731,6 +751,14 @@ def test_a_refused_extra_arg_reaches_the_pull_request_as_error_and_revokes(
                 "supports an approval"
             ),
         ),
+        (
+            5,
+            "REVOKE",
+            (
+                "exit 5 is ASH refusing its command line (ASH_EXIT_USAGE_ERROR): "
+                "nothing was scanned, so nothing supports an approval"
+            ),
+        ),
         (70, "REVOKE", "an unrecognised failure is not evidence of cleanliness"),
     ],
 )
@@ -760,6 +788,74 @@ def test_a_non_pass_outcome_never_leaves_the_state_untouched(
         "findings left the approval state untouched; an approval granted on an earlier clean "
         "commit therefore survives on code the gate has just judged unclean"
     )
+
+
+def test_a_usage_error_says_to_check_the_extra_args(gate, monkeypatch, tmp_path):
+    """Exit 5 is ASH refusing the command line, and the gate's own options are fixed.
+
+    ASH releases after 3.7.1 exit 5 for an option or value they do not accept. Every
+    option this gate passes is one it owns, so the token that turned a pull request's
+    scan into exit 5 is almost always in ASH_SCAN_EXTRA_ARGS, and every pull request
+    then reports an error until it is removed. The comment has to say where to look;
+    "exited 5" alone sends the operator to the Lambda logs for a deployment setting.
+    """
+    client = _drive_handler(gate, monkeypatch, tmp_path, 5)
+
+    assert [call["approvalState"] for call in client.approval_calls] == ["REVOKE"]
+    body = client.comments[0]["content"]
+    assert "usage error" in body, body
+    assert "ash_scan_extra_args" in body and "ASH_SCAN_EXTRA_ARGS" in body, body
+    assert getattr(gate, "EXIT_USAGE_ERROR", None) == 5
+
+
+def _deployed_cdk_gate_handlers(tmp_path) -> dict[str, ModuleType]:
+    """The CDK gate handler as each committed template deploys it, imported as a module.
+
+    Read from the image build's `cat > ash-src/ash_gate_handler.py <<'ASH_CDK_EOF'`
+    heredoc in the synthesized templates, not sliced out of the TypeScript: the
+    template is what an adopter deploys, and the IaC drift gate holds it equal to a
+    fresh synth. The quoted heredoc writes its body byte for byte, so the module
+    imported here is the file the image carries. Importing it only imports boto3; no
+    client is created until handler() runs.
+    """
+    handlers = {}
+    for name, template in templates_with_joined_buildspec_marker(
+        GATE_HANDLER_MARKER
+    ).items():
+        document = joined_buildspec_document(template, GATE_HANDLER_MARKER)
+        command = sole_command_containing(
+            document, "build", "cat > ash-src/ash_gate_handler.py"
+        )
+        module_path = tmp_path / name / "ash_gate_handler.py"
+        module_path.parent.mkdir()
+        module_path.write_text(
+            heredoc_body(command, delimiter="ASH_CDK_EOF"), encoding="utf-8"
+        )
+        spec = importlib.util.spec_from_file_location(
+            f"_cdk_gate_handler_{name}", module_path
+        )
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        assert callable(getattr(module, "_verdict", None)), f"{name}: no _verdict"
+        handlers[name] = module
+    return handlers
+
+
+def test_the_cdk_gate_names_a_usage_error(tmp_path):
+    for name, module in _deployed_cdk_gate_handlers(tmp_path).items():
+        verdict, explanation = module._verdict(5)
+        assert verdict == "errored", name
+        assert "usage error" in explanation and "AshVersion" in explanation, (
+            name,
+            explanation,
+        )
+        assert getattr(module, "EXIT_USAGE_ERROR", None) == 5, name
+        # The unknown-code arm must still catch everything else.
+        assert module._verdict(70) == (
+            "errored",
+            "ASH exited with unexpected code 70.",
+        ), name
 
 
 # ---------------------------------------------------------------------------

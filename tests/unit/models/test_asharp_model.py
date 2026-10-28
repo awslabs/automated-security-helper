@@ -262,4 +262,5 @@ def test_ash_aggregated_results_to_flat_vulnerabilities_with_sarif():
     assert len(flat_vulns) == 1
     assert flat_vulns[0].title == "TEST001"
     assert flat_vulns[0].description == "Test finding"
-    assert flat_vulns[0].severity == "HIGH"
+    # error with no declared severity: CRITICAL, as the summary and gate grade it.
+    assert flat_vulns[0].severity == "CRITICAL"

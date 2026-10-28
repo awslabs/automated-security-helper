@@ -87,7 +87,7 @@ class TestSingleBase:
               bandit:
                 enabled: false
                 options:
-                  probe_from_base: kept
+                  confidence_level: high
             """,
         )
         _write(
@@ -97,7 +97,7 @@ class TestSingleBase:
             scanners:
               bandit:
                 options:
-                  probe_from_child: added
+                  ignore_nosec: true
               checkov:
                 enabled: false
             """,
@@ -105,8 +105,8 @@ class TestSingleBase:
         config = _load(tmp_path)
         bandit = config.scanners.bandit.model_dump()
         assert bandit["enabled"] is False
-        assert bandit["options"]["probe_from_base"] == "kept"
-        assert bandit["options"]["probe_from_child"] == "added"
+        assert bandit["options"]["confidence_level"] == "high"
+        assert bandit["options"]["ignore_nosec"] is True
         assert config.scanners.checkov.enabled is False
 
     def test_lists_are_replaced_not_concatenated(self, tmp_path):
@@ -245,7 +245,7 @@ class TestFailuresAreNotSilent:
     def test_unparseable_base_is_an_error(self, tmp_path):
         _write(tmp_path / "base.yaml", "project_name: [unclosed\n")
         _write(tmp_path / ".ash.yaml", "extends: base.yaml\n")
-        with pytest.raises(ASHConfigValidationError, match="could not be read"):
+        with pytest.raises(ASHConfigValidationError, match="could not be parsed"):
             _load(tmp_path)
 
     def test_base_that_is_not_a_mapping_is_an_error(self, tmp_path):
@@ -484,7 +484,7 @@ class TestAliasSpellings:
               cdk-nag:
                 enabled: false
                 options:
-                  probe_from_base: kept
+                  include_compliant_checks: true
             """,
         )
         _write(
@@ -499,7 +499,7 @@ class TestAliasSpellings:
         config = _load(tmp_path)
         cdk_nag = config.scanners.cdk_nag.model_dump()
         assert cdk_nag["enabled"] is True
-        assert cdk_nag["options"]["probe_from_base"] == "kept"
+        assert cdk_nag["options"]["include_compliant_checks"] is True
         assert not (config.scanners.__pydantic_extra__ or {})
 
     def test_child_alias_overrides_base_field_name(self, tmp_path):
@@ -511,7 +511,7 @@ class TestAliasSpellings:
               cdk_nag:
                 enabled: true
                 options:
-                  probe_from_base: kept
+                  include_compliant_checks: true
             """,
         )
         _write(
@@ -525,7 +525,7 @@ class TestAliasSpellings:
         )
         cdk_nag = _load(tmp_path).scanners.cdk_nag.model_dump()
         assert cdk_nag["enabled"] is False
-        assert cdk_nag["options"]["probe_from_base"] == "kept"
+        assert cdk_nag["options"]["include_compliant_checks"] is True
 
     def test_patch_pointer_matches_the_other_spelling(self, tmp_path):
         _write(
@@ -597,18 +597,18 @@ class TestConfigOverrides:
               cdk-nag:
                 enabled: false
                 options:
-                  probe_from_base: kept
+                  include_compliant_checks: true
             """,
         )
         _write(tmp_path / ".ash.yaml", "extends: base.yaml\n")
         config = resolve_config(
             source_dir=tmp_path,
-            config_overrides=["scanners.cdk-nag.options.probe_from_override=added"],
+            config_overrides=["scanners.cdk-nag.options.scan_timeout=123"],
         )
         cdk_nag = config.scanners.cdk_nag.model_dump()
         assert cdk_nag["enabled"] is False
-        assert cdk_nag["options"]["probe_from_base"] == "kept"
-        assert cdk_nag["options"]["probe_from_override"] == "added"
+        assert cdk_nag["options"]["include_compliant_checks"] is True
+        assert cdk_nag["options"]["scan_timeout"] == 123
 
 
 class TestEnvInterpolationAcrossTheChain:
@@ -711,3 +711,54 @@ class TestExtendsAcrossFormats:
         _write(tmp_path / "base.yaml", "project_name: via-from-file\n")
         child = _write(tmp_path / "child.yaml", "extends: base.yaml\n")
         assert AshConfig.from_file(child).project_name == "via-from-file"
+
+
+def _outcome(**kwargs):
+    """What resolve_config makes of a config: its data, or the error class."""
+    try:
+        config = resolve_config(fallback_to_default=False, **kwargs)
+    except ASHConfigValidationError as e:
+        return ("refused", type(e).__name__)
+    return ("loaded", config.model_dump(mode="json"))
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
+@pytest.mark.parametrize(
+    "base_ref, loads",
+    [
+        # The link's target extends a file next to it, outside the repository.
+        pytest.param("base.yaml", True, id="extends-a-sibling-of-the-target"),
+        # The target extends a file back inside the repository.
+        pytest.param("../repo/shared.yaml", False, id="extends-back-into-the-repo"),
+    ],
+)
+def test_a_discovered_link_confines_bases_as_the_same_path_named_does(
+    tmp_path, monkeypatch, base_ref, loads
+):
+    """Discovery and --config confine an extends chain the same way.
+
+    The repository's config is a symlink to a file outside it. Bases are
+    confined to the target's own directory, as for any config outside the
+    source directory, whether discovery found the link or --config named it.
+    Were a discovered config to confine its bases to the source directory
+    whatever it pointed at, the two would disagree in both of these cases.
+    """
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    repo = tmp_path / "repo"
+    outside = tmp_path / "outside"
+    repo.mkdir()
+    outside.mkdir()
+    _write(repo / "shared.yaml", "fail_on_findings: false\n")
+    _write(outside / "base.yaml", "fail_on_findings: false\n")
+    target = _write(outside / "ash.yaml", f"extends: {base_ref}\nproject_name: demo\n")
+    link = repo / ".ashrc.yaml"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("symlinks are not available")
+
+    discovered = _outcome(source_dir=repo)
+    named = _outcome(config_path=link, source_dir=repo)
+
+    assert discovered == named
+    assert discovered[0] == ("loaded" if loads else "refused"), discovered

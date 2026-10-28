@@ -10,6 +10,7 @@ mcp_get_scan_results into smaller, purpose-specific views.
 
 import copy
 from typing import Any, Dict, List, Optional
+from automated_security_helper.utils.severity_ladder import result_severity
 
 
 def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
@@ -33,6 +34,11 @@ def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
         "generated_at": metadata.get("generated_at"),
         "ash_version": metadata.get("tool_version"),
         "scan_duration_seconds": metadata.get("summary_stats", {}).get("duration"),
+        # Whether the repository's ignore files shrank the scan set, and by how
+        # much. A summary that leaves it out reads the same for a scan that skipped
+        # files as for one that read them all. None for results that carry no
+        # record (no scan set was built, or an older ASH wrote them).
+        "ignore_file_exclusions": metadata.get("ignore_file_exclusions"),
     }
 
     summary_stats = results.get("summary_stats") or {}
@@ -114,24 +120,48 @@ def filter_minimal(results: Dict[str, Any]) -> Dict[str, Any]:
 
 def filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Filter results to exclude suppressed findings.
+    Filter results to the actionable findings, the ones that make a scan exit 2.
 
-    Returns a deep copy of *results* with suppressed SARIF entries removed
-    and suppressed counts zeroed out.
+    A finding is actionable when it is not suppressed and is at or above the
+    severity threshold the scan was judged by: its scanner's own threshold when
+    the scan's config sets one, else the global one. That is the set
+    ``run_ash_scan._compute_exit_code`` counts. Dropping only the suppressed
+    findings would keep findings below the threshold, which the scan reports but
+    does not fail on, so a client gating on them would fail a scan that exited 0.
+
+    Returns a deep copy of *results* with the SARIF entries that are not
+    actionable removed, and the suppressed counts zeroed. ``summary_stats.total``
+    becomes ``summary_stats.actionable``, which the scan counted by the same
+    thresholds.
+
+    ``--min-severity``, a whole-scan switch of the CLI, is not applied: the
+    results do not record it, and an MCP scan runs at its default ``low``, which
+    every finding meets.
+
+    Raises:
+        ValueError: The results carry SARIF without the thresholds its findings
+            were judged by (``raw_results["severity_thresholds"]``, written by
+            ``scan_tracking.get_scan_results(include_sarif=True)``). Without them
+            the actionable set cannot be told apart, and keeping either too much
+            or nothing would read as an answer.
     """
     filtered_results = copy.deepcopy(results)
 
     if "raw_results" in filtered_results and "sarif" in filtered_results["raw_results"]:
         sarif = filtered_results["raw_results"]["sarif"]
+        thresholds = filtered_results["raw_results"].get("severity_thresholds")
         if "runs" in sarif:
+            if not isinstance(thresholds, dict):
+                raise ValueError(
+                    "The scan's SARIF came without raw_results.severity_thresholds, "
+                    "so which of its findings are actionable cannot be decided"
+                )
             for run in sarif["runs"]:
                 if "results" in run and run["results"]:
                     run["results"] = [
                         r
                         for r in run["results"]
-                        if not (
-                            r.get("suppressions") and len(r.get("suppressions", [])) > 0
-                        )
+                        if _counts_toward_exit_2(r, _threshold_for(r, thresholds))
                     ]
 
     if "summary_stats" in filtered_results:
@@ -160,6 +190,48 @@ def filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
     filtered_results["_content_filters"]["actionable_only"] = True
 
     return filtered_results
+
+
+def _threshold_for(
+    result: Dict[str, Any], thresholds: Dict[str, Optional[str]]
+) -> Optional[str]:
+    """The threshold *result* was judged by, from ``severity_thresholds``.
+
+    Keyed by scanner name, ``""`` for a result that names none, which is the
+    global threshold. A name missing from the map is judged by that too, as
+    ``_compute_exit_code`` judges a scanner with no threshold of its own.
+    """
+    props = result.get("properties")
+    name = props.get("scanner_name") if isinstance(props, dict) else None
+    key = name if isinstance(name, str) else ""
+    return thresholds[key] if key in thresholds else thresholds.get("")
+
+
+def _counts_toward_exit_2(result: Dict[str, Any], threshold: Optional[str]) -> bool:
+    """Whether ``_compute_exit_code`` counts *result* toward exit 2 at *threshold*.
+
+    Its per-result test, step for step: a suppressed result never counts;
+    ``properties.issue_severity`` decides when it names an ASH severity;
+    otherwise the SARIF ``level`` does. Both comparisons are
+    ``utils.severity_ladder``'s, so a falsy threshold counts nothing here too.
+    """
+    from automated_security_helper.utils.severity_ladder import (
+        SEVERITIES,
+        sarif_level_fails_threshold,
+        severity_fails_threshold,
+    )
+
+    if result.get("suppressions"):
+        return False
+    props = result.get("properties")
+    issue_severity = (
+        str(props.get("issue_severity") or "").upper()
+        if isinstance(props, dict)
+        else ""
+    )
+    if issue_severity in SEVERITIES:
+        return severity_fails_threshold(issue_severity, threshold)
+    return sarif_level_fails_threshold(result.get("level"), threshold)
 
 
 def apply_content_filters(
@@ -225,6 +297,19 @@ def apply_content_filters(
                 new_scanner_results[name] = data
             filtered_results["raw_results"]["scanner_results"] = new_scanner_results
 
+    # The findings themselves, which add_findings_list reads. Narrowing only the
+    # counts above left a findings list with every scanner and every severity in
+    # it, so `severities="critical"` listed low findings too.
+    sarif = filtered_results.get("raw_results", {}).get("sarif")
+    if isinstance(sarif, dict) and (scanner_list or severity_list):
+        for run in sarif.get("runs") or []:
+            if run.get("results"):
+                run["results"] = [
+                    r
+                    for r in run["results"]
+                    if _sarif_result_selected(r, scanner_list, severity_list)
+                ]
+
     if (
         "raw_results" in filtered_results
         and "additional_reports" in filtered_results["raw_results"]
@@ -268,6 +353,30 @@ def apply_content_filters(
     return filtered_results
 
 
+def _sarif_result_selected(
+    result: Dict[str, Any],
+    scanner_list: Optional[List[str]],
+    severity_list: Optional[List[str]],
+) -> bool:
+    """Whether a SARIF result passes the scanner and severity filters.
+
+    A suppressed result is in the ``suppressed`` bucket rather than its own
+    severity's, as it is in the severity counts, so ``severities="high"`` does
+    not select a suppressed high finding and ``severities="suppressed"`` does.
+    A result that names no scanner matches no scanner filter.
+    """
+    if scanner_list:
+        props = result.get("properties") or {}
+        scanner = props.get("scanner_name") if isinstance(props, dict) else None
+        if not isinstance(scanner, str) or scanner.lower() not in scanner_list:
+            return False
+    if severity_list:
+        if result.get("suppressions"):
+            return "suppressed" in severity_list
+        return _get_finding_severity(result).lower() in severity_list
+    return True
+
+
 def _get_finding_severity(result: Dict[str, Any]) -> str:
     """
     Determine the severity of a SARIF finding.
@@ -281,23 +390,8 @@ def _get_finding_severity(result: Dict[str, Any]) -> str:
     Returns:
         Uppercase severity string (CRITICAL, HIGH, MEDIUM, LOW, INFO)
     """
-    # SARIF level -> severity mapping
-    _SARIF_LEVEL_TO_SEVERITY = {
-        "error": "CRITICAL",
-        "warning": "MEDIUM",
-        "note": "LOW",
-        "none": "INFO",
-    }
-
-    # Check explicit issue_severity in properties first
-    props = result.get("properties", {}) or {}
-    issue_severity = (props.get("issue_severity") or "").upper()
-    if issue_severity in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"):
-        return issue_severity
-
-    # Fall back to SARIF level mapping
-    level = (result.get("level") or "note").lower()
-    return _SARIF_LEVEL_TO_SEVERITY.get(level, "LOW")
+    # The gate's rule, shared with every report: utils.severity_ladder.
+    return result_severity(result)
 
 
 def add_findings_list(results: Dict[str, Any]) -> Dict[str, Any]:

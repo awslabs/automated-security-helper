@@ -38,11 +38,32 @@ Two mechanisms here, because they cover different failures:
   ``pretty_exceptions_enable=True`` renders exactly as it does on a normal
   terminal. Repairing the sink beats teaching each reporter to cope.
 * :func:`_report_failure` is the floor for whatever the repair could not save.
-  It prefers ``sys.excepthook`` so the pretty traceback is not lost in the
-  common case, then falls back to plain ``traceback`` formatting, then to
-  ``os.write`` on a raw descriptor. It imports nothing outside the standard
-  library: not Rich, not the ASH logger, not the config. Anything it needed
-  could be the thing that is broken.
+  In place of typer's hook, rich.traceback's and the interpreter's own, which
+  only print the traceback, it reports through
+  :func:`_ash_traceback`, which prints the traceback typer's hook would, through
+  ASH's console, so the pretty traceback is not lost in the common case. Any
+  other ``sys.excepthook``, one a library, a plugin or the user installed, is
+  called, so what else it does (a crash reporter, say) still happens, with
+  ``sys.stdout`` and ``sys.stderr`` writing each line it writes shown, not
+  obeyed, for that call only. If that hook raises, :func:`_ash_traceback`
+  reports; a ``sys.exit`` in either ends the process with its code, as CPython
+  lets it, and a Ctrl-C with 130, printing nothing. After those comes plain
+  ``traceback`` formatting, then ``os.write`` on a raw descriptor.
+  :func:`_ash_traceback` imports typer, Rich
+  and ASH's console itself, and when one of them cannot be imported the floor
+  falls back. Otherwise the floor imports nothing outside the standard library:
+  not Rich, not the ASH logger, not the config. Anything it needed could be the
+  thing that is broken. Every text it prints is shown, not obeyed, when ASH's
+  text rule can be imported.
+
+Known limit of the installed-hook path: a hook that writes to a descriptor
+itself (``os.write(2, ...)``), or to a stream object it took before the call
+(``sys.__stderr__``, or ``sys.stderr`` saved at install time), writes past the
+shown streams, as given. A hook whose console decided on color when it was made
+still writes its color codes, and those are shown as text. That is why
+``rich.traceback.install()``'s hook, which only prints, is reported through
+ASH's traceback rather than called: on a terminal its frame came out as color
+codes written as text.
 
 The heavy import of ``automated_security_helper.cli.main`` happens *inside*
 :func:`main`, after the streams are known good. That ordering is load-bearing.
@@ -54,17 +75,23 @@ Known limitation: an exception raised while importing this module, or
 ``automated_security_helper/__init__.py`` above it, still precedes the repair and
 is still silent on a console-less host. Closing that would require code in the
 console-script stub, which pip generates and ASH does not control. Keeping this
-module's own imports to ``os``, ``sys`` and ``traceback`` is what holds that
-window as narrow as it can be, so do not add imports at module scope.
+module's own imports to ``os``, ``sys``, ``traceback`` and ``typing`` is what holds
+that window as narrow as it can be, so do not add imports at module scope.
 """
 
 import os
 import sys
 import traceback
+from typing import Any, Callable
 
 #: Prefix for the last-resort report. Deliberately greppable, and it names the
 #: program because on this path nothing else has identified itself yet.
 _BANNER = "ash: fatal error"
+
+#: The modules whose exception hooks only print the traceback, which ASH's
+#: traceback prints in their place: typer's, and rich.traceback.install()'s. A
+#: wrapper of one (it has ``__wrapped__``) is not one of them.
+_PRINTERS = frozenset({"typer.main", "rich.traceback"})
 
 
 def _reattach(fd: int):
@@ -133,11 +160,20 @@ def _write_raw(text: str) -> bool:
 def _report_failure(exc: BaseException, repaired: tuple[str, ...] = ()) -> None:
     """Report *exc*, degrading through every channel rather than giving up.
 
-    Tries ``sys.excepthook`` first. By the time an exception escapes ``app()``,
-    ``Typer.__call__`` has already tagged it for pretty rendering, so going
-    through the hook keeps the Rich traceback that ``pretty_exceptions_enable``
-    and ``ASH_DEBUG_SHOW_LOCALS`` exist to produce. Output on a healthy terminal
-    is therefore unchanged by this module.
+    With typer's hook, rich.traceback's or the interpreter's own in
+    ``sys.excepthook`` (one of :data:`_PRINTERS`' modules, or
+    ``sys.__excepthook__``), reports through :func:`_ash_traceback`. By the time
+    an exception escapes ``app()``,
+    ``Typer.__call__`` has already tagged it for pretty rendering, and
+    :func:`_ash_traceback` reads the tag, so the report keeps the Rich traceback
+    that ``pretty_exceptions_enable`` and ``ASH_DEBUG_SHOW_LOCALS`` exist to
+    produce, printed through a console set up as typer's is, with its text shown,
+    not obeyed. Any other hook is called through :func:`_call_shown`, and ASH
+    prints no report of its own on top; if the hook raises,
+    :func:`_ash_traceback` reports. A ``SystemExit`` from either is raised on, so
+    a hook's exit code stands; a ``KeyboardInterrupt`` ends the process with 130,
+    ``from None``, since the interrupt held *exc* as its context and the
+    interpreter would print that chain as given.
 
     *repaired* names the streams :func:`ensure_std_streams` had to reattach. It
     is passed in rather than read from module state so nothing here depends on
@@ -158,18 +194,193 @@ def _report_failure(exc: BaseException, repaired: tuple[str, ...] = ()) -> None:
             stderr,
         )
 
+    # typer's hook prints with typer's own Rich console, and the interpreter's
+    # own (still in place when the failure comes before typer installs its hook)
+    # prints the traceback: both write the exception's text as given, and that
+    # text quotes paths and values from the scanned tree. rich.traceback's
+    # (rich.traceback.install()) does nothing else but print, with a console
+    # that picked color when it was made, so through the shown streams its frame
+    # was color codes written as text. ASH's renders the same traceback through
+    # ASH's console instead of each. Any other hook is the installer's, so it
+    # runs, writing through streams that show what it writes.
     hook = getattr(sys, "excepthook", None)
+    # By module, and only unwrapped: a functools.wraps wrapper takes the module
+    # name of the hook it wraps, but is a crash reporter's own, so it runs.
+    printer = getattr(hook, "__module__", None) in _PRINTERS and not hasattr(
+        hook, "__wrapped__"
+    )
+    if hook is sys.__excepthook__ or printer:
+        hook = None
     if stderr is not None and hook is not None:
         try:
-            hook(type(exc), exc, exc.__traceback__)
+            _call_shown(hook, exc)
             return
+        except SystemExit:
+            # A hook's sys.exit ends the process with its code, as CPython lets
+            # it when it reports an uncaught exception: not a failed report.
+            raise
+        except KeyboardInterrupt:
+            # A Ctrl-C ends it as an interrupted process ends, with 130. Not the
+            # KeyboardInterrupt itself: it holds the failure as its context, and
+            # the interpreter's top level would print that chain as given, the
+            # failure's text raw, after calling the installed hook again.
+            raise SystemExit(130) from None
+        except BaseException:
+            # The installed hook failed: ASH's traceback reports instead.
+            pass
+    if stderr is not None:
+        try:
+            _ash_traceback(type(exc), exc, exc.__traceback__)
+            return
+        except SystemExit:
+            raise
+        except KeyboardInterrupt:
+            raise SystemExit(130) from None
         except BaseException:
             # The reporter destroyed the report. Keep going: a plain traceback
             # is worth more than a pretty one that never arrived.
             pass
 
     detail = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
-    _emit(f"{_BANNER}: {type(exc).__name__}: {exc}\n{detail}", stderr)
+    _emit(_shown(f"{_BANNER}: {type(exc).__name__}: {exc}\n{detail}"), stderr)
+
+
+class _ShownLines:
+    """A text stream that writes each line written to it to *stream*, shown.
+
+    A line is held until its newline, or until :meth:`end`, so a line written in
+    pieces is shown whole: a ``::`` that starts it is a CI command only as a
+    whole line. Not a terminal (``isatty()`` is false) and no descriptor, so a
+    writer that asks does not color its text or write past the stream.
+    """
+
+    def __init__(self, stream) -> None:
+        # ASH's text rule, imported here: when it cannot be, no stream is made
+        # and the hook is not called.
+        from automated_security_helper.utils.terminal_text import shown_not_obeyed
+
+        self._show = shown_not_obeyed
+        self._stream = stream
+        self._held = ""
+        self.encoding = getattr(stream, "encoding", None) or "utf-8"
+        self.errors = getattr(stream, "errors", None) or "strict"
+
+    def write(self, text: str) -> int:
+        self._held += text
+        lines, newline, self._held = self._held.rpartition("\n")
+        if newline:
+            self._stream.write(self._show(lines + newline))
+        return len(text)
+
+    def writelines(self, lines) -> None:
+        for line in lines:
+            self.write(line)
+
+    def flush(self) -> None:
+        self._stream.flush()
+
+    def end(self) -> None:
+        """Write the line still held, ended, so nothing after it joins it."""
+        if self._held:
+            self.write("\n")
+        self.flush()
+
+    def isatty(self) -> bool:
+        return False
+
+    def writable(self) -> bool:
+        return True
+
+    def fileno(self) -> int:
+        import io
+
+        raise io.UnsupportedOperation("fileno")
+
+
+def _call_shown(hook: Callable[..., Any], exc: BaseException) -> None:
+    """Call *hook*, an installed ``sys.excepthook``, for *exc*, with ``sys.stdout``
+    and ``sys.stderr`` writing each line it writes shown, not obeyed.
+
+    The streams are put back after the call, whatever it did, and a line the hook
+    left unended is ended. The shown streams are made before the call: when ASH's
+    text rule cannot be imported, nothing could be shown, and the hook is not
+    called.
+    """
+    stdout, stderr = sys.stdout, sys.stderr
+    shown = [_ShownLines(s) if s is not None else None for s in (stdout, stderr)]
+    sys.stdout, sys.stderr = shown
+    try:
+        hook(type(exc), exc, exc.__traceback__)
+    finally:
+        sys.stdout, sys.stderr = stdout, stderr
+        for stream in shown:
+            if stream is not None:
+                stream.end()
+
+
+def _shown(text: str) -> str:
+    """*text* shown, not obeyed, when ASH's text rule can be imported, else as is.
+
+    The floor imports nothing it needs: ASH's own modules could be what is broken.
+    """
+    try:
+        from automated_security_helper.utils.terminal_text import shown_not_obeyed
+
+        return shown_not_obeyed(text)
+    except BaseException:
+        return text
+
+
+def _ash_traceback(exc_type, exc, tb) -> None:
+    """Print *exc*'s traceback as typer's hook would, through ASH's console.
+
+    The exception's text, notes and file names quote repository paths and tool
+    output, so they go through the console log's traceback rule (utils/log.py's
+    _show_trace): controls shown, CI command forms broken. As typer's hook does,
+    it reads the app's choices from the tag Typer.__call__ puts on the exception:
+    typer's frames, the vendored click's among them, are left out, locals are
+    shown only when the app shows them (ASH_DEBUG_SHOW_LOCALS), and the widths and
+    console are typer's. With TYPER_STANDARD_TRACEBACK set, or no pretty
+    traceback asked for, the plain traceback is printed, shown the same way.
+    Called in place of typer's hook, rich.traceback's and the interpreter's own,
+    and after an installed hook that raised; when the failure came before typer
+    could be imported, importing it here fails too, and the floor falls back to
+    its own shown report.
+    """
+    import typer
+    from typer.main import _typer_developer_exception_attr_name
+
+    # As typer's hook decides: the tag Typer.__call__ put on the exception says
+    # whether the app wants a pretty traceback and its locals.
+    config = getattr(exc, _typer_developer_exception_attr_name, None)
+    standard = os.getenv(
+        "TYPER_STANDARD_TRACEBACK", os.getenv("_TYPER_STANDARD_TRACEBACK")
+    )
+    if standard or config is None or not config.pretty_exceptions_enable:
+        detail = "".join(traceback.format_exception(exc_type, exc, tb))
+        _emit(_shown(detail), sys.stderr)
+        return
+
+    from rich.traceback import Traceback
+
+    from automated_security_helper.utils.console import typer_console
+    from automated_security_helper.utils.log import _show_trace
+
+    terminal_width = os.environ.get("TERMINAL_WIDTH", "")
+    rendered = Traceback.from_exception(
+        exc_type,
+        exc,
+        tb,
+        show_locals=bool(config.pretty_exceptions_show_locals),
+        suppress=[os.path.dirname(typer.__file__)],
+        # typer's widths, its TERMINAL_WIDTH or else the console's, where Rich's
+        # own defaults are 100 and 88; read now, as typer_console reads it.
+        width=int(terminal_width) if terminal_width.isdigit() else None,
+        code_width=None,
+        word_wrap=True,
+    )
+    _show_trace(rendered.trace)
+    typer_console(stderr=True).print(rendered)
 
 
 def _emit(text: str, stream) -> None:
@@ -185,15 +396,62 @@ def _emit(text: str, stream) -> None:
 
 
 def main() -> None:
-    """Entry point for the ``ash``, ``ashv3`` and ``automated-security-helper`` scripts."""
-    repaired = ensure_std_streams()
+    """Entry point for the ``ash``, ``ashv3`` and ``automated-security-helper`` scripts.
 
-    try:
+    Shutdown contract: this is the one place that installs ASH's SIGTERM and
+    SIGINT handlers (core/cancellation.install_sigterm_shutdown and
+    install_sigint_shutdown; the cancellation module docstring, "SIGTERM on
+    the CLI", is the contract). A SIGTERM to the process then stops a running
+    ``ash scan`` through the same cancellation path a timeout uses, the
+    running tool included, and the command exits ASH_EXIT_TERMINATED (143);
+    with no scan running, on a second SIGTERM, on Windows and for a process
+    started with SIGTERM ignored, the signal keeps the semantics it had
+    without the handler. A Ctrl-C keeps raising KeyboardInterrupt (the
+    handler chains the default one) and additionally latches the registered
+    scan's cancellation at once; a second Ctrl-C takes the recorded tool
+    processes along and dies by SIGINT, so a tool mid-stop is not orphaned.
+    Library imports of ASH never install either, so an embedder's disposition
+    is its own; the MCP server paths install their own handling over this one
+    once they start.
+    """
+
+    def run() -> None:
         # Imported here, not at module scope: see the module docstring. The
-        # streams have to be usable before this line can fail.
+        # streams have to be usable before this line can fail. The handler
+        # install comes first so it covers the CLI import and everything after;
+        # core.cancellation imports only the standard library.
+        from automated_security_helper.core.cancellation import (
+            install_sigint_shutdown,
+            install_sigterm_shutdown,
+        )
+
+        install_sigterm_shutdown()
+        install_sigint_shutdown()
+
         from automated_security_helper.cli.main import run_app
 
         run_app()
+
+    _run_reporting_failures(run)
+
+
+def run_module_app(app: Callable[[], Any]) -> None:
+    """Run *app*, one of the CLI's Typer apps, with :func:`main`'s failure path.
+
+    For a command module run as a script (``python -m
+    automated_security_helper.cli.config``), which calls its own app rather than
+    ASH's: an exception escaping it is reported as main() reports one, through
+    ASH's console, instead of by typer's hook.
+    """
+    _run_reporting_failures(app)
+
+
+def _run_reporting_failures(run: Callable[[], Any]) -> None:
+    """Call *run* with usable streams, reporting any exception that escapes it."""
+    repaired = ensure_std_streams()
+
+    try:
+        run()
     except SystemExit:
         # Normal control flow. Click raises it on success, `raise typer.Exit()`
         # backs `--version`, and run_ash_scan calls sys.exit with the scan's
@@ -201,11 +459,22 @@ def main() -> None:
         # ASH reports.
         raise
     except KeyboardInterrupt:
-        # Not a defect to diagnose; the operator knows why. Re-raised so the
-        # interpreter's own signal semantics are untouched.
-        raise
+        # Not a defect to diagnose; the operator knows why. A Ctrl-C that gets
+        # here, during the CLI's import say, before Click has a handler of its
+        # own, ends the process with 130 and prints nothing. Not the interrupt
+        # itself: it can hold the exception being handled when it came as its
+        # context, and the interpreter's top level would print that chain as
+        # given.
+        raise SystemExit(130) from None
     except BaseException as exc:
-        _report_failure(exc, repaired)
+        try:
+            _report_failure(exc, repaired)
+        except KeyboardInterrupt:
+            # A Ctrl-C anywhere in the report, the plain traceback and the line
+            # saying a console was missing included, ends the process with 130.
+            # Not the interrupt itself: it holds exc as its context, and the
+            # interpreter's top level would print that chain as given.
+            raise SystemExit(130) from None
         # `from None` because _report_failure has already printed exc in full;
         # re-raising it would render the same traceback a second time.
         raise SystemExit(1) from None

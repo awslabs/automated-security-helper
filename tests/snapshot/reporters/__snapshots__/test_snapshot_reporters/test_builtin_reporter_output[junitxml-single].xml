@@ -4,7 +4,7 @@ issue_confidence: HIGH
 scanner_name: bandit
 scanner_version: 1.8.6
 scanner_details: {'tool_name': 'bandit', 'tool_version': '1.8.6', 'tool_invocation': {'exit_code': 0, 'duration': 1.25, 'start_time': '2026-01-15T12:00:00+00:00', 'end_time': '2026-01-15T12:00:01.250000+00:00'}}
-ash_occurrence_context: {'version': 1, 'rule_index': 0, 'component': {'name': 'bandit'}, 'resolved_rule': {'id': 'B602'}, 'message': {'state': 'resolved', 'text': 'subprocess call with shell=True identified, security issue.'}}</system-out></testcase><testcase name="Possible hardcoded password: 'hunter2-not-a-real-secret' [B105]" classname="B105"><skipped message="Finding is below configured severity threshold" type="threshold" /><system-out>tags: ['bandit']
+ash_occurrence_context: {'version': 1, 'rule_index': 0, 'component': {'name': 'bandit'}, 'resolved_rule': {'id': 'B602'}, 'message': {'state': 'resolved', 'text': 'subprocess call with shell=True identified, security issue.'}}</system-out></testcase><testcase name="Possible hardcoded password: 'hu**********************t' [B105]" classname="B105"><skipped message="Finding is below configured severity threshold" type="threshold" /><system-out>tags: ['bandit']
 issue_severity: LOW
 issue_confidence: MEDIUM
 scanner_name: bandit

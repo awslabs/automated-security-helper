@@ -2,17 +2,22 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the JupyterConverter.
 
-Note on the malformed-notebook case: this converter does not parse .ipynb JSON
-itself -- it shells out to ``jupyter nbconvert``. A malformed notebook therefore
-surfaces as a non-zero exit from that subprocess, which the converter turns into
-a CalledProcessError, logs, and skips. The test below drives that exact path with
-a genuinely malformed notebook on disk and a subprocess double that mimics
-nbconvert's real failure, then asserts the file is excluded from the results
-rather than silently reported as converted.
+Note on the malformed-notebook case: a file that is not a notebook nbconvert
+could read (not UTF-8, not JSON, or without the structure its nbformat version
+calls for) is caught before nbconvert runs and recorded as an input error, in
+ASH's own words (_parse_notebook). nbconvert is launched, the way the
+dependency check chose (through uv, or a verified jupyter-nbconvert by its
+path), only on files past that check, and its own non-zero exit on one is
+recorded as a tool failure. The test below drives the pre-check path with a
+genuinely malformed notebook on disk, then asserts the file is excluded from
+the results rather than silently reported as converted;
+test_an_input_that_is_not_a_notebook_is_classified.py covers the
+classification, and the recorded-failure tests cover nbconvert's own exits.
 """
 
 import json
 import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -21,15 +26,34 @@ from unittest.mock import Mock, patch
 import pytest
 
 from automated_security_helper.models.core import IgnorePathWithReason
+from tests.unit.converters.nbconvert_routes import (
+    STAND_IN_NBCONVERT as NBCONVERT,
+    refuse_stand_in_nbconvert,
+    staged_notebook,
+    use_stand_in_nbconvert,
+)
+from tests.unit.converters.nbconvert_stand_in import (
+    accept_stand_in_nbconvert,
+    notebook_patterns,
+)
+from tests.utils.process_guard import refuse_process_starts
 from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter import (
     JupyterConverter,
     JupyterConverterConfig,
     JupyterConverterConfigOptions,
 )
+from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.uv_tool_runner import (
     UVToolRunner,
     UVToolRunnerError,
 )
+from tests.unit.converters.nbconvert_stand_in import expand
+
+# A converter that found nbconvert asked uv for its version (``uv tool run --from
+# nbconvert jupyter-nbconvert --version``), which started the tool wherever uv could
+# reach it. These tests are about the converter's own decisions, so the probes answer
+# without a process (tests/unit/conftest.py).
+pytestmark = pytest.mark.usefixtures("no_tool_probes")
 
 MODULE = (
     "automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter"
@@ -98,11 +122,58 @@ def messages_at(records, level):
     return [r.getMessage() for r in records if r.levelno == level]
 
 
+#: The run the converter's context belongs to. Not None, so a test comparing what
+#: the converter passes with ``context.run_id`` fails for a call passing None.
+RUN_ID = "d" * 32
+
+
 @pytest.fixture
 def converter(test_plugin_context):
+    test_plugin_context.run_id = RUN_ID
     return JupyterConverter(
         context=test_plugin_context, config=JupyterConverterConfig()
     )
+
+
+@pytest.fixture
+def deferred_converter(test_plugin_context):
+    """A converter as the convert phase builds it: inside
+    deferred_tool_version_probes(), so the version probe waits for the dependency
+    check (core/phases/convert_phase.py)."""
+    from automated_security_helper.base.uv_tool_mixin import (
+        deferred_tool_version_probes,
+    )
+
+    test_plugin_context.run_id = RUN_ID
+    with deferred_tool_version_probes():
+        return JupyterConverter(
+            context=test_plugin_context, config=JupyterConverterConfig()
+        )
+
+
+@pytest.fixture(autouse=True)
+def installed_jupyter(monkeypatch, tmp_path) -> Path:
+    """A jupyter-nbconvert on PATH, outside the scanned tree, for the direct route.
+
+    Never executed: every test that reaches the direct route replaces
+    ``subprocess.run``. ASH's own bin directory and /usr/local/bin are taken out of
+    the lookup, and its cache cleared, so the jupyter found is this one.
+    """
+    bin_dir = tmp_path / "installed" / "bin"
+    bin_dir.mkdir(parents=True)
+    name = "jupyter-nbconvert"
+    jupyter = bin_dir / (f"{name}.exe" if sys.platform == "win32" else name)
+    jupyter.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    jupyter.chmod(0o755)
+    monkeypatch.setenv(
+        "PATH", os.pathsep.join([str(bin_dir), os.environ.get("PATH", "")])
+    )
+    monkeypatch.setattr(
+        subprocess_utils, "path_independent_dirs", lambda: [tmp_path / "ash-bin"]
+    )
+    subprocess_utils.clear_find_executable_cache()
+    yield jupyter
+    subprocess_utils.clear_find_executable_cache()
 
 
 def expected_output_name(notebook: Path) -> str:
@@ -123,29 +194,47 @@ def write_notebook(directory: Path, name: str) -> Path:
     return path
 
 
-def nbconvert_double(returncode=0, stdout="", stderr="", create_output=True):
-    """Stand in for subprocess.run over `jupyter nbconvert`.
+def notebook_arg(cmd) -> str:
+    """The notebook nbconvert reads for this command line, its argument expanded."""
+    (pattern,) = notebook_patterns(cmd)
+    (path,) = expand(pattern)
+    return path
 
-    Mimics nbconvert's real contract: the output path on the command line gets
-    ".py" appended. Returns a CompletedProcess, not a bare Mock, so a test
-    cannot pass by touching an attribute the real object does not have.
+
+def output_file(cmd) -> Path:
+    """Where nbconvert writes: ``--output-dir`` / ``--output`` plus ``.py``."""
+    return Path(
+        cmd[cmd.index("--output-dir") + 1], cmd[cmd.index("--output") + 1] + ".py"
+    )
+
+
+def nbconvert_double(returncode=0, stdout="", stderr="", create_output=True):
+    """Stand in for the direct run of the verified `jupyter-nbconvert`.
+
+    Mimics nbconvert's real contract: the output is written into ``--output-dir``
+    under the ``--output`` name, with ".py" appended. Returns a CompletedProcess,
+    not a bare Mock, so a test cannot pass by touching an attribute the real
+    object does not have.
     """
     calls = []
     inputs = []
+    staged = []
 
     def _run(cmd, *args, **kwargs):
         calls.append(list(cmd))
         # What nbconvert was given to read, captured while it still exists: the
         # converter hands it a staged copy that is removed afterwards.
-        inputs.append(Path(cmd[6]).read_bytes() if len(cmd) > 6 else None)
+        patterns = notebook_patterns([str(part) for part in cmd])
+        inputs.append(Path(patterns[0]).read_bytes() if patterns else None)
         if create_output and "--output" in cmd:
-            out = Path(cmd[cmd.index("--output") + 1] + ".py")
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text("#!/usr/bin/env python\nimport os\n", encoding="utf-8")
+            output_file(cmd).write_text(
+                "#!/usr/bin/env python\nimport os\n", encoding="utf-8"
+            )
         return subprocess.CompletedProcess(cmd, returncode, stdout, stderr)
 
     _run.calls = calls
     _run.inputs = inputs
+    _run.staged = staged
     return _run
 
 
@@ -182,7 +271,65 @@ class TestConfigAndToolMetadata:
         assert converter._get_tool_with_dependencies() == ["jupyter"]
 
 
+class TestShownRequirementRedaction:
+    """The requirement as messages show it (_shown_uv_from_spec) hides what the
+    config read from the environment. The texts that quote it (the dependency
+    check's refusal reasons) reach the results and ash.log, and the constraint
+    it embeds (``tool_version``) can be a value the config read from
+    ``${VAR}``. Pure text: nothing here starts a process."""
+
+    #: A pin the scan's config read from the environment, so it is in
+    #: ``config._environment_values`` and must not reach any sink raw.
+    PIN = "7.55.99777"
+
+    def _converter(self, test_plugin_context):
+        test_plugin_context.config._environment_values = [self.PIN]
+        return JupyterConverter(
+            context=test_plugin_context,
+            config=JupyterConverterConfig(
+                options=JupyterConverterConfigOptions(tool_version=f"=={self.PIN}")
+            ),
+        )
+
+    def test_the_shown_requirement_hides_a_config_read_pin(self, test_plugin_context):
+        """With the default values hook, the shown form already redacts the
+        pin (the control for the overriding-hook case below)."""
+        converter = self._converter(test_plugin_context)
+        shown = converter._shown_uv_from_spec()
+        assert shown is not None
+        # The control: the requirement is still a requirement, only the
+        # environment-read pin is hidden.
+        assert "nbconvert" in shown
+        assert self.PIN not in shown
+
+    def test_an_overriding_values_hook_does_not_unhide_the_config_read_pin(
+        self, test_plugin_context, monkeypatch
+    ):
+        """``_environment_values()`` is the hook a plugin overrides to add the
+        values it knows, and one that returns only its own, without calling
+        super(), drops none of the config's: the base classes redact with
+        ``_values_to_redact()``, the union (uv_tool_mixin's contract). The
+        shown requirement keeps that contract, so the pin stays hidden."""
+        converter = self._converter(test_plugin_context)
+        monkeypatch.setattr(
+            type(converter), "_environment_values", lambda self: ("own-value",)
+        )
+        shown = converter._shown_uv_from_spec()
+        assert shown is not None
+        assert "nbconvert" in shown
+        assert self.PIN not in shown
+
+
 class TestValidatePluginDependencies:
+    @pytest.fixture(autouse=True)
+    def _a_notebook_to_convert(self, test_plugin_context):
+        """These tests are about finding or installing nbconvert, which the converter
+        does only when the scan set holds a notebook (with none, the check returns
+        True at once; see test_jupyter_converter_needs_a_notebook.py)."""
+        source = Path(test_plugin_context.source_dir)
+        source.mkdir(parents=True, exist_ok=True)
+        (source / "analysis.ipynb").write_text("{}", encoding="utf-8")
+
     def test_uv_installed_tool_is_accepted(self, converter, ash_log_records):
         converter._get_tool_installation_info = Mock(
             return_value={"available": True, "preferred_source": "uv"}
@@ -197,7 +344,16 @@ class TestValidatePluginDependencies:
             for m in messages_at(ash_log_records, logging.DEBUG)
         )
 
-    def test_pre_installed_tool_is_accepted(self, converter, ash_log_records):
+    def test_pre_installed_tool_is_accepted_once_verified(
+        self, converter, ash_log_records, monkeypatch
+    ):
+        accept_stand_in_nbconvert(monkeypatch)
+        # The copy is the lookup's answer; the installation info only says a
+        # pre-installed copy exists.
+        monkeypatch.setattr(
+            f"{MODULE}.lookup_for_scan",
+            lambda command, root: ("bin/jupyter-nbconvert", None),
+        )
         converter._get_tool_installation_info = Mock(
             return_value={
                 "available": True,
@@ -210,17 +366,115 @@ class TestValidatePluginDependencies:
 
         assert converter.validate_plugin_dependencies() is True
         install.assert_not_called()
+        assert converter._nbconvert_route == "direct"
+        assert converter._nbconvert_path == "bin/jupyter-nbconvert"
         assert any(
             "Using pre-installed" in m
             for m in messages_at(ash_log_records, logging.DEBUG)
         )
 
-    def test_unknown_source_is_still_accepted_without_logging_a_source(
-        self, converter, ash_log_records
+    def test_a_pre_installed_copy_that_does_not_verify_runs_nothing_but_uv(
+        self, converter, ash_log_records, monkeypatch
     ):
-        converter._get_tool_installation_info = Mock(return_value={"available": True})
+        """The copy is refused, and nbconvert is installed through uv with the
+        converter's requirement, which is then the way a conversion runs it."""
+        refuse_stand_in_nbconvert(monkeypatch)
+        install = Mock(return_value=True)
+        converter._install_uv_tool = install
+        converter._get_tool_installation_info = Mock(
+            return_value={
+                "available": True,
+                "preferred_source": "pre_installed",
+                "pre_installed_path": "bin/jupyter-nbconvert",
+            }
+        )
 
         assert converter.validate_plugin_dependencies() is True
+        install.assert_called_once_with(
+            timeout=converter.config.options.install_timeout
+        )
+        assert converter._nbconvert_route == "uv"
+        assert converter._nbconvert_path is None
+        assert not any(
+            "Using pre-installed" in m
+            for m in messages_at(ash_log_records, logging.DEBUG)
+        )
+
+    def test_a_pre_installed_copy_that_does_not_verify_and_no_install_is_missing(
+        self, converter, monkeypatch
+    ):
+        refuse_stand_in_nbconvert(monkeypatch)
+        monkeypatch.setattr(
+            f"{MODULE}.lookup_for_scan",
+            lambda command, root: ("bin/jupyter-nbconvert", None),
+        )
+        converter._install_uv_tool = Mock(return_value=False)
+        converter._get_tool_installation_info = Mock(
+            return_value={
+                "available": True,
+                "preferred_source": "pre_installed",
+                "pre_installed_path": "bin/jupyter-nbconvert",
+            }
+        )
+
+        assert converter.validate_plugin_dependencies() is False
+        reason = converter.dependency_unavailable_reason or ""
+        # The verdict's summary travels; its detail (the installed version's
+        # text) and the copy's path stay in the log.
+        assert "cannot be used" in reason, reason
+        assert "version constraint" in reason, reason
+        assert "6.5.0" not in reason, reason
+        assert "bin/jupyter-nbconvert" not in reason, reason
+
+    def test_a_replaced_copys_install_refreshes_the_reported_version(
+        self, deferred_converter, monkeypatch
+    ):
+        """The install that replaces an unverified copy refreshes tool_version
+        under the converter's requirement, as the no-copy install branch does:
+        the reported version is the installed environment's, not the probe's
+        earlier answer."""
+        converter = deferred_converter
+        refuse_stand_in_nbconvert(monkeypatch)
+        monkeypatch.setattr(
+            f"{MODULE}.lookup_for_scan",
+            lambda command, root: ("bin/jupyter-nbconvert", None),
+        )
+        converter._install_uv_tool = Mock(return_value=True)
+        converter._get_tool_installation_info = Mock(
+            return_value={
+                "available": True,
+                "preferred_source": "pre_installed",
+                "pre_installed_path": "bin/jupyter-nbconvert",
+            }
+        )
+        asked = []
+        answers = iter(["7.16.0", "7.16.4"])
+
+        def version(runner, tool_name, package_name=None, *args, **kwargs):
+            asked.append((tool_name, package_name))
+            return next(answers)
+
+        monkeypatch.setattr(UVToolRunner, "get_tool_version", version)
+
+        assert converter.validate_plugin_dependencies() is True
+        assert converter.tool_version == "7.16.4"
+        # Every probe, the refresh included, resolves under the run's own spec.
+        assert asked == [("jupyter-nbconvert", "nbconvert>=7.16.0,<8.0.0")] * 2
+
+    def test_unknown_source_is_still_accepted_without_logging_a_source(
+        self, converter, ash_log_records, monkeypatch
+    ):
+        """No source named and no copy to verify: nbconvert is installed through
+        uv and runs through it. The lookup and the install are stubbed, so what
+        is installed on this machine decides nothing."""
+        converter._get_tool_installation_info = Mock(return_value={"available": True})
+        monkeypatch.setattr(
+            f"{MODULE}.lookup_for_scan", lambda command, root: (None, None)
+        )
+        converter._install_uv_tool = Mock(return_value=True)
+
+        assert converter.validate_plugin_dependencies() is True
+        assert converter._nbconvert_route == "uv"
         debug = messages_at(ash_log_records, logging.DEBUG)
         assert not any("already installed via UV tool" in m for m in debug)
         assert not any("Using pre-installed" in m for m in debug)
@@ -235,6 +489,72 @@ class TestValidatePluginDependencies:
             timeout=converter.config.options.install_timeout
         )
         assert converter.tool_version == "7.16.4"
+
+    def test_a_fresh_installs_refresh_resolves_under_the_runs_spec(
+        self, deferred_converter
+    ):
+        """The version refresh after a fresh install resolves under the run's
+        own spec, as the replaced-copy branch's refresh does: the reported
+        version is the installed environment's under the converter's
+        requirement, not whatever a spec-less probe would answer."""
+        converter = deferred_converter
+        converter._get_tool_installation_info = Mock(return_value={"available": False})
+        converter._install_uv_tool = Mock(return_value=True)
+        asked = []
+        answers = iter(["7.16.0", "7.16.4"])
+
+        def version(runner, tool_name, package_name=None, *args, **kwargs):
+            asked.append((tool_name, package_name))
+            return next(answers)
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(UVToolRunner, "get_tool_version", version)
+            assert converter.validate_plugin_dependencies() is True
+
+        assert converter.tool_version == "7.16.4"
+        # Every probe, the refresh included, resolves under the run's own spec.
+        assert asked == [("jupyter-nbconvert", "nbconvert>=7.16.0,<8.0.0")] * 2
+
+    def test_a_copy_whose_version_answered_nothing_reports_none(
+        self, converter, monkeypatch
+    ):
+        """On the direct route the reported version is the copy's own; a copy
+        whose --version answered nothing leaves it unknown (None) rather than
+        keeping the deferred probe's answer, which is the version uv resolved
+        and not what runs on this route."""
+        from types import SimpleNamespace
+
+        from automated_security_helper.utils import pre_installed_tool
+
+        monkeypatch.setattr(
+            pre_installed_tool,
+            "verify_pre_installed_tool",
+            lambda executable, package, *a, **k: SimpleNamespace(
+                status="satisfied",
+                executable=executable,
+                requirement=package,
+                detail="",
+                version=None,
+            ),
+        )
+        monkeypatch.setattr(
+            f"{MODULE}.lookup_for_scan", lambda command, root: (NBCONVERT, None)
+        )
+        converter._get_tool_installation_info = Mock(
+            return_value={
+                "available": True,
+                "preferred_source": "pre_installed",
+                "pre_installed_path": NBCONVERT,
+            }
+        )
+        converter._install_uv_tool = Mock()
+        # What uv resolved under the requirement, which is not what runs.
+        converter._get_uv_tool_version = Mock(return_value="7.16.6")
+
+        assert converter.validate_plugin_dependencies() is True
+
+        assert converter._nbconvert_route == "direct"
+        assert converter.tool_version is None
 
     def test_install_timeout_is_taken_from_config(self, test_plugin_context):
         conv = JupyterConverter(
@@ -251,69 +571,360 @@ class TestValidatePluginDependencies:
 
         conv._install_uv_tool.assert_called_once_with(timeout=42)
 
-    def test_failed_install_falls_back_to_direct_jupyter(
-        self, converter, ash_log_records
+    def test_after_a_failed_install_a_verified_copy_is_ready(
+        self, converter, ash_log_records, monkeypatch
     ):
+        """After a failed install the check takes the jupyter-nbconvert the
+        lookup finds, once verified, and probes nothing by name."""
+        use_stand_in_nbconvert(monkeypatch, converter)
+        converter.use_uv_tool = True
         converter._get_tool_installation_info = Mock(return_value={"available": False})
         converter._install_uv_tool = Mock(return_value=False)
+        converter._get_uv_tool_version = Mock(return_value=None)
+        started = refuse_process_starts(monkeypatch)
 
-        with patch(f"{MODULE}.subprocess.run") as run:
-            run.return_value = subprocess.CompletedProcess(
-                ["jupyter", "nbconvert", "--version"], 0, "7.16.4\n", ""
-            )
-            assert converter.validate_plugin_dependencies() is True
+        assert converter.validate_plugin_dependencies() is True
 
-        run.assert_called_once()
-        assert run.call_args.args[0] == ["jupyter", "nbconvert", "--version"]
-        assert run.call_args.kwargs["timeout"] == 10
+        assert started == []
+        assert converter._nbconvert_route == "direct"
+        assert converter._nbconvert_path == NBCONVERT
         assert any(
             "UV tool installation failed" in m
             for m in messages_at(ash_log_records, logging.WARNING)
         )
 
-    def test_direct_jupyter_nonzero_exit_is_not_available(
-        self, converter, ash_log_records
+    def test_after_a_failed_install_with_no_copy_the_converter_is_missing(
+        self, converter, ash_log_records, monkeypatch
     ):
+        """The failed install's way out is a verified copy; with none on the
+        lookup the converter is missing, and says so."""
         converter._get_tool_installation_info = Mock(return_value={"available": False})
         converter._install_uv_tool = Mock(return_value=False)
+        monkeypatch.setattr(
+            f"{MODULE}.lookup_for_scan", lambda command, root: (None, None)
+        )
 
-        with patch(f"{MODULE}.subprocess.run") as run:
-            run.return_value = subprocess.CompletedProcess(
-                ["jupyter", "nbconvert", "--version"], 1, "", "not found"
-            )
-            assert converter.validate_plugin_dependencies() is False
+        assert converter.validate_plugin_dependencies() is False
 
         assert any(
             "is not available" in m
             for m in messages_at(ash_log_records, logging.WARNING)
         )
 
-    @pytest.mark.parametrize(
-        "exc",
-        [
-            subprocess.TimeoutExpired(cmd=["jupyter"], timeout=10),
-            FileNotFoundError("jupyter"),
-            subprocess.SubprocessError("boom"),
-        ],
-        ids=["timeout", "missing_binary", "subprocess_error"],
-    )
-    def test_direct_jupyter_probe_failures_are_swallowed(self, converter, exc):
-        converter._get_tool_installation_info = Mock(return_value={"available": False})
-        converter._install_uv_tool = Mock(return_value=False)
-
-        with patch(f"{MODULE}.subprocess.run", side_effect=exc):
-            assert converter.validate_plugin_dependencies() is False
-
-    def test_uv_disabled_skips_straight_to_direct_probe(self, converter):
-        converter.use_uv_tool = False
+    def test_uv_disabled_goes_straight_to_the_verified_copy(
+        self, converter, monkeypatch
+    ):
+        use_stand_in_nbconvert(monkeypatch, converter)
         info = Mock()
         converter._get_tool_installation_info = info
 
-        with patch(f"{MODULE}.subprocess.run") as run:
-            run.return_value = subprocess.CompletedProcess(["jupyter"], 0, "", "")
-            assert converter.validate_plugin_dependencies() is True
+        assert converter.validate_plugin_dependencies() is True
 
         info.assert_not_called()
+        assert converter._nbconvert_route == "direct"
+        assert converter._nbconvert_path == NBCONVERT
+
+    def test_the_check_starts_no_process(self, converter, monkeypatch):
+        """With nothing on the lookup the converter is missing, and nothing was
+        started to find that out: no name is probed."""
+        converter.use_uv_tool = False
+        monkeypatch.setattr(
+            f"{MODULE}.lookup_for_scan", lambda command, root: (None, None)
+        )
+        started = refuse_process_starts(monkeypatch)
+
+        assert converter.validate_plugin_dependencies() is False
+
+        assert started == []
+        reason = converter.dependency_unavailable_reason or ""
+        assert "jupyter-nbconvert" in reason, reason
+
+    def test_a_found_copy_the_verification_refuses_is_not_run(
+        self, converter, monkeypatch
+    ):
+        """The check judges a copy the lookup found by verify_pre_installed_tool's
+        verdict: refused, it is not run, and the converter is missing with the
+        verdict's reason."""
+        converter.use_uv_tool = False
+        monkeypatch.setattr(
+            f"{MODULE}.lookup_for_scan", lambda command, root: (NBCONVERT, None)
+        )
+        refuse_stand_in_nbconvert(monkeypatch)
+        started = refuse_process_starts(monkeypatch)
+
+        assert converter.validate_plugin_dependencies() is False
+
+        assert started == []
+        assert converter._nbconvert_route is None
+        reason = converter.dependency_unavailable_reason or ""
+        # The verdict's summary travels; its detail (the installed version's
+        # text) and the copy's path stay in the log.
+        assert "cannot be used" in reason, reason
+        assert "version constraint" in reason, reason
+        assert "6.5.0" not in reason, reason
+        assert NBCONVERT not in reason, reason
+
+    def test_the_direct_route_reports_the_verified_copys_version(
+        self, converter, monkeypatch
+    ):
+        """On the direct route the reported tool_version is the version of the
+        copy that runs, as its verification read it, not the version uv
+        resolved under the converter's requirement."""
+        from types import SimpleNamespace
+
+        from automated_security_helper.utils import pre_installed_tool
+
+        monkeypatch.setattr(
+            pre_installed_tool,
+            "verify_pre_installed_tool",
+            lambda executable, package, *a, **k: SimpleNamespace(
+                status="satisfied",
+                executable=executable,
+                requirement=package,
+                detail="",
+                version="7.16.0",
+            ),
+        )
+        monkeypatch.setattr(
+            f"{MODULE}.lookup_for_scan", lambda command, root: (NBCONVERT, None)
+        )
+        converter._get_tool_installation_info = Mock(
+            return_value={
+                "available": True,
+                "preferred_source": "pre_installed",
+                "pre_installed_path": NBCONVERT,
+            }
+        )
+        converter._install_uv_tool = Mock()
+        # What uv resolves under the requirement, which is not what runs.
+        converter._get_uv_tool_version = Mock(return_value="7.16.6")
+
+        assert converter.validate_plugin_dependencies() is True
+
+        assert converter._nbconvert_route == "direct"
+        assert converter.tool_version == "7.16.0"
+
+    @pytest.mark.parametrize(
+        "installed,ready,level",
+        [
+            pytest.param(True, True, logging.DEBUG, id="replaced-through-uv"),
+            pytest.param(False, False, logging.WARNING, id="nothing-runs"),
+        ],
+    )
+    def test_a_refused_copy_is_logged_once_with_its_path(
+        self, converter, ash_log_records, monkeypatch, installed, ready, level
+    ):
+        """The refusal of a copy on PATH is logged once, by the caller, at the
+        level of what it means there: detail when uv replaces the copy, a
+        warning when nothing runs nbconvert. The one record names the copy by
+        its host path; the recorded reason does not."""
+        refuse_stand_in_nbconvert(monkeypatch)
+        monkeypatch.setattr(
+            f"{MODULE}.lookup_for_scan", lambda command, root: (NBCONVERT, None)
+        )
+        converter._install_uv_tool = Mock(return_value=installed)
+        converter._get_tool_installation_info = Mock(
+            return_value={
+                "available": True,
+                "preferred_source": "pre_installed",
+                "pre_installed_path": NBCONVERT,
+            }
+        )
+
+        assert converter.validate_plugin_dependencies() is ready
+
+        told = [r for r in ash_log_records if "cannot be used" in r.getMessage()]
+        assert [r.levelno for r in told] == [level], [
+            (r.levelname, r.getMessage()) for r in told
+        ]
+        assert NBCONVERT in told[0].getMessage(), told[0].getMessage()
+        assert NBCONVERT not in (converter.dependency_unavailable_reason or "")
+
+
+#: A constraint no real release carries, read from the environment below.
+CANARY_CONSTRAINT = "==9.9.9rc777"
+
+
+def _canary_configured_converter(test_plugin_context, tmp_path, monkeypatch):
+    """A converter whose tool_version its config read from the environment.
+
+    Loaded through the run's own loader, so the config records the read
+    (_written_references) and the plugin's redaction values hold the resolved
+    text. The assert is the measurement the sites rest on: the reference
+    arrives resolved in options.tool_version through the shared config
+    machinery.
+    """
+    from automated_security_helper.config.resolve_config import (
+        load_config_file_for_run,
+    )
+
+    monkeypatch.setenv("ASH_NB_CANARY", CANARY_CONSTRAINT)
+    profile = tmp_path / "canary.ash.yaml"
+    profile.write_text(
+        "project_name: probe\n"
+        "converters:\n"
+        "  jupyter:\n"
+        "    options:\n"
+        "      tool_version: ${ASH_NB_CANARY}\n",
+        encoding="utf-8",
+    )
+    config = load_config_file_for_run(profile)[1]
+    test_plugin_context.config = config
+    test_plugin_context.run_id = RUN_ID
+    converter = JupyterConverter(
+        context=test_plugin_context, config=config.converters.jupyter
+    )
+    assert converter.config.options.tool_version == CANARY_CONSTRAINT
+    return converter
+
+
+class TestAConstraintReadFromTheEnvironmentIsNotShown:
+    """tool_version configured as ${VAR}: the resolved constraint is a value
+    the config read from the environment, so no log record, no recorded
+    reason, and no install line carries it; each shows the requirement with
+    the read part as the placeholder."""
+
+    @pytest.fixture(autouse=True)
+    def _a_notebook_to_convert(self, test_plugin_context):
+        source = Path(test_plugin_context.source_dir)
+        source.mkdir(parents=True, exist_ok=True)
+        (source / "analysis.ipynb").write_text("{}", encoding="utf-8")
+
+    def test_the_recorded_reason_and_warning_carry_no_value(
+        self, test_plugin_context, tmp_path, monkeypatch, ash_log_records
+    ):
+        """A refused copy with no install: the dependency check records its
+        reason (dependency_unavailable_reason) and logs the one warning; neither
+        carries the constraint's value. The results' row for the converter
+        carries the same reason, redacted again with the run's values."""
+        converter = _canary_configured_converter(
+            test_plugin_context, tmp_path, monkeypatch
+        )
+        refuse_stand_in_nbconvert(monkeypatch)
+        monkeypatch.setattr(
+            f"{MODULE}.lookup_for_scan", lambda command, root: (NBCONVERT, None)
+        )
+        converter._install_uv_tool = Mock(return_value=False)
+        converter._get_tool_installation_info = Mock(
+            return_value={
+                "available": True,
+                "preferred_source": "pre_installed",
+                "pre_installed_path": NBCONVERT,
+            }
+        )
+
+        assert converter.validate_plugin_dependencies() is False
+
+        reason = converter.dependency_unavailable_reason or ""
+        # The control: the reason still says what was refused and for what.
+        assert "cannot be used" in reason, reason
+        assert "nbconvert" in reason, reason
+        assert "9.9.9rc777" not in reason, reason
+        text = "\n".join(r.getMessage() for r in ash_log_records)
+        assert "9.9.9rc777" not in text, text
+
+    def test_the_refused_copy_line_after_an_install_carries_no_value(
+        self, test_plugin_context, tmp_path, monkeypatch, ash_log_records
+    ):
+        """The refused-copy detail logged when uv replaces the copy shows the
+        requirement without the constraint's value."""
+        converter = _canary_configured_converter(
+            test_plugin_context, tmp_path, monkeypatch
+        )
+        refuse_stand_in_nbconvert(monkeypatch)
+        monkeypatch.setattr(
+            f"{MODULE}.lookup_for_scan", lambda command, root: (NBCONVERT, None)
+        )
+        converter._install_uv_tool = Mock(return_value=True)
+        converter._get_tool_installation_info = Mock(
+            return_value={
+                "available": True,
+                "preferred_source": "pre_installed",
+                "pre_installed_path": NBCONVERT,
+            }
+        )
+
+        assert converter.validate_plugin_dependencies() is True
+
+        text = "\n".join(r.getMessage() for r in ash_log_records)
+        # The control: the refused copy's line was logged.
+        assert "is not used" in text, text
+        assert "9.9.9rc777" not in text, text
+
+    def test_the_install_lines_carry_no_value(
+        self, test_plugin_context, tmp_path, monkeypatch, ash_log_records
+    ):
+        """The installation's own lines (the attempt's tool specification and
+        constraint) show the requirement without the constraint's value."""
+        from automated_security_helper.utils import uv_tool_runner as runner_module
+
+        converter = _canary_configured_converter(
+            test_plugin_context, tmp_path, monkeypatch
+        )
+        monkeypatch.delenv("ASH_OFFLINE", raising=False)
+        runner = Mock()
+        runner.is_uv_available.return_value = True
+        runner.get_cache_info.return_value = {"cache_available": False}
+        runner.is_tool_installed.return_value = False
+        runner.install_tool_with_version.return_value = True
+        monkeypatch.setattr(runner_module, "get_uv_tool_runner", lambda: runner)
+
+        assert converter._install_uv_tool(timeout=30) is True
+
+        # The control: the attempt was logged, and the install itself got the
+        # real constraint.
+        text = "\n".join(r.getMessage() for r in ash_log_records)
+        assert "[INSTALLATION_ATTEMPT]" in text, text
+        kwargs = runner.install_tool_with_version.call_args.kwargs
+        assert kwargs["version_constraint"] == CANARY_CONSTRAINT, kwargs
+        assert "9.9.9rc777" not in text, text
+
+
+def test_a_copy_that_no_longer_verifies_is_logged_once_with_its_path(
+    converter, tmp_path, monkeypatch, ash_log_records
+):
+    """At conversion, a copy the check chose that no longer verifies is not run,
+    and that is logged once, as a warning naming the copy by its host path; the
+    failed input's reason names no path."""
+    from automated_security_helper.plugin_modules.ash_builtin.converters import (
+        jupyter_converter,
+    )
+
+    use_stand_in_nbconvert(monkeypatch, converter)
+    converter._nbconvert_route = "direct"
+    converter._nbconvert_path = NBCONVERT
+    refuse_stand_in_nbconvert(monkeypatch)
+    notebook = tmp_path / "stage" / "analysis.ipynb"
+    notebook.parent.mkdir()
+    notebook.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(jupyter_converter._NbconvertNotRun) as refused:
+        converter._run_nbconvert(notebook, tmp_path / "out" / "analysis.py", "x")
+
+    told = [r for r in ash_log_records if "cannot be used" in r.getMessage()]
+    assert [r.levelno for r in told] == [logging.WARNING], [
+        (r.levelname, r.getMessage()) for r in told
+    ]
+    assert NBCONVERT in told[0].getMessage(), told[0].getMessage()
+    assert NBCONVERT not in str(refused.value)
+
+
+def test_direct_nbconvert_gives_jupyter_no_stdin(converter, tmp_path, monkeypatch):
+    """nbconvert reads the repository's notebook; started without stdin= it also
+    inherited ASH's stdin, and the converter waited on it for its 60 s timeout
+    wherever a notebook's kernel or a plugin read from stdin."""
+    use_stand_in_nbconvert(monkeypatch, converter)
+    notebook = tmp_path / "stage" / "analysis.ipynb"
+    notebook.parent.mkdir()
+    notebook.write_text("{}", encoding="utf-8")
+
+    with patch(f"{MODULE}.run_ended_with_the_server") as run:
+        run.return_value = subprocess.CompletedProcess(["jupyter"], 0, "", "")
+        converter._run_nbconvert(notebook, tmp_path / "out" / "analysis.py", "x")
+
+    assert run.call_args.kwargs.get("stdin") is subprocess.DEVNULL
+    # And by the verified copy's own path, never a name the OS resolves.
+    assert run.call_args.args[0][0] == NBCONVERT
 
 
 class TestExecuteNbconvertViaUv:
@@ -339,6 +950,206 @@ class TestExecuteNbconvertViaUv:
             )
 
         uv_runner.run_tool.assert_not_called()
+
+    def test_a_run_ash_could_not_record_is_no_conversion_whatever_its_code(
+        self, converter, uv_runner
+    ):
+        """nbconvert exited 0, but ASH could not record its run: the flag is read
+        before the code, so the notebook is not taken as converted."""
+        from automated_security_helper.utils.subprocess_utils import (
+            PostRunErrorProcess,
+        )
+
+        uv_runner.run_tool.return_value = PostRunErrorProcess(
+            ["jupyter"],
+            0,
+            "",
+            "",
+            error="ASH could not record the output of jupyter: No space left on device",
+        )
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+            return_value=uv_runner,
+        ):
+            assert (
+                converter._execute_nbconvert_via_uv(["jupyter", "nbconvert", "x.ipynb"])
+                is False
+            )
+
+        uv_runner.run_tool.assert_called_once()
+
+    def test_a_tool_stopped_mid_run_is_not_reported_with_exit_code_none(
+        self, converter, uv_runner, ash_log_records
+    ):
+        """A tool ASH stopped while it ran has no exit code at all, and
+        "exit code None" would read as one. The warning says no code was
+        observed and carries the failure's own reason."""
+        from automated_security_helper.utils.subprocess_utils import (
+            PostRunErrorProcess,
+        )
+
+        uv_runner.run_tool.return_value = PostRunErrorProcess(
+            ["jupyter"],
+            None,
+            "",
+            "",
+            error="ASH could not record the output of jupyter: No space left on device",
+        )
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+            return_value=uv_runner,
+        ):
+            assert (
+                converter._execute_nbconvert_via_uv(["jupyter", "nbconvert", "x.ipynb"])
+                is False
+            )
+
+        warnings = messages_at(ash_log_records, logging.WARNING)
+        assert not any("exit code None" in m for m in warnings)
+        assert any(
+            "no exit code" in m
+            and "ASH could not record the output of jupyter: No space left on device"
+            in m
+            for m in warnings
+        )
+
+    def test_a_post_run_failure_with_a_real_code_still_names_it(
+        self, converter, uv_runner, ash_log_records
+    ):
+        """The control: a tool that did exit keeps its integer code in the
+        warning, formatted as before."""
+        from automated_security_helper.utils.subprocess_utils import (
+            PostRunErrorProcess,
+        )
+
+        uv_runner.run_tool.return_value = PostRunErrorProcess(
+            ["jupyter"],
+            2,
+            "",
+            "",
+            error="ASH could not record the output of jupyter: No space left on device",
+        )
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+            return_value=uv_runner,
+        ):
+            assert (
+                converter._execute_nbconvert_via_uv(["jupyter", "nbconvert", "x.ipynb"])
+                is False
+            )
+
+        assert any(
+            "failed with exit code 2" in m
+            for m in messages_at(ash_log_records, logging.WARNING)
+        )
+
+    def test_a_signal_death_is_not_reported_as_an_exit_code(
+        self, converter, uv_runner, ash_log_records
+    ):
+        """A child that ended on a signal has the signal's negative number,
+        not an exit code of its own. "failed with exit code -9" misreads it;
+        the warning says the run ended on the signal, in the same words the
+        runner's other signal reports use (subprocess_utils.signal_death)."""
+        from automated_security_helper.utils.subprocess_utils import (
+            PostRunErrorProcess,
+        )
+
+        uv_runner.run_tool.return_value = PostRunErrorProcess(
+            ["jupyter"],
+            -9,
+            "",
+            "",
+            error="ASH could not record the output of jupyter: No space left on device",
+        )
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+            return_value=uv_runner,
+        ):
+            assert (
+                converter._execute_nbconvert_via_uv(["jupyter", "nbconvert", "x.ipynb"])
+                is False
+            )
+
+        warnings = messages_at(ash_log_records, logging.WARNING)
+        assert not any("exit code -9" in m for m in warnings), warnings
+        assert any(
+            "SIGKILL (signal 9)" in m
+            and "ASH could not record the output of jupyter: No space left on device"
+            in m
+            for m in warnings
+        ), warnings
+
+    @pytest.mark.skipif(os.name == "nt", reason="Windows has no signal deaths")
+    def test_a_death_without_the_signaled_flag_is_named_but_not_attributed(
+        self, converter, uv_runner, ash_log_records
+    ):
+        """The builders withhold ``signaled`` when ASH's own stop may have been
+        the sender (a kill while the server stops, after a failed wait). For
+        such a result the warning names the signal but does not claim "a
+        signal ASH did not send": re-deriving the attribution from the bare
+        negative code would assert an outside sender ASH cannot know."""
+        from automated_security_helper.utils.subprocess_utils import (
+            PostRunErrorProcess,
+        )
+
+        uv_runner.run_tool.return_value = PostRunErrorProcess(
+            ["jupyter"],
+            -9,
+            "",
+            "",
+            error="ASH could not record the output of jupyter: No space left on device",
+        )
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+            return_value=uv_runner,
+        ):
+            assert (
+                converter._execute_nbconvert_via_uv(["jupyter", "nbconvert", "x.ipynb"])
+                is False
+            )
+
+        warnings = messages_at(ash_log_records, logging.WARNING)
+        assert any("SIGKILL (signal 9)" in m for m in warnings), warnings
+        assert not any("a signal ASH did not send" in m for m in warnings), warnings
+
+    @pytest.mark.skipif(os.name == "nt", reason="Windows has no signal deaths")
+    def test_a_flagged_signal_death_keeps_its_attribution(
+        self, converter, uv_runner, ash_log_records
+    ):
+        """The control: a result whose builder set ``signaled`` had the
+        attribution decided where the facts were (the runner saw the tool end
+        on a signal it did not send), and the warning carries it."""
+        from automated_security_helper.utils.subprocess_utils import (
+            PostRunErrorProcess,
+        )
+
+        uv_runner.run_tool.return_value = PostRunErrorProcess(
+            ["jupyter"],
+            -9,
+            "",
+            "",
+            error="ASH could not record the output of jupyter: No space left on device",
+            signaled=True,
+        )
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+            return_value=uv_runner,
+        ):
+            assert (
+                converter._execute_nbconvert_via_uv(["jupyter", "nbconvert", "x.ipynb"])
+                is False
+            )
+
+        warnings = messages_at(ash_log_records, logging.WARNING)
+        assert any(
+            "SIGKILL (signal 9), a signal ASH did not send" in m for m in warnings
+        ), warnings
 
     def test_rejects_a_command_that_does_not_start_with_jupyter(
         self, converter, uv_runner, ash_log_records
@@ -373,21 +1184,137 @@ class TestExecuteNbconvertViaUv:
             "both 'jupyter' and 'nbconvert' must be stripped before handing off"
         )
         assert kwargs["tool_name"] == "jupyter-nbconvert"
-        assert kwargs["package_name"] == "nbconvert"
+        # The requirement rides in the one --from spec, nbconvert plus
+        # tool_version, so uv runs a version that satisfies it or none.
+        assert kwargs["package_name"] == "nbconvert>=7.16.0,<8.0.0"
         # Never the scanned tree: nbconvert puts its working directory first on
         # sys.path. With no cwd given, it runs in an empty temporary directory.
         assert kwargs["cwd"] != converter.context.source_dir
         assert not Path(kwargs["cwd"]).is_relative_to(converter.context.source_dir)
         assert kwargs["timeout"] == 17
         assert kwargs["version_constraint"] is None, (
-            "passing a constraint here makes uv error; it was validated earlier"
+            "a constraint here would build a second --from, which uv refuses; "
+            "the requirement rides in package_name"
         )
+        # uv's resolver and installer lines land on stderr ahead of any
+        # diagnostic, and _is_uv_error judges the first line, so the run is
+        # quiet: uv then prints only its error diagnostics there.
+        assert kwargs["quiet"] is True
 
-    def test_nonzero_exit_returns_false_and_logs_stderr(
+    def test_the_install_resolves_under_the_converters_requirement(self, converter):
+        """``uv tool install`` runs with the converter's constraint, so what a
+        later run finds installed satisfies it, the way the run's own --from
+        does."""
+        from unittest.mock import MagicMock
+
+        runner = MagicMock()
+        runner.is_tool_installed.return_value = False
+        runner.validate_cached_tool.return_value = {
+            "is_functional": True,
+            "version": "7.16.4",
+        }
+        runner.install_tool_with_version.return_value = True
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+            return_value=runner,
+        ):
+            assert converter._install_uv_tool(timeout=30) is True
+
+        kwargs = runner.install_tool_with_version.call_args.kwargs
+        # The package, not the command: `uv tool install nbconvert<constraint>`
+        # is what provides jupyter-nbconvert.
+        assert kwargs["tool_name"] == "nbconvert"
+        assert kwargs["version_constraint"] == ">=7.16.0,<8.0.0"
+
+    def test_the_version_probe_resolves_under_the_converters_requirement(
+        self, deferred_converter, monkeypatch
+    ):
+        """The probe, the install refreshes and the run share one --from spec,
+        so the reported tool_version is the version that runs: one resolved
+        environment, one entry-point cache, one answer."""
+        converter = deferred_converter
+        asked = []
+
+        def version(runner, tool_name, package_name=None, *args, **kwargs):
+            asked.append((tool_name, package_name))
+            return "7.16.4"
+
+        monkeypatch.setattr(UVToolRunner, "get_tool_version", version)
+
+        converter.resolve_deferred_tool_version()
+
+        assert asked == [("jupyter-nbconvert", "nbconvert>=7.16.0,<8.0.0")]
+
+    def test_the_version_probe_resolves_the_requirement_of_the_check(
+        self, deferred_converter, monkeypatch
+    ):
+        """The spec is the one the dependency check and the run use, read when
+        the probe runs: a tool_version set after the converter was built is the
+        one probed, not the one it was built with."""
+        converter = deferred_converter
+        converter.config.options.tool_version = ">=7.99.0"
+        # The control: the run's spec reads the new requirement.
+        assert converter._uv_from_spec() == "nbconvert>=7.99.0"
+        asked = []
+
+        def version(runner, tool_name, package_name=None, *args, **kwargs):
+            asked.append((tool_name, package_name))
+            return "7.99.1"
+
+        monkeypatch.setattr(UVToolRunner, "get_tool_version", version)
+
+        converter.resolve_deferred_tool_version()
+
+        assert asked == [("jupyter-nbconvert", "nbconvert>=7.99.0")]
+
+    def test_a_nonzero_exit_is_raised_as_nbconvert_exiting(
         self, converter, uv_runner, ash_log_records
     ):
+        """nbconvert ran under uv and exited non-zero: its own verdict on the
+        notebook, raised as the direct route raises it, so the failed input says
+        nbconvert exited and with what code."""
         uv_runner.run_tool.return_value = subprocess.CompletedProcess(
             ["jupyter"], 3, "", "nbconvert blew up"
+        )
+
+        with (
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+                return_value=uv_runner,
+            ),
+            pytest.raises(subprocess.CalledProcessError) as raised,
+        ):
+            converter._execute_nbconvert_via_uv(["jupyter", "nbconvert"])
+
+        assert raised.value.returncode == 3
+        assert raised.value.stderr == "nbconvert blew up"
+
+    @pytest.mark.parametrize(
+        "stderr",
+        [
+            "error: No solution found when resolving tool dependencies\n",
+            "\n  × No solution found when resolving tool dependencies:\n",
+            (
+                "warning: `VIRTUAL_ENV` does not match the project environment\n"
+                "error: No solution found when resolving tool dependencies\n"
+            ),
+            (
+                # Under FORCE_COLOR uv colors its prefixes even into a pipe;
+                # the judgment strips the codes first.
+                "\x1b[1m\x1b[31merror\x1b[0m: No solution found when resolving "
+                "tool dependencies\n"
+            ),
+        ],
+        ids=["error-line", "diagnostic", "warning-then-error", "colored-error-line"],
+    )
+    def test_uv_failing_itself_returns_false(
+        self, converter, uv_runner, ash_log_records, stderr
+    ):
+        """uv's own failure (it prints "error: ..." or a "×" diagnostic):
+        nbconvert never ran, so the run is one uv could not make."""
+        uv_runner.run_tool.return_value = subprocess.CompletedProcess(
+            ["jupyter"], 2, "", stderr
         )
 
         with patch(
@@ -398,13 +1325,135 @@ class TestExecuteNbconvertViaUv:
                 converter._execute_nbconvert_via_uv(["jupyter", "nbconvert"]) is False
             )
 
-        assert any(
-            "exit code 3" in m for m in messages_at(ash_log_records, logging.WARNING)
+        warnings = messages_at(ash_log_records, logging.WARNING)
+        assert any(m.startswith("uv could not run nbconvert: ") for m in warnings), (
+            warnings
         )
-        assert any(
-            "nbconvert blew up" in m
-            for m in messages_at(ash_log_records, logging.DEBUG)
+
+    def test_uv_failing_to_start_returns_false_for_the_fallback(
+        self, converter, uv_runner
+    ):
+        from automated_security_helper.utils.subprocess_utils import (
+            SpawnFailedProcess,
         )
+
+        uv_runner.run_tool.return_value = SpawnFailedProcess(
+            ["uv"], 127, "", "uv: No such file or directory"
+        )
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+            return_value=uv_runner,
+        ):
+            assert (
+                converter._execute_nbconvert_via_uv(["jupyter", "nbconvert"]) is False
+            )
+
+    @pytest.mark.parametrize(
+        "stderr",
+        [
+            (
+                "Traceback (most recent call last):\n"
+                '  File "nbconvert/nbconvertapp.py", line 1, in convert\n'
+                "  error: the notebook could not be read\n"
+            ),
+            (
+                "[NbConvertApp] Converting notebook nb.ipynb to python\n"
+                "\N{MULTIPLICATION SIGN} the exporter failed\n"
+            ),
+            (
+                # An installer line ahead of uv's own error reads this way too,
+                # which is why the run passes --quiet: uv then leads with its
+                # diagnostic, and the quiet kwarg cell above pins the flag.
+                "Installed 1 package in 25ms\n"
+                "error: No solution found when resolving tool dependencies\n"
+            ),
+        ],
+        ids=["later-error-line", "later-diagnostic-line", "installer-line-first"],
+    )
+    def test_nbconvert_s_own_later_error_line_is_its_exit(
+        self, converter, uv_runner, stderr
+    ):
+        """An "error:" or diagnostic line later in nbconvert's own output is
+        nbconvert's: it ran and exited, so the run is raised as its verdict."""
+        uv_runner.run_tool.return_value = subprocess.CompletedProcess(
+            ["jupyter"], 1, "", stderr
+        )
+
+        with (
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+                return_value=uv_runner,
+            ),
+            pytest.raises(subprocess.CalledProcessError) as raised,
+        ):
+            converter._execute_nbconvert_via_uv(["jupyter", "nbconvert"])
+
+        assert raised.value.returncode == 1
+
+    def test_a_run_that_timed_out_is_raised_as_timing_out(self, converter, uv_runner):
+        from automated_security_helper.utils.subprocess_utils import TimedOutProcess
+
+        uv_runner.run_tool.return_value = TimedOutProcess(
+            ["jupyter"], 124, "", "", "timed out after 17 s"
+        )
+
+        with (
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+                return_value=uv_runner,
+            ),
+            pytest.raises(subprocess.TimeoutExpired) as raised,
+        ):
+            converter._execute_nbconvert_via_uv(["jupyter", "nbconvert"], timeout=17)
+
+        assert raised.value.timeout == 17
+
+    def test_a_run_that_did_not_start_returns_false(self, converter, uv_runner):
+        from automated_security_helper.utils.subprocess_utils import (
+            SpawnFailedProcess,
+        )
+
+        uv_runner.run_tool.return_value = SpawnFailedProcess(
+            ["jupyter"], 127, "", "[Errno 2] No such file", "no uv"
+        )
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+            return_value=uv_runner,
+        ):
+            assert (
+                converter._execute_nbconvert_via_uv(["jupyter", "nbconvert"]) is False
+            )
+
+    def test_nbconverts_own_failure_is_not_taken_for_uvs(self, converter, uv_runner):
+        uv_runner.run_tool.return_value = subprocess.CompletedProcess(
+            ["uv"],
+            1,
+            "",
+            "[NbConvertApp] Converting notebook notebook.ipynb to python\n"
+            "Traceback (most recent call last):\n"
+            "nbformat.reader.NotJSONError: Notebook does not appear to be JSON\n",
+        )
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+            return_value=uv_runner,
+        ):
+            with pytest.raises(subprocess.CalledProcessError):
+                converter._execute_nbconvert_via_uv(["jupyter", "nbconvert"])
+
+    def test_a_uv_timeout_is_raised_as_one(self, converter, uv_runner):
+        from automated_security_helper.utils.subprocess_utils import TimedOutProcess
+
+        uv_runner.run_tool.return_value = TimedOutProcess(["uv"], 124, "", "")
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+            return_value=uv_runner,
+        ):
+            with pytest.raises(subprocess.TimeoutExpired):
+                converter._execute_nbconvert_via_uv(["jupyter", "nbconvert"], 9)
 
     def test_uv_tool_runner_error_returns_false(
         self, converter, uv_runner, ash_log_records
@@ -508,13 +1557,13 @@ class TestConvert:
         )
 
     def test_converts_a_notebook_via_direct_execution(
-        self, converter, tmp_path, monkeypatch
+        self, converter, tmp_path, monkeypatch, installed_jupyter
     ):
         notebook = write_notebook(converter.context.source_dir, "analysis.ipynb")
         monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(notebook)])
-        converter.use_uv_tool = False
+        use_stand_in_nbconvert(monkeypatch, converter)
         run = nbconvert_double()
-        monkeypatch.setattr(f"{MODULE}.subprocess.run", run)
+        monkeypatch.setattr(f"{MODULE}.run_ended_with_the_server", run)
 
         results = converter.convert()
 
@@ -525,11 +1574,11 @@ class TestConvert:
         assert out.parent == converter.results_dir
         # The command handed to nbconvert must ask for a script export.
         (cmd,) = run.calls
-        # A Python notebook is exported with nbconvert's Python exporter, chosen by
-        # ASH rather than by the notebook's metadata.
-        assert cmd[:6] == [
-            "jupyter",
-            "nbconvert",
+        # The verified copy, by its own absolute path. A Python notebook is
+        # exported with nbconvert's Python exporter, chosen by ASH rather than
+        # by the notebook's metadata.
+        assert cmd[:5] == [
+            NBCONVERT,
             "--log-level",
             "WARN",
             "--to",
@@ -537,12 +1586,15 @@ class TestConvert:
         ]
         # nbconvert reads a copy made through the checked handle, never the tree
         # path itself, so a link swapped in after the check cannot be followed.
-        assert Path(cmd[6]).name == notebook.name
-        assert cmd[6] != str(notebook)
+        staged = staged_notebook(cmd)
+        assert staged.name == "notebook.ipynb", "the copy is staged under a fixed name"
+        assert staged != notebook
         assert run.inputs == [notebook.read_bytes()]
-        assert not Path(cmd[6]).exists(), "the staged copy is removed afterwards"
-        assert cmd[7] == "--output"
-        assert not cmd[8].endswith(".py"), "nbconvert appends .py itself"
+        assert not staged.exists(), "the staged copy is removed afterwards"
+        assert cmd.index("--output") + 1 < len(cmd), "an --output value is given"
+        assert not cmd[cmd.index("--output") + 1].endswith(".py"), (
+            "nbconvert appends .py itself"
+        )
 
     def test_directories_in_the_scan_set_are_skipped(
         self, converter, ash_log_records, monkeypatch
@@ -551,7 +1603,7 @@ class TestConvert:
         a_directory.mkdir(parents=True, exist_ok=True)
         monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(a_directory)])
         run = nbconvert_double()
-        monkeypatch.setattr(f"{MODULE}.subprocess.run", run)
+        monkeypatch.setattr(f"{MODULE}.run_ended_with_the_server", run)
         converter.use_uv_tool = False
 
         assert converter.convert() == []
@@ -574,33 +1626,159 @@ class TestConvert:
         monkeypatch.setattr(
             f"{MODULE}.scan_set", lambda **kwargs: [str(kept), str(skipped)]
         )
-        converter.use_uv_tool = False
+        use_stand_in_nbconvert(monkeypatch, converter)
         run = nbconvert_double()
-        monkeypatch.setattr(f"{MODULE}.subprocess.run", run)
+        monkeypatch.setattr(f"{MODULE}.run_ended_with_the_server", run)
 
         results = converter.convert()
 
         assert len(results) == 1, "only the non-ignored notebook should convert"
         assert len(run.calls) == 1
-        assert Path(run.calls[0][6]).name == kept.name
+        # By the converted file's name: nbconvert is handed a staged copy under a
+        # fixed name, so neither its argv nor the staged file names the notebook.
+        assert results[0].name.endswith(expected_output_name(kept))
         debug = messages_at(ash_log_records, logging.DEBUG)
         assert any("third-party code" in m for m in debug), (
             "the ignore reason belongs in the log so the skip is explainable"
         )
 
-    def test_uv_execution_is_preferred_and_skips_the_subprocess_fallback(
+    def test_an_ignore_path_ending_in_a_slash_skips_the_directory(
+        self, converter, monkeypatch
+    ):
+        """``vendor/`` names the directory, so a notebook in it is not converted."""
+        kept = write_notebook(converter.context.source_dir / "keep", "keep.ipynb")
+        skipped = write_notebook(
+            converter.context.source_dir / "vendor" / "deep", "vendored.ipynb"
+        )
+        converter.context.config.global_settings.ignore_paths = [
+            IgnorePathWithReason(path="vendor/", reason="third-party code")
+        ]
+        monkeypatch.setattr(
+            f"{MODULE}.scan_set", lambda **kwargs: [str(kept), str(skipped)]
+        )
+        use_stand_in_nbconvert(monkeypatch, converter)
+        run = nbconvert_double()
+        monkeypatch.setattr(f"{MODULE}.run_ended_with_the_server", run)
+
+        results = converter.convert()
+
+        assert len(results) == 1, "the notebook under vendor/ must not be converted"
+        assert len(run.calls) == 1
+        assert results[0].name.endswith(expected_output_name(kept))
+
+    def test_a_client_supplied_ignore_path_does_not_skip_conversion(
+        self, converter, monkeypatch
+    ):
+        """A client's ignore path hides findings in the results; the file is converted."""
+        client = write_notebook(converter.context.source_dir / "client", "c.ipynb")
+        vendor = write_notebook(converter.context.source_dir / "vendor", "v.ipynb")
+        converter.context.config.global_settings.ignore_paths = [
+            IgnorePathWithReason(path="vendor/*", reason="operator"),
+            IgnorePathWithReason(
+                path="client/*", reason="client", client_supplied=True
+            ),
+        ]
+        monkeypatch.setattr(
+            f"{MODULE}.scan_set", lambda **kwargs: [str(client), str(vendor)]
+        )
+        use_stand_in_nbconvert(monkeypatch, converter)
+        run = nbconvert_double()
+        monkeypatch.setattr(f"{MODULE}.run_ended_with_the_server", run)
+
+        results = converter.convert()
+
+        # By the converted file's name: nbconvert is handed a staged copy under a
+        # fixed name, so neither its argv nor the staged file names the notebook.
+        assert len(results) == 1
+        assert len(run.calls) == 1
+        assert results[0].name.endswith(expected_output_name(client))
+
+    def test_ignore_suppressions_converts_a_notebook_under_an_ignore_path(
+        self, converter, monkeypatch
+    ):
+        """With --ignore-suppressions an ignore path skips nothing."""
+        vendor = write_notebook(converter.context.source_dir / "vendor", "v.ipynb")
+        converter.context.config.global_settings.ignore_paths = [
+            IgnorePathWithReason(path="vendor/*", reason="operator"),
+        ]
+        converter.context.ignore_suppressions = True
+        monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(vendor)])
+        use_stand_in_nbconvert(monkeypatch, converter)
+        run = nbconvert_double()
+        monkeypatch.setattr(f"{MODULE}.run_ended_with_the_server", run)
+
+        results = converter.convert()
+
+        assert len(results) == 1
+        assert len(run.calls) == 1
+        assert results[0].name.endswith(expected_output_name(vendor))
+
+    @pytest.mark.parametrize(
+        "expiration,skipped",
+        [("2026-06-16", True), ("2026-06-15", False), ("2026-06-14", False)],
+        ids=["expires-tomorrow", "expires-today", "expired-yesterday"],
+    )
+    def test_ignore_path_stops_skipping_on_its_expiration_day(
+        self, converter, monkeypatch, expiration, skipped
+    ):
+        """An expired ignore path no longer keeps a notebook from being converted.
+
+        The clock is fixed at 2026-06-15 in the module that compares expiration
+        dates, so the three cases are the day before, the day itself and the day
+        after. tests/unit/utils/test_ignore_path_expiration.py holds the rule.
+        """
+        from datetime import date as real_date
+        from datetime import datetime as real_datetime
+
+        from automated_security_helper.models import core as models_core
+        from automated_security_helper.utils import suppression_matcher
+
+        class _FixedDate(real_date):
+            @classmethod
+            def today(cls):
+                return cls(2026, 6, 15)
+
+        class _FixedDatetime(real_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return cls(2026, 6, 15, 12, 0, 0, tzinfo=tz)
+
+        monkeypatch.setattr(models_core, "date", _FixedDate)
+        monkeypatch.setattr(suppression_matcher, "datetime", _FixedDatetime)
+        notebook = write_notebook(
+            converter.context.source_dir / "vendor", "vendored.ipynb"
+        )
+        converter.context.config.global_settings.ignore_paths = [
+            IgnorePathWithReason(
+                path="vendor/*", reason="third-party code", expiration=expiration
+            )
+        ]
+        monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(notebook)])
+        use_stand_in_nbconvert(monkeypatch, converter)
+        run = nbconvert_double()
+        monkeypatch.setattr(f"{MODULE}.run_ended_with_the_server", run)
+
+        results = converter.convert()
+
+        assert len(results) == (0 if skipped else 1), (
+            f"an ignore path expiring {expiration} should "
+            f"{'still' if skipped else 'no longer'} skip the notebook on 2026-06-15"
+        )
+
+    def test_a_uv_run_that_converts_launches_nothing_else(
         self, converter, tmp_path, monkeypatch
     ):
         notebook = write_notebook(converter.context.source_dir, "nb.ipynb")
         monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(notebook)])
         run = nbconvert_double()
-        monkeypatch.setattr(f"{MODULE}.subprocess.run", run)
+        monkeypatch.setattr(f"{MODULE}.run_ended_with_the_server", run)
+
+        uv_cwds = []
 
         def fake_uv(cmd, timeout=60, cwd=None):
             # Stand in for nbconvert succeeding under uv: write the output file.
-            out = Path(cmd[cmd.index("--output") + 1] + ".py")
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text("converted\n", encoding="utf-8")
+            uv_cwds.append(cwd)
+            output_file(cmd).write_text("converted\n", encoding="utf-8")
             return True
 
         converter._execute_nbconvert_via_uv = fake_uv
@@ -608,35 +1786,48 @@ class TestConvert:
         results = converter.convert()
 
         assert len(results) == 1
-        assert run.calls == [], "subprocess must not run when uv succeeded"
+        assert run.calls == [], "nothing is launched besides the uv run that converted"
+        # uv runs nbconvert outside the scanned tree, never inheriting a cwd.
+        (cwd,) = uv_cwds
+        assert cwd is not None
+        assert (
+            not Path(cwd)
+            .resolve()
+            .is_relative_to(converter.context.source_dir.resolve())
+        )
 
-    def test_uv_failure_falls_back_to_subprocess(
+    def test_a_uv_failure_converts_nothing_and_runs_nothing_in_its_place(
         self, converter, ash_log_records, monkeypatch
     ):
+        """uv was the route, so a jupyter-nbconvert from PATH does not run in
+        its place: a second run after nbconvert failed on the notebook would
+        double the time and report the second failure's reason."""
         notebook = write_notebook(converter.context.source_dir, "nb.ipynb")
         monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(notebook)])
         converter._execute_nbconvert_via_uv = Mock(return_value=False)
         run = nbconvert_double()
-        monkeypatch.setattr(f"{MODULE}.subprocess.run", run)
+        monkeypatch.setattr(f"{MODULE}.run_ended_with_the_server", run)
 
         results = converter.convert()
 
-        assert len(results) == 1
-        assert len(run.calls) == 1, "the direct-execution fallback must have run"
-        assert any(
-            "trying direct execution" in m
-            for m in messages_at(ash_log_records, logging.WARNING)
-        )
+        assert results == []
+        assert run.calls == [], "nothing runs in uv's place"
+        errors = messages_at(ash_log_records, logging.ERROR)
+        assert len(errors) == 1
+        assert errors[0].startswith("Could not convert 'nb.ipynb': "), errors
+        assert "uv could not run nbconvert" in errors[0]
+        # Recorded as well as logged, so the completeness gate sees it.
+        assert [r.path for r in converter.failed_inputs] == ["nb.ipynb"]
 
-    def test_uv_failure_then_subprocess_failure_drops_the_notebook(
+    def test_a_direct_run_that_fails_drops_the_notebook(
         self, converter, ash_log_records, monkeypatch
     ):
-        """Both execution routes failing must not yield a phantom result."""
+        """The verified copy failing must not yield a phantom result."""
         notebook = write_notebook(converter.context.source_dir, "nb.ipynb")
         monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(notebook)])
-        converter._execute_nbconvert_via_uv = Mock(return_value=False)
+        use_stand_in_nbconvert(monkeypatch, converter)
         monkeypatch.setattr(
-            f"{MODULE}.subprocess.run",
+            f"{MODULE}.run_ended_with_the_server",
             nbconvert_double(
                 returncode=2, stderr="nbconvert failed", create_output=False
             ),
@@ -644,8 +1835,8 @@ class TestConvert:
 
         assert converter.convert() == []
         errors = messages_at(ash_log_records, logging.ERROR)
-        assert len(errors) == 1
-        assert errors[0].startswith("Error converting ")
+        assert errors == ["Could not convert 'nb.ipynb': nbconvert exited with code 2"]
+        assert [r.path for r in converter.failed_inputs] == ["nb.ipynb"]
         assert "nbconvert failed" in " ".join(
             messages_at(ash_log_records, logging.DEBUG)
         )
@@ -653,7 +1844,8 @@ class TestConvert:
     def test_malformed_notebook_is_skipped_not_reported_as_converted(
         self, converter, ash_log_records, monkeypatch
     ):
-        """nbconvert exits non-zero on unparseable JSON; the file must be dropped."""
+        """A file whose text is not JSON is an input error: nbconvert is never
+        launched on it, and the file must be dropped from the results."""
         source = converter.context.source_dir
         source.mkdir(parents=True, exist_ok=True)
         broken = source / "broken.ipynb"
@@ -662,69 +1854,74 @@ class TestConvert:
         monkeypatch.setattr(
             f"{MODULE}.scan_set", lambda **kwargs: [str(broken), str(good)]
         )
-        converter.use_uv_tool = False
-
-        stderr_text = (
-            "nbformat.reader.NotJSONError: Notebook does not appear to be JSON"
-        )
+        use_stand_in_nbconvert(monkeypatch, converter)
+        launched: list = []
 
         def _run(cmd, *args, **kwargs):
-            if Path(cmd[6]).name == broken.name:
-                return subprocess.CompletedProcess(cmd, 1, "", stderr_text)
-            out = Path(cmd[cmd.index("--output") + 1] + ".py")
+            launched.append(staged_notebook(cmd).name)
+            # Where nbconvert writes: --output-dir / --output plus ".py".
+            out = output_file(cmd)
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text("ok\n", encoding="utf-8")
             return subprocess.CompletedProcess(cmd, 0, "", "")
 
-        monkeypatch.setattr(f"{MODULE}.subprocess.run", _run)
+        monkeypatch.setattr(f"{MODULE}.run_ended_with_the_server", _run)
 
         results = converter.convert()
 
-        # The malformed notebook must not appear in the results under any name.
+        # The malformed notebook must not appear in the results under any name,
+        # and nbconvert ran only on the good one.
         assert len(results) == 1
         assert results[0].name.endswith(expected_output_name(good))
         assert not any("broken" in p.name for p in results)
-        # Exactly one failure was reported, and nbconvert's diagnosis was kept.
+        # nbconvert ran once, on the good notebook's staged copy (the copy is
+        # staged under a fixed name).
+        assert launched == ["notebook.ipynb"]
+        # Exactly one failure was recorded, as an input error.
         errors = messages_at(ash_log_records, logging.ERROR)
-        assert len(errors) == 1
-        assert errors[0].startswith("Error converting ")
-        assert broken.name in errors[0]
-        assert stderr_text in " ".join(messages_at(ash_log_records, logging.DEBUG)), (
-            "nbconvert's stderr is the only clue to why the notebook failed"
+        expected = (
+            "Could not convert 'broken.ipynb': not a Jupyter notebook: "
+            "its text is not JSON"
         )
+        assert errors == [expected]
+        # Recorded as well as logged, so the completeness gate sees it.
+        assert [r.path for r in converter.failed_inputs] == ["broken.ipynb"]
+        assert converter.failed_inputs[0].kind == "input"
 
     def test_timeout_is_reported_and_the_notebook_is_dropped(
         self, converter, ash_log_records, monkeypatch
     ):
         notebook = write_notebook(converter.context.source_dir, "slow.ipynb")
         monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(notebook)])
-        converter.use_uv_tool = False
+        use_stand_in_nbconvert(monkeypatch, converter)
         monkeypatch.setattr(
-            f"{MODULE}.subprocess.run",
+            f"{MODULE}.run_ended_with_the_server",
             Mock(side_effect=subprocess.TimeoutExpired(cmd=["jupyter"], timeout=60)),
         )
 
         assert converter.convert() == []
         errors = messages_at(ash_log_records, logging.ERROR)
-        assert len(errors) == 1
-        assert errors[0].startswith("Timeout converting ")
+        assert errors == [
+            "Could not convert 'slow.ipynb': nbconvert did not finish within 60s"
+        ]
+        assert [r.path for r in converter.failed_inputs] == ["slow.ipynb"]
 
-    def test_missing_output_file_is_a_warning_not_a_result(
+    def test_missing_output_file_is_a_failure_not_a_result(
         self, converter, ash_log_records, monkeypatch
     ):
         """A zero exit with no output file must not be counted as a conversion."""
         notebook = write_notebook(converter.context.source_dir, "nb.ipynb")
         monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(notebook)])
-        converter.use_uv_tool = False
+        use_stand_in_nbconvert(monkeypatch, converter)
         monkeypatch.setattr(
-            f"{MODULE}.subprocess.run", nbconvert_double(create_output=False)
+            f"{MODULE}.run_ended_with_the_server", nbconvert_double(create_output=False)
         )
 
         assert converter.convert() == []
-        assert any(
-            "output file not found" in m
-            for m in messages_at(ash_log_records, logging.WARNING)
-        )
+        assert messages_at(ash_log_records, logging.ERROR) == [
+            "Could not convert 'nb.ipynb': nbconvert exited 0 but wrote no output"
+        ]
+        assert [r.path for r in converter.failed_inputs] == ["nb.ipynb"]
 
     def test_unexpected_error_is_logged_with_a_traceback_and_does_not_abort(
         self, converter, ash_log_records, monkeypatch
@@ -734,23 +1931,31 @@ class TestConvert:
         monkeypatch.setattr(
             f"{MODULE}.scan_set", lambda **kwargs: [str(first), str(second)]
         )
-        converter.use_uv_tool = False
+        use_stand_in_nbconvert(monkeypatch, converter)
         real = nbconvert_double()
+        launched: list = []
 
         def _run(cmd, *args, **kwargs):
-            if Path(cmd[6]).name == first.name:
+            # Every copy is staged as notebook.ipynb, so the run is told apart by
+            # its order: the scan set's, first.ipynb then second.ipynb.
+            launched.append(list(cmd))
+            if len(launched) == 1:
                 raise ValueError("something unexpected")
             return real(cmd, *args, **kwargs)
 
-        monkeypatch.setattr(f"{MODULE}.subprocess.run", _run)
+        monkeypatch.setattr(f"{MODULE}.run_ended_with_the_server", _run)
 
         results = converter.convert()
 
         assert len(results) == 1, "one bad notebook must not stop the others"
         assert results[0].name.endswith(expected_output_name(second))
         errors = messages_at(ash_log_records, logging.ERROR)
-        assert len(errors) == 1
-        assert errors[0].startswith("Unexpected error converting ")
+        assert errors == [
+            "Could not convert 'first.ipynb': conversion raised ValueError"
+        ], "the error's own text is left out: it can quote the notebook"
+        assert [r.reason for r in converter.failed_inputs] == [
+            "conversion raised ValueError"
+        ]
         assert any(
             "Traceback (most recent call last)" in m
             for m in messages_at(ash_log_records, logging.DEBUG)
@@ -772,6 +1977,10 @@ class TestConvert:
         assert seen == {
             "source": converter.context.source_dir,
             "output": converter.context.output_dir,
+            # The operator's switch for the repository's ignore files, from the
+            # context's config; the default config honors them.
+            "honor_ignore_files": True,
+            "run_id": RUN_ID,
         }
 
 
@@ -816,16 +2025,13 @@ class TestCandidateInputCount:
     def test_counting_never_invokes_nbconvert(self, converter, monkeypatch):
         """The tool is absent in the case this exists for, so the count must not need it."""
         write_notebook(converter.context.source_dir, "nb.ipynb")
-
-        def _explode(*args, **kwargs):  # pragma: no cover - must not be reached
-            raise AssertionError(
-                "candidate_input_count invoked a subprocess; it must answer without "
-                "nbconvert, because the case it exists for is nbconvert being absent"
-            )
-
-        monkeypatch.setattr(subprocess, "run", _explode)
+        # Any process start fails, by every route (tests/utils/process_guard.py): the
+        # count must answer without nbconvert, because the case it exists for is
+        # nbconvert being absent.
+        started = refuse_process_starts(monkeypatch)
 
         assert converter.candidate_input_count() == 1
+        assert started == []
 
     def test_an_unreadable_scan_set_reports_no_count_rather_than_zero(
         self, converter, monkeypatch
@@ -864,7 +2070,14 @@ class TestCandidateInputCount:
 
         monkeypatch.setattr(converter, "_notebooks_in_scan_set", _spy)
 
-        with patch(f"{MODULE}.subprocess.run", nbconvert_double()):
+        # The uv tool runner's plain runner and the direct nbconvert run both.
+        with (
+            patch(
+                "automated_security_helper.utils.subprocess_utils._run_plain",
+                nbconvert_double(),
+            ),
+            patch(f"{MODULE}.run_ended_with_the_server", nbconvert_double()),
+        ):
             converter.convert()
         converter.candidate_input_count()
 

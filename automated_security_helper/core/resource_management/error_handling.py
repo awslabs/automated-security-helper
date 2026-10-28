@@ -10,8 +10,10 @@ validating input parameters, and creating meaningful error messages for
 various failure scenarios.
 """
 
+import errno
 import json
 import os
+import stat
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple, Union
@@ -20,6 +22,7 @@ from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
 from automated_security_helper.utils.atomic_write import read_text_of_replaced_file
+from automated_security_helper.utils.directory_refusals import output_dir_refusal
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -39,6 +42,10 @@ class ErrorCategory(Enum):
     OPERATION_TIMEOUT = "operation_timeout"
     SCAN_NOT_FOUND = "scan_not_found"
     SCAN_INCOMPLETE = "scan_incomplete"
+    #: A configuration that loaded and parsed, whose plugin-module list a
+    #: scan refuses. Not a format problem: a format category sent clients
+    #: to re-format a healthy file.
+    PLUGIN_MODULE_REFUSED = "plugin_module_refused"
     UNEXPECTED_ERROR = "unexpected_error"
 
 
@@ -202,9 +209,12 @@ def safe_write_json_file(
                 },
             )
 
-        # Write the file
+        # Write the file. Below an output directory, as ASH's other writes there:
+        # never through a link (fs_guard).
+        from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
         try:
-            with open(path_obj, "w", encoding="utf-8") as f:
+            with open_for_write(path_obj) as f:
                 json.dump(data, f, indent=2)
             return None
         except PermissionError:
@@ -314,6 +324,68 @@ def validate_directory_path(
     )
 
 
+def source_directory_error(
+    directory_path: Union[str, Path],
+) -> Optional[MCPResourceError]:
+    """Why ``directory_path`` cannot be scanned as a source directory, or None.
+
+    In the words the CLI uses for ``--source-dir``, quoting the path as given:
+    "Source directory does not exist" (a link to nothing included), "Source
+    directory is not a directory", and "Source directory cannot be entered" for
+    one whose entries cannot be listed and read, or that sits below a directory
+    that cannot be. For source directories only: validate_directory_path, which
+    output-directory lookups also use, keeps its own words.
+    """
+    try:
+        status = os.stat(directory_path)
+    except (FileNotFoundError, NotADirectoryError):
+        problem, category = "does not exist", ErrorCategory.FILE_NOT_FOUND
+    except OSError as error:
+        if error.errno == errno.ELOOP:
+            problem, category = "does not exist", ErrorCategory.FILE_NOT_FOUND
+        else:
+            problem, category = "cannot be entered", ErrorCategory.PERMISSION_DENIED
+    else:
+        if not stat.S_ISDIR(status.st_mode):
+            problem, category = "is not a directory", ErrorCategory.INVALID_PATH
+        elif not os.access(directory_path, os.R_OK | os.X_OK):
+            problem, category = "cannot be entered", ErrorCategory.PERMISSION_DENIED
+        else:
+            return None
+    return MCPResourceError(
+        f"Source directory {problem}: {directory_path}",
+        context={
+            "directory_path": str(directory_path),
+            "error_category": category.value,
+        },
+    )
+
+
+def validate_output_directory_path(
+    directory_path: Union[str, Path],
+) -> Optional[MCPResourceError]:
+    """Validate a scan's output directory, which need not exist yet.
+
+    A scan creates its output directory only once the registry has given it the
+    scan, so that a scan refused at max_concurrent_scans leaves nothing on disk.
+    Registration therefore accepts a directory that does not exist. It still
+    refuses a path that exists and is not a directory, which no scan can write
+    into, in the words the CLI uses for an ``--output-dir`` that is a file
+    (``utils/directory_refusals.py``). Where the directory may be is the
+    caller's to check, as for :func:`validate_directory_path`.
+    """
+    refusal = output_dir_refusal(directory_path)
+    if refusal is None:
+        return None
+    return MCPResourceError(
+        refusal,
+        context={
+            "directory_path": str(directory_path),
+            "error_category": ErrorCategory.INVALID_PARAMETER.value,
+        },
+    )
+
+
 def validate_scan_id(scan_id: str) -> Optional[MCPResourceError]:
     """
     Validate a scan ID with comprehensive error handling.
@@ -345,6 +417,11 @@ def validate_scan_id(scan_id: str) -> Optional[MCPResourceError]:
     return None
 
 
+#: The severity thresholds a scan accepts, in any case: the values
+#: ``AshConfig.global_settings.severity_threshold`` allows, loosest first.
+VALID_SEVERITY_THRESHOLDS = ("ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL")
+
+
 def validate_severity_threshold(severity_threshold: str) -> Optional[MCPResourceError]:
     """
     Validate a severity threshold with comprehensive error handling.
@@ -368,7 +445,7 @@ def validate_severity_threshold(severity_threshold: str) -> Optional[MCPResource
     Returns:
         None if valid, MCPResourceError if invalid
     """
-    valid_severities = ["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    valid_severities = list(VALID_SEVERITY_THRESHOLDS)
 
     if not severity_threshold:
         return MCPResourceError(
@@ -493,8 +570,8 @@ def validate_scan_parameters(
     """
     errors = []
 
-    # Validate directory path
-    dir_error = validate_directory_path(directory_path)
+    # Validate the source directory
+    dir_error = source_directory_error(directory_path)
     if dir_error:
         errors.append(dir_error)
 
@@ -562,6 +639,7 @@ def create_error_response(
     error: Union[MCPResourceError, Exception],
     operation: str,
     suggestions: Optional[List[str]] = None,
+    category: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Create a standardized error response for API operations.
@@ -570,6 +648,8 @@ def create_error_response(
         error: The error that occurred
         operation: The operation that was being performed
         suggestions: Optional list of suggestions for resolving the error
+        category: The error category, for an error that is not an
+            MCPResourceError and so names none in its context
 
     Returns:
         Standardized error response dictionary
@@ -581,21 +661,65 @@ def create_error_response(
     if isinstance(error, MCPResourceError) and hasattr(error, "context"):
         context = error.context
         error_category = context.get("error_category", "unexpected_error")
+    if category is not None:
+        error_category = category
 
     # Generate default suggestions based on error category
     if suggestions is None:
         suggestions = _get_default_suggestions(error_category)
 
+    from automated_security_helper.utils.error_text import error_text
+    from automated_security_helper.utils.terminal_text import raw_controls_on_one_line
+
     return {
         "success": False,
         "operation": operation,
-        "error": str(error),
+        # The MCP response of every tool's failure: a pydantic error's own text
+        # quotes the refused input, which can be a secret (utils/error_text.py).
+        # A client reads and may display it, so it holds no control character:
+        # each is written as its escape, on one line.
+        "error": raw_controls_on_one_line(error_text(error)),
         "error_type": type(error).__name__,
         "error_category": error_category,
-        "context": context,
+        # Its strings name paths and values the error quotes: shown the same way,
+        # in a copy, so the error's own context keeps them as raised.
+        "context": _strings_shown(context),
         "suggestions": suggestions,
         "timestamp": None,  # Will be set by caller if needed
     }
+
+
+def _strings_shown(value: Any) -> Any:
+    """*value* with each string in it, in nested dicts, lists and tuples too,
+    written for a client that may display it: on one line, each control as its
+    escape (utils/terminal_text.py's raw_controls_on_one_line). Anything else is
+    returned as it is."""
+    from automated_security_helper.utils.terminal_text import raw_controls_on_one_line
+
+    if isinstance(value, str):
+        return raw_controls_on_one_line(value)
+    if isinstance(value, dict):
+        return {key: _strings_shown(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return type(value)(_strings_shown(item) for item in value)
+    return value
+
+
+#: The one wording for the plugin-module refusal's suggestions: the MCP
+#: get_config/scan refusal (cli/mcp_tools._plugin_module_refusal) and this
+#: module's category defaults answer with the same list, naming only what an
+#: MCP client can change. Two wordings for one category sent a reader of the
+#: defaults to a "configuration" the MCP client may never have as a file.
+#: A tuple, so every response is built as its own ``list(...)`` copy: handed
+#: out by identity, one caller's append rewrote the suggestions of every
+#: later refusal in the process.
+PLUGIN_MODULE_REFUSED_SUGGESTIONS: Tuple[str, ...] = (
+    (
+        "Review the ash_plugin_modules entries in the config file or the "
+        "config content sent"
+    ),
+    "Remove the entries a scan refuses",
+)
 
 
 def _get_default_suggestions(error_category: str) -> List[str]:
@@ -654,6 +778,9 @@ def _get_default_suggestions(error_category: str) -> List[str]:
             "Check for errors in the scan process",
             "Verify the scan is still running",
         ],
+        ErrorCategory.PLUGIN_MODULE_REFUSED.value: list(
+            PLUGIN_MODULE_REFUSED_SUGGESTIONS
+        ),
         ErrorCategory.UNEXPECTED_ERROR.value: [
             "Check logs for additional information",
             "Verify system stability and resource availability",

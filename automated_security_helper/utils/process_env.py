@@ -19,7 +19,13 @@ The fix has two halves and needs both:
 * Every runtime mutation goes through this module, under ``ENVIRON_LOCK``, so a
   snapshot is never taken halfway through someone else's change. Copying
   ``os.environ`` reads the key list and then each value, so a concurrent ``pop``
-  between the two raises ``KeyError`` in the copying thread.
+  between the two raises ``KeyError`` in the copying thread, and a copy taken
+  during a multi-variable override gets some of its values and not others.
+  So every copy goes through ``snapshot_environ()`` too, not only a spawn's:
+  ``tests/unit/utils/test_environ_mutations_are_locked.py`` refuses a write
+  outside this module and ``test_environ_copies_are_locked.py`` any read of the
+  whole mapping (a copy, ``**`` or ``|``, iteration, ``env=os.environ``, an
+  alias, or the mapping handed to a function).
 
 The lock is held only while variables are written or copied, never across the
 work done with them. ``cdk_nag_wrapper`` keeps its own lock to serialize whole
@@ -34,6 +40,7 @@ changed, copies ``os.environ`` and passes ``env=`` itself.
 import os
 import threading
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Dict, Iterator, Mapping, Optional
 
 #: Re-entrant so a helper here can call another helper here without deadlocking.
@@ -48,6 +55,36 @@ def snapshot_environ() -> Dict[str, str]:
     """
     with ENVIRON_LOCK:
         return dict(os.environ)
+
+
+#: The variables that set how a child lays text out and colors it for a terminal.
+#: uv wraps its messages at the caller's COLUMNS and colors them under FORCE_COLOR
+#: or CLICOLOR_FORCE even into a pipe (measured with uv 0.13), so text ASH parses
+#: came back split across lines or wrapped in escape codes.
+DISPLAY_VARIABLES = (
+    "COLUMNS",
+    "LINES",
+    "FORCE_COLOR",
+    "CLICOLOR_FORCE",
+    "TTY_COMPATIBLE",
+    "TTY_INTERACTIVE",
+)
+
+
+def environ_for_parsed_output(
+    env: Optional[Mapping[str, str]] = None,
+) -> Dict[str, str]:
+    """The environment for a child whose output ASH parses: ``env``, or a snapshot
+    of the environment when it is None, without ``DISPLAY_VARIABLES`` and with
+    ``NO_COLOR=1``, which stops uv's color even alongside FORCE_COLOR.
+
+    A new dict; ``env`` is left as it was.
+    """
+    parsed = dict(env) if env is not None else snapshot_environ()
+    for name in DISPLAY_VARIABLES:
+        parsed.pop(name, None)
+    parsed["NO_COLOR"] = "1"
+    return parsed
 
 
 def apply_environ_overrides(
@@ -95,6 +132,68 @@ def environ_overrides(
         yield
     finally:
         restore_environ(previous)
+
+
+@dataclass
+class _Hold:
+    """One variable hold_environ holds."""
+
+    value: str
+    holders: int
+    #: The variable's value before the first hold, None when it was unset.
+    original: Optional[str]
+
+
+#: Variables held by hold_environ, by name.
+_HELD: Dict[str, _Hold] = {}
+
+
+def hold_environ(key: str, value: str) -> None:
+    """Set ``key`` to ``value`` for as long as at least one caller holds it.
+
+    For a change that several overlapping callers each need, such as
+    ``ASH_OFFLINE=YES`` for two offline scans in one process. Snapshot and restore
+    (:func:`apply_environ_overrides`) breaks there: the first caller to finish
+    restores the value it saw while the other is still running, and the last one
+    restores the first one's change. Here the first holder records the original
+    value and sets the variable, and the last :func:`release_environ` puts the
+    original back.
+
+    Raises ValueError if the variable is already held at a different value, since
+    two holders cannot both have their way.
+    """
+    with ENVIRON_LOCK:
+        held = _HELD.get(key)
+        if held is None:
+            _HELD[key] = _Hold(value=value, holders=1, original=os.environ.get(key))
+        elif held.value != value:
+            raise ValueError(
+                f"{key} is held at {held.value!r}; it cannot also be held at {value!r}"
+            )
+        else:
+            held.holders += 1
+        os.environ[key] = value
+
+
+def release_environ(key: str) -> None:
+    """Release one :func:`hold_environ` of ``key``; the last restores its original.
+
+    Raises RuntimeError if nobody holds it, which is a hold and release that do not
+    pair up.
+    """
+    with ENVIRON_LOCK:
+        held = _HELD.get(key)
+        if held is None:
+            raise RuntimeError(f"{key} is released but not held")
+        held.holders -= 1
+        if held.holders:
+            return
+        del _HELD[key]
+        original = held.original
+        if original is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = original
 
 
 def setdefault_environ(key: str, value: str) -> str:

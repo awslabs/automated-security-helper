@@ -1,0 +1,8 @@
+{% macro icon(name, class="") -%}
+<span class="ash-icon {{ class }}" aria-hidden="true">{% include ".icons/phosphor/" ~ name ~ ".svg" %}</span>
+{%- endmacro %}
+
+{% macro action(label, href, primary=true, symbol="arrow-right") -%}
+<a class="ash-button ash-button--{{ 'primary' if primary else 'quiet' }}" href="{{ href }}"><span class="ash-button__label">{{ label }}</span><span class="ash-button__icon">{{ icon(symbol) }}</span></a>
+{%- endmacro %}
+

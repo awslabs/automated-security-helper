@@ -16,6 +16,7 @@ The three properties these tests exist to hold:
 """
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -30,14 +31,23 @@ from automated_security_helper.workspace.aggregation import (
     WorkspaceAggregator,
     count_actionable_results,
     has_finding_at_min_severity,
-    incomplete_scanners_for_project,
-    no_scanner_ran_for_project,
     project_relative_uri,
     project_root_uri,
     rebase_run_for_project,
     to_workspace_uri,
 )
+from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
+from automated_security_helper.workspace.execution import _coverage_fields
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
+
+
+def incomplete_scanners_for_project(results):
+    """Names of the incomplete scanners, read as a single scan reads them."""
+    from automated_security_helper.interactions.run_ash_scan import (
+        scan_incompleteness,
+    )
+
+    return [name for name, _status in scan_incompleteness(results, gate=True).scanners]
 
 
 def _plan(tmp_path, *keys):
@@ -128,8 +138,12 @@ class TestWorkspaceUriConversion:
             == "api/src/app.py"
         )
 
-    def test_a_backslash_path_is_normalised(self):
-        assert to_workspace_uri("src\\app.py", "api") == "api/src/app.py"
+    def test_a_backslash_in_a_sanitized_uri_is_part_of_the_name(self):
+        """The project's scan wrote "/" for its separators when it sanitized the
+        URI, so a backslash left in it is part of a POSIX file name. Under a
+        Windows project path it is a separator (test_a_relative_windows_uri_still_converts)."""
+        assert to_workspace_uri("src\\app.py", "api") == "api/src\\app.py"
+        assert to_workspace_uri("src/app.py", "api") == "api/src/app.py"
 
     def test_a_path_the_converter_refuses_returns_none(self):
         """Not an exception and not a silent pass-through -- the caller counts it."""
@@ -462,10 +476,11 @@ class TestActionableCounting:
         results = [_result(level="error", suppressed=True)]
         assert count_actionable_results(results, "ALL") == 0
 
-    def test_a_missing_level_is_read_as_note(self):
+    def test_a_missing_level_is_read_as_the_missing_level(self):
+        """MISSING_SARIF_LEVEL, "warning" (MEDIUM); it was "note" here."""
         entry = {"ruleId": "B307"}
-        assert count_actionable_results([entry], "LOW") == 1
-        assert count_actionable_results([entry], "MEDIUM") == 0
+        assert count_actionable_results([entry], "MEDIUM") == 1
+        assert count_actionable_results([entry], "HIGH") == 0
 
     def test_the_threshold_is_matched_case_insensitively(self):
         """run_ash_scan upper-cases the configured value; the ladder does not."""
@@ -508,6 +523,26 @@ class TestMinSeverityGate:
 
     def test_a_high_gate_rejects_a_warning(self):
         assert has_finding_at_min_severity([_result(level="warning")], "high") is False
+
+    def test_a_declared_severity_decides_over_the_level(self):
+        """issue_severity first, as run_ash_scan._severity_filters_finding reads it.
+
+        The workspace gate read the level alone, so a scanner's declared HIGH at
+        level note never met --min-severity high, and a declared LOW at level
+        error always did.
+        """
+        assert (
+            has_finding_at_min_severity(
+                [_result(level="note", severity="HIGH")], "high"
+            )
+            is True
+        )
+        assert (
+            has_finding_at_min_severity(
+                [_result(level="error", severity="LOW")], "high"
+            )
+            is False
+        )
 
 
 class TestParityWithComputeExitCode:
@@ -729,13 +764,13 @@ class TestCompletenessParityWithComputeExitCode:
         assert mine == []
 
     def test_an_excluded_scanner_is_clean_to_both_derivations(self, tmp_path):
-        """The case that separates delegating from mirroring.
+        """The case that separates reading the metrics from reading raw statuses.
 
         Excluded AND its tool absent, which is ``--exclude-scanners cfn-nag`` on a
         host without cfn-nag, and also every shard of a sharded scan. Both
-        derivations must read SKIPPED, which they do only because this function
-        delegates to ``incomplete_scanners`` -- a copy reading
-        ``scanner_results[*].status`` directly would see MISSING.
+        derivations must read SKIPPED, which they do only because both go through
+        ``scan_incompleteness`` -- a read of ``scanner_results[*].status``
+        directly would see MISSING.
         """
         statuses = {
             "bandit": ("PASSED", False, True),
@@ -747,14 +782,109 @@ class TestCompletenessParityWithComputeExitCode:
         assert standalone == 0
         assert mine == []
 
-    def test_neither_derivation_reads_a_none_model_as_incomplete(self):
-        """``None`` is "the scan crashed", which is already exit 1 on its own.
+    def test_a_none_model_is_read_as_no_coverage_facts(self):
+        """``scan_incompleteness(None)`` answers an empty ``ScanIncompleteness``.
 
-        Answering "every scanner is incomplete" here would be a second, weaker
-        claim about the same event.
+        ``_coverage_fields`` has no guard of its own for ``None``; it relies on this.
+        Pinned so that the day ``scan_incompleteness`` raises on ``None``, this fails.
+        ``_scan_one_project`` does not reach the coverage fields with a ``None``
+        model (a crashed scan is FAILED before that point), so the answer matters
+        only as the contract ``_coverage_fields`` is written against.
         """
-        assert incomplete_scanners_for_project(None) == []
-        assert no_scanner_ran_for_project(None) is False
+        from automated_security_helper.interactions.run_ash_scan import (
+            scan_incompleteness,
+        )
+
+        facts = scan_incompleteness(None, gate=True)
+
+        assert not facts
+        assert facts.no_scanner_ran is False
+        assert facts.scanners == ()
+        assert _coverage_fields(None) == {
+            "incomplete_scanners": [],
+            "incomplete_scanner_details": {},
+            "partial_coverage_scanners": [],
+            "no_scanner_ran": False,
+        }
+
+    @pytest.mark.parametrize(
+        ("statuses", "roster", "exit_code"),
+        [
+            # Per-scanner arm only: a MISSING scanner beside one that ran.
+            (
+                {
+                    "bandit": ("PASSED", False, True),
+                    "cfn-nag": ("MISSING", False, False),
+                },
+                [],
+                1,
+            ),
+            # Set-level arm only: every entry SKIPPED.
+            ({"bandit": ("SKIPPED", True, True)}, [], 1),
+            # Set-level arm through the roster: nothing recorded, a roster says
+            # the scan phase ran.
+            ({}, ["bandit"], 1),
+            # Controls: a narrowed run that measured something, and a clean one.
+            (
+                {"bandit": ("PASSED", False, True), "cfn-nag": ("SKIPPED", True, True)},
+                [],
+                0,
+            ),
+            ({"bandit": ("PASSED", False, True)}, [], 0),
+        ],
+    )
+    def test_the_fields_the_scan_writes_agree_with_the_exit_code(
+        self, tmp_path, statuses, roster, exit_code
+    ):
+        """``_coverage_fields`` is what ``_scan_one_project`` writes into the outcome.
+
+        Called from here and from production with only the results, so the helper
+        owns the ``gate=`` it reads under and a change to it (a field dropped, a
+        different ``gate=``, a filter on the details) moves this test. The expected
+        side is ``_compute_exit_code`` on a second model built the same way, run with
+        the completeness gate ON: the verdict a workspace project has to match. With
+        the helper reading under ``gate=False`` the per-scanner and roster cells come
+        back empty while the exit code is still 1, which is what fails here.
+        """
+        from automated_security_helper.models.workspace import WorkspaceProjectResult
+
+        model = self._model(statuses)
+        model.metadata.expected_scanners = list(roster)
+        standalone_model = self._model(statuses)
+        standalone_model.metadata.expected_scanners = list(roster)
+        from automated_security_helper.interactions.run_ash_scan import (
+            ScanOptions,
+            _compute_exit_code,
+        )
+
+        standalone = _compute_exit_code(
+            standalone_model,
+            ScanOptions(
+                source_dir=tmp_path,
+                output_dir=tmp_path,
+                fail_on_incomplete_scanners=True,
+            ),
+            None,
+        )
+        fields = _coverage_fields(model)
+
+        assert standalone == exit_code
+        assert set(fields) <= set(WorkspaceProjectResult.model_fields)
+        assert set(fields) == {
+            "incomplete_scanners",
+            "incomplete_scanner_details",
+            "partial_coverage_scanners",
+            "no_scanner_ran",
+        }
+        assert (standalone == 1) == bool(
+            fields["incomplete_scanners"] or fields["no_scanner_ran"]
+        )
+        # The per-scanner half against the test module's own reader, which asks
+        # scan_incompleteness under gate=True itself.
+        assert fields["incomplete_scanners"] == incomplete_scanners_for_project(model)
+        assert (
+            list(fields["incomplete_scanner_details"]) == fields["incomplete_scanners"]
+        )
 
     def test_a_project_whose_every_scanner_was_skipped_is_seen_by_both(self, tmp_path):
         """The set-level half, which the per-entry helper structurally cannot see.
@@ -762,8 +892,8 @@ class TestCompletenessParityWithComputeExitCode:
         ``incomplete_scanners`` tolerates SKIPPED one entry at a time, because that
         is how an exclusion and another shard's ownership are recorded. So a project
         in which *every* entry is SKIPPED clears that pass having measured nothing,
-        and before ``no_scanner_ran_for_project`` existed the workspace layer had no
-        second question to ask: the project reported zero findings and COMPLETED
+        and before ``_coverage_fields`` carried ``no_scanner_ran`` the workspace layer
+        had no second question to ask: the project reported zero findings and COMPLETED
         while ``ash --source-dir P`` on the same project exited 1.
 
         Asserted through the same agreement the rest of this class uses, so a
@@ -775,7 +905,7 @@ class TestCompletenessParityWithComputeExitCode:
 
         assert standalone == 1
         assert incomplete_scanners_for_project(model) == []
-        assert no_scanner_ran_for_project(model) is True
+        assert _coverage_fields(model)["no_scanner_ran"] is True
 
     def test_a_project_with_one_scanner_that_ran_is_clean_to_both(self, tmp_path):
         """The control for the case above, at the boundary that decides it.
@@ -794,7 +924,7 @@ class TestCompletenessParityWithComputeExitCode:
 
         assert standalone == 0
         assert incomplete_scanners_for_project(model) == []
-        assert no_scanner_ran_for_project(model) is False
+        assert _coverage_fields(model)["no_scanner_ran"] is False
 
     def test_an_empty_scanner_set_with_no_roster_is_not_read_as_nothing_having_run(
         self, tmp_path
@@ -816,7 +946,7 @@ class TestCompletenessParityWithComputeExitCode:
             "reading depends on"
         )
 
-        assert no_scanner_ran_for_project(model) is False
+        assert _coverage_fields(model)["no_scanner_ran"] is False
 
     def test_an_empty_scanner_set_with_a_roster_is_seen_by_both(self, tmp_path):
         """The state an empty set alone cannot distinguish.
@@ -827,10 +957,10 @@ class TestCompletenessParityWithComputeExitCode:
         the silent zero. ``metadata.expected_scanners`` separates them, because
         ``ScanPhase`` is what records it -- a roster means the phase ran.
 
-        The workspace helper called the delegate with one argument, so it answered
-        the benign reading for both states while ``ash --source-dir P`` on the same
-        project answered 1. That is the same divergence this class was opened for,
-        reappearing through a caller left on the older signature.
+        The workspace helper once called ``no_scanner_ran`` with one argument, so it
+        answered the benign reading for both states while ``ash --source-dir P`` on
+        the same project answered 1. It now reads ``ScanIncompleteness``, which
+        passes the roster.
         """
         statuses: dict = {}
         model = self._model(statuses)
@@ -854,7 +984,7 @@ class TestCompletenessParityWithComputeExitCode:
         )
 
         assert standalone == 1
-        assert no_scanner_ran_for_project(model) is True
+        assert _coverage_fields(model)["no_scanner_ran"] is True
 
 
 class TestAggregatorOutput:
@@ -868,6 +998,115 @@ class TestAggregatorOutput:
             output_path=f"projects/{key}",
             **kwargs,
         )
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
+    def test_the_unified_file_is_not_written_through_a_link(self, tmp_path):
+        plan = _plan(tmp_path, "api")
+        output = tmp_path / "out"
+        output.mkdir()
+        victim = tmp_path / "victim.json"
+        (output / "ash_aggregated_results.json").symlink_to(victim)
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=output)
+        aggregator.add(self._outcome("api"), _run(_result()), plan.projects[0])
+
+        with pytest.raises(OutputDirLinkRefused):
+            aggregator.write(exit_code=0, wall_clock_seconds=1.0)
+
+        assert not victim.exists()
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
+    def test_a_spool_file_is_not_written_through_a_link(self, tmp_path):
+        plan = _plan(tmp_path, "api")
+        spool = tmp_path / "out" / ".workspace-spool"
+        spool.mkdir(parents=True)
+        victim = tmp_path / "victim.json"
+        (spool / "api.run.json").symlink_to(victim)
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=tmp_path / "out")
+
+        with pytest.raises(OutputDirLinkRefused):
+            aggregator.add(self._outcome("api"), _run(_result()), plan.projects[0])
+
+        assert not victim.exists()
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
+    def test_a_spool_directory_that_is_a_link_is_not_written_through(self, tmp_path):
+        """No PluginContext registered the workspace output; the spool is guarded."""
+        plan = _plan(tmp_path, "api")
+        output = tmp_path / "out"
+        output.mkdir()
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (output / ".workspace-spool").symlink_to(elsewhere, target_is_directory=True)
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=output)
+
+        with pytest.raises(OutputDirLinkRefused):
+            aggregator.add(self._outcome("api"), _run(_result()), plan.projects[0])
+
+        assert list(elsewhere.iterdir()) == []
+
+    def test_a_reader_sees_the_previous_unified_file_while_it_is_written(
+        self, tmp_path, monkeypatch
+    ):
+        """The MCP progress reader parses the file while a workspace scan rewrites it."""
+        import shutil
+
+        from automated_security_helper.workspace import aggregation
+
+        plan = _plan(tmp_path, "api", "web")
+        output = tmp_path / "out"
+        output.mkdir()
+        target = output / "ash_aggregated_results.json"
+        previous = '{"previous": "complete"}\n'
+        target.write_text(previous, encoding="utf-8")
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=output)
+        for index, key in enumerate(("api", "web")):
+            aggregator.add(self._outcome(key), _run(_result()), plan.projects[index])
+        seen = []
+        copy = shutil.copyfileobj
+
+        def read_then_copy(source, destination, *args, **kwargs):
+            destination.flush()
+            seen.append(target.read_text(encoding="utf-8"))
+            return copy(source, destination, *args, **kwargs)
+
+        monkeypatch.setattr(aggregation.shutil, "copyfileobj", read_then_copy)
+
+        path = aggregator.write(exit_code=0, wall_clock_seconds=1.0)
+
+        assert seen == [previous, previous]
+        assert len(json.loads(path.read_text(encoding="utf-8"))["sarif"]["runs"]) == 2
+        assert sorted(p.name for p in output.iterdir() if p.is_file()) == [
+            target.name
+        ], "a staging file was left behind"
+
+    def test_a_spool_file_appears_only_once_it_is_complete(self, tmp_path, monkeypatch):
+        """Written to a staging file and renamed: no reader finds a partial spool."""
+        from automated_security_helper.workspace import aggregation
+
+        plan = _plan(tmp_path, "api")
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=tmp_path / "out")
+        spool = aggregator.spool_dir / "api.run.json"
+        present_while_written = []
+        dump = json.dump
+
+        def dump_then_look(obj, handle, *args, **kwargs):
+            dump(obj, handle, *args, **kwargs)
+            handle.flush()
+            present_while_written.append(spool.exists())
+
+        monkeypatch.setattr(aggregation.json, "dump", dump_then_look)
+
+        aggregator.add(self._outcome("api"), _run(_result()), plan.projects[0])
+
+        assert present_while_written == [False]
+        assert json.loads(spool.read_text(encoding="utf-8"))["results"]
+        assert sorted(p.name for p in aggregator.spool_dir.iterdir()) == [spool.name]
 
     def test_the_unified_file_parses_as_json(self, tmp_path):
         """The writer streams rather than dumping one object, so this is not free."""
@@ -1123,3 +1362,166 @@ class TestAggregatorOutput:
         path = aggregator.write(exit_code=0, wall_clock_seconds=1.0)
         parsed = json.loads(path.read_text(encoding="utf-8"))
         assert parsed["scanner_results"]["bandit"]["status"] == "ERROR"
+
+
+class TestStampingARunRecord:
+    """A record goes into the written file without loading it whole.
+
+    The inner run of a container scan stamps its completion marker after the
+    report step, and its refusal when the report step refuses; see
+    utils/inner_run_outcome.py.
+    """
+
+    RECORD = {"type": "run_completed", "metadata": {"run_id": "1" * 32}}
+
+    def _written(self, tmp_path):
+        from automated_security_helper.workspace.aggregation import (
+            WorkspaceAggregator,
+        )
+
+        return WorkspaceAggregator(
+            plan=_plan(tmp_path), output_dir=tmp_path / "out"
+        ).write(exit_code=0, wall_clock_seconds=0.1)
+
+    def test_the_record_is_stamped_and_the_rest_is_unchanged(self, tmp_path):
+        from automated_security_helper.workspace.aggregation import stamp_run_record
+
+        path = self._written(tmp_path)
+        before = json.loads(path.read_text(encoding="utf-8"))
+
+        assert stamp_run_record(path, self.RECORD)
+
+        after = json.loads(path.read_text(encoding="utf-8"))
+        assert after.pop("validation_checkpoints") == [self.RECORD]
+        before.pop("validation_checkpoints")
+        assert after == before
+
+    def test_the_file_is_replaced_rather_than_rewritten_in_place(self, tmp_path):
+        """A reader that opened the file before the stamp keeps reading it whole."""
+        from automated_security_helper.workspace.aggregation import stamp_run_record
+
+        path = self._written(tmp_path)
+        before = path.read_bytes()
+        inode = path.stat().st_ino
+
+        with open(path, "rb") as reader:
+            assert stamp_run_record(path, self.RECORD)
+            assert reader.read() == before
+
+        assert path.stat().st_ino != inode
+
+    def test_a_header_line_longer_than_one_read_is_copied_whole(
+        self, tmp_path, monkeypatch
+    ):
+        """The file is read in bounded pieces; a long line is copied in several."""
+        from automated_security_helper.workspace import aggregation
+
+        path = self._written(tmp_path)
+        before = json.loads(path.read_text(encoding="utf-8"))
+        # Only just long enough for the checkpoints line, which must be read whole;
+        # the workspace and scanner_results lines take several reads.
+        monkeypatch.setattr(
+            aggregation,
+            "_STAMP_READ_LIMIT",
+            len(aggregation._EMPTY_CHECKPOINTS_LINE) + 1,
+        )
+
+        assert aggregation.stamp_run_record(path, self.RECORD)
+
+        after = json.loads(path.read_text(encoding="utf-8"))
+        assert after.pop("validation_checkpoints") == [self.RECORD]
+        before.pop("validation_checkpoints")
+        assert after == before
+
+    def test_a_file_without_the_checkpoints_line_is_not_read_whole(
+        self, tmp_path, monkeypatch
+    ):
+        """Given up on at the SARIF line, after one bounded read of it."""
+        import builtins
+
+        from automated_security_helper.workspace import aggregation
+
+        path = tmp_path / "ash_aggregated_results.json"
+        sarif_line = '"sarif": {"runs": ["' + "x" * 100_000 + '"]}\n'
+        path.write_text('{\n"name": "n",\n' + sarif_line + "}\n", encoding="utf-8")
+        reads = []
+
+        class _Recording:
+            def __init__(self, handle):
+                self._handle = handle
+
+            def readline(self, size=-1):
+                line = self._handle.readline(size)
+                reads.append((size, len(line)))
+                return line
+
+            def __getattr__(self, name):
+                return getattr(self._handle, name)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return self._handle.__exit__(*exc)
+
+        def recording_open(file, mode="r", *args, **kwargs):
+            handle = builtins.open(file, mode, *args, **kwargs)
+            return _Recording(handle) if mode == "r" else handle
+
+        monkeypatch.setattr(aggregation, "open", recording_open, raising=False)
+        monkeypatch.setattr(aggregation, "_STAMP_READ_LIMIT", 4096)
+
+        assert not aggregation.stamp_run_record(path, self.RECORD)
+
+        assert reads, "the file was not read in bounded pieces"
+        assert all(0 < size <= 4096 for size, _ in reads), reads
+        assert sum(length for _, length in reads) < 4096 + 64, reads
+
+    def test_a_link_at_the_results_file_is_not_written_through(self, tmp_path):
+        """In the output directory a scan writes to, the stamp refuses a link at the
+        file and leaves both the link and the file it names as they were."""
+        from automated_security_helper.utils.sandbox.fs_guard import writable_root
+        from automated_security_helper.workspace.aggregation import stamp_run_record
+
+        path = self._written(tmp_path)
+        elsewhere = tmp_path / "elsewhere.json"
+        elsewhere.write_bytes(path.read_bytes())
+        before = elsewhere.read_bytes()
+        path.unlink()
+        path.symlink_to(elsewhere)
+
+        with writable_root(path.parent):
+            assert not stamp_run_record(path, self.RECORD)
+
+        assert path.is_symlink()
+        assert elsewhere.read_bytes() == before
+
+    def test_a_file_the_aggregator_did_not_write_is_left_unchanged(self, tmp_path):
+        from automated_security_helper.workspace.aggregation import stamp_run_record
+
+        path = tmp_path / "ash_aggregated_results.json"
+        path.write_text(json.dumps({"validation_checkpoints": []}), encoding="utf-8")
+        before = path.read_bytes()
+
+        assert not stamp_run_record(path, self.RECORD)
+        assert path.read_bytes() == before
+
+    def test_a_failed_rewrite_leaves_the_file_and_no_staging_file(
+        self, tmp_path, monkeypatch
+    ):
+        import os
+
+        from automated_security_helper.workspace import aggregation
+
+        path = self._written(tmp_path)
+        before = path.read_bytes()
+
+        def no_replace(*args, **kwargs):
+            raise OSError("no space left on device")
+
+        # The rename fs_guard.open_for_atomic_write makes when the copy ends.
+        monkeypatch.setattr(os, "replace", no_replace)
+
+        assert not aggregation.stamp_run_record(path, self.RECORD)
+        assert path.read_bytes() == before
+        assert sorted(p.name for p in path.parent.iterdir()) == [path.name]

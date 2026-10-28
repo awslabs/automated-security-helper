@@ -65,9 +65,10 @@ class TestGroupResultsBySeverity:
 
         groups = self._group([active], test_plugin_context)
 
+        # Grouped by the gate's severity (warning is MEDIUM), not by SARIF level.
         assert "SUPPRESSED" not in groups
-        assert "WARNING" in groups
-        assert len(groups["WARNING"]) == 1
+        assert "MEDIUM" in groups
+        assert len(groups["MEDIUM"]) == 1
 
     def test_mixed_results_separated_correctly(self, test_plugin_context):
         active_err = _make_result(level=Level.error, suppressed=False)
@@ -81,5 +82,5 @@ class TestGroupResultsBySeverity:
         )
 
         assert len(groups.get("SUPPRESSED", [])) == 2
-        assert len(groups.get("ERROR", [])) == 1
-        assert len(groups.get("NOTE", [])) == 1
+        assert len(groups.get("CRITICAL", [])) == 1
+        assert len(groups.get("LOW", [])) == 1

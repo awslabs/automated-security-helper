@@ -2,17 +2,17 @@
 # name: test_extract_findings
   list([
     dict({
-      'code_snippet': "password = 'hunter2'",
+      'code_snippet': '[masked: a secret finding reports this line]',
       'column': 5,
       'file': 'src/app.py',
       'id': 3,
       'kind': 'fail',
       'level': 'error',
       'line': 12,
-      'message': "Possible hardcoded password: 'hunter2'",
+      'message': "Possible hardcoded password: 'h******'",
       'rule_id': 'B105',
       'scanner': 'bandit',
-      'severity': 'high',
+      'severity': 'critical',
       'suppressed': False,
     }),
     dict({

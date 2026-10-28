@@ -96,15 +96,13 @@ def ash_mcp_client() -> Callable[[], object]:
     rather than as a JSON-RPC error result that an assertion might read as an
     ordinary "tool returned failure" response. The two are different findings and
     should not be confusable.
+
+    The client is the local one (``serving_local_client()``), as ``ash mcp``
+    serves stdio: see ``tests/utils/mcp_transport_harness.local_in_memory_client``.
     """
-    from mcp import Client
+    from tests.utils.mcp_transport_harness import local_in_memory_client
 
-    from automated_security_helper.cli.mcp_server import mcp
-
-    def connect() -> object:
-        return Client(mcp, raise_exceptions=True)
-
-    return connect
+    return local_in_memory_client
 
 
 # Pytest markers for integration tests

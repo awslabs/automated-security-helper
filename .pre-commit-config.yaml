@@ -1,11 +1,25 @@
 # See https://pre-commit.com for more information
 # See https://pre-commit.com/hooks.html for more hooks
+
+# Without this, every hook that declares no stages of its own also runs at the
+# commit-msg stage, where the file set is the commit message, so each commit's
+# output ends with a second block of the same hooks reading "(no files to
+# check) Skipped". The skip is correct and the gate is intact either way; the
+# block just reads like the hooks skipped the commit. Hooks that mean another
+# stage say so themselves (commitizen at commit-msg, the ash hook at
+# manual), and a per-hook stages key still overrides this default.
+default_stages: [pre-commit]
+
 repos:
   - repo: local
     hooks:
+      # --frozen because this hook runs under the committer's own uv. Without it, a uv
+      # that disagrees with uv.lock re-resolves and rewrites the lockfile as part of the
+      # commit, so a commit can carry pin changes nobody asked for. --frozen reads the
+      # lock as committed and fails the hook when it does not satisfy pyproject.toml.
       - id: generate-schemas
         name: Generate ASH JSON schemas
-        entry: uv run python -m automated_security_helper.schemas.generate_schemas
+        entry: uv run --frozen python -m automated_security_helper.schemas.generate_schemas
         language: system
         verbose: true
         pass_filenames: false
@@ -14,13 +28,20 @@ repos:
       # test_fallback_matches_installed_metadata both only ever *reported* it, and
       # a human edited the constant by hand on every dependabot bump.
       #
-      # --python 3.13 is explicit because the script needs tomllib (3.11+) while
-      # requires-python starts at 3.10. It never runs inside ASH, so that is a
-      # constraint on this hook and not on the supported interpreter range -- which
-      # is the whole reason this is codegen rather than a runtime pyproject read.
+      # --python 3.13 is explicit so this hook reads pyproject with tomllib, the
+      # parser of record. The script itself runs on the whole supported range:
+      # on 3.10, where tomllib is not yet in the standard library, it falls back
+      # to a strict parse of the one key it owns. So the pin picks the best
+      # parser; it is not a floor the script needs.
+      #
+      # --no-project because the script uses only the standard library. Without it,
+      # `uv run` syncs the project environment on 3.13: it removed a contributor's
+      # .venv built on another interpreter and recreated it without the cdk and
+      # symbols extras, on every run of this hook. tests/unit/test_pre_commit_hook_commands.py
+      # fails on a hook that picks an interpreter inside the project.
       - id: sync-cdk-extra-fallback
         name: Sync the cdk extra fallback constant with pyproject
-        entry: uv run --python 3.13 python scripts/sync_cdk_extra_fallback.py --fix
+        entry: uv run --no-project --python 3.13 python scripts/sync_cdk_extra_fallback.py --fix
         language: system
         verbose: true
         pass_filenames: false
@@ -60,7 +81,37 @@ repos:
         # an order `npm install` immediately undoes -- several thousand lines per
         # lockfile, which is why lockfile commits used to be made with this hook
         # skipped.
-        exclude: '\.vscode/.*|^deploy/cdk/templates/.*\.template\.json|^deploy/[^/]+/package(-lock)?\.json$|^tests/snapshot/.*/__snapshots__/'
+        #
+        # ash-agent-plugins/agentic-coding/plugins/ is the transpiler's output, and
+        # `agentic-plugins check` (ash-agent-plugins-drift.yml) rebuilds it and
+        # byte-compares it against the committed tree, so this hook's rewrite of the
+        # twelve JSON files there failed that gate. transpiler/_base/mcp.json is
+        # hand-written but copied byte for byte into five of them, so formatting it
+        # fails the same gate until every plugin is rebuilt, and reorders the MCP
+        # config users get.
+        # The rest of _base/ and schemas/schemas.json are hand-written and formatted
+        # here; the check passes with them formatted.
+        #
+        # transpiler/schemas/*.schema.json are vendored: `refresh-schemas` writes the
+        # upstream bytes as fetched, so a reformat is undone by the next refresh and
+        # makes the copy differ from its source.
+        #
+        # deploy/cdk/tsconfig.json has comments, which tsc allows and JSON does not,
+        # so this hook cannot parse it and failed on every run.
+        #
+        # tests/unit/test_pre_commit_json_scope.py checks each of these against the
+        # tracked tree, and that the hand-written files stay in scope.
+        exclude: |
+          (?x)^(
+            .*\.vscode/.*
+            |deploy/cdk/templates/.*\.template\.json
+            |deploy/[^/]+/package(-lock)?\.json
+            |deploy/cdk/tsconfig\.json
+            |tests/snapshot/.*/__snapshots__/.*
+            |ash-agent-plugins/agentic-coding/plugins/.*
+            |ash-agent-plugins/agentic-coding/transpiler/_base/mcp\.json
+            |ash-agent-plugins/agentic-coding/transpiler/schemas/.*\.schema\.json
+          )$
         args:
           - "--autofix"
           - "--indent=2"
@@ -193,10 +244,12 @@ repos:
       #
       # Manual-staged means it never fires from a git hook. Invoke it deliberately:
       #   pre-commit run --hook-stage manual ash
+      #
+      # --frozen for the reason given on generate-schemas: it never rewrites uv.lock.
       - id: ash
         name: (manual) ASH dev manual scan
         description: Runs various code scanners from Python directly
-        entry: uv run ash --mode=precommit
+        entry: uv run --frozen ash --mode=precommit
         pass_filenames: false
         verbose: true
         language: system

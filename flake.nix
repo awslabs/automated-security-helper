@@ -57,6 +57,11 @@
       opengrepFor = system:
         (pkgsFor system).callPackage ./nix/opengrep.nix { inherit systems; };
 
+      # cfn-guard has no nixpkgs package either; nix/cfn-guard.nix wraps the pinned release
+      # asset, as nix/opengrep.nix does for opengrep.
+      cfnGuardFor = system:
+        (pkgsFor system).callPackage ./nix/cfn-guard.nix { inherit systems; };
+
       # The scanners ASH invokes as external executables.
       #
       # cdk-nag is deliberately absent: its scanner sets self.command = "python" and runs
@@ -94,15 +99,27 @@
               ++ py.pyjwt.optional-dependencies.crypto;
           });
         in [
+          pkgs.actionlint # ASH disables its shellcheck/pyflakes wrappers
           bandit
+          # cfn-lint with its `sarif` extra: ASH runs `cfn-lint --format sarif`, and
+          # nixpkgs ships the extra as optional. As a Python application so its library
+          # closure stays out of the shared env.
+          (pkgs.python3Packages.toPythonApplication
+            (pkgs.python3Packages.cfn-lint.overridePythonAttrs (old: {
+              dependencies = (old.dependencies or [ ])
+                ++ old.optional-dependencies.sarif;
+            })))
           pkgs.cfn-nag
           pkgs.checkov
           pkgs.detect-secrets
+          (cfnGuardFor system) # its rules are seeded by the shellHook below
+          pkgs.gitleaks
           pkgs.grype
           pkgs.nodejs # provides `npm audit`
           semgrep
           pkgs.syft
-          pkgs.trivy # community-mode scanner set
+          pkgs.trivy # its vulnerability database is seeded by the shellHook below
+          pkgs.zizmor
           (opengrepFor system)
         ];
     in
@@ -111,6 +128,7 @@
         let pkgs = pkgsFor system;
         in {
           opengrep = opengrepFor system;
+          cfn-guard = cfnGuardFor system;
 
           # Every scanner in one store path, so CI can realize the whole toolchain with a
           # single build and cache it as one unit.
@@ -131,13 +149,16 @@
             # opengrep rule caches. It is listed explicitly rather than assumed present,
             # because a shell that silently depends on a host binary is the same class of
             # problem this mode exists to fix.
-            packages = scannersFor system ++ [ pkgs.curl ];
+            # python3 likewise: the shellHook runs ASH's own pinned installer
+            # (automated_security_helper/assets/install-pinned-tool.py, stdlib only) to
+            # seed the cfn-guard rules.
+            packages = scannersFor system ++ [ pkgs.curl pkgs.python3 ];
 
             # ASH itself is intentionally NOT in this shell. The shell's job is to supply
             # the external scanner binaries; ASH comes from the ambient environment (uv,
-            # pipx or a venv), exactly as it comes from the image in container mode. Since
-            # `nix develop` prepends its packages to the inherited PATH rather than
-            # replacing it, an `ash` on the caller's PATH stays reachable inside.
+            # pipx or a venv), exactly as it comes from the image in container mode. The
+            # inner run is started with the calling ASH's own interpreter
+            # (interactions/run_ash_nix.py:_this_ash), so it is the same ASH.
             shellHook = ''
               # Tells ASH's scanners not to install tools this shell already provides.
               # Thirteen scanners prefer `uv tool install` when uv is present, and
@@ -166,7 +187,7 @@
               # their versions, and ASH imports cleanly.
               unset PYTHONPATH
 
-              # Three scanners need DATA that no flake can pin, and ASH_OFFLINE above stops
+              # Several scanners need DATA that no flake can pin, and ASH_OFFLINE above stops
               # them fetching it themselves. The flag is still right -- it is what keeps
               # scanners from installing tools that shadow the pinned ones -- but it makes
               # seeding these caches this shell's job.
@@ -187,16 +208,40 @@
               # and the rulesets are fetched from a service, so pinning either would mean
               # shipping stale security data, which is worse than fetching it.
               export GRYPE_DB_CACHE_DIR="''${GRYPE_DB_CACHE_DIR:-$HOME/.cache/ash/grype-db}"
+              # trivy's vulnerability database, read through TRIVY_CACHE_DIR, and the AWS
+              # Guard Rules Registry bundle cfn-guard evaluates, read through
+              # ASH_CFN_GUARD_RULES_DIR. The bundle is pinned and digest-checked by the
+              # same installer the container image uses, so cfn-guard's own check of the
+              # installed rules passes unchanged.
+              export TRIVY_CACHE_DIR="''${TRIVY_CACHE_DIR:-$HOME/.cache/ash/trivy}"
+              export ASH_CFN_GUARD_RULES_DIR="''${ASH_CFN_GUARD_RULES_DIR:-$HOME/.cache/ash/cfn-guard-rules}"
               export SEMGREP_RULES_CACHE_DIR="''${SEMGREP_RULES_CACHE_DIR:-$HOME/.cache/ash/semgrep-rules}"
               export OPENGREP_RULES_CACHE_DIR="''${OPENGREP_RULES_CACHE_DIR:-$HOME/.cache/ash/opengrep-rules}"
-              mkdir -p "$GRYPE_DB_CACHE_DIR" "$SEMGREP_RULES_CACHE_DIR" "$OPENGREP_RULES_CACHE_DIR"
+              mkdir -p "$GRYPE_DB_CACHE_DIR" "$SEMGREP_RULES_CACHE_DIR" "$OPENGREP_RULES_CACHE_DIR" \
+                "$TRIVY_CACHE_DIR" "$ASH_CFN_GUARD_RULES_DIR"
 
-              # Announced rather than silent: these are network fetches inside what is
-              # otherwise a hermetic shell, and a reader deserves to know they happened.
-              if [ -z "$(ls -A "$GRYPE_DB_CACHE_DIR" 2>/dev/null)" ]; then
-                echo "ash: seeding grype vulnerability database (one time, needs network)" >&2
-                grype db update >/dev/null 2>&1 \
-                  || echo "ash: grype database download FAILED; grype will report ERROR" >&2
+              # grype's and trivy's databases, each downloaded from an empty directory
+              # with an empty config of the script's own, so the result does not
+              # depend on where the shell was entered. See nix/refresh-content-dbs.sh.
+              sh ${self}/nix/refresh-content-dbs.sh
+
+              # Installed whenever the bundle there is not the one this flake pins, not
+              # only when the directory is empty. A bundle lands in a directory named for
+              # its version and cfn-guard reads only the pinned version's, so after an
+              # upgrade that bumps the pin the previous release's directory is still
+              # there and cfn-guard would be MISSING. `--check` reads no network: it is
+              # the test `ash dependencies install` makes before skipping a bundle (the
+              # rule files there match the contents the pins name). Both calls name
+              # this flake's pins rather than $ASH_PINS_DIR's.
+              # tests/unit/test_nix_cfn_guard_rules_reseed.py runs this block.
+              if ! python3 ${self}/automated_security_helper/assets/install-pinned-tool.py \
+                --pins-dir ${self}/automated_security_helper \
+                aws-guard-rules-registry --rules-bundle --check -d "$ASH_CFN_GUARD_RULES_DIR" >/dev/null 2>&1; then
+                echo "ash: installing the pinned AWS Guard Rules Registry for cfn-guard (needs network)" >&2
+                python3 ${self}/automated_security_helper/assets/install-pinned-tool.py \
+                  --pins-dir ${self}/automated_security_helper \
+                  aws-guard-rules-registry --rules-bundle -d "$ASH_CFN_GUARD_RULES_DIR" >/dev/null 2>&1 \
+                  || echo "ash: rules download FAILED; cfn-guard will report MISSING" >&2
               fi
 
               if [ -z "$(ls -A "$SEMGREP_RULES_CACHE_DIR" 2>/dev/null)" ]; then

@@ -156,7 +156,10 @@ class TestPyprojectToolAsh:
             tmp_path / "pyproject.toml",
             '[tool.ash]\nproject_name = "unterminated\n',
         )
-        with pytest.raises(ASHConfigValidationError, match="not valid TOML"):
+        with pytest.raises(
+            ASHConfigValidationError,
+            match=r"could not be parsed \(TOMLDecodeError",
+        ):
             resolve_config(source_dir=tmp_path)
 
     def test_tool_ash_that_is_not_a_table_is_an_error(self, tmp_path):

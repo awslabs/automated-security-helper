@@ -55,8 +55,10 @@ class TestRecursiveGlobMatch:
     def test_double_star_on_both_sides_no_match_absent_segment(self):
         assert _recursive_glob_match("src/lib/foo.py", "**/.venv/**") is False
 
-    def test_backslash_normalized_to_forward_slash(self):
-        assert _recursive_glob_match("tests\\sub\\foo.py", "tests/**/*.py") is True
+    def test_a_backslash_is_a_separator_in_the_pattern_only(self):
+        assert _recursive_glob_match("tests/sub/foo.py", "tests\\**\\*.py") is True
+        # In the path it is part of a name, as on POSIX: one top-level file.
+        assert _recursive_glob_match("tests\\sub\\foo.py", "tests/**/*.py") is False
 
     def test_simple_pattern_without_double_star_falls_through_to_fnmatch(self):
         # No ** — function shouldn't be called normally, but must not crash.
@@ -79,13 +81,15 @@ class TestRecursiveGlobMatch:
 
 
 class TestPathPatternMatches:
-    """Tests for _path_pattern_matches (handles None, case-insensitivity, dispatch)."""
+    """Tests for _path_pattern_matches (handles None, case, dispatch)."""
 
     def test_none_file_path_returns_false(self):
         assert _path_pattern_matches(None, "src/*.py") is False
 
-    def test_exact_match_case_insensitive(self):
-        assert _path_pattern_matches("SRC/App.py", "src/app.py") is True
+    def test_exact_match_is_case_sensitive(self):
+        """On a case-sensitive filesystem ``SRC/App.py`` is another file."""
+        assert _path_pattern_matches("SRC/App.py", "src/app.py") is False
+        assert _path_pattern_matches("src/app.py", "src/app.py") is True
 
     def test_simple_glob_match(self):
         assert _path_pattern_matches("src/app.py", "src/*.py") is True
@@ -99,8 +103,10 @@ class TestPathPatternMatches:
     def test_double_star_no_match(self):
         assert _path_pattern_matches("src/app.py", "tests/**/*.py") is False
 
-    def test_case_insensitive_glob(self):
-        assert _path_pattern_matches("SRC/APP.PY", "src/*.py") is True
+    def test_glob_is_case_sensitive(self):
+        assert _path_pattern_matches("SRC/APP.PY", "src/*.py") is False
+        assert _path_pattern_matches("TESTS/other.py", "tests/**") is False
+        assert _path_pattern_matches("tests/other.py", "tests/**") is True
 
 
 class TestMatchGlob:

@@ -1,0 +1,197 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Start ASH's own interpreter as a child that imports nothing from where it starts.
+
+``python -m`` and ``python -c`` put the working directory first on ``sys.path``:
+``-m`` as its full path, ``-c`` as ``''``, which follows a later ``os.chdir``. ASH
+usually runs inside the repository it scans, ``ash dependencies install`` takes the
+current directory as the source tree, and a scanner's subprocesses start in the
+scanned tree by default. A ``pip/``, ``json.py`` or ``automated_security_helper/``
+there was therefore imported in place of the real module.
+
+Two measures, because neither covers every supported Python on its own:
+
+* ``-P`` (Python 3.11 and later) stops Python adding the working directory at all.
+  The flag rather than ``PYTHONSAFEPATH=1``: the variable is inherited by the child's
+  own children, and pip runs ``setup.py`` builds that import modules beside
+  ``setup.py`` through exactly that entry.
+* The child starts in an empty directory created for it and removed afterwards, so
+  on 3.10, which has no ``-P``, the entry Python adds names nothing.
+
+``-I`` would cover both on every version, but it also ignores ``PYTHONPATH`` and the
+user site-packages directory, which an install of ASH may depend on.
+
+A child that changes directory after it starts should not rely on this: under 3.10
+its ``''`` entry follows it. ``utils/cdk_nag_worker.py`` removes that entry itself
+for that reason.
+
+:func:`empty_directory` is the start directory on its own, for a child that is not
+Python. ``ash dependencies install`` starts every install command in one, so a
+package manager that reads settings from its working directory (npm's project
+``.npmrc``, the Gemfile ``gem install -g`` reads, Bundler's ``.bundle/config``) does
+not read the scanned repository's. The user's own settings, in HOME or set
+globally, still apply.
+
+:func:`uv_child_overrides` is the environment a ``uv`` command needs on top, because
+uv looks for a project and a ``.venv`` in every parent directory as well. Both the
+installer and a scanner's own commands (``PluginBase._run_subprocess``) apply it.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import shutil
+import sys
+import tempfile
+from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, Iterator, List, Optional, Sequence
+
+#: What makes the interpreter skip the working directory, where it can.
+_SAFE_PATH_FLAGS: List[str] = ["-P"] if sys.version_info >= (3, 11) else []
+
+
+@dataclass(frozen=True)
+class PythonChild:
+    """The argv to spawn and the directory to spawn it in."""
+
+    argv: List[str]
+    cwd: Path
+
+
+@contextmanager
+def empty_directory(parent: Optional[Path] = None) -> Iterator[Path]:
+    """A new, empty directory for a child to start in, removed when the block ends.
+
+    Created under ``parent`` when given (a sandboxed child can only see the
+    directories its policy grants, so a caller under a sandbox passes one it can
+    see), otherwise in the system's temporary directory.
+    """
+    directory = Path(
+        tempfile.mkdtemp(prefix="ash-child-", dir=str(parent) if parent else None)
+    ).absolute()
+    try:
+        yield directory
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+@contextmanager
+def python_child(*args: str, parent: Optional[Path] = None) -> Iterator[PythonChild]:
+    """ASH's interpreter with ``args``, and an empty directory to start it in.
+
+    ``args`` is everything after the interpreter, such as ``"-m", "pip", "install"``.
+    Spawn ``child.argv`` with ``cwd=child.cwd``. ``parent`` is as for
+    :func:`empty_directory`.
+    """
+    with empty_directory(parent) as directory:
+        yield PythonChild(
+            argv=[sys.executable, *_SAFE_PATH_FLAGS, *args], cwd=directory
+        )
+
+
+#: The first statement of a ``-c`` child that has to start where its caller is. It
+#: removes the ``''`` entry Python adds for ``-c`` before anything is imported;
+#: ``import sys`` is built in and reads nothing from disk, and ``sitecustomize`` and
+#: ``usercustomize`` are imported before that entry is added (measured on 3.10 and
+#: 3.14). Under ``-P`` or ``PYTHONSAFEPATH`` the entry is not there, and the first,
+#: real entry is kept. ``utils/cdk_nag_worker.py`` starts its child the same way.
+DROP_WORKING_DIRECTORY = (
+    "import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]; "
+)
+
+
+def python_code_argv(source: str) -> List[str]:
+    """ASH's interpreter running ``source`` with ``-c``, importing nothing from its cwd.
+
+    For a child that cannot be given an empty start directory, such as the inner scan
+    ``nix develop --command`` runs in the scan's own directory: ``-P`` where Python
+    has it, and ``source`` behind :data:`DROP_WORKING_DIRECTORY` for Python 3.10.
+    """
+    return [sys.executable, *_SAFE_PATH_FLAGS, "-c", DROP_WORKING_DIRECTORY + source]
+
+
+def runs_module_or_code(argv: Sequence[str]) -> bool:
+    """Whether ``argv`` starts ASH's interpreter with ``-m`` or ``-c``.
+
+    Only interpreter options may come before it, so ``python script.py -c`` is not
+    one: a script's own directory is what Python adds for it, and ``-P`` would drop
+    that too.
+    """
+    if not argv or argv[0] != sys.executable:
+        return False
+    options = iter(argv[1:])
+    for arg in options:
+        if arg in ("-m", "-c"):
+            return True
+        if arg in ("-X", "-W"):
+            next(options, None)
+        elif not arg.startswith("-") or arg == "-":
+            return False
+    return False
+
+
+#: uv options that come before the subcommand and take a value (uv 0.12).
+_UV_OPTIONS_WITH_A_VALUE = frozenset(
+    {
+        "--allow-insecure-host",
+        "--cache-dir",
+        "--color",
+        "--config-file",
+        "--directory",
+        "--project",
+        "--python-preference",
+    }
+)
+
+
+def uv_child_overrides(argv: Sequence[str]) -> Dict[str, str]:
+    """The environment a uv command needs to find no project or ``.venv`` near it.
+
+    Measured with uv 0.12.22: ``uv pip`` and ``uv run`` run the python of a ``.venv``
+    in the directory they start in or any parent, and ``uv run`` builds a project it
+    finds there, running the project's build backend. A scanner's commands start in
+    the scanned tree, and the installer's empty start directory keeps uv out of it
+    only while the system's temporary directory is outside it, so a uv command gets:
+
+    - ``UV_NO_PROJECT=1``, unless it names a ``uv --project`` itself;
+    - ``UV_PYTHON`` set to ASH's interpreter, unless it names one (``uv --python``,
+      ``uv -p``, ``uv --system``) or the operator set ``UV_PYTHON`` or
+      ``UV_SYSTEM_PYTHON``.
+
+    ``uv tool`` commands and ``uvx`` get nothing: they read neither, and an
+    interpreter there would change which Python the tool's environment is built on.
+    Neither does ``UV_NO_CONFIG`` help, which only stops uv reading ``uv.toml``.
+    """
+    if not argv:
+        return {}
+    name = re.split(r"[\\/]", argv[0])[-1].lower().removesuffix(".exe")
+    if name != "uv":
+        return {}
+    rest = list(argv[1:])
+    subcommand = None
+    index = 0
+    while index < len(rest):
+        arg = rest[index]
+        if arg in _UV_OPTIONS_WITH_A_VALUE:
+            index += 2
+            continue
+        if not arg.startswith("-"):
+            subcommand = arg
+            break
+        index += 1
+    if subcommand in (None, "tool"):
+        return {}
+    overrides: Dict[str, str] = {}
+    if not any(a == "--project" or a.startswith("--project=") for a in rest):
+        overrides["UV_NO_PROJECT"] = "1"
+    names_interpreter = any(
+        a in ("--python", "-p", "--system") or a.startswith("--python=") for a in rest
+    )
+    operator_chose = os.environ.get("UV_PYTHON") or os.environ.get("UV_SYSTEM_PYTHON")
+    if not names_interpreter and not operator_chose:
+        overrides["UV_PYTHON"] = sys.executable
+    return overrides

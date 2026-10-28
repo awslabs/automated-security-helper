@@ -1,33 +1,22 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Concurrent plugin resolution, and why pre-warming closes the race.
+"""Concurrent plugin resolution: a registration from another thread does not disturb it.
 
-The defect
-----------
-``AshPluginManager.plugin_modules`` iterates ``plugin_library.scanners.items()``
-and does ``importlib.import_module`` work *inside* the loop. Another project's
-thread calling ``register_plugin_module`` writes a new key into that same dict
-mid-iteration, and CPython raises ``RuntimeError: dictionary changed size during
-iteration``. ``plugin_modules`` catches only ``ImportError``, so the
-``RuntimeError`` escapes into ``_scan_one_project``'s broad ``except Exception``
-and becomes a project reported FAILED for a reason that has nothing to do with
-that project.
-
-Why pre-warming closes it, mechanically
----------------------------------------
-``plugin_modules`` returns early on a cache hit::
-
-    if cache_key in self._resolved_plugins:
-        return self.filter_plugin_modules(self._resolved_plugins[cache_key], ...)
-
-The iteration is only reached on a cache *miss*. Pre-warming resolves every
-plugin type before any worker starts, so every in-worker call takes the early
-return and no thread ever iterates the dict.
-``TestTheCacheIsWhatCloses`` asserts the two facts that argument rests on: the
-iteration is reachable only on a miss, and ``register_plugin_module`` does not
-invalidate the cache. If either changes, pre-warming stops working and one of
-those tests fails.
+What the manager guarantees
+---------------------------
+Workspace mode runs several projects' scans in one process, so one project's thread
+can call ``register_plugin_module`` while another is in ``plugin_modules``.
+``plugin_modules`` copies the registrations under the manager's registry lock,
+which ``register_plugin_module`` also takes, and does its
+``importlib.import_module`` work over the copy. A registration landing mid-resolve
+changes the dict, not the copy, so nothing reaches ``_scan_one_project``'s broad
+``except Exception`` and no project is recorded FAILED for it. The resolved list is
+cached with the registrations it came from, so a resolve with nothing new
+registered does no import work at all (which is what ``prewarm_plugin_registry``
+relies on to keep the workers out of the import loop), and the first resolve after
+a new registration reads the registry again, so a plugin module a later scan
+imports is part of that scan.
 
 Why the reproduction is deterministic and not a timing loop
 -----------------------------------------------------------
@@ -39,9 +28,9 @@ nothing, which is the same failure shape as a gate that cannot fail.
 
 So the writer is released from *inside* the loop instead. ``import_module`` is
 patched to signal on its first call and wait for the registration to complete,
-which puts the mutation inside the iteration by construction. That makes the
-cold-cache failure deterministic and the warm-cache result meaningful: with a
-warm cache the hook is never reached at all, because there is no iteration.
+which puts the mutation inside the iteration by construction. The tests then
+check that the registration really happened, so a pass is not a loop the writer
+never entered.
 """
 
 from __future__ import annotations
@@ -136,38 +125,125 @@ def _resolve_while_registering(manager: AshPluginManager) -> Optional[BaseExcept
     return escaped
 
 
-class TestTheRaceIsReal:
-    """Establishes the hazard, deterministically, before showing it avoided."""
+def _counting_imports(calls: List[str]):
+    """Patch importlib.import_module to record the scanner module's imports."""
+    import importlib
 
-    def test_a_cold_cache_raises_dictionary_changed_size(self):
+    real_import = importlib.import_module
+
+    def counting_import(name, *args, **kwargs):
+        if name == REAL_SCANNER_MODULE:
+            calls.append(name)
+        return real_import(name, *args, **kwargs)
+
+    return patch.object(importlib, "import_module", counting_import)
+
+
+class TestARegistrationDuringAResolve:
+    """A registration forced into a resolve on a cold cache."""
+
+    def test_a_registration_inside_a_cold_resolve_does_not_escape(self):
         manager = _manager()
         assert "scanner" not in manager._resolved_plugins
 
         escaped = _resolve_while_registering(manager)
 
-        assert escaped is not None, (
-            "the registry was mutated inside plugin_modules' iteration and "
-            "nothing escaped -- either the loop no longer iterates the live dict, "
-            "or plugin_modules now catches RuntimeError. Both would be good news, "
-            "but this test and the pre-warm rationale need rewriting."
+        assert "registered-mid-iteration" in manager.plugin_library.scanners, (
+            "the writer never registered, so the loop was not entered and this "
+            "test observed nothing"
         )
-        assert isinstance(escaped, RuntimeError)
-        assert "changed size during iteration" in str(escaped)
+        assert escaped is None, (
+            "a registration made while plugin_modules was resolving escaped as "
+            f"{escaped!r}; the resolve must iterate a copy of the registrations"
+        )
 
-    def test_what_escapes_is_not_caught_by_plugin_modules(self):
-        """It catches ImportError only, so this reaches the caller's handler.
-
-        In ``_scan_one_project`` that handler is a broad ``except Exception``,
-        which turns an unrelated project's registration into this project's
-        FAILED status.
-        """
+    def test_the_resolve_still_returns_the_registered_classes(self):
+        """Nothing is lost to the mutation: the seeds' class is resolved."""
         manager = _manager()
-        escaped = _resolve_while_registering(manager)
-        assert not isinstance(escaped, ImportError)
+        _resolve_while_registering(manager)
+
+        assert [cls.__name__ for cls in manager.plugin_modules("scanner")] == [
+            "BanditScanner"
+        ]
+
+    def test_the_next_resolution_picks_it_up(self):
+        manager = _manager()
+        _resolve_while_registering(manager)
+        calls: List[str] = []
+
+        with _counting_imports(calls):
+            manager.plugin_modules("scanner")
+
+        assert calls, "the registry changed and the memo was reused anyway"
+        names = [
+            name for name, _, _ in manager._resolved_plugins["scanner"].registrations
+        ]
+        assert "registered-mid-iteration" in names
 
 
-class TestTheCacheIsWhatCloses:
-    """The two facts the pre-warm argument depends on."""
+class TestTheCopyIsTakenUnderTheLock:
+    def test_a_resolve_waits_while_the_registry_lock_is_held(self):
+        """A registration holds the lock while it inserts, so the copy must wait.
+
+        The forced mutation above lands inside ``import_module``, after the copy, so
+        it shows the resolve iterates a copy but not that the copy is taken under the
+        lock. Holding the lock shows that: the resolve cannot finish until it is
+        released.
+        """
+        manager = _manager(seed=3)
+        started = threading.Event()
+        finished = threading.Event()
+
+        def resolve() -> None:
+            started.set()
+            manager.plugin_modules("scanner")
+            finished.set()
+
+        with manager._registry_lock:
+            thread = threading.Thread(target=resolve)
+            thread.start()
+            assert started.wait(timeout=30)
+            assert not finished.wait(timeout=0.5), (
+                "plugin_modules copied the registrations without taking the lock"
+            )
+        thread.join(timeout=30)
+        assert finished.is_set()
+
+    def test_a_registration_waits_while_the_registry_lock_is_held(self):
+        """A resolve holds the lock while it copies, so an insert must wait.
+
+        The other half of the pair: without the lock on the insert, a registration
+        could change the dict while a resolve is copying it. Holding the lock shows
+        the insert takes it: the registration cannot finish until it is released.
+        """
+        manager = _manager(seed=3)
+        started = threading.Event()
+        finished = threading.Event()
+
+        def register() -> None:
+            started.set()
+            manager.register_plugin_module(
+                plugin_type="scanner",
+                plugin_module_class="registered-while-locked",
+                plugin_module_path=REAL_SCANNER_MODULE,
+            )
+            finished.set()
+
+        with manager._registry_lock:
+            thread = threading.Thread(target=register)
+            thread.start()
+            assert started.wait(timeout=30)
+            assert not finished.wait(timeout=0.5), (
+                "register_plugin_module inserted without taking the registry lock"
+            )
+            assert "registered-while-locked" not in manager.plugin_library.scanners
+        thread.join(timeout=30)
+        assert finished.is_set()
+        assert "registered-while-locked" in manager.plugin_library.scanners
+
+
+class TestTheCacheFollowsTheRegistrations:
+    """What the cache does between resolves."""
 
     def test_the_iteration_is_only_reached_on_a_cache_miss(self):
         manager = _manager(seed=3)
@@ -175,44 +251,16 @@ class TestTheCacheIsWhatCloses:
         manager.plugin_modules("scanner")
         assert "scanner" in manager._resolved_plugins
 
-    def test_registration_does_not_invalidate_the_cache(self):
-        """If this changes, pre-warming stops closing the race.
+    def test_a_registration_makes_the_next_resolve_read_the_registry_again(self):
+        """Once, and then the cache is warm again.
 
-        The argument is that a warm cache stays warm for the whole run. A future
-        change clearing ``_resolved_plugins`` on registration would silently
-        reopen the window; this is what catches it.
-        """
-        manager = _manager(seed=3)
-        manager.plugin_modules("scanner")
-        before = manager._resolved_plugins["scanner"]
-
-        manager.register_plugin_module(
-            plugin_type="scanner",
-            plugin_module_class="added-later",
-            plugin_module_path=REAL_SCANNER_MODULE,
-        )
-
-        assert manager._resolved_plugins["scanner"] is before
-
-
-class TestAWarmCacheClosesIt:
-    def test_the_same_forced_mutation_no_longer_escapes(self):
-        """Identical construction, cache resolved first. Nothing may escape."""
-        manager = _manager()
-        manager.plugin_modules("scanner")  # what prewarm_plugin_registry does
-        assert "scanner" in manager._resolved_plugins
-
-        assert _resolve_while_registering(manager) is None
-
-    def test_a_warm_resolve_never_enters_the_import_loop(self):
-        """The mechanism, observed rather than inferred.
-
-        If the warm path still imported, the previous test would be passing for
-        the wrong reason -- a fast loop rather than no loop.
+        A cache that kept serving the first resolve would give a plugin module a
+        later scan imports no row in that scan's results. A cache that never
+        warmed would put every workspace worker back in the import loop.
         """
         import importlib
 
-        manager = _manager()
+        manager = _manager(seed=3)
         manager.plugin_modules("scanner")
 
         calls: List[str] = []
@@ -225,12 +273,54 @@ class TestAWarmCacheClosesIt:
 
         with patch.object(importlib, "import_module", counting_import):
             manager.plugin_modules("scanner")
+            assert calls == [], "a resolve with nothing new registered imported"
+
+            manager.register_plugin_module(
+                plugin_type="scanner",
+                plugin_module_class="added-later",
+                plugin_module_path=REAL_SCANNER_MODULE,
+            )
+            manager.plugin_modules("scanner")
+            assert calls, "the first resolve after a registration did not read it"
+
+            calls.clear()
+            manager.plugin_modules("scanner")
+            assert calls == [], "the cache did not warm again after the re-read"
+
+        names = [
+            name for name, _, _ in manager._resolved_plugins["scanner"].registrations
+        ]
+        assert names[-1] == "added-later"
+
+
+class TestAWarmCache:
+    def test_the_same_forced_mutation_does_not_escape(self):
+        """Identical construction, cache resolved first. Nothing may escape."""
+        manager = _manager()
+        manager.plugin_modules("scanner")  # what prewarm_plugin_registry does
+        assert "scanner" in manager._resolved_plugins
+
+        assert _resolve_while_registering(manager) is None
+
+    def test_a_warm_resolve_never_enters_the_import_loop(self):
+        """With no registration since, the memo answers and nothing is imported."""
+        manager = _manager()
+        manager.plugin_modules("scanner")
+
+        calls: List[str] = []
+        with _counting_imports(calls):
+            manager.plugin_modules("scanner")
 
         assert calls == []
 
     @pytest.mark.parametrize("readers", [2, 4, 8])
-    def test_many_concurrent_readers_are_safe_once_warm(self, readers):
-        """A workspace at max_parallel_projects=8 is eight concurrent readers."""
+    def test_concurrent_readers_and_a_writer_are_safe(self, readers):
+        """A workspace at max_parallel_projects=8 is eight concurrent readers.
+
+        Every registration the writer makes sends the readers' next resolution
+        back through the loop, so this runs the copy-and-iterate path under
+        contention, not only the memo.
+        """
         manager = _manager(seed=30)
         manager.plugin_modules("scanner")
 

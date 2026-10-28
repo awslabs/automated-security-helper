@@ -105,9 +105,44 @@ class SandboxMode(str, Enum):
     sandbox_exec = "sandbox-exec"
 
 
-class ExportFormat(str, Enum):
-    """Supported export formats."""
+class MinSeverity(str, Enum):
+    """The values --min-severity accepts, laxest first, matched without regard to case.
 
+    Not the severity ladder: there is no ``info``, ``critical`` and ``high`` rank the
+    same because SARIF's ``error`` covers both, and ``none`` gates on any finding. The
+    rank tables in interactions/run_ash_scan.py (``_SEVERITY_RANK``) and
+    workspace/aggregation.py (``_MIN_SEVERITY_RANK``) are keyed by exactly these
+    values. Only these reach those tables: ranked as ``low``, a typo would be the
+    strictest gate short of ``none``.
+    """
+
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    NONE = "none"
+
+
+class ExportFormat(str, Enum):
+    """A report format name, as --output-formats and output_formats take it.
+
+    Each names the reporter that writes it, except aggregated, dict, asff and
+    custom: no reporter writes those, so asking for one writes nothing for it and
+    logs why.
+    """
+
+    # A reporter is selected by its configured name, so every reporter ASH ships
+    # needs a member with that exact value. Without one the reporter cannot be
+    # named, and any list of formats switches it off.
+    #
+    # aggregated, dict, asff and custom name no reporter. They stay accepted
+    # rather than refused because they have been valid values of this public enum
+    # and of --output-formats since v3; ReportPhase's FORMAT_NO_REPORTER message
+    # tells an operator who asks for one that nothing will be written.
+    # tests/unit/cli/test_output_formats_select_every_reporter.py fails for a
+    # shipped reporter that has no member. (A comment rather than the docstring,
+    # because a docstring becomes the description wherever this enum appears in a
+    # published JSON schema.)
     AGGREGATED = "aggregated"
     TEXT = "text"
     FLAT_JSON = "flat-json"
@@ -123,3 +158,31 @@ class ExportFormat(str, Enum):
     CYCLONEDX = "cyclonedx"
     SPDX = "spdx"
     CUSTOM = "custom"
+    GITHUB_GHAS = "github-ghas"
+    GITLAB_SAST = "gitlab-sast"
+    GITLAB_CYCLONEDX = "gitlab-cyclonedx"
+    UNUSED_SUPPRESSIONS = "unused-suppressions"
+    # Reporters of the AWS plugin module. They exist in a run only when
+    # ash_plugin_modules loads that module.
+    AWS_SECURITY_HUB = "aws-security-hub"
+    BEDROCK_SUMMARY = "bedrock-summary-reporter"
+    CLOUDWATCH_LOGS = "cloudwatch-logs"
+    S3 = "s3"
+
+
+#: The formats no reporter writes (see ExportFormat): ``ash report --format``
+#: refuses each, and a scan asked for one writes nothing for it and says why.
+FORMATS_NO_REPORTER_WRITES = frozenset(
+    {ExportFormat.AGGREGATED, ExportFormat.DICT, ExportFormat.ASFF, ExportFormat.CUSTOM}
+)
+
+#: The formats of the AWS plugin module's reporters, which a run has only when
+#: ``ash_plugin_modules`` loads that module.
+AWS_PLUGIN_MODULE_FORMATS = frozenset(
+    {
+        ExportFormat.AWS_SECURITY_HUB,
+        ExportFormat.BEDROCK_SUMMARY,
+        ExportFormat.CLOUDWATCH_LOGS,
+        ExportFormat.S3,
+    }
+)

@@ -44,6 +44,8 @@ from types import ModuleType
 import pytest
 from typer.testing import CliRunner
 
+from tests.utils.windows_console import windows_logging_kept_in_the_test
+
 
 @dataclass(frozen=True)
 class Host:
@@ -131,6 +133,10 @@ def pin_host(monkeypatch: pytest.MonkeyPatch, host: Host) -> Callable[[], None]:
     simulated_enabled = not host.is_windows
     monkeypatch.setattr(platform, "system", lambda: host.system)
     monkeypatch.setattr(platform, "machine", lambda: host.machine)
+    if host.is_windows:
+        # On a CI runner, get_logger then sets the process locale and
+        # PYTHONIOENCODING, which outlived the simulated host (see the helper).
+        windows_logging_kept_in_the_test(monkeypatch)
     if simulated_enabled == real_enabled:
         return lambda: None
     _set_import_time_defaults(simulated_enabled)
@@ -167,9 +173,12 @@ def displayed_cwd(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     the path, but the box was padded to the real path's length first, so the border
     lands in a different column on every machine. A display-only cwd of fixed length
     keeps the geometry the same everywhere. Relative file access still goes to the
-    real working directory, because only ``os.getcwd`` is replaced. Register
-    DISPLAYED_CWD with ``snapshot_normalizer.add_root`` so its Windows spelling
-    (backslashes) snapshots like the POSIX one.
+    real working directory, because only ``os.getcwd`` is replaced. A directory made
+    through the displayed absolute path (``os.path.abspath`` reads ``os.getcwd``) is
+    made at the same place under the real working directory, so no test needs a
+    writable ``/workspace``. Register DISPLAYED_CWD with
+    ``snapshot_normalizer.add_root`` so its Windows spelling (backslashes)
+    snapshots like the POSIX one.
 
     ``os.getcwd`` returns the native spelling (``\\workspace\\demo-project`` on
     Windows), as the real one does. From Python 3.13 ``Path.absolute()`` relies on
@@ -180,8 +189,19 @@ def displayed_cwd(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     import pathlib
 
     native_cwd = str(pathlib.PurePath(DISPLAYED_CWD))
+    real_cwd = pathlib.Path(os.getcwd())
+    real_mkdir = pathlib.Path.mkdir
+
+    def mkdir_below_the_real_cwd(self, *args, **kwargs):
+        try:
+            below = pathlib.PurePath(self).relative_to(native_cwd)
+        except ValueError:
+            return real_mkdir(self, *args, **kwargs)
+        return real_mkdir(real_cwd / below, *args, **kwargs)
+
     with monkeypatch.context() as mp:
         mp.setattr(os, "getcwd", lambda: native_cwd)
+        mp.setattr(pathlib.Path, "mkdir", mkdir_below_the_real_cwd)
         accessor = getattr(pathlib, "_NormalAccessor", None)  # Python 3.10 only
         if accessor is not None and hasattr(accessor, "getcwd"):
             mp.setattr(accessor, "getcwd", staticmethod(lambda: native_cwd))
@@ -234,9 +254,12 @@ class _FrozenLogClock:
 def pinned_console() -> Iterator[None]:
     """Make every rich console a CLI run builds render the same on every OS.
 
-    - rich.print and rich.get_console share one lazily-built Console. It is dropped so
-      the next one reads the pinned COLUMNS/NO_COLOR/TERM, not whatever terminal an
-      earlier import saw.
+    - rich.print and rich.get_console share one global Console. A new one replaces it
+      for the run, built last, so it reads the pinned COLUMNS/NO_COLOR/TERM and
+      terminal size, not whatever terminal an earlier import saw. It is built as
+      utils/console.py builds rich's global console (``new_global_console``): a run
+      prints through the console ASH uses, which checks each line and does not wrap
+      text off a terminal, not one rich builds without either.
     - ASH's log console passes ``_environ={}``, so it never reads COLUMNS and asks the
       process's real stdin/stdout/stderr for a size instead: 80 columns under xdist,
       the developer's terminal width under ``-n0``. The terminal is pinned to the same
@@ -275,10 +298,13 @@ def pinned_console() -> Iterator[None]:
             ]
             if len(kept) != len(logger.handlers):
                 mp.setattr(logger, "handlers", kept)
-        mp.setattr(rich, "_console", None)
         mp.setattr(rich.console, "detect_legacy_windows", lambda: False)
         mp.setattr(os, "get_terminal_size", lambda *_: os.terminal_size((100, 50)))
         mp.setattr(logging, "time", _FrozenLogClock(time))
+        # Last, so it is built in the environment pinned above.
+        from automated_security_helper.utils.console import new_global_console
+
+        mp.setattr(rich, "_console", new_global_console())
         yield
 
 

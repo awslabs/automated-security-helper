@@ -335,7 +335,8 @@ export class AshAgentCoreStack extends Stack {
         /*
          * Resolves the contradiction between this stack's own two defaults.
          *
-         * `AshVersion` defaults to v3.7.0, whose `ash mcp` has no
+         * `AshVersion` defaults to `DEFAULT_ASH_VERSION`, the packaged release.
+         * At v3.7.0 and v3.7.1 that release's `ash mcp` has no
          * `--stateless-http`; `McpStatelessHttp` defaults to `true`. The
          * entrypoint refuses that pair and exits 65, so the shipped one-click
          * template could not deploy without an adopter changing a parameter, and
@@ -357,10 +358,35 @@ export class AshAgentCoreStack extends Stack {
          *
          * This is maintainer decision D6's second option, taken because the first
          * -- pointing `DEFAULT_ASH_VERSION` at a ref whose `ash mcp` accepts the
-         * flag -- needs a release that does not exist yet. Delete this line when
-         * it does, rather than carrying both.
+         * flag -- needs a release that does not exist yet.
+         *
+         * WHEN IT GOES: at the first release that has the
+         * flag. `cz bump` moves `DEFAULT_ASH_VERSION` to each new release, and
+         * the first release after 3.7.1 has `--stateless-http` (this tree's `ash
+         * mcp` does). From that release the shipped defaults start stateless
+         * without this line, and on such an ASH the line is inert: the entrypoint
+         * passes the flag and does not warn ("the fallback is inert where the
+         * option exists" in ash-container-scripts.test.ts). Kept, it would only
+         * serve an adopter who sets `AshVersion` to v3.7.0 or v3.7.1 by hand, with
+         * a stateful server and a warning instead of exit 65, and exit 65 is what
+         * such an adopter should get. tests/unit/deploy/
+         * test_agentcore_stateless_fallback_tripwire.py fails at that bump until
+         * this line is deleted and the templates are re-synthesized.
          */
         ASH_MCP_STATELESS_FALLBACK: 'warn',
+        /*
+         * The two statements only this target can make; see "HOST CHECKING IS AN
+         * EXPLICIT DECISION" on MCP_ENTRYPOINT_SCRIPT. Host is on AgentCore's
+         * restricted-header list, so no allowlist can name it and the platform is
+         * what restricts what reaches the container: without an allowlist the
+         * entrypoint passes --trust-upstream-host-check. And AgentCore issues the
+         * Mcp-Session-Id it routes on, so in stateless mode the entrypoint passes
+         * --trust-upstream-session-id; without it ASH ignores the header and every
+         * session tool (source delivery, the scan registry) refuses. Both are
+         * passed only when the image's `ash mcp` has the flag.
+         */
+        ASH_MCP_TRUST_UPSTREAM_HOST_CHECK: 'true',
+        ASH_MCP_TRUST_UPSTREAM_SESSION_ID: 'true',
       },
       description: 'ASH security scanner exposed over MCP.',
     });
@@ -369,8 +395,8 @@ export class AshAgentCoreStack extends Stack {
      * A custom auth header only reaches the container if it is on the runtime's
      * allowlist, so the allowlist must appear exactly when auth is configured.
      *
-     * The object keys are CloudFormation-cased on purpose. `Fn::If` bypasses the
-     * L1's camelCase-to-PascalCase property mapper, so writing
+     * The object keys are CloudFormation-cased on purpose. `Fn::If` is not passed
+     * through the L1's camelCase-to-PascalCase property mapper, so writing
      * `requestHeaderAllowlist` here would emit a property AgentCore does not
      * recognize — and it would emit silently.
      */

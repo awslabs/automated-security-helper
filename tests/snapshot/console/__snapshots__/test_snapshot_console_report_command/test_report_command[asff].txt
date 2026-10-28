@@ -1,5 +1,7 @@
 $ ash report --format asff --log-level ERROR
-[exit 1]
+[exit 5]
+
+[stderr]
 Error: Reporter plugin 'asff' not found.
 Available reporter formats:
   - csv

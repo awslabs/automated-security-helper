@@ -16,6 +16,7 @@ validated and listed in the skeleton.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from unittest.mock import patch
@@ -28,6 +29,7 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.json_input import CliJsonInputCommand
 from automated_security_helper.cli.main import app
 from automated_security_helper.cli.scan import run_ash_scan_cli_command
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.core.enums import ExecutionStrategy, RunMode
 
 RUN_ASH_SCAN = "automated_security_helper.cli.scan.run_ash_scan"
@@ -42,6 +44,22 @@ def _write(tmp_path: Path, payload: object, name: str = "params.json") -> Path:
     path = tmp_path / name
     path.write_text(json.dumps(payload), encoding="utf-8")
     return path
+
+
+#: The characters of the Rich panel a usage error is printed in.
+_PANEL_BORDER = str.maketrans("", "", "│╭╮╰╯─")
+
+
+def _flat(output: str) -> str:
+    """``output`` with the error panel's border and all whitespace removed.
+
+    The panel wraps its text at the console width, so where a line breaks
+    depends on how long the message is, and a message that quotes a tmp path
+    can break inside a name the test looks for. The names looked for here have
+    no whitespace, so they are found in the flattened text wherever the line
+    broke.
+    """
+    return "".join(output.translate(_PANEL_BORDER).split())
 
 
 def _scan_kwargs(mock_run) -> dict:
@@ -200,103 +218,149 @@ class TestScanJsonInputErrors:
 
     def test_unknown_key_names_the_key_and_valid_ones(self, runner, tmp_path):
         result, mock_run = self._invoke(runner, tmp_path, {"sauce_dir": "x"})
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
-        assert "'sauce_dir'" in result.output
-        assert "source_dir" in result.output
-        assert "output_dir" in result.output
+        assert "'sauce_dir'" in _flat(result.output)
+        assert "source_dir" in _flat(result.output)
+        assert "output_dir" in _flat(result.output)
 
     def test_wrong_enum_value_points_at_the_key(self, runner, tmp_path):
         result, mock_run = self._invoke(runner, tmp_path, {"strategy": "sideways"})
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
-        assert "'strategy'" in result.output
-        assert "sideways" in result.output
+        assert "'strategy'" in _flat(result.output)
+        assert "sideways" in _flat(result.output)
 
     def test_wrong_int_value_points_at_the_key(self, runner, tmp_path):
         result, mock_run = self._invoke(
             runner, tmp_path, {"shard_index": "zero", "shard_count": 2}
         )
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
-        assert "'shard_index'" in result.output
+        assert "'shard_index'" in _flat(result.output)
 
     def test_list_for_scalar_parameter_is_rejected(self, runner, tmp_path):
         # A string parameter would otherwise accept str(['a', 'b']).
         result, mock_run = self._invoke(runner, tmp_path, {"source_dir": ["a", "b"]})
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
-        assert "'source_dir'" in result.output
+        assert "'source_dir'" in _flat(result.output)
 
     def test_scalar_for_list_parameter_is_rejected(self, runner, tmp_path):
         result, mock_run = self._invoke(runner, tmp_path, {"scanners": "bandit"})
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
-        assert "'scanners'" in result.output
+        assert "'scanners'" in _flat(result.output)
 
     def test_boolean_for_non_boolean_parameter_is_rejected(self, runner, tmp_path):
         # int(True) == 1, so without this check `true` would become shard 1.
         result, mock_run = self._invoke(
             runner, tmp_path, {"shard_index": True, "shard_count": 2}
         )
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
-        assert "'shard_index'" in result.output
+        assert "'shard_index'" in _flat(result.output)
 
     def test_object_for_parameter_is_rejected(self, runner, tmp_path):
         result, mock_run = self._invoke(runner, tmp_path, {"config": {"a": 1}})
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
-        assert "'config'" in result.output
+        assert "'config'" in _flat(result.output)
 
     def test_same_parameter_under_two_spellings_is_rejected(self, runner, tmp_path):
         result, mock_run = self._invoke(
             runner, tmp_path, {"strategy": "parallel", "--strategy": "sequential"}
         )
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
-        assert "strategy" in result.output
+        assert "strategy" in _flat(result.output)
 
     def test_top_level_must_be_an_object(self, runner, tmp_path):
         result, mock_run = self._invoke(runner, tmp_path, ["strategy", "parallel"])
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
-        assert "object" in result.output
+        assert "object" in _flat(result.output)
 
     def test_duplicate_key_in_document_is_rejected(self, runner, tmp_path):
         path = tmp_path / "dup.json"
         path.write_text('{"strategy": "parallel", "strategy": "sequential"}')
         with patch(RUN_ASH_SCAN) as mock_run:
             result = runner.invoke(app, ["scan", "--cli-json-input", str(path)])
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
-        assert "strategy" in result.output
+        assert "strategy" in _flat(result.output)
 
     def test_malformed_json_is_rejected(self, runner, tmp_path):
         path = tmp_path / "bad.json"
         path.write_text("{not json")
         with patch(RUN_ASH_SCAN) as mock_run:
             result = runner.invoke(app, ["scan", "--cli-json-input", str(path)])
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
-        assert "JSON" in result.output
+        assert "JSON" in _flat(result.output)
 
     def test_missing_file_is_rejected(self, runner, tmp_path):
+        missing = tmp_path / ("a-directory-name-long-enough" * 4) / "absent.json"
+        missing.parent.mkdir()
+        # The control: longer than a console line, so a refusal that wrapped
+        # it would split the path (the one-line contract
+        # tests/unit/cli/test_usage_errors_naming_a_path_on_one_line.py pins
+        # for the other usage errors).
+        assert len(str(missing)) > 120
         with patch(RUN_ASH_SCAN) as mock_run:
-            result = runner.invoke(
-                app, ["scan", "--cli-json-input", str(tmp_path / "absent.json")]
-            )
-        assert result.exit_code == 2
+            result = runner.invoke(app, ["scan", "--cli-json-input", str(missing)])
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
-        assert "absent.json" in result.output
+        error_lines = [
+            line for line in result.output.splitlines() if line.startswith("Error: ")
+        ]
+        assert len(error_lines) == 1, result.output
+        assert str(missing) in error_lines[0], result.output
+
+    @pytest.mark.parametrize("shape", ["missing", "a-directory"])
+    def test_an_unreadable_document_path_is_named_once(self, runner, tmp_path, shape):
+        path = tmp_path / "params.json"
+        if shape == "a-directory":
+            path.mkdir()
+        # The control: the OS's own error names the same path, so a refusal that
+        # appends its text to "cannot read <path>" names the path twice.
+        with pytest.raises(OSError) as raised:
+            Path(str(path)).read_text(encoding="utf-8")
+        assert os.fsdecode(raised.value.filename) == str(path)
+        reason = f"[Errno {raised.value.errno}] {raised.value.strerror}"
+        assert raised.value.strerror, reason
+        with patch(RUN_ASH_SCAN) as mock_run:
+            result = runner.invoke(app, ["scan", "--cli-json-input", str(path)])
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+        assert not mock_run.called
+        assert result.output.count(str(path)) == 1, result.output
+        assert reason in result.output, result.output
+
+    def test_a_rewritten_document_path_is_still_named_once(
+        self, runner, tmp_path, monkeypatch
+    ):
+        # Path() rewrites "./params.json" to "params.json" before the open, so
+        # the OSError's own filename is not the string the command was given.
+        # The one-name drop compares them as paths (utils/error_text.py), so
+        # the refusal still names the path once, as typed.
+        monkeypatch.chdir(tmp_path)
+        with patch(RUN_ASH_SCAN) as mock_run:
+            result = runner.invoke(app, ["scan", "--cli-json-input", "./params.json"])
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+        assert not mock_run.called
+        assert "./params.json" in result.output, result.output
+        # One occurrence covers both spellings: the as-typed name contains the
+        # rewritten one, so a second, OSError-sourced "params.json" would
+        # raise the count to two.
+        assert result.output.count("params.json") == 1, result.output
 
     def test_meta_options_cannot_be_set_from_json(self, runner, tmp_path):
         result, mock_run = self._invoke(
             runner, tmp_path, {"cli_json_input": "other.json"}
         )
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
-        assert "'cli_json_input'" in result.output
+        assert "'cli_json_input'" in _flat(result.output)
 
     def test_no_environment_expansion_in_values(self, runner, tmp_path, monkeypatch):
         monkeypatch.setenv("ASH_TEST_290", "expanded")
@@ -317,12 +381,26 @@ class TestSkeleton:
         result = runner.invoke(app, ["scan", "--generate-cli-skeleton"])
         assert result.exit_code == 0, result.output
         skeleton = json.loads(result.stdout)
+        params = typer.utils.get_params_from_function(run_ash_scan_cli_command)
+        # Hidden options are not part of the structured input (json_input_parameters):
+        # --config-from-scanned-repository, --config-file-from-scanned-repository,
+        # --config-file-from-another-checkout and --ash-config-from-host are what
+        # container mode passes the scan it starts, not operator settings.
+        hidden = {
+            name
+            for name, meta in params.items()
+            if getattr(meta.default, "hidden", False)
+        }
         expected = {
             name
-            for name, meta in typer.utils.get_params_from_function(
-                run_ash_scan_cli_command
-            ).items()
+            for name, meta in params.items()
             if meta.annotation is not typer.Context
+        } - hidden
+        assert hidden == {
+            "config_from_scanned_repository",
+            "config_file_from_scanned_repository",
+            "config_file_from_another_checkout",
+            "ash_config_from_host",
         }
         assert set(skeleton) == expected
 
@@ -436,7 +514,7 @@ class TestNoDrift:
         )
         assert result.exit_code == 2
         assert captured == {}
-        assert "'brand_new_flag'" in result.output
+        assert "'brand_new_flag'" in _flat(result.output)
 
     def test_positional_argument_on_command_line_overrides_json(self, runner, tmp_path):
         captured: dict = {}

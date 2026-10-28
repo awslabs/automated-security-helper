@@ -90,11 +90,27 @@ async def test_mcp_check_installation():
         return_value=(f"ASH version {mock_version}".encode(), b"")
     )
 
+    inventory = [
+        {
+            "name": "bandit",
+            "enabled": True,
+            "dependencies_satisfied": True,
+            "version": "1.8.0",
+            "offline_strategy": "bundled",
+            "installs_on_first_scan": False,
+        }
+    ]
+
     with (
         patch(
             "automated_security_helper.cli.mcp_tools.get_ash_version",
             return_value=mock_version,
         ),
+        patch(
+            "automated_security_helper.cli.mcp_tools.list_scanner_inventory",
+            return_value=inventory,
+        ),
+        patch("shutil.which", return_value="/usr/local/bin/ash"),
         patch("pathlib.Path.home", return_value=mock_path),
         patch("pathlib.Path.__truediv__", return_value=mock_path),
         patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_process)),
@@ -105,7 +121,8 @@ async def test_mcp_check_installation():
         # Check the result
         assert result["success"] is True
         assert result["installed"] is True
+        assert result["ready"] is True
         assert result["version"] == mock_version
         assert result["ash_command_available"] is True
-        assert "ash_command_output" in result
+        assert result["ash_command_output"] == "/usr/local/bin/ash"
         assert "timestamp" in result

@@ -11,7 +11,7 @@
 ┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
 │ --bin-path          -b                <path>  Path to install binaries to.                      │
 │                                               [env var: ASH_BIN_PATH]                           │
-│                                               [default: <HOME>/.ash/bin]                        │
+│                                               [default: (~/.ash/bin)]                           │
 │ --plugin-type       -t                <str>   Plugin types to install dependencies for          │
 │                                               [default: converter, scanner, reporter]           │
 │ --tool              -T                <str>   Install dependencies for these tools only, by     │

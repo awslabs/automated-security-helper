@@ -4926,6 +4926,9 @@ class CycloneDXReport(BaseModel):
         extra="forbid",
         use_enum_values=True,
         serialize_by_alias=True,
+        # Not from the codegen: a refused value can be scanned content, which an
+        # error does not quote.
+        hide_input_in_errors=True,
     )
 
     field_schema: Optional[str] = Field(

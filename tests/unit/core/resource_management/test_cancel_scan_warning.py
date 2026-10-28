@@ -1,4 +1,11 @@
-"""Regression test: cancel_scan warns when process_id is None (M1)."""
+"""Regression test: cancel_scan on a scan with no process id.
+
+An MCP scan runs in a thread, so it has no process id to signal. Neither a silent
+no-op nor a warning that the scan cannot be stopped is right for it: the
+scan is stopped through its registry entry's cancel event, which its runner
+checks (core/cancellation.py), so the expectation is that the event is set and
+nothing claims the scan cannot be stopped.
+"""
 
 import tempfile
 from pathlib import Path
@@ -24,14 +31,13 @@ def _make_registry_with_running_scan():
     return registry
 
 
-def test_cancel_scan_logs_warning_when_process_id_is_none():
+def test_cancel_scan_signals_a_scan_with_no_process_id_through_its_event():
     registry = _make_registry_with_running_scan()
     with patch.object(registry._logger, "warning") as mock_warn:
         result = registry.cancel_scan("test-scan-1")
     assert result is True
-    mock_warn.assert_called_once()
-    msg = mock_warn.call_args[0][0]
-    assert "process" in msg.lower() or "thread" in msg.lower()
+    assert registry.get_scan("test-scan-1").cancel_event.is_set()
+    mock_warn.assert_not_called()
 
 
 def test_cancel_scan_still_marks_cancelled_when_no_pid():

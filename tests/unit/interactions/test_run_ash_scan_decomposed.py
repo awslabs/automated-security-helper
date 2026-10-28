@@ -254,14 +254,23 @@ class TestRunContainerMode:
 
         from automated_security_helper.models.asharp_model import AshAggregatedResults
 
-        dummy = AshAggregatedResults.__new__(AshAggregatedResults)
+        from automated_security_helper.utils.inner_run_outcome import (
+            mark_run_completed,
+        )
+
+        dummy = AshAggregatedResults()
+
+        def container_run(**kwargs):
+            # The marker the in-container run writes when it completes.
+            mark_run_completed(dummy, kwargs["outer_run_id"])
+            return mock_container_result
 
         mock_logger = MagicMock()
         fake_content = "{}"
 
         with patch(
             "automated_security_helper.interactions.run_ash_scan.run_ash_container",
-            return_value=mock_container_result,
+            side_effect=container_run,
         ) as mock_rac:
             with patch(
                 "automated_security_helper.interactions.run_ash_scan.AshAggregatedResults.model_validate_json",
@@ -427,6 +436,8 @@ class TestRunLocalModeTupleUnpacking:
         )
 
         mock_metric = _ran_metric(0)
+        # The spec'd mock lacks the per-target reports a real model always has.
+        result.additional_reports = {}
         with patch(
             "automated_security_helper.interactions.run_ash_scan.get_unified_scanner_metrics",
             return_value=[mock_metric],

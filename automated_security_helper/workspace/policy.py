@@ -51,6 +51,17 @@ sort order or mtime would mean the effective ceiling changes when an operator
 adds a file they thought was inert -- and a ceiling that moves on its own is
 worse than no ceiling, because it is believed.
 
+A policy file is named by the path it was reached by
+----------------------------------------------------
+Discovery and ``--workspace-config`` give the path the file was found or named
+at, made absolute but not resolved. The policy beside a definition an MCP client
+delivered may be a link to a file elsewhere, and a file is judged by every path
+it was reached by (``config/config_sources.py``, "Base paths"), so the caller
+judges that path: a link the client delivered makes the file the client's
+wherever it points. A caller's ``permit_base`` covers the file the path reaches
+before anything reads it, and for a client's file (``client_supplied``) an error
+says where each problem is, not what the file holds.
+
 What the ceiling can and cannot reach
 -------------------------------------
 ``effective_threshold`` is ``stricter_of(project, ceiling)``, so a stricter
@@ -101,7 +112,8 @@ Failure modes and known limitations
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping, Sequence
+import os
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -109,11 +121,21 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
+from automated_security_helper.config.ash_config import (
+    load_config_yaml,
+    reduced_plugin_name,
+)
 from automated_security_helper.config.ash_workspace_config import (
     AshWorkspaceConfig,
     WorkspacePolicyConfig,
 )
+from automated_security_helper.config.config_sources import (
+    _is_a_link,
+    parse_error_kind,
+)
+from automated_security_helper.config.plugin_section_names import ascii_lower
 from automated_security_helper.core.exceptions import (
+    ASHConfigInputNotPermittedError,
     WorkspaceDefinitionError,
     WorkspacePatternError,
 )
@@ -126,7 +148,12 @@ from automated_security_helper.utils.severity_ladder import (
     sarif_level_fails_threshold,
     stricter_of,
 )
-from automated_security_helper.utils.workspace_paths import to_project_pattern
+from automated_security_helper.utils.workspace_paths import (
+    IGNORE_PATH,
+    SUPPRESSION,
+    PatternKind,
+    to_project_pattern,
+)
 
 # Written as `str | Path` rather than `Union[...]` -- evaluated eagerly at import,
 # and PEP 604 unions are runtime-valid from 3.10, this project's floor.
@@ -273,43 +300,87 @@ def normalise_scanner_name(name: str) -> str:
     correctness hazard, not a style one: the two would agree on every name until
     one of them met an aliased scanner, and the disagreement would show up as a
     policy that enables nothing while the plan says it enabled something.
+
+    The fold is the one ``AshConfig.get_plugin_config`` reads a section under
+    (``ash_config.reduced_plugin_name``): the Converter, Scanner or Reporter word
+    dropped, every character outside ``[a-z0-9+]`` dropped, and the rest lowered
+    with ``ascii_lower``. So the project keys the lookup reads as one scanner
+    (``Snyk_Code``, ``snyk.code``, ``snykcode``) are one name here. Folded any
+    other way, the policy and the lookup disagreed about which project keys are a
+    scanner's. A name the reduction leaves empty falls back to the name itself,
+    lowered the same way, so two such names stay two names.
     """
-    return name.strip().lower().replace("-", "_")
+    stripped = name.strip()
+    return reduced_plugin_name(stripped) or ascii_lower(stripped).replace("-", "_")
 
 
-def _read_policy_document(path: Path) -> object:
-    """Parse the policy file, refusing anything unreadable.
+def _read_policy_document(path: Path, named: Path, quote_values: bool) -> object:
+    """Parse the policy file at ``path``, refusing anything unreadable.
 
-    Uses ``yaml.safe_load`` rather than ``AshConfig``'s ``!ENV``-aware loader.
+    Uses ``load_config_yaml`` rather than ``AshConfig``'s ``!ENV``-aware loader.
     See "No ``!ENV`` substitution" in ``config/ash_workspace_config.py``: a
-    ceiling an environment variable can loosen is not a ceiling.
+    ceiling an environment variable can loosen is not a ceiling. YAML aliases are
+    refused, as in every ASH config file.
+
+    A refusal names ``named``, the path the file was reached by. A file that is
+    not UTF-8 or does not parse is refused with the error's type and where it
+    stopped (parse_error_kind), never the decoder's or the parser's own message,
+    whatever ``quote_values`` says: the decoder's prints the undecodable byte's
+    value and the parser's quotes the file (a snippet of the line, since this
+    parse is of a str) or, for a constructor's ValueError (``!!int``), the
+    value itself (config_sources.unparsed_config_reason). ``quote_values``
+    governs the schema problems only (_load_policy), where the operator's own
+    file shows the value it wrote.
     """
+    label = f"workspace policy file '{named.as_posix()}'"
+    undecoded = ""
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise _refuse(
-            f"workspace policy file '{path.as_posix()}' could not be read: {exc}"
-        ) from exc
+        reason = f": {exc}" if quote_values else f" ({exc.strerror or 'OSError'})"
+        raise _refuse(f"{label} could not be read{reason}") from exc
     except UnicodeDecodeError as exc:
-        raise _refuse(
-            f"workspace policy file '{path.as_posix()}' is not valid UTF-8: {exc}"
-        ) from exc
+        # The decoder's message prints the byte's value; parse_error_kind gives
+        # its offset and nothing from the file.
+        undecoded = parse_error_kind(exc)
+    if undecoded:
+        # Outside the handler, so the decoder's error is not its context.
+        raise _refuse(f"{label} could not be parsed {undecoded}")
 
+    kind = ""
     try:
         if path.suffix.lower() == ".json":
             return json.loads(raw)
-        return yaml.safe_load(raw)
-    except (yaml.YAMLError, json.JSONDecodeError) as exc:
-        raise _refuse(
-            f"workspace policy file '{path.as_posix()}' could not be parsed: {exc}"
-        ) from exc
+        return load_config_yaml(raw)
+    except (yaml.YAMLError, ValueError) as exc:
+        # json.JSONDecodeError and a constructor's ValueError (!!int) are
+        # ValueErrors. The type and place only: the parser's message quotes the
+        # file, a snippet of the line included, since this parse is of a str,
+        # and the constructor's quotes the value (unparsed_config_reason).
+        kind = parse_error_kind(exc)
+    # Outside the handler, so the parser's error is not its context.
+    raise _refuse(f"{label} could not be parsed {kind}")
 
 
-def load_workspace_policy(path: PathLike) -> AshWorkspaceConfig:
+def _where(error: Exception) -> str:
+    """Where a YAML or JSON parser stopped, as line and column, or ""."""
+    mark = getattr(error, "problem_mark", None)
+    if mark is not None:
+        return f" at line {mark.line + 1}, column {mark.column + 1}"
+    if isinstance(error, json.JSONDecodeError):
+        return f" at line {error.lineno}, column {error.colno}"
+    return ""
+
+
+def load_workspace_policy(
+    path: PathLike, *, quote_values: bool = True
+) -> AshWorkspaceConfig:
     """Parse and validate the policy file at *path*.
 
     Args:
         path: The policy file. Must exist.
+        quote_values: False for a client's file: a refusal then gives where
+            each problem is and what kind it is, without the file's text.
 
     Returns:
         The validated policy.
@@ -317,17 +388,39 @@ def load_workspace_policy(path: PathLike) -> AshWorkspaceConfig:
     Raises:
         WorkspaceDefinitionError: Exit code 4, for every unusable file -- absent,
             unreadable, unparseable, not a mapping, or failing the schema. The
-            message names the file, because a workspace may have several config
-            files and "validation error" alone does not say which to open.
+            message names the file, by the path it was reached by, because a
+            workspace may have several config files and "validation error" alone
+            does not say which to open.
     """
-    resolved = Path(path)
-    if not resolved.exists():
-        raise _refuse(f"workspace policy file '{resolved.as_posix()}' does not exist")
-    if not resolved.is_file():
-        raise _refuse(f"workspace policy file '{resolved.as_posix()}' is not a file")
+    named = Path(os.path.abspath(path))
+    return _load_policy(named.resolve(), named, quote_values)
 
-    resolved = resolved.resolve()
-    document = _read_policy_document(resolved)
+
+def _policy_problems(error: ValidationError) -> str:
+    """Each problem of a policy file, with the value the file wrote.
+
+    The model hides inputs in its errors, since a config value can be a secret
+    read from the environment. This loader substitutes nothing from the
+    environment, so each value is the file's own text, and an operator whose CI
+    templating left ``${THRESH}`` unexpanded has to see it. ``repr`` shows a
+    control character in it as an escape.
+    """
+    return "; ".join(
+        f"{'.'.join(str(part) for part in item['loc']) or '(top level)'}: "
+        f"{item['msg']} (the file has {item.get('input')!r})"
+        for item in error.errors()
+    )
+
+
+def _load_policy(path: Path, named: Path, quote_values: bool) -> AshWorkspaceConfig:
+    """``load_workspace_policy`` for the file ``path``, reached by ``named``."""
+    label = f"workspace policy file '{named.as_posix()}'"
+    if not path.exists():
+        raise _refuse(f"{label} does not exist")
+    if not path.is_file():
+        raise _refuse(f"{label} is not a file")
+
+    document = _read_policy_document(path, named, quote_values)
 
     # An empty file parses to None. Treated as "declares no policy" rather than
     # refused: a commented-out policy file is a reasonable thing to keep in a
@@ -337,36 +430,102 @@ def load_workspace_policy(path: PathLike) -> AshWorkspaceConfig:
 
     if not isinstance(document, dict):
         raise _refuse(
-            f"workspace policy file '{resolved.as_posix()}' must contain a "
-            f"mapping at the top level, found {type(document).__name__}"
+            f"{label} must contain a mapping at the top level, found "
+            f"{type(document).__name__}"
         )
 
     try:
         return AshWorkspaceConfig.model_validate(document)
     except ValidationError as exc:
+        if quote_values:
+            raise _refuse(f"{label} is not valid: {_policy_problems(exc)}") from exc
+        from automated_security_helper.config.resolve_config import (
+            unquoted_validation_problems,
+        )
+
+        problems = unquoted_validation_problems(exc, AshWorkspaceConfig)
         raise _refuse(
-            f"workspace policy file '{resolved.as_posix()}' is not valid: {exc}"
-        ) from exc
+            f"{label} is not valid: {len(problems)} problem(s): "
+            f"{'; '.join(problems)}. The values are not shown because an MCP "
+            "client supplied the file."
+        ) from None
 
 
-def discover_workspace_policy_file(root: PathLike) -> Path | None:
+def _policy_not_permitted(candidate: Path, root: Path) -> WorkspaceDefinitionError:
+    """The refusal of a policy file *permit* refused: its name in *root*, and nothing
+    the file holds or its resolved path, which may be outside what the caller may
+    read. Raised from an ``ASHConfigInputNotPermittedError``, so a caller reports it
+    as the other confinement refusals of a config input."""
+    try:
+        name = candidate.relative_to(root).as_posix()
+    except ValueError:
+        name = candidate.name
+    if candidate == root / _POLICY_SUBDIR:
+        # A linked .ash, refused before anything in it is looked at.
+        message = (
+            f"The workspace policy directory '{name}' in '{root.as_posix()}' is "
+            f"outside the directories this caller may read config from, so nothing "
+            f"in it was read."
+        )
+    else:
+        message = (
+            f"The workspace policy file '{name}' in '{root.as_posix()}' is outside "
+            f"the directories this caller may read config from, so it was not read."
+        )
+    refusal = _refuse(message)
+    refusal.__cause__ = ASHConfigInputNotPermittedError(message)
+    return refusal
+
+
+def discover_workspace_policy_file(
+    root: PathLike, permit: Callable[[Path], bool] | None = None
+) -> Path | None:
     """Find the one policy file for the workspace rooted at *root*.
 
     Looks in *root* itself and in ``root/.ash``, non-recursively. Recursing would
     let a vendored checkout supply workspace policy.
 
+    *permit* is the caller's gate on config it may read (an MCP session's
+    ``config_base_gate``). Every candidate name that exists as an entry, a link to
+    a file that is not there included, must pass it before anything is read, as
+    config discovery checks its candidates: a link to a missing file outside is
+    refused as one to a present file, so the answer says nothing about the
+    outside path. A ``.ash`` that is a link must pass it too, before any name in
+    it is looked at, so the answer says nothing about what the directory it leads
+    to holds.
+
     Returns:
-        The canonical path, or ``None`` when there is none.
+        The path the file was found at, made absolute but not resolved (see "A
+        policy file is named by the path it was reached by"), or ``None`` when
+        there is none.
 
     Raises:
         WorkspaceDefinitionError: When more than one candidate exists. Listed,
-            not ranked -- see the module docstring.
+            not ranked -- see the module docstring. Also when *permit* refuses a
+            candidate, raised from an ``ASHConfigInputNotPermittedError``.
     """
     directory = Path(root)
     candidates: list[Path] = []
     for parent in (directory, directory / _POLICY_SUBDIR):
+        # A linked .ash first, before any name in it: asking whether a name is
+        # there follows the link, so the answer would say whether the directory
+        # it leads to holds the name. A junction is a link here too, which
+        # Path.is_symlink() does not say.
+        if (
+            permit is not None
+            and parent != directory
+            and _is_a_link(parent)
+            and not permit(parent)
+        ):
+            raise _policy_not_permitted(parent, directory)
         for name in WORKSPACE_POLICY_FILE_NAMES:
             candidate = parent / name
+            if (
+                permit is not None
+                and os.path.lexists(candidate)
+                and not permit(candidate)
+            ):
+                raise _policy_not_permitted(candidate, directory)
             if candidate.is_file():
                 candidates.append(candidate)
 
@@ -374,14 +533,46 @@ def discover_workspace_policy_file(root: PathLike) -> Path | None:
         return None
 
     if len(candidates) > 1:
-        listed = "\n  - ".join(candidate.as_posix() for candidate in sorted(candidates))
-        raise _refuse(
+        raise WorkspaceDefinitionError.listing(
             f"Found {len(candidates)} workspace policy files under "
             f"'{directory.as_posix()}'; there must be exactly one. Remove the "
-            f"extras or name one with '--workspace-config':\n  - {listed}"
+            f"extras or name one with '--workspace-config':",
+            [candidate.as_posix() for candidate in sorted(candidates)],
         )
 
-    return candidates[0].resolve()
+    return Path(os.path.abspath(candidates[0]))
+
+
+def named_workspace_policy_path(
+    root: PathLike, explicit: PathLike | None = None
+) -> Path | None:
+    """The policy file's path as it was named, made absolute, with no link
+    followed and no ``..`` collapsed.
+
+    ``--workspace-config`` as given, or else the one candidate discovery finds in
+    *root* or ``root/.ash``. :func:`discover_workspace_policy_file` and
+    :func:`resolve_workspace_policy` return the resolved path, which is the file
+    read; container mode needs the name too, to refuse a policy named inside the
+    workspace's tree that is a link to a file outside it. That refusal judges
+    the spelling, so the name is made absolute by prefixing the working
+    directory, never by ``os.path.abspath``: collapsing ``ws/L/../../pol.yaml``
+    as text drops the link ``L`` from the name, and the gate then judged a
+    sibling path the host never read. Call it after
+    :func:`resolve_workspace_policy` has accepted the policy: with several
+    candidates this returns the first, and that call has already refused them.
+    """
+    if explicit is not None:
+        named = Path(explicit)
+        return named if named.is_absolute() else Path(os.getcwd()) / named
+    directory = Path(root)
+    for parent in (directory, directory / _POLICY_SUBDIR):
+        for name in WORKSPACE_POLICY_FILE_NAMES:
+            candidate = parent / name
+            if candidate.is_file():
+                if candidate.is_absolute():
+                    return candidate
+                return Path(os.getcwd()) / candidate
+    return None
 
 
 def _refuse_project_config_as_policy(
@@ -427,6 +618,8 @@ def resolve_workspace_policy(
     *,
     explicit: PathLike | None = None,
     project_config_paths: Iterable[PathLike] = (),
+    permit_base: Callable[[Path], bool] | None = None,
+    client_supplied: Callable[[Path], bool] | None = None,
 ) -> tuple[AshWorkspaceConfig | None, Path | None]:
     """Locate and load the workspace policy, if there is one.
 
@@ -438,18 +631,30 @@ def resolve_workspace_policy(
             discovery would run with different policy than the operator named.
         project_config_paths: Each project's own config file, where it has one.
             Used to refuse a policy file that is one of them.
+        permit_base: The MCP session's gate (``cli/mcp/sandbox.config_base_gate``),
+            or None. The file the policy path reaches must be one it permits,
+            checked before the file is read, for *explicit* and for every
+            candidate discovery finds.
+        client_supplied: Whether a policy path is a client's file, or None for
+            never. A client's file is loaded with ``quote_values`` False.
 
     Returns:
-        ``(policy, source)``. Both are ``None`` when the workspace declares no
-        policy, which is not an error -- workspace policy is opt-in.
+        ``(policy, source)``, ``source`` the path the file was found or named
+        at, made absolute but not resolved. Both are ``None`` when the
+        workspace declares no policy, which is not an error -- workspace policy
+        is opt-in.
 
     Raises:
         WorkspaceDefinitionError: Exit code 4. The named file is absent, the
             workspace has two candidates, the file is unusable, or it is a
             project's config. The message names the file in every case.
+        ASHConfigInputNotPermittedError: The file is outside what
+            ``permit_base`` permits.
     """
     if explicit is not None:
         policy_path = Path(explicit)
+        if permit_base is not None and not permit_base(policy_path):
+            raise _policy_not_permitted(policy_path, Path(root))
         if not policy_path.exists():
             raise _refuse(
                 f"workspace policy file '{policy_path.as_posix()}' does not "
@@ -458,22 +663,36 @@ def resolve_workspace_policy(
                 f"policy than the one asked for."
             )
     else:
-        discovered = discover_workspace_policy_file(root)
+        discovered = discover_workspace_policy_file(root, permit=permit_base)
         if discovered is None:
             return None, None
         policy_path = discovered
 
-    _refuse_project_config_as_policy(
-        policy_path, [Path(p) for p in project_config_paths]
-    )
+    named = Path(os.path.abspath(policy_path))
+    target = named.resolve()
+    if permit_base is not None and not permit_base(target):
+        raise ASHConfigInputNotPermittedError(
+            f"workspace policy file '{named.as_posix()}' reaches a file outside "
+            "the directories this caller may read config from."
+        )
 
-    return load_workspace_policy(policy_path), policy_path.resolve()
+    _refuse_project_config_as_policy(named, [Path(p) for p in project_config_paths])
+
+    quote_values = client_supplied is None or not client_supplied(named)
+    return _load_policy(target, named, quote_values), named
 
 
 def _push_down(
-    entries: Sequence[IgnorePathWithReason], project_prefix: PathLike
+    entries: Sequence[IgnorePathWithReason],
+    project_prefix: PathLike,
+    *,
+    kind: PatternKind,
 ) -> tuple[IgnorePathWithReason, ...]:
     """Rewrite each entry's path into *project_prefix*'s coordinates.
+
+    ``kind`` is what the entries are, ``IGNORE_PATH`` or ``SUPPRESSION``: the two
+    read a trailing ``/`` differently, so it decides the rewrite
+    (``utils/workspace_paths.to_project_pattern``).
 
     Entries whose pattern cannot match inside the project are dropped -- they are
     about a different project. Entries with no sound rewrite are refused, because
@@ -485,7 +704,7 @@ def _push_down(
     pushed: list[IgnorePathWithReason] = []
     for entry in entries:
         try:
-            rewritten = to_project_pattern(entry.path, project_prefix)
+            rewritten = to_project_pattern(entry.path, project_prefix, kind=kind)
         except WorkspacePatternError as exc:
             raise _refuse(
                 f"workspace policy pattern '{entry.path}' cannot be applied to "
@@ -556,9 +775,11 @@ def policy_for_project(
             # _push_down returns the base type; suppressions keep their own type
             # because model_copy preserves the class it was called on.
             entry  # type: ignore[misc]
-            for entry in _push_down(policy.suppressions, project_prefix)
+            for entry in _push_down(
+                policy.suppressions, project_prefix, kind=SUPPRESSION
+            )
         ),
-        ignore_paths=_push_down(policy.ignore_paths, project_prefix),
+        ignore_paths=_push_down(policy.ignore_paths, project_prefix, kind=IGNORE_PATH),
         policy_scanners=policy_scanners,
         policy_scanners_gate=policy.policy_scanners_gate,
     )

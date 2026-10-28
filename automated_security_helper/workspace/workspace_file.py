@@ -49,7 +49,9 @@ every problem below raises ``WorkspaceDefinitionError`` and nothing is scanned:
 the file is absent, is a directory, is unreadable, is not valid JSON, is not a
 JSON object, has no ``folders`` key, has a ``folders`` value that is not a list,
 has an empty ``folders`` list, or has an entry that is not an object with a
-non-blank string ``path``.
+non-blank string ``path``. A file whose canonical path, or its directory's, is
+not UTF-8 is refused before it is read (``WorkspacePathNotUtf8Error``): the plan
+holds both paths, and the plan is UTF-8 only.
 
 An empty ``folders`` list is a refusal rather than a no-op scan for the reason
 that runs through all of workspace mode: a scan of zero projects exits 0, which
@@ -100,7 +102,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Tuple, Union
 
-from automated_security_helper.core.exceptions import WorkspaceDefinitionError
+from automated_security_helper.config.config_sources import parse_error_kind
+from automated_security_helper.core.exceptions import (
+    WorkspaceDefinitionError,
+    WorkspacePathNotUtf8Error,
+)
 
 PathLike = Union[str, Path]
 
@@ -162,6 +168,7 @@ def _reject(message: str) -> WorkspaceDefinitionError:
 
 def _read_json(workspace_file: Path) -> Any:
     """Read and parse the workspace file, or raise with an actionable message."""
+    undecoded = ""
     try:
         raw = workspace_file.read_text(encoding="utf-8")
     except OSError as exc:
@@ -169,9 +176,15 @@ def _read_json(workspace_file: Path) -> Any:
             f"workspace file '{workspace_file.as_posix()}' could not be read: {exc}"
         ) from exc
     except UnicodeDecodeError as exc:
+        # The decoder's message prints the byte's value; parse_error_kind gives
+        # its offset and nothing from the file (as workspace/policy.py).
+        undecoded = parse_error_kind(exc)
+    if undecoded:
+        # Outside the handler, so the decoder's error is not its context.
         raise _reject(
-            f"workspace file '{workspace_file.as_posix()}' is not valid UTF-8: {exc}"
-        ) from exc
+            f"workspace file '{workspace_file.as_posix()}' could not be parsed "
+            f"{undecoded}"
+        )
 
     try:
         return json.loads(raw)
@@ -247,12 +260,50 @@ def _parse_folders(document: Any, workspace_file: Path) -> Tuple[WorkspaceFolder
     if problems:
         # Report every bad entry: an operator with three malformed entries
         # should not have to run ASH three times to find them.
-        joined = "\n  - ".join(problems)
-        raise _reject(
-            f"workspace file '{location}' has unusable folder entries:\n  - {joined}"
+        raise WorkspaceDefinitionError.listing(
+            f"workspace file '{location}' has unusable folder entries:", problems
         )
 
     return tuple(folders)
+
+
+def is_utf8_path(path: Path) -> bool:
+    """Whether *path* is UTF-8: a name that is not arrives as surrogate escapes."""
+    try:
+        str(path).encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+#: The end of every refusal of a path that is not UTF-8.
+NOT_UTF8_ON_THE_HOST = (
+    "Container mode does not get around this: the workspace is planned on the host."
+)
+
+
+def _refuse_a_file_path_that_is_not_utf8(resolved: Path) -> None:
+    """Refuse a workspace file whose canonical path is not UTF-8, before reading it.
+
+    The plan and the results file hold the file's path and its root's, and both
+    are UTF-8. The root is named first, since renaming it is what clears both.
+    The message holds the path as it is, on one line; each sink shows it once
+    (see WorkspacePathNotUtf8Error).
+    """
+    if not is_utf8_path(resolved.parent):
+        raise WorkspacePathNotUtf8Error(
+            f"The workspace root '{resolved.parent.as_posix()}' has a path that is "
+            "not UTF-8. The workspace plan and its results hold the root's path and "
+            "every project's, and they are UTF-8 only, so the workspace cannot be "
+            "planned. Rename the directory whose name is not UTF-8. "
+            f"{NOT_UTF8_ON_THE_HOST}"
+        )
+    if not is_utf8_path(resolved):
+        raise WorkspacePathNotUtf8Error(
+            f"The workspace file '{resolved.as_posix()}' has a name that is not "
+            "UTF-8. The workspace plan holds its path, and it is UTF-8 only, so the "
+            f"workspace cannot be planned. Rename the file. {NOT_UTF8_ON_THE_HOST}"
+        )
 
 
 def load_workspace_file(workspace_file: PathLike) -> WorkspaceDefinition:
@@ -279,6 +330,7 @@ def load_workspace_file(workspace_file: PathLike) -> WorkspaceDefinition:
         raise _reject(f"workspace file '{candidate.as_posix()}' is not a file")
 
     resolved = candidate.resolve()
+    _refuse_a_file_path_that_is_not_utf8(resolved)
     document = _read_json(resolved)
     folders = _parse_folders(document, resolved)
 
@@ -326,11 +378,11 @@ def discover_workspace_file(search_dir: PathLike) -> Path:
         )
 
     if len(candidates) > 1:
-        listed = "\n  - ".join(candidate.as_posix() for candidate in candidates)
-        raise _reject(
+        raise WorkspaceDefinitionError.listing(
             f"Found {len(candidates)} '*{WORKSPACE_FILE_SUFFIX}' files in "
             f"'{directory.as_posix()}'; '--workspace auto' needs exactly one. "
-            f"Pass '--workspace <file>' to choose:\n  - {listed}"
+            f"Pass '--workspace <file>' to choose:",
+            [candidate.as_posix() for candidate in candidates],
         )
 
     return candidates[0].resolve()

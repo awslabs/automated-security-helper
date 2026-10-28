@@ -1,8 +1,7 @@
 $ ash config update ash.yaml --set global_settings.severity_threshold=LOW --set scanners.bandit.enabled=false --set 'global_settings.ignore_paths+={"path": "dist/**", "reason": "build output"}'
-[<LOG_TIME>] INFO     Applied modification: global_settings.severity_threshold=LOW
-             INFO     Applied modification: scanners.bandit.enabled=false
-             INFO     Applied modification: global_settings.ignore_paths+={"path": "dist/**",
-                      "reason": "build output"}
+[<LOG_TIME>] INFO     Applied a modification to global_settings.severity_threshold
+             INFO     Applied a modification to scanners.bandit.enabled
+             INFO     Appended to global_settings.ignore_paths
 # yaml-language-server: $schema=https://example.invalid/AshConfig.json
 project_name: snapshot-demo
 global_settings:
@@ -10,7 +9,7 @@ global_settings:
   ignore_paths:
   - path: dist/**
     reason: build output
-    expiration: null
+    client_supplied: false
   suppressions: []
   mcp:
     runtime_overrides:
@@ -21,44 +20,149 @@ global_settings:
       - /fail_on_incomplete_scanners
       - /content_db_staleness
       - /content_db_staleness_overrides
+      - /honor_ignore_files
+      - /content_db_staleness_offline_image_default
       - /sandbox
       - /sandbox/**
       - /ash_plugin_modules
       - /ash_plugin_modules/**
+      - /scanners/detect-secrets/options/scan_settings/filters_used
+      - /scanners/detect-secrets/options/scan_settings/filters_used/**
+      - /scanners/detect-secrets/options/scan_settings/plugins_used
+      - /scanners/detect-secrets/options/scan_settings/plugins_used/**
+      - /scanners/detect-secrets/options/baseline_file
       - /global_settings/ignore_paths
       - /global_settings/suppressions
+      - /global_settings/mcp
+      - /global_settings/mcp/**
+      - /scanners/opengrep/options/exclude_rule
+      - /scanners/semgrep/options/exclude_rule
+      - /scanners/bandit/options/confidence_level
+      - /scanners/checkov/options/frameworks
+      - /scanners/checkov/options/skip_frameworks
+      - /scanners/opengrep/options/config
+      - /scanners/opengrep/options/patterns
+      - /scanners/opengrep/options/severity
+      - /scanners/semgrep/options/config
+      - /scanners/semgrep/options/severity
+      - /scanners/detect-secrets/options/scan_settings
+      - /scanners/cdk-nag/options/nag_packs/AwsSolutionsChecks
+      - /scanners/ferret-scan/options/checks
+      - /scanners/ferret-scan/options/confidence_levels
+      - /scanners/ferret-scan/options/disable_ip_types
+      - /scanners/ferret-scan/options/enable_preprocessors
+      - /scanners/ferret-scan/options/finding_limit
+      - /scanners/ferret-scan/options/profile
+      - /scanners/ferret-scan/options/recursive
+      - /scanners/ferret-scan/options/respect_gitignore
+      - /scanners/ferret-scan/options/use_default_config
+      - /scanners/ferret-scan/options/validator_budget
+      - /scanners/trivy-repo/options/license_full
+      - /scanners/trivy-repo/options/scanners
+      - /scanners/cfn-guard/options/rule_sets
+      - /scanners/cfn-lint/options/ignore_checks
+      - /scanners/cfn-lint/options/regions
+      - /scanners/gitleaks/options/baseline_path
+      - /scanners/trivy/options/scanners
+      - /scanners/trivy/options/ignore_unfixed
+      - /scanners/*/options/offline
+      - /scanners/ferret-scan/options/max_live_bytes
+      - /scanners/gitleaks/options/max_target_megabytes
+      - /scanners/bandit/options/config_file
+      - /scanners/checkov/options/config_file
+      - /scanners/ferret-scan/options/config_file
+      - /scanners/grype/options/config_file
+      - /scanners/syft/options/config_file
+      - /scanners/trivy-repo/options/secret_config_file
+      - /scanners/trivy-repo/options/config_file
+      - /scanners/trivy-repo/options/module_dir
+      - /scanners/trivy/options/config_file
+      - /scanners/trivy/options/secret_config_file
+      - /scanners/actionlint/options/config_file
+      - /scanners/actionlint/options/shellcheck
+      - /scanners/actionlint/options/pyflakes
+      - /scanners/cfn-guard/options/rules_paths
+      - /scanners/cfn-lint/options/config_file
+      - /scanners/gitleaks/options/config_file
+      - /scanners/zizmor/options/config_file
+      - /scanners/zizmor/options/online_audits
+      - /scanners/snyk-code/options/honor_tree_exclusions
+      - /scanners/cfn-lint/options/honor_inline_ignores
+      - /scanners/gitleaks/options/honor_inline_ignores
+      - /scanners/zizmor/options/honor_inline_ignores
+      - /scanners/*/options/tool_version
+      - /converters/jupyter/options/tool_version
+      - /scanners/opengrep/options/version
+      - /scanners/opengrep/options/sha256
+      - /scanners/opengrep/options/metrics
+      - /scanners/semgrep/options/metrics
       - /reporters/bedrock-summary-reporter/options/aws_*
       - /reporters/cloudwatch-logs/**
+      - /reporters/aws-security-hub/**
+      - /reporters/bedrock-summary-reporter/options/model_id
+      - /reporters/bedrock-summary-reporter/options/output_file
+      - /reporters/bedrock-summary-reporter/options/output_executive_file
+      - /reporters/bedrock-summary-reporter/options/output_technical_file
+      - /reporters/s3/**
+      - /reporters/bedrock-summary-reporter/**
+      - /reporters/gitlab-sast/options/exclude_suppressed
+      - /scanners/detect-secrets/**
+      - /scanners/npm-audit/**
+      - /scanners/opengrep/**
+      - /scanners/semgrep/**
+      - /scanners/snyk-code/**
+      - /scanners/trivy-repo/**
+      - /scanners/trivy/**
+      - /scanners/zizmor/**
+      - /converters/archive/options/max_members
+      - /converters/archive/options/max_member_bytes
+      - /converters/archive/options/max_total_bytes
+      - /converters/archive/options/max_compression_ratio
       denied_value_patterns: {}
+      replace_default_denied_paths: false
 fail_on_findings: true
 fail_on_incomplete_scanners: true
+honor_ignore_files: true
 sandbox:
   mode: 'off'
   network_scanners: null
   extra_read_paths: []
+  read_path_scanners: []
+  env_scanners: []
 content_db_staleness: fail
 content_db_staleness_overrides: []
+content_db_staleness_offline_image_default: true
 ash_plugin_modules: []
 external_reports_to_include: []
-build: null
 converters:
   archive:
-    name: archive
     enabled: true
-    options: {}
+    options:
+      max_members: 100000
+      max_member_bytes: 268435456
+      max_total_bytes: 1073741824
+      max_compression_ratio: 100
   jupyter:
-    name: jupyter
     enabled: true
     options:
       tool_version: '>=7.16.0,<8.0.0'
       install_timeout: 300
 scanners:
+  actionlint:
+    enabled: true
+    options:
+      severity_threshold: null
+      scan_timeout: 1800
+      offline: false
+      config_file: null
+      shellcheck: null
+      pyflakes: null
   bandit:
-    name: bandit
     enabled: false
     options:
       severity_threshold: null
       scan_timeout: 1800
+      offline: false
       config_file: null
       confidence_level: all
       ignore_nosec: false
@@ -67,11 +171,11 @@ scanners:
       tool_version: '>=1.7.0,<2.0.0'
       install_timeout: 300
   cdk-nag:
-    name: cdk-nag
     enabled: true
     options:
       severity_threshold: null
       scan_timeout: 1800
+      offline: false
       nag_packs:
         AwsSolutionsChecks: true
         HIPAASecurityChecks: false
@@ -79,23 +183,44 @@ scanners:
         NIST80053R5Checks: false
         PCIDSS321Checks: false
       include_compliant_checks: false
+  cfn-guard:
+    enabled: true
+    options:
+      severity_threshold: null
+      scan_timeout: 1800
+      offline: false
+      rule_sets:
+      - wa-Security-Pillar
+      rules_paths: []
+  cfn-lint:
+    enabled: true
+    options:
+      severity_threshold: null
+      scan_timeout: 1800
+      offline: false
+      config_file: null
+      regions: []
+      ignore_checks: []
+      include_checks: []
+      honor_inline_ignores: false
+      tool_version: '>=1.43.3,<2.0.0'
+      install_timeout: 300
   cfn-nag:
-    name: cfn-nag
     enabled: true
     options:
       severity_threshold: null
       scan_timeout: 1800
+      offline: false
   checkov:
-    name: checkov
     enabled: true
     options:
       severity_threshold: null
       scan_timeout: 1800
+      offline: false
       config_file: null
       skip_path: []
       additional_formats:
       - cyclonedx_json
-      offline: false
       frameworks:
       - all
       skip_frameworks: []
@@ -103,11 +228,11 @@ scanners:
       tool_version: null
       install_timeout: 300
   detect-secrets:
-    name: detect-secrets
     enabled: true
     options:
       severity_threshold: null
       scan_timeout: 1800
+      offline: false
       baseline_file: null
       scan_settings:
         version: null
@@ -116,27 +241,36 @@ scanners:
         filters_used: []
         results: {}
       skip_generated_lockfiles: true
-  grype:
-    name: grype
+      max_worker_output_mib: 256
+  gitleaks:
     enabled: true
     options:
       severity_threshold: null
       scan_timeout: 1800
-      config_file: null
       offline: false
+      config_file: null
+      baseline_path: null
+      honor_inline_ignores: false
+      max_target_megabytes: null
+  grype:
+    enabled: true
+    options:
+      severity_threshold: null
+      scan_timeout: 1800
+      offline: false
+      config_file: null
   npm-audit:
-    name: npm-audit
     enabled: true
     options:
       severity_threshold: null
       scan_timeout: 1800
       offline: false
   opengrep:
-    name: opengrep
     enabled: true
     options:
       severity_threshold: null
       scan_timeout: 1800
+      offline: false
       config: p/ci
       exclude:
       - '*-converted.py'
@@ -144,16 +278,15 @@ scanners:
       exclude_rule: []
       severity: []
       metrics: auto
-      offline: false
       patterns: []
       version: v1.30.2
       sha256: {}
   semgrep:
-    name: semgrep
     enabled: true
     options:
       severity_threshold: null
       scan_timeout: 1800
+      offline: false
       config: p/ci
       exclude:
       - '*-converted.py'
@@ -161,73 +294,80 @@ scanners:
       exclude_rule: []
       severity: []
       metrics: auto
-      offline: false
       tool_version: null
       install_timeout: 300
   syft:
-    name: syft
     enabled: true
     options:
       severity_threshold: null
       scan_timeout: 1800
+      offline: false
       config_file: null
       exclude: []
       additional_outputs:
       - syft-table
+  trivy:
+    enabled: true
+    options:
+      severity_threshold: null
+      scan_timeout: 1800
       offline: false
+      scanners:
+      - vuln
+      license_full: false
+      ignore_unfixed: false
+      disable_telemetry: true
+      config_file: null
+      ignore_file: null
+      secret_config_file: null
+  zizmor:
+    enabled: true
+    options:
+      severity_threshold: null
+      scan_timeout: 1800
+      offline: false
+      config_file: null
+      persona: regular
+      online_audits: false
+      honor_inline_ignores: false
+      tool_version: '>=1.29.0,<2.0.0'
+      install_timeout: 300
 reporters:
   csv:
-    name: csv
     enabled: true
     options: {}
-    extension: csv
   cyclonedx:
-    name: cyclonedx
     enabled: true
     options: {}
-    extension: cdx.json
   gitlab-cyclonedx:
-    name: gitlab-cyclonedx
     enabled: true
     options:
       category: production
       package_manager_override: null
       language_override: null
       input_file_path_override: null
-    extension: gl-dependency-scanning-report.cdx.json
   html:
-    name: html
     enabled: true
     options: {}
-    extension: html
   flat-json:
-    name: flat-json
     enabled: true
     options:
       include_scanner_metrics: true
       include_summary_metrics: true
       include_metadata: true
-    extension: flat.json
   gitlab-sast:
-    name: gitlab-sast
     enabled: true
     options:
       exclude_suppressed: false
-    extension: gl-sast-report.json
   github-ghas:
-    name: github-ghas
     enabled: true
     options:
       exclude_suppressed: true
-    extension: ghas.sarif
   junitxml:
-    name: junitxml
     enabled: true
     options:
       respect_severity_threshold: true
-    extension: junit.xml
   markdown:
-    name: markdown
     enabled: true
     options:
       include_summary: true
@@ -237,24 +377,16 @@ reporters:
       top_hotspots_limit: 10
       use_collapsible_details: true
       compact: false
-    extension: summary.md
   ocsf:
-    name: ocsf
     enabled: true
     options: {}
-    extension: ocsf.json
   sarif:
-    name: sarif
     enabled: true
     options: {}
-    extension: sarif
   spdx:
-    name: spdx
     enabled: false
     options: {}
-    extension: spdx.json
   text:
-    name: text
     enabled: true
     options:
       include_summary: true
@@ -262,35 +394,14 @@ reporters:
       include_detailed_findings: false
       max_detailed_findings: 20
       top_hotspots_limit: 20
-    extension: summary.txt
   unused-suppressions:
-    name: unused-suppressions
     enabled: true
     options:
       output_format: both
-    extension: unused-suppressions.json
   yaml:
-    name: yaml
     enabled: false
     options: {}
-    extension: yaml
-mcp-resource-management:
-  max_concurrent_scans: 3
-  max_concurrent_tasks: 20
-  thread_pool_max_workers: 4
-  scan_timeout_seconds: 1800
-  operation_timeout_seconds: 180
-  shutdown_timeout_seconds: 30
-  memory_warning_threshold_mb: 1024
-  memory_critical_threshold_mb: 2048
-  task_count_warning_threshold: 15
-  max_message_size_bytes: 10485760
-  max_path_length: 4096
-  max_directory_size_mb: 1000
-  enable_health_checks: true
-  health_check_interval_seconds: 60
-  enable_resource_logging: true
-  log_resource_operations: false
+output_formats: []
 workspace:
   max_parallel_projects: null
   project_timeout: null

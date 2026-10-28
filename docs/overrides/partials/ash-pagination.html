@@ -1,0 +1,17 @@
+{% from "partials/ash-icons.html" import icon %}
+{% if page.previous_page or page.next_page %}
+<nav class="ash-pagination" aria-label="Previous and next documentation pages">
+  <div class="ash-wrap ash-pagination__inner">
+    {% if page.previous_page %}
+    <a href="{{ page.previous_page.url | url }}" rel="prev">
+      {{ icon("arrow-left") }}<span><span class="ash-pagination__direction">PREVIOUS</span>{{ page.previous_page.title }}</span>
+    </a>
+    {% endif %}
+    {% if page.next_page %}
+    <a class="ash-pagination__next" href="{{ page.next_page.url | url }}" rel="next">
+      <span><span class="ash-pagination__direction">NEXT</span>{{ page.next_page.title }}</span>{{ icon("arrow-right") }}
+    </a>
+    {% endif %}
+  </div>
+</nav>
+{% endif %}

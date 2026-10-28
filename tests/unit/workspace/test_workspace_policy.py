@@ -20,6 +20,8 @@ purpose:
 """
 
 import json
+import os
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -39,6 +41,8 @@ from automated_security_helper.models.core import (
 from automated_security_helper.workspace.policy import (
     WORKSPACE_POLICY_FILE_NAMES,
     ceiling_unreachable_counts,
+    load_workspace_policy,
+    named_workspace_policy_path,
     policy_for_project,
     resolve_workspace_policy,
 )
@@ -88,6 +92,36 @@ def test_an_unknown_policy_key_is_refused():
         AshWorkspaceConfig.model_validate(
             {"workspace": {"max_severity_threshhold": "HIGH"}}
         )
+
+
+@pytest.mark.parametrize(
+    "entry,key",
+    [
+        (
+            "suppressions:\n    - path: src/a.py\n      reason: r\n      ruleId: B101",
+            "ruleId",
+        ),
+        (
+            (
+                "ignore_paths:\n    - path: vendor/\n      reason: r\n"
+                "      expires: 2030-01-01"
+            ),
+            "expires",
+        ),
+    ],
+)
+def test_a_policy_entry_with_an_unknown_key_is_a_policy_error(tmp_path, entry, key):
+    """A typo in a policy suppression or ignore path refuses the policy file.
+
+    It is a WorkspaceDefinitionError, so ``ash scan`` exits 4 (a workspace
+    definition or policy error), not 3 as an unknown key in a project's own
+    configuration does; the message names the file and the key.
+    """
+    policy_file = _write(tmp_path / "ash-workspace.yaml", f"workspace:\n  {entry}\n")
+    with pytest.raises(WorkspaceDefinitionError) as excinfo:
+        load_workspace_policy(policy_file)
+    assert f"Unknown key '{key}'" in str(excinfo.value)
+    assert policy_file.name in str(excinfo.value)
 
 
 def test_an_unknown_top_level_key_is_refused():
@@ -291,6 +325,48 @@ def test_a_double_star_suppression_reaches_every_project():
         assert [s.path for s in resolved.suppressions] == ["**/generated.py"], prefix
 
 
+@pytest.mark.parametrize("field", ["suppressions", "ignore_paths"])
+def test_a_dot_slash_policy_path_is_refused_not_pushed_down_as_everything(field):
+    """ "./" names nothing to the matcher. Pushed down as "**", it suppressed or
+    ignored every finding in every project and the scan exited 0; it is refused
+    with a WorkspaceDefinitionError, so ``ash scan`` exits 4."""
+    entry = (
+        _suppression("./")
+        if field == "suppressions"
+        else IgnorePathWithReason(path="./", reason="test")
+    )
+    policy = _policy(**{field: [entry]})
+    with pytest.raises(WorkspaceDefinitionError) as excinfo:
+        policy_for_project(
+            policy,
+            project_prefix="api",
+            project_threshold="MEDIUM",
+            project_scanners=(),
+        )
+    assert "'./'" in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "pattern, pushed", [("***", ()), ("****", ()), ("***/x.py", ("x.py",))]
+)
+def test_a_run_of_three_stars_is_pushed_down_as_one_star(tmp_path, pattern, pushed):
+    """``***`` reads as one ``*`` per component, so at workspace level it covers no
+    project file and no project gets it; pushed down as ``**`` it suppressed every
+    finding in every project. ``***/x.py`` covers ``api/x.py`` of project api."""
+    policy_file = _write(
+        tmp_path / "ash-workspace.yaml",
+        f"workspace:\n  suppressions:\n    - path: '{pattern}'\n      reason: r\n",
+    )
+    policy = load_workspace_policy(policy_file).workspace
+    resolved = policy_for_project(
+        policy,
+        project_prefix="api",
+        project_threshold="MEDIUM",
+        project_scanners=(),
+    )
+    assert tuple(entry.path for entry in resolved.suppressions) == pushed
+
+
 def test_a_suppression_naming_only_the_project_directory_is_not_passed_down():
     """ "api" matches the path "api", not "api/src/x.py", so it covers no file.
 
@@ -305,6 +381,25 @@ def test_a_suppression_naming_only_the_project_directory_is_not_passed_down():
         project_scanners=(),
     )
     assert resolved.suppressions == ()
+
+
+def test_each_entry_is_pushed_down_as_its_own_kind():
+    """ "api/" reads as the directory's files for an ignore path and literally for
+    a suppression, so for project api the ignore path covers the whole project and
+    the suppression covers no file there. Pushed down as an ignore path, the
+    suppression would suppress every finding of the project."""
+    policy = _policy(
+        suppressions=[_suppression("api/")],
+        ignore_paths=[IgnorePathWithReason(path="api/", reason="test")],
+    )
+    resolved = policy_for_project(
+        policy,
+        project_prefix="api",
+        project_threshold="MEDIUM",
+        project_scanners=(),
+    )
+    assert resolved.suppressions == ()
+    assert [entry.path for entry in resolved.ignore_paths] == ["**"]
 
 
 def test_an_unrewritable_suppression_is_refused_and_names_the_pattern():
@@ -741,3 +836,69 @@ def test_a_json_policy_file_is_read(tmp_path):
     )
     config, _ = resolve_workspace_policy(tmp_path)
     assert config.workspace.max_severity_threshold == "HIGH"
+
+
+# ---------------------------------------------------------------------------
+# 7. The policy's name keeps the spelling it was given
+# ---------------------------------------------------------------------------
+
+
+def _tree_with_a_link_out(tmp_path):
+    """A workspace tree whose ``link`` directory points outside it.
+
+    ``tree/link`` is a link to ``outside/deep``. Lexically ``tree/link/..`` is
+    ``tree``, so ``tree/link/../ash-workspace.yaml`` collapses to a file inside
+    the tree; the kernel walks the link and reaches ``outside/ash-workspace.yaml``.
+    """
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    (tmp_path / "outside" / "deep").mkdir(parents=True)
+    _write(tmp_path / "outside" / "ash-workspace.yaml", "workspace: {}\n")
+    _write(tree / "ash-workspace.yaml", "workspace: {}\n")
+    link = tree / "link"
+    link.symlink_to(tmp_path / "outside" / "deep", target_is_directory=True)
+    return tree, link
+
+
+def test_a_policy_named_through_a_link_and_dotdot_keeps_that_spelling(tmp_path):
+    """The link gate judges the name, so a ``..`` after a link must not be collapsed.
+
+    Collapsed lexically, the name reads as the in-tree file and the link the
+    kernel follows is gone from what the gate sees.
+    """
+    tree, link = _tree_with_a_link_out(tmp_path)
+    given = tmp_path / "tree" / "link" / ".." / "ash-workspace.yaml"
+    assert ".." in given.parts
+
+    named = named_workspace_policy_path(tree, explicit=given)
+
+    assert named == given
+    assert ".." in named.parts
+    assert named != tree / "ash-workspace.yaml"
+
+
+def test_a_relative_policy_name_keeps_its_link_and_dotdot_segments(
+    tmp_path, monkeypatch
+):
+    """A relative name is only prefixed with the working directory."""
+    tree, link = _tree_with_a_link_out(tmp_path)
+    monkeypatch.chdir(tree)
+
+    named = named_workspace_policy_path(tree, explicit="link/../ash-workspace.yaml")
+
+    assert named == Path(os.getcwd()) / "link" / ".." / "ash-workspace.yaml"
+    assert named.parts[-3:] == ("link", "..", "ash-workspace.yaml")
+
+
+def test_a_plainly_named_policy_keeps_its_absolute_path(tmp_path):
+    """Control: no link and no ``..`` gives the same answer as before."""
+    policy = _write(tmp_path / "plain" / "policy.yaml", "workspace: {}\n")
+
+    assert named_workspace_policy_path(tmp_path, explicit=policy) == policy
+
+
+def test_a_discovered_policy_is_named_as_found_under_the_root(tmp_path):
+    """Control: discovery returns the candidate path under the root, unchanged."""
+    found = _write(tmp_path / ".ash" / "ash-workspace.yaml", "workspace: {}\n")
+
+    assert named_workspace_policy_path(tmp_path) == found

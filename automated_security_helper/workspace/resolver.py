@@ -124,29 +124,57 @@ Failure modes and known limitations
 from __future__ import annotations
 
 import os
+import re
 from itertools import combinations
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
-from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.ash_config import (
+    AshConfig,
+    plugin_section_claims,
+    plugin_section_key,
+    plugin_section_peers,
+)
+from automated_security_helper.config.client_config_policy import ClientConfigRules
+from automated_security_helper.config.plugin_module_trust import config_module_names
+from automated_security_helper.utils.error_text import (
+    config_environment_values,
+    text_without_values,
+)
 from automated_security_helper.config.resolve_config import (
+    check_operator_config,
     find_config_file,
+    operator_config_digest,
     resolve_config,
 )
 from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
     WorkspaceDefinitionError,
+    WorkspacePathNotUtf8Error,
 )
 from automated_security_helper.models.workspace import SkippedProjectReason
 from automated_security_helper.utils.path_containment import validate_contained_path
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 from automated_security_helper.workspace.policy import (
+    normalise_scanner_name,
     policy_for_project,
     resolve_workspace_policy,
 )
 from automated_security_helper.workspace.scanner_pins import PinVerdict, compare_pins
 from automated_security_helper.workspace.workspace_file import (
+    NOT_UTF8_ON_THE_HOST,
     WorkspaceDefinition,
+    is_utf8_path,
     load_workspace_file,
 )
 
@@ -180,8 +208,7 @@ class _Candidate:
 
 def _refuse(headline: str, problems: List[str]) -> WorkspaceDefinitionError:
     """Build a refusal naming every problem, not just the first."""
-    joined = "\n  - ".join(problems)
-    return WorkspaceDefinitionError(f"{headline}\n  - {joined}")
+    return WorkspaceDefinitionError.listing(headline, problems)
 
 
 def _field(container: Any, name: str, default: Any = None) -> Any:
@@ -210,34 +237,326 @@ def _scanner_display_name(field_name: str, config: AshConfig) -> str:
     return field_name.replace("_", "-")
 
 
-def _scanner_state(config: AshConfig) -> Tuple[List[str], Dict[str, str]]:
-    """Return the project's enabled scanner names and its effective pins.
+def _scanner_state(
+    config: AshConfig,
+) -> Tuple[List[str], Dict[str, str], Dict[str, List[str]]]:
+    """Return the project's enabled scanner names, its effective pins and its twins.
 
     Walks the declared fields and then anything a plugin contributed via
     ``extra="allow"``, so a scanner ASH does not ship is still accounted for.
+
+    The list is what a scan runs, so it follows the section the lookup reads. A
+    declared scanner reads its own section. The sections of one extra plugin name
+    are read in this order (``plugin_section_key``, ``plugin_section_claims``):
+
+    1. the key spelled exactly as the name the caller gives, if there is one;
+    2. the key spelled as the reduced name (``snykcode``);
+    3. the first key whose name without punctuation is the plugin's;
+    4. the first whose name is the plugin's only once its Converter, Scanner or
+       Reporter word is removed.
+
+    The plan has no registered name, so it applies steps 2 to 4. Every extra key
+    that reduces to one name is a twin of the others, a section with no body
+    included, because the lookup indexes it. The keys that claimed the name in the
+    same pass as the key read (``plugin_section_peers``) are one plugin's
+    spellings of its section. The keys of the other rank are other plugins, read
+    by their own exact names, so each plugin is listed by its own section; but
+    which of them the scan reads for the reduced name depends on the registered
+    name, which the plan does not know, so they are twins all the same. A policy
+    that requires the name would otherwise take the section of one plugin that is
+    on for the scanner the scan reads, which may be another's that is off.
+
+    A twin written in a form a plugin could register its name in (lowercase words
+    joined by ``-`` or ``_``) may be what step 1 selects, and the registered names
+    are not known until the plugin modules load, after the plan. Such a pair is
+    unresolved: it is not listed as enabled unless every section of it is, and a
+    section with no body is off and sets no pin. It records a pin when the
+    sections set the same one. When they differ, ``_unresolved_pins`` holds each
+    version the pair may apply, and ``_validate_unresolved_pins`` compares them
+    with the pins of the other projects. The sections of the two ranks record a pin
+    each, under their own keys, and ``_unresolved_pins`` holds them as a pair too.
+
+    The twins are returned by reduced name, the keys of every rank together. The
+    caller refuses a project's twins when the workspace policy requires that
+    scanner (``_apply_workspace_policy``), because only a policy compares this
+    list with names of its own. Two spellings of a declared plugin's section are
+    refused earlier (``plugin_section_names.fold_known_plugin_sections``).
     """
     segment = config.scanners
-    declared = list(type(segment).model_fields.keys())
-    extra = list(getattr(segment, "__pydantic_extra__", None) or {})
-
-    enabled: List[str] = []
+    sections: List[Tuple[str, bool]] = []
     pins: Dict[str, str] = {}
 
-    for field_name in declared + [name for name in extra if name not in declared]:
+    fields = type(segment).model_fields
+    for field_name in fields:
         entry = _field(segment, field_name)
         if entry is None:
             continue
-        name = (
-            _scanner_display_name(field_name, config)
-            if field_name in declared
-            else field_name
-        )
-        if _field(entry, "enabled", True):
-            enabled.append(name)
-        pin = _field(_field(entry, "options"), "tool_version")
-        if isinstance(pin, str) and pin.strip():
+        name = _scanner_display_name(field_name, config)
+        sections.append((name, bool(_field(entry, "enabled", True))))
+        pin = _scanner_pin(entry)
+        if pin is not None:
             pins[name] = pin
-    return sorted(enabled), pins
+
+    groups = _extra_scanner_groups(config)
+    for group in groups:
+        candidates = group.candidates()
+        bodies = {name: _field(segment, name) for name in candidates}
+        if not group.unresolved:
+            if bodies[group.read] is None:
+                continue
+            sections.append((group.read, _section_is_on(bodies[group.read])))
+            pin = _scanner_pin(bodies[group.read])
+        else:
+            every_section_on = all(_section_is_on(body) for body in bodies.values())
+            sections.append((group.read, every_section_on))
+            group_pins = {_scanner_pin(body) for body in bodies.values()}
+            pin = group_pins.pop() if len(group_pins) == 1 else None
+        if pin is not None:
+            pins[group.read] = pin
+
+    keys_of: Dict[str, List[str]] = {}
+    for group in groups:
+        keys_of.setdefault(group.folded, []).extend(group.names)
+    twins = {folded: names for folded, names in keys_of.items() if len(names) > 1}
+    enabled = [name for name, on in sections if on]
+    return sorted(enabled), pins, twins
+
+
+class _ExtraScanners(NamedTuple):
+    """The extra scanner sections that one plugin reads, or one section alone.
+
+    *folded* is the reduced name they claim, *names* the keys in file order, *read*
+    the key a lookup by the reduced name reads, and *unresolved* the other keys of
+    the group that may be the registered name of the plugin. A reduced name has a
+    group for each rank of key that claims it (``plugin_section_peers``).
+    """
+
+    folded: str
+    names: List[str]
+    read: str
+    unresolved: List[str]
+
+    def candidates(self) -> List[str]:
+        """The sections a scan may read: the one read, and the unresolved ones."""
+        return [n for n in self.names if n == self.read or n in self.unresolved]
+
+
+def _extra_scanner_groups(config: AshConfig) -> List[_ExtraScanners]:
+    """Group the extra scanner sections of *config* by the plugin that reads them.
+
+    Declared scanners own the names they claim, so an extra key whose name a
+    declared key claims first is left out. The rest are split by rank
+    (``plugin_section_peers``), and a section with no body is still a member.
+    """
+    segment = config.scanners
+    fields = type(segment).model_fields
+    extra: List[str] = [
+        name
+        for name in (getattr(segment, "__pydantic_extra__", None) or {})
+        if name not in fields
+    ]
+    claims = plugin_section_claims(
+        [*(info.alias or n for n, info in fields.items()), *extra]
+    )
+    by_name: Dict[str, List[str]] = {}
+    for name in extra:
+        folded = normalise_scanner_name(name)
+        if (claims.get(folded) or [name])[0] in extra:
+            by_name.setdefault(folded, []).append(name)
+
+    groups: List[_ExtraScanners] = []
+    for folded, names in by_name.items():
+        remaining = names
+        while remaining:
+            claimed = plugin_section_claims(remaining)
+            read = plugin_section_key(remaining, folded, claimed)
+            if read not in remaining:
+                read = remaining[0]
+            peers = plugin_section_peers(claimed, read, folded)
+            members = [n for n in remaining if n == read or n in peers]
+            unresolved = [
+                n for n in members if n != read and _REGISTRABLE_SPELLING.fullmatch(n)
+            ]
+            groups.append(_ExtraScanners(folded, members, read, unresolved))
+            remaining = [n for n in remaining if n not in members]
+    return groups
+
+
+def _section_is_on(body: Any) -> bool:
+    """Whether a scanner section is enabled; a section with no body is not."""
+    return body is not None and bool(_field(body, "enabled", True))
+
+
+class _PossiblePins(NamedTuple):
+    """The tool versions the scan may apply for one unresolved pair of sections.
+
+    *sections* are the keys of the pair in file order, *pins* the distinct
+    versions they set, sorted. A section that sets none adds no version.
+    """
+
+    sections: List[str]
+    pins: List[str]
+
+
+def _unresolved_pins(config: AshConfig) -> Dict[str, _PossiblePins]:
+    """The versions each unresolved pair of sections may apply, by the name read.
+
+    A pair is the sections of one reduced name that the scan may read: the
+    candidates of its group when it holds an unresolved key, and the candidates of
+    every group of the name when it has groups of both ranks (``acme`` beside
+    ``acme-scanner``), as ``_scanner_state`` returns its twins. The plugin's
+    registered name, which the plan cannot tell, selects the section either way.
+    Only a pair whose sections do not all set the same pin is held: the plan
+    records a pin for the rest (``_scanner_state``), and for the sections of the
+    two ranks it records the pin of each on its own. The scan applies the pin of the
+    section the registered name selects, so ``_validate_unresolved_pins`` holds each
+    version against the other projects' pins. A section with no body, or one that
+    sets no pin, differs from one that sets a pin, and contributes no version. A pair
+    is held under the key its first group reads.
+    """
+    segment = config.scanners
+    by_name: Dict[str, List[_ExtraScanners]] = {}
+    for group in _extra_scanner_groups(config):
+        by_name.setdefault(group.folded, []).append(group)
+
+    held: Dict[str, _PossiblePins] = {}
+    for groups in by_name.values():
+        if len(groups) == 1 and not groups[0].unresolved:
+            continue
+        sections = [name for group in groups for name in group.candidates()]
+        pins = {_scanner_pin(_field(segment, name)) for name in sections}
+        if len(pins) > 1:
+            held[groups[0].read] = _PossiblePins(
+                sections, sorted(pin for pin in pins if pin is not None)
+            )
+    return held
+
+
+def _first_clash(mine: List[str], theirs: List[str]) -> Optional[Tuple[str, str, str]]:
+    """The first pair of one pin from each list that is not compatible, or ``None``.
+
+    The third item is the reason, worded as ``_validate_scanner_pins`` words it.
+    """
+    for first in mine:
+        for second in theirs:
+            comparison = compare_pins(first, second)
+            if comparison is PinVerdict.INCOMPATIBLE:
+                return first, second, "no version satisfies both"
+            if comparison is not PinVerdict.COMPATIBLE:
+                return first, second, "ASH cannot prove any version satisfies both"
+    return None
+
+
+def _pins_under_name(
+    folded: str, project: ProjectPlan, held: Dict[str, _PossiblePins]
+) -> Tuple[List[str], bool]:
+    """The versions *project* may apply to the scanner reduced to *folded*, and
+    whether any of them comes from a pair it holds.
+
+    The scan reads one section of a scanner in every project, but which key that
+    is depends on the order the project writes its sections in, so the plan
+    records a pin, or holds a pair, under the key that project's lookup reads.
+    Two projects can therefore record one scanner under different spellings. The
+    keys are matched by the reduced name they share, as ``_extra_scanner_groups``
+    groups them.
+    """
+    versions = {
+        pin
+        for name, pin in project.scanner_pins.items()
+        if normalise_scanner_name(name) == folded
+    }
+    pairs = [
+        pair for name, pair in held.items() if normalise_scanner_name(name) == folded
+    ]
+    for pair in pairs:
+        versions.update(pair.pins)
+    return sorted(versions), bool(pairs)
+
+
+def _validate_unresolved_pins(
+    projects: Sequence[ProjectPlan], unresolved: Dict[str, Dict[str, _PossiblePins]]
+) -> None:
+    """Refuse a workspace where a version an unresolved pair may apply cannot be
+    reconciled with the pin of another project.
+
+    *unresolved* maps a project key to what ``_unresolved_pins`` held for it. The
+    scan may apply any one version of a pair, so one that no version of the other
+    project fits is enough to refuse, as an undecidable comparison is refused in
+    ``_validate_scanner_pins``. The pins of the other project are every one it
+    records under a key that reduces to the same name as the pair's, whatever the
+    spelling (``_pins_under_name``), and each version of a pair it holds under such
+    a key. A project that no other project pins has nothing to be compared with,
+    and a pair of two such projects is compared once.
+    """
+    by_key = {project.key: project for project in projects}
+    problems: List[str] = []
+    for key, by_name in sorted(unresolved.items()):
+        for name, mine in sorted(by_name.items()):
+            folded = normalise_scanner_name(name)
+            for other in projects:
+                if other.key == key:
+                    continue
+                their_pins, theirs_held = _pins_under_name(
+                    folded, other, unresolved.get(other.key, {})
+                )
+                if theirs_held and other.key < key:
+                    continue
+                verb = "may apply" if theirs_held or len(their_pins) > 1 else "requires"
+                clash = _first_clash(mine.pins, their_pins)
+                if clash is None:
+                    continue
+                first, second, reason = clash
+                problems.append(
+                    text_without_values(
+                        f"scanner '{name}': project '{key}' may apply '{first}' "
+                        f"(scanners.{' and scanners.'.join(mine.sections)} set "
+                        "different tool versions and the plan cannot tell which "
+                        f"one the scan reads) and project '{other.key}' {verb} "
+                        f"'{second}' -- {reason}",
+                        (*by_key[key]._environment_values, *other._environment_values),
+                    )
+                )
+
+    if problems:
+        raise _refuse(
+            "A project's configuration cannot be planned: it holds sections that may "
+            "each be the one the plugin lookup reads for a scanner, and a tool "
+            "version one of them sets cannot be reconciled with another project's. "
+            "One ASH run installs one version of each tool. Keep one section per "
+            "scanner, or reconcile the pins:",
+            problems,
+        )
+
+
+#: The spelling a plugin could register its name in: lowercase words joined by
+#: ``-`` or ``_``. A key in this form may be the exact name a lookup is given.
+_REGISTRABLE_SPELLING = re.compile(r"[a-z0-9+]+(?:[-_][a-z0-9+]+)*")
+
+
+def _scanner_pin(entry: Any) -> Optional[str]:
+    """The ``tool_version`` pin of a scanner section, or ``None`` when it sets none."""
+    pin = _field(_field(entry, "options"), "tool_version")
+    return pin if isinstance(pin, str) and pin.strip() else None
+
+
+def _twin_section_problems(
+    config: AshConfig, project_key: str, twins: Dict[str, List[str]]
+) -> Dict[str, str]:
+    """One refusal line per reduced scanner name a project holds twins of.
+
+    Built where the project's config is in hand, because the keys may hold values
+    the config read from the environment and ``text_without_values`` needs them
+    to leave those out. The line names every key of the name: the scan reads one
+    of them, and which one depends on the plugin's registered name.
+    """
+    return {
+        folded: text_without_values(
+            f"project '{project_key}': scanners.{' and scanners.'.join(names)} "
+            f"may each be the section the scan reads as '{folded}'",
+            config_environment_values(config),
+        )
+        for folded, names in sorted(twins.items())
+    }
 
 
 def _project_label(config: AshConfig, key: str) -> str:
@@ -314,6 +633,68 @@ def _validate_containment(
             problems,
         )
     return candidates
+
+
+def _refuse_folders_that_are_not_utf8(
+    definition: WorkspaceDefinition, candidates: List[_Candidate]
+) -> None:
+    """Refuse the entries whose resolved path is not UTF-8, naming every one.
+
+    Each project's path, relative path and key go into the plan and the results
+    file, which are UTF-8 only, and pydantic refused the first such project with
+    a traceback. Run right after containment, before any project's config is
+    read. The root is UTF-8 here: load_workspace_file refused it otherwise. The
+    message holds the paths as they are, on one line; each sink shows it once
+    (see WorkspacePathNotUtf8Error).
+    """
+    problems = [
+        f"'{candidate.entry}' at '{candidate.resolved.as_posix()}'"
+        for candidate in candidates
+        if not (
+            is_utf8_path(candidate.resolved) and is_utf8_path(Path(candidate.entry))
+        )
+    ]
+    if problems:
+        raise WorkspacePathNotUtf8Error(
+            f"Workspace '{definition.path.as_posix()}' lists folders whose path is "
+            "not UTF-8. The workspace plan and its results hold every project's "
+            "path, and they are UTF-8 only, so the workspace cannot be planned: "
+            f"{'; '.join(problems)}. Rename each of them. {NOT_UTF8_ON_THE_HOST}"
+        )
+
+
+def _refuse_config_files_that_are_not_utf8(
+    workspace_config: Optional[PathLike], default_config: Optional[PathLike]
+) -> None:
+    """Refuse a policy file or a default config whose path is not UTF-8, naming each.
+
+    The plan holds the policy file's resolved path, and the default config's for
+    every project that declares none, and the plan is UTF-8 only: both MCP
+    workspace tools built a response their client could not be sent. Checked as
+    given, made absolute, and resolved, so a link whose own name is UTF-8 does
+    not get around it. Refused whenever given, whether or not a project ends up
+    using the default config. Run with the folder check, before any project's
+    config is read.
+    """
+    problems = []
+    for described, given in (
+        ("the workspace policy file", workspace_config),
+        ("the default config, for a project that declares none", default_config),
+    ):
+        if given is None or given == "":
+            continue
+        absolute = Path(os.path.abspath(os.fspath(given)))
+        resolved = absolute.resolve()
+        for path in dict.fromkeys((absolute, resolved)):
+            if not is_utf8_path(path):
+                problems.append(f"{described}, '{path.as_posix()}'")
+    if problems:
+        raise WorkspacePathNotUtf8Error(
+            "A config file the workspace plan names has a path that is not UTF-8. "
+            "The plan holds its path, and it is UTF-8 only, so the workspace "
+            f"cannot be planned: {'; '.join(problems)}. Rename the file, or the "
+            f"directory whose name is not UTF-8, or move it. {NOT_UTF8_ON_THE_HOST}"
+        )
 
 
 def _validate_no_overlap(
@@ -421,40 +802,106 @@ def _apply_existence_checks(
         )
 
 
+def _as_named(path: Optional[Path]) -> Optional[str]:
+    """``path`` made absolute without following a symlink, or None."""
+    return Path(os.path.abspath(path)).as_posix() if path is not None else None
+
+
+def _operator_config(
+    default_config: Optional[Path], trusted_config: Optional[Path]
+) -> Optional[Path]:
+    """The operator's config a workspace layers over each project's own, or None.
+
+    ``trusted_config`` when there is one: under the MCP server, the profile as the
+    operator registered it, never the client's patched ``default_config``.
+    Otherwise ``default_config``, which ``check_operator_config`` then refuses if
+    it is a client's file, so a client's copy is never layered for want of the
+    registered one.
+    """
+    return trusted_config if trusted_config is not None else default_config
+
+
 def _resolve_project_config(
     candidate: _Candidate,
     config_overrides: Tuple[str, ...] = (),
     default_config: Optional[Path] = None,
     workspace_root: Optional[Path] = None,
-) -> Tuple[AshConfig, Optional[Path]]:
+    client_config_rules: Optional[ClientConfigRules] = None,
+    trusted_config: Optional[Path] = None,
+    remote_client: bool = False,
+    permit_base: Optional[Callable[[Path], bool]] = None,
+) -> Tuple[AshConfig, Optional[Path], Optional[Path]]:
     """Load one project's config through ASH's ordinary resolution path.
 
-    ``workspace_root`` and ``default_config`` are passed on as ``scanned_root``
-    and ``trusted_config_path``, as ``execution._project_config_with_policy`` does,
-    so what an in-tree config may set (sandbox grants, ``ash_plugin_modules``) is
-    decided against the whole workspace here too. The plan's plugin list is what
-    the registry is pre-warmed from, before any project's scan resolves its config.
+    ``workspace_root`` and ``trusted_config`` (``default_config`` when None) are
+    passed on as ``scanned_root`` and ``trusted_config_path``, as
+    ``execution._project_config_with_policy`` does, so what an in-tree config may
+    set (sandbox grants, ``ash_plugin_modules``) is decided against the whole
+    workspace here too. The plan's plugin list is what the registry is pre-warmed
+    from, before any project's scan resolves its config.
+
+    The two differ under the MCP server when a client patched the session's
+    profile: ``default_config`` is then the client's copy, and ``trusted_config``
+    the profile as the operator registered it. Taking the client's copy as the
+    trusted base would let it grant what it sets; it is refused as one
+    (``resolve_config``), and falling back to the defaults would drop the
+    profile's own grants.
 
     The config file is located once and passed back in, rather than letting
     resolution search again, so the file the plan reports is definitionally the
     file that was loaded and the two cannot disagree.
 
-    ``default_config`` and where it sits in the precedence
-    -----------------------------------------------------
-    Used only when the project declares no config of its own -- when
-    ``find_config_file`` returns None, where ASH's built-in default would
-    otherwise apply. A project with an ``.ash.yaml`` keeps it, because the
-    project's own config is the more specific statement; the same rule makes an
-    explicit ``config_path`` beat a session-bound profile on a single-directory
-    MCP scan.
+    ``permit_base`` is the MCP session's gate (``cli/mcp/sandbox.config_base_gate``),
+    or None for the CLI. It covers the config discovery finds in the project
+    (``find_config_file``) and every base its ``extends`` chain names.
 
-    The MCP server passes a profile a client bound with ``select_profile`` here.
-    It must reach BOTH this function and ``execution._project_config_with_policy``,
-    which re-resolves at scan time: the plan's reported threshold comes from this
-    call and the scan's actual config comes from that one, so a value threaded
-    into only one of them makes ``--dry-run`` report a plan the scan does not run.
-    ``ProjectScanSettings.default_config_path`` is the same value on the execution
-    side, and the MCP caller sets both from one variable for that reason.
+    The operator's config, and where it sits in the precedence
+    ----------------------------------------------------------
+    The operator's config is ``trusted_config``, or ``default_config`` when that
+    is None: ``--config`` on the CLI, the profile the session bound or the call
+    named under the MCP server. Every field it sets is final for every project,
+    and a project's own config fills only the fields it leaves unset:
+
+    * A project with a config of its own resolves that file with the operator's
+      layered over it (``resolve_config``'s ``overlay_config_path``), by the
+      ``extends`` merge rule with the operator's file as the child: mappings
+      merge key by key, and a list the operator sets replaces the project's.
+      "Sets" means the key is in the operator's file or its ``extends`` chain,
+      whatever its value. The CLI overrides apply after both.
+    * A project with none resolves ``default_config`` alone, where ASH's built-in
+      default would otherwise apply.
+
+    Rejected: ignoring every project's own config when the operator names one,
+    which loses the per-project settings a workspace exists to keep; and taking
+    the operator's file as the base with the project merged over it, which lets
+    a project turn off ``fail_on_findings`` or ``fail_on_incomplete_scanners``
+    that the operator set.
+
+    Under the MCP server the client's patched copy (``default_config`` when it
+    differs from ``trusted_config``) is not layered over a project's own config:
+    the registered profile is. So a client's values are never final over a
+    project, and they are not trusted either: the patched copy is a project's
+    config only when the project has none, and is then checked as a file the
+    client delivered, as before. A session's operator copy holds only the fields
+    the profile sets (``profile_registry.materialize_session_config``), so the
+    project still fills the rest.
+
+    Every file the operator's config is built from must be the operator's.
+    ``resolve_workspace`` refuses one with a file inside the workspace or one an
+    MCP client delivered (``resolve_config.check_operator_config``), as a config
+    error, before any project resolves; ``resolve_config`` refuses such an
+    overlay again for each project. There is no fallback from a missing
+    ``trusted_config`` to a client's ``default_config``: that copy is a client's
+    file, so it is refused rather than layered (``_operator_config``).
+
+    These values must reach BOTH this function and
+    ``execution._project_config_with_policy``, which re-resolves at scan time:
+    the plan's reported threshold comes from this call and the scan's actual
+    config from that one, so a value threaded into only one of them makes
+    ``--dry-run`` report a plan the scan does not run. The layered file is
+    recorded as ``ProjectPlan.operator_config``, which execution reads, and
+    ``ProjectScanSettings.default_config_path`` holds ``default_config`` on the
+    execution side.
 
     Why the CLI overrides are applied HERE
     -------------------------------------
@@ -467,8 +914,9 @@ def _resolve_project_config(
     therefore ``--dry-run`` -- reporting a threshold that is not the one enforced.
 
     Returns:
-        The resolved config, and the config file it came from -- ``None`` when the
-        project has none and took ASH's default config.
+        The resolved config; the config file it came from, ``None`` when the
+        project has none and took ASH's default config; and the operator's file
+        layered over it, ``None`` when nothing was layered.
 
     Raises:
         ASHConfigValidationError: When the project's own config is invalid, or an
@@ -480,8 +928,14 @@ def _resolve_project_config(
             message is re-issued with the project key so the operator knows which
             of N projects to look at.
     """
+    operator = _operator_config(default_config, trusted_config)
     try:
-        config_path = find_config_file(candidate.resolved)
+        # The project directory is one the caller may read, but a source found
+        # there may be a link out of it, and discovery reads a pyproject.toml to
+        # look for its table; a caller's gate covers every source before any is
+        # opened (config_sources.check_discovery_candidates).
+        config_path = find_config_file(candidate.resolved, permit=permit_base)
+        overlay = operator if config_path is not None else None
         if config_path is None and default_config is not None:
             config_path = Path(default_config)
         config = resolve_config(
@@ -490,9 +944,13 @@ def _resolve_project_config(
             fallback_to_default=True,
             config_overrides=list(config_overrides),
             scanned_root=workspace_root,
-            trusted_config_path=default_config,
+            trusted_config_path=operator,
+            client_config_policy=client_config_rules,
+            remote_client=remote_client,
+            overlay_config_path=overlay,
+            permit_base=permit_base,
         )
-        return config, config_path
+        return config, config_path, overlay
     except ASHConfigValidationError as exc:
         raise ASHConfigValidationError(
             f"Project '{candidate.key}' at '{candidate.resolved.as_posix()}' has "
@@ -506,7 +964,10 @@ def _validate_scanner_pins(
     """Refuse a workspace whose projects demand irreconcilable tool versions.
 
     Only projects that will actually be scanned are compared: a skipped project
-    cannot conflict with one that runs.
+    cannot conflict with one that runs. A project's own config does not choose
+    ``tool_version`` (``config/tool_config_trust.confine_tool_versions``), so the
+    pins recorded are the operator's or the scanner's default; the check still
+    holds the plan to one installable version per scanner, whatever set them.
 
     An undecidable comparison is refused alongside an incompatible one. Assuming
     compatibility would mean a project could be scanned by a tool version it
@@ -579,16 +1040,17 @@ def _validate_plugin_modules(
     ``ScanExecutionEngine.__init__`` reads *the project's own*
     ``ash_plugin_modules`` and registers them into the module-level
     ``plugin_library``, then reads the scanner set back through
-    ``ash_plugin_manager.plugin_modules()``, which memoises into
-    ``_resolved_plugins``. So the first project to build its engine decides the
-    scanner set for every project in the run, and measured on two real projects
-    neither ordering is correct:
+    ``ash_plugin_manager.plugin_modules()``. That method's memo follows the
+    registrations, but the registry is process-wide, so the order in which
+    projects register still decides what one of them gets:
 
-    * project-without-the-plugin first -- the project that DECLARED it loses it.
-      A silent false negative: fewer findings than ``ash --source-dir`` would
-      report, with no warning anywhere.
+    * project-without-the-plugin first -- the project that declared the plugin
+      keeps it. A memo keyed on the plugin kind alone would make that project
+      lose it: a silent false negative, fewer findings than ``ash --source-dir``
+      would report, with no warning anywhere.
     * project-with-the-plugin first -- the other project gains a scanner it never
-      declared.
+      declared, because the registry holds every module any project loaded.
+      This one can still happen.
 
     Merging the sets would make the second case the defined behaviour for
     everyone, which is the wrong direction for a security tool: a project would
@@ -647,10 +1109,92 @@ def _assign_display_labels(projects: List[ProjectPlan]) -> None:
         )
 
 
+def _policy_document(
+    suppressions: Any, ignore_paths: Any, scanners: Any
+) -> Dict[str, Any]:
+    """A workspace policy's effect on a project, written as the config it amounts to.
+
+    Its suppressions and ignore paths land in ``global_settings``, and each
+    scanner it adds is a ``scanners.<name>.enabled: true``, so the rules that
+    govern a client's config file govern a client's policy file the same way.
+    """
+    document: Dict[str, Any] = {
+        "global_settings": {
+            "suppressions": [
+                entry.model_dump(mode="json", exclude={"client_supplied"})
+                for entry in suppressions or []
+            ],
+            "ignore_paths": [
+                entry.model_dump(mode="json", exclude={"client_supplied"})
+                for entry in ignore_paths or []
+            ],
+        }
+    }
+    if scanners:
+        document["scanners"] = {str(name): {"enabled": True} for name in scanners}
+    return document
+
+
+def _check_a_client_supplied_policy(
+    source: Path,
+    documents: List[Dict[str, Any]],
+    root: Path,
+    default_config: Optional[PathLike],
+    client_config_rules: Optional[ClientConfigRules],
+) -> None:
+    """Hold a policy file an MCP client delivered to the rules a client's config file gets.
+
+    ``documents`` are the policy as written and as each active project gets
+    it, after its patterns are rewritten for the project (``_policy_document``),
+    since a rewritten entry can be one the rules deny when the written one is
+    not. Under the default ``denied_paths`` its suppressions and ignore paths
+    apply, marked, and an operator's ``denied_value_patterns`` still hold; a
+    profile whose own ``denied_paths`` lists them, or a scanner's ``enabled``,
+    refuses the file. Its ceiling only tightens a project's threshold, and its
+    scanners gate only makes the verdict stricter, so neither is checked.
+
+    Raises:
+        ASHConfigFieldDeniedError: The file sets a field the rules deny.
+        ASHConfigPolicyUnreadableError: The rules cannot be established.
+    """
+    from automated_security_helper.config.client_config_policy import (
+        _trusted_config,
+        client_file_denials,
+        denied_fields_message,
+        rules_from,
+    )
+    from automated_security_helper.core.exceptions import (
+        ASHConfigFieldDeniedError,
+        ASHConfigPolicyUnreadableError,
+    )
+
+    rules = client_config_rules or rules_from(
+        _trusted_config(default_config, root, None)
+    )
+    if rules.unreadable is not None:
+        raise ASHConfigPolicyUnreadableError(
+            f"A workspace policy an MCP client delivered cannot be checked: "
+            f"{rules.unreadable}"
+        )
+    for document in documents:
+        found = client_file_denials(
+            {source: document}, rules, scanned_root=root, all_delivered=True
+        )
+        if found:
+            path, denials = found[0]
+            raise ASHConfigFieldDeniedError(denied_fields_message(path, denials))
+
+
 def _apply_workspace_policy(
     definition: WorkspaceDefinition,
     projects: List[ProjectPlan],
     workspace_config: Optional[PathLike],
+    default_config: Optional[PathLike] = None,
+    client_config_rules: Optional[ClientConfigRules] = None,
+    trusted_config: Optional[PathLike] = None,
+    remote_client: bool = False,
+    permit_base: Optional[Callable[[Path], bool]] = None,
+    scanner_twins: Optional[Dict[str, Dict[str, str]]] = None,
 ) -> Optional[Path]:
     """Resolve the workspace policy and fold it into every active project.
 
@@ -665,40 +1209,197 @@ def _apply_workspace_policy(
     happens, and pushing a pattern into it could refuse the whole workspace over
     a project nobody is looking at.
 
+    A policy file an MCP client delivered (``config_is_client_supplied``) is
+    checked as a delivered config is (``_check_a_client_supplied_policy``), and
+    each suppression and ignore path it pushes down is marked
+    ``client_supplied``, so a finding it hides is reported suppressed and
+    marked rather than dropped and the files under its ignore paths are still
+    scanned. Any other policy's entries are left unmarked, whatever the file
+    says: only ASH marks an entry. Delivered is judged at the path the file was
+    found or named at, so a delivered link is the client's wherever it points.
+
+    The file that path reaches must be one ``permit_base`` permits, checked
+    before it is read. For a delivered file, or any under a remote caller, a
+    refusal of its content says where each problem is, not what the file holds.
+
+    *scanner_twins* maps a project key to the refusal line of each reduced name
+    that two or more of its extra scanner sections reduce to (``_scanner_state``,
+    by reduced name, the keys of every rank together). A project's twins are
+    refused only when the policy requires a scanner of that reduced name, and one
+    refusal names every project that holds some.
+
     Returns:
-        The policy file that was applied, or ``None`` when there is no policy.
+        The path the applied policy file was found or named at, or ``None``
+        when there is no policy.
 
     Raises:
-        WorkspaceDefinitionError: Exit code 4, for an unusable policy file or a
-            pattern with no sound rewrite for some project. The message names the
-            project as well as the pattern, because a workspace-level pattern is
-            legal in itself and only fails in combination with one project.
+        WorkspaceDefinitionError: Exit code 4, for an unusable policy file, a
+            pattern with no sound rewrite for some project, or a project that
+            holds more than one section the scan may read for a scanner the policy
+            requires. The message names the project as well as the pattern,
+            because a workspace-level pattern is legal in itself and only fails
+            in combination with one project.
+        ASHConfigFieldDeniedError: Exit code 3, for a delivered policy that sets
+            a field the rules deny.
+        ASHConfigInputNotPermittedError: The policy file is outside what
+            ``permit_base`` permits.
     """
+    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+
+    def client_supplied(path: Path) -> bool:
+        return remote_client or config_is_client_supplied(path)
+
     policy, source = resolve_workspace_policy(
         definition.root,
         explicit=workspace_config,
         project_config_paths=[
             Path(project.config_source) for project in projects if project.config_source
         ],
+        permit_base=permit_base,
+        client_supplied=client_supplied,
     )
+    delivered = source is not None and config_is_client_supplied(source)
+    workspace_policy = policy.workspace if policy else None
 
+    if workspace_policy is not None and scanner_twins:
+        required = {
+            normalise_scanner_name(name)
+            for name in workspace_policy.additional_scanners
+        }
+        problems = [
+            line
+            for project in projects
+            if not project.skipped
+            for reduced, line in (scanner_twins.get(project.key) or {}).items()
+            if reduced in required
+        ]
+        if problems:
+            raise _refuse(
+                "A project's configuration cannot be planned: it holds more than one "
+                "section for a scanner the workspace policy requires, the plugin "
+                "lookup reads only one of them, and which one depends on the name "
+                "the plugin is registered under. Keep one section per scanner:",
+                problems,
+            )
+
+    resolved_for: Dict[str, Any] = {}
     for project in projects:
         if project.skipped:
             continue
-        resolved = policy_for_project(
-            policy.workspace if policy else None,
+        resolved_for[project.key] = policy_for_project(
+            workspace_policy,
             project_prefix=project.relative_path,
             project_threshold=project.severity_threshold,
             project_scanners=project.scanners,
         )
+    if delivered and source is not None and workspace_policy is not None:
+        _check_a_client_supplied_policy(
+            source,
+            [
+                _policy_document(
+                    workspace_policy.suppressions,
+                    workspace_policy.ignore_paths,
+                    workspace_policy.additional_scanners,
+                )
+            ]
+            + [
+                _policy_document(
+                    resolved.suppressions,
+                    resolved.ignore_paths,
+                    resolved.policy_scanners,
+                )
+                for resolved in resolved_for.values()
+            ],
+            definition.root,
+            trusted_config if trusted_config is not None else default_config,
+            client_config_rules,
+        )
+
+    for project in projects:
+        if project.skipped:
+            continue
+        resolved = resolved_for[project.key]
         project.effective_severity_threshold = resolved.effective_threshold
         project.threshold_tightened_by_policy = resolved.threshold_tightened
-        project.policy_suppressions = list(resolved.suppressions)
-        project.policy_ignore_paths = list(resolved.ignore_paths)
+        project.policy_suppressions = [
+            entry.model_copy(update={"client_supplied": delivered})
+            for entry in resolved.suppressions
+        ]
+        project.policy_ignore_paths = [
+            entry.model_copy(update={"client_supplied": delivered})
+            for entry in resolved.ignore_paths
+        ]
         project.policy_scanners = list(resolved.policy_scanners)
         project.policy_scanners_gate = resolved.policy_scanners_gate
 
     return source
+
+
+def _refuse_missing_default_config(default_config: Optional[PathLike]) -> None:
+    """Refuse a named default config that is not a file, before any project is read.
+
+    Checked here, not only where a project falls back to it, because every project
+    may have its own config, and the file is also the trusted base those projects'
+    sandbox grants come from. A missing one used to be skipped without a word, so
+    the plan, and ``--dry-run``, described a run with the built-in defaults where
+    the operator had named a file. Whether the file parses is left to the
+    projects' own resolution, which reads it with the confinement a scan uses.
+    """
+    if default_config is None:
+        return
+    if not str(default_config).strip() or not Path(default_config).is_file():
+        raise ASHConfigValidationError(
+            f"The default configuration file '{default_config}' (--config, or the "
+            "profile bound to the MCP session) does not exist or is not a regular "
+            "file. Name an existing config file, or omit it so that projects "
+            "without their own config use ASH's built-in defaults."
+        )
+
+
+def _refuse_a_default_config_that_does_not_load(default_config: Path) -> None:
+    """Refuse the operator's ``--config`` by its own name when it cannot be read or
+    parsed, before a project's resolution quotes it as that project's.
+
+    It is the config of every project that declares none, so it is refused once,
+    as the operator's file, rather than once per project. A file that parses and
+    does not validate is refused by each project's resolution, which names the
+    project. A name with no file there is left to that resolution too.
+    """
+    import yaml
+
+    from automated_security_helper.config.config_sources import (
+        describe_config_path,
+        read_config_file,
+        unparsed_config_reason,
+    )
+    from automated_security_helper.core.exceptions import ASHConfigSourceError
+    from automated_security_helper.utils.error_text import error_text
+
+    if not default_config.is_file():
+        return
+    unparsed: Optional[str] = None
+    try:
+        read_config_file(default_config)
+    except ASHConfigValidationError:
+        raise
+    except (OSError, UnicodeDecodeError, yaml.YAMLError, ValueError) as exc:
+        # json.JSONDecodeError, UnicodeDecodeError and a constructor's
+        # ValueError are all ValueErrors.
+        if isinstance(exc, OSError):
+            # Read: the file could not be opened, so there is no syntax to
+            # send a reader to.
+            raise ASHConfigSourceError(
+                f"Config file '{describe_config_path(default_config)}' could not "
+                f"be read: {error_text(exc)}"
+            ) from exc
+        # Anything else here is a parse refusal, and a parser's or
+        # a constructor's own words can quote the file (unparsed_config_reason).
+        # pydantic's ValidationError, the one excluded ValueError, is never
+        # raised here: read_config_file only parses.
+        unparsed = unparsed_config_reason(default_config, exc)
+    if unparsed is not None:
+        # Outside the handler, so the parser's error is not its context.
+        raise ASHConfigSourceError(unparsed)
 
 
 def resolve_workspace(
@@ -708,6 +1409,11 @@ def resolve_workspace(
     workspace_config: Optional[PathLike] = None,
     config_overrides: Tuple[str, ...] = (),
     default_config: Optional[PathLike] = None,
+    project_gate: Optional[Callable[[Sequence[Tuple[str, Path]]], None]] = None,
+    client_config_rules: Optional[ClientConfigRules] = None,
+    trusted_config: Optional[PathLike] = None,
+    remote_client: bool = False,
+    permit_base: Optional[Callable[[Path], bool]] = None,
 ) -> WorkspacePlan:
     """Resolve and validate a workspace, returning an inspectable plan.
 
@@ -733,12 +1439,40 @@ def resolve_workspace(
             having none is not an error. When given it must exist; ASH does not
             fall back to searching, because that would apply different policy
             than the one named. It may not be any project's own config.
-        default_config: Config file to use for a project that declares none of
-            its own, in place of ASH's built-in default. A project with its own
-            ``.ash.yaml`` is unaffected. The MCP server passes a profile a client
-            bound with ``select_profile``; see
-            :func:`_resolve_project_config` on why the same value has to reach
+        default_config: The operator's config file (``--config``). Every field
+            it sets is final for every project: it is layered over a project's
+            own config, which fills only the fields it leaves unset, and a
+            project that declares no config uses it alone in place of ASH's
+            built-in default. The MCP server passes the profile a client bound
+            with ``select_profile``; see :func:`_resolve_project_config` for the
+            precedence, and on why the same value has to reach
             ``ProjectScanSettings.default_config_path`` as well.
+        project_gate: Called with ``(key, resolved directory)`` for every
+            project that will be scanned, after the definition's own checks and
+            before any project's config is read; it raises to refuse the
+            workspace. The MCP server passes its scan-root confinement here, so
+            a config outside the permitted roots is never read.
+        client_config_rules: The rules a config an MCP client delivered is
+            checked against (``config/client_config_policy.py``).
+        trusted_config: The operator's config the trust checks take as the
+            trusted base, when it is not ``default_config``: the registered
+            profile, when the MCP client patched the session's copy of it. None
+            takes ``default_config``. It is also the file layered over a
+            project's own config, so the client's patched copy is not. Must
+            reach ``ProjectScanSettings.trusted_config_path`` too.
+        remote_client: The workspace is resolved for a remote MCP client, so a
+            project config the operator did not set aside resolves no ``!ENV``
+            (``resolve_config``). Must reach ``ProjectScanSettings.remote_client``
+            too.
+        permit_base: The MCP session's gate (``cli/mcp/sandbox.config_base_gate``),
+            or None. Every config source in each project's directory, every
+            base a project's chain extends, and the workspace policy file must
+            resolve to a file it permits; one that is a link out is refused
+            before anything opens it (``config_sources.check_discovery_candidates``).
+            Must reach ``ProjectScanSettings.config_base_gate`` too. A refusal is
+            raised as the project's ``ASHConfigValidationError``, from the
+            ``ASHConfigInputNotPermittedError``, and names neither the file's
+            target nor anything in it.
 
     Returns:
         A :class:`~automated_security_helper.workspace.plan.WorkspacePlan` with
@@ -749,16 +1483,24 @@ def resolve_workspace(
             entry escapes the workspace root, is a symlink, names the root, does
             not exist, is unreadable, overlaps another entry, collides on its
             key, or pins a scanner version irreconcilable with another project's.
-            The message names every offending entry.
+            The message names every offending entry. A workspace file, root,
+            entry, policy file or default config whose path is not UTF-8 raises
+            its WorkspacePathNotUtf8Error subclass, before any project's config
+            is read.
         ASHConfigValidationError: Exit code 3. The workspace is fine but one
-            project's own config is invalid. The message names the project.
+            project's own config is invalid, or cannot be loaded, or
+            ``default_config`` names a file that does not exist. The message
+            names the project or the file.
     """
     definition = load_workspace_file(workspace_file)
 
     candidates = _validate_containment(definition)
+    _refuse_folders_that_are_not_utf8(definition, candidates)
+    _refuse_config_files_that_are_not_utf8(workspace_config, default_config)
     _validate_no_overlap(definition, candidates)
     _validate_unique_keys(definition, candidates)
     _apply_existence_checks(definition, candidates, allow_missing_projects)
+    _refuse_missing_default_config(default_config)
 
     if all(candidate.skipped for candidate in candidates):
         raise WorkspaceDefinitionError(
@@ -767,7 +1509,26 @@ def resolve_workspace(
             f"report a clean result for a workspace nothing examined."
         )
 
+    if project_gate is not None:
+        project_gate([(c.key, c.resolved) for c in candidates if not c.skipped])
+
+    if default_config is not None:
+        _refuse_a_default_config_that_does_not_load(Path(default_config))
+
+    operator = _operator_config(
+        Path(default_config) if default_config else None,
+        Path(trusted_config) if trusted_config else None,
+    )
+    operator_digest: Optional[str] = None
+    if operator is not None:
+        # Once for the whole workspace, so a project with no config of its own,
+        # which uses the operator's file alone, is refused with the rest.
+        check_operator_config(operator, definition.root, remote_client=remote_client)
+        operator_digest = operator_config_digest(operator)
+
     projects: List[ProjectPlan] = []
+    scanner_twins: Dict[str, Dict[str, str]] = {}
+    unresolved_pins: Dict[str, Dict[str, _PossiblePins]] = {}
     for candidate in candidates:
         if candidate.skipped:
             projects.append(
@@ -784,36 +1545,67 @@ def resolve_workspace(
             )
             continue
 
-        config, config_path = _resolve_project_config(
+        config, config_path, operator_config = _resolve_project_config(
             candidate,
             config_overrides,
             default_config=Path(default_config) if default_config else None,
             workspace_root=definition.root,
+            client_config_rules=client_config_rules,
+            trusted_config=Path(trusted_config) if trusted_config else None,
+            remote_client=remote_client,
+            permit_base=permit_base,
         )
-        scanners, pins = _scanner_state(config)
-        label = _project_label(config, candidate.key)
-        projects.append(
-            ProjectPlan(
-                key=candidate.key,
-                relative_path=candidate.relative.as_posix(),
-                path=candidate.resolved.as_posix(),
-                label=label,
-                # Settled below by _assign_display_labels, which needs the whole
-                # sibling set to know whether this label is ambiguous.
-                display_label=label,
-                config_source=config_path.resolve().as_posix() if config_path else None,
-                scanners=scanners,
-                severity_threshold=config.global_settings.severity_threshold,
-                scanner_pins=pins,
-                ash_plugin_modules=_project_plugin_modules(config),
+        scanners, pins, twins = _scanner_state(config)
+        if twins:
+            scanner_twins[candidate.key] = _twin_section_problems(
+                config, candidate.key, twins
             )
+        held = _unresolved_pins(config)
+        if held:
+            unresolved_pins[candidate.key] = held
+        label = _project_label(config, candidate.key)
+        project = ProjectPlan(
+            key=candidate.key,
+            relative_path=candidate.relative.as_posix(),
+            path=candidate.resolved.as_posix(),
+            label=label,
+            # Settled below by _assign_display_labels, which needs the whole
+            # sibling set to know whether this label is ambiguous.
+            display_label=label,
+            # By the path the project holds it at, not the file a link there
+            # reaches: execution re-resolves from it, and a file is judged by
+            # every path it was reached by (config_sources, "Base paths"). The
+            # sandbox check needs the config's own name too, and a symlinked
+            # .ash.yaml resolves out of the project.
+            config_source=_as_named(config_path),
+            operator_config=_as_named(operator_config),
+            operator_config_digest=operator_digest if operator_config else None,
+            scanners=scanners,
+            severity_threshold=config.global_settings.severity_threshold,
+            scanner_pins=pins,
+            ash_plugin_modules=_project_plugin_modules(config),
+            plugin_module_names=config_module_names(config),
         )
+        # Private: no dump of the plan shows it (ProjectPlan._environment_values).
+        project._environment_values = config_environment_values(config)
+        projects.append(project)
 
     active = [project for project in projects if not project.skipped]
     _validate_scanner_pins(definition, active)
+    _validate_unresolved_pins(active, unresolved_pins)
     _validate_plugin_modules(definition, active)
     _assign_display_labels(projects)
-    policy_source = _apply_workspace_policy(definition, projects, workspace_config)
+    policy_source = _apply_workspace_policy(
+        definition,
+        projects,
+        workspace_config,
+        default_config=default_config,
+        client_config_rules=client_config_rules,
+        trusted_config=trusted_config,
+        remote_client=remote_client,
+        permit_base=permit_base,
+        scanner_twins=scanner_twins,
+    )
 
     return WorkspacePlan(
         workspace_file=definition.path.as_posix(),

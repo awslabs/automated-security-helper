@@ -26,7 +26,8 @@ The tests below pin five properties:
    produced this". ``projects/`` is excluded, because workspace mode's per-project trees
    are inputs to the run that follows.
 2. A terminal status that is not a verdict is propagated rather than discarded. Verdicts
-   are 0, 1 and 2, the statuses reached from a results file; 3 (invalid config) and 4
+   are 0, 1 and 2, the statuses reached from a results file; 3 (invalid config or
+   refused input) and 4
    (workspace definition or policy error) assert the opposite and must not be flattened
    into the read-back's 1. Exit 2 IS a verdict and must still reach the host's own
    exit-code computation, because the host applies filters the container was never told
@@ -92,6 +93,32 @@ def _seed_stale_results(output_dir: Path) -> Path:
         encoding="utf-8",
     )
     return results_file
+
+
+def _write_this_runs_results(
+    output_dir: Path, run_kwargs: dict, document: dict
+) -> None:
+    """Write the results file as the inner run would, with its completion marker.
+
+    ``run_kwargs`` are what the wrapper passed to the stand-in runner; the marker
+    carries the run ID among them (utils/inner_run_outcome.py).
+    """
+    from tests.utils.helpers import mark_inner_run_completed
+
+    results_file = output_dir / "ash_aggregated_results.json"
+    results_file.write_text(json.dumps(document), encoding="utf-8")
+    assert mark_inner_run_completed(results_file, run_kwargs["outer_run_id"])
+
+
+def _complete_the_existing_results(existing: Path):
+    """A stand-in inner run that reads ``existing`` and completes, as --use-existing does."""
+    from tests.utils.helpers import mark_inner_run_completed
+
+    def run(*args, **kwargs):
+        assert mark_inner_run_completed(existing, kwargs["outer_run_id"])
+        return create_completed_process(args=[], returncode=0, stdout="", stderr="")
+
+    return run
 
 
 def _seed_stale_sarif(output_dir: Path) -> Path:
@@ -294,8 +321,8 @@ class TestContainerModeStaleResults:
         not_a_directory.write_text("left behind by something else", encoding="utf-8")
 
         def clean_scan(*args, **kwargs):
-            (opts.output_dir / "ash_aggregated_results.json").write_text(
-                json.dumps({"name": "produced by this invocation"}), encoding="utf-8"
+            _write_this_runs_results(
+                opts.output_dir, kwargs, {"name": "produced by this invocation"}
             )
             return create_completed_process(args=[], returncode=0, stdout="", stderr="")
 
@@ -351,8 +378,8 @@ class TestContainerModeStaleResults:
         opts.output_dir.mkdir(parents=True, exist_ok=True)
 
         def dirty_scan(*args, **kwargs):
-            (opts.output_dir / "ash_aggregated_results.json").write_text(
-                json.dumps({"name": "produced by this invocation"}), encoding="utf-8"
+            _write_this_runs_results(
+                opts.output_dir, kwargs, {"name": "produced by this invocation"}
             )
             return create_completed_process(args=[], returncode=2, stdout="", stderr="")
 
@@ -404,9 +431,7 @@ class TestContainerModeStaleResults:
 
         with patch(
             "automated_security_helper.interactions.run_ash_scan.run_ash_container",
-            return_value=create_completed_process(
-                args=[], returncode=0, stdout="", stderr=""
-            ),
+            side_effect=_complete_the_existing_results(existing),
         ):
             results = _run_container_mode(opts, MagicMock())
 
@@ -494,7 +519,7 @@ class TestContainerStatusesThatAreNotVerdicts:
 
         assert exit_info.value.code == 3
         reported = " ".join(str(call) for call in logger.error.call_args_list)
-        assert "invalid config" in reported, (
+        assert "invalid config or refused input" in reported, (
             "the status is the whole diagnostic here -- there is no report to point the "
             f"operator at -- so the message has to name what it means; got: {reported}"
         )
@@ -531,8 +556,8 @@ class TestContainerStatusesThatAreNotVerdicts:
         opts.output_dir.mkdir(parents=True, exist_ok=True)
 
         def errored_scan(*args, **kwargs):
-            (opts.output_dir / "ash_aggregated_results.json").write_text(
-                json.dumps({"name": "produced by this invocation"}), encoding="utf-8"
+            _write_this_runs_results(
+                opts.output_dir, kwargs, {"name": "produced by this invocation"}
             )
             return create_completed_process(args=[], returncode=1, stdout="", stderr="")
 
@@ -560,8 +585,8 @@ class TestCleanupFailureRefusesOnTheArtifactNotTheCall:
         opts.output_dir.mkdir(parents=True, exist_ok=True)
 
         def clean_scan(*args, **kwargs):
-            (opts.output_dir / "ash_aggregated_results.json").write_text(
-                json.dumps({"name": "produced by this invocation"}), encoding="utf-8"
+            _write_this_runs_results(
+                opts.output_dir, kwargs, {"name": "produced by this invocation"}
             )
             return create_completed_process(args=[], returncode=0, stdout="", stderr="")
 
@@ -636,6 +661,46 @@ class TestNixModeStaleResults:
         assert exit_info.value.code != 0
         assert not stale.exists()
 
+    @pytest.mark.parametrize(
+        ("code", "meaning"),
+        [(3, "invalid config"), (4, "workspace definition or policy error")],
+    )
+    def test_an_inner_refusal_without_results_keeps_its_exit_code(
+        self, tmp_path, caplog, code, meaning
+    ):
+        """3 and 4 say nothing was scanned and why; exit 1 would lose which."""
+        opts = _opts(tmp_path)
+        logger = logging.getLogger("test_nix_refusal_code")
+
+        with (
+            caplog.at_level(logging.ERROR, logger="test_nix_refusal_code"),
+            patch(
+                "automated_security_helper.interactions.run_ash_scan.run_ash_nix",
+                return_value=create_completed_process(args=[], returncode=code),
+            ),
+            pytest.raises(SystemExit) as exit_info,
+        ):
+            _run_nix_mode(opts, logger)
+
+        assert exit_info.value.code == code
+        assert any(meaning in record.message for record in caplog.records), [
+            r.message for r in caplog.records
+        ]
+
+    def test_control_another_failure_without_results_exits_1(self, tmp_path):
+        opts = _opts(tmp_path)
+
+        with (
+            patch(
+                "automated_security_helper.interactions.run_ash_scan.run_ash_nix",
+                return_value=create_completed_process(args=[], returncode=42),
+            ),
+            pytest.raises(SystemExit) as exit_info,
+        ):
+            _run_nix_mode(opts, MagicMock())
+
+        assert exit_info.value.code == 1
+
     def test_the_non_zero_shell_status_is_reported_above_debug(self, tmp_path, caplog):
         """The console handler and both file handlers sit at INFO, so a debug-level
         report of "the shell exited non-zero" is emitted nowhere -- not to the terminal
@@ -644,8 +709,8 @@ class TestNixModeStaleResults:
         opts.output_dir.mkdir(parents=True, exist_ok=True)
 
         def dirty_scan(*args, **kwargs):
-            (opts.output_dir / "ash_aggregated_results.json").write_text(
-                json.dumps({"name": "produced by this invocation"}), encoding="utf-8"
+            _write_this_runs_results(
+                opts.output_dir, kwargs, {"name": "produced by this invocation"}
             )
             return create_completed_process(args=[], returncode=42)
 
@@ -673,7 +738,7 @@ class TestNixModeStaleResults:
 
         with patch(
             "automated_security_helper.interactions.run_ash_scan.run_ash_nix",
-            return_value=create_completed_process(args=[], returncode=0),
+            side_effect=_complete_the_existing_results(existing),
         ):
             results = _run_nix_mode(opts, MagicMock())
 

@@ -46,9 +46,9 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 import pytest
 
 from automated_security_helper.cli.mcp import source_delivery as sd
-from automated_security_helper.cli.mcp.profile_registry import DEFAULT_SESSION_ID
 from automated_security_helper.cli.mcp.session_identity import (
     MCP_SESSION_ID_HEADER,
+    UNIDENTIFIED_SESSION_ID,
     resolve_session_id,
     validate_path_component,
 )
@@ -64,7 +64,9 @@ ACCEPTED = [
     "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1",  # pragma: allowlist secret
     "tenant-a",
     "session_test",
-    DEFAULT_SESSION_ID,
+    # DEFAULT_SESSION_ID is deliberately not here: it is a reserved name, which
+    # the header path refuses (see test_session_identity.py,
+    # TestReservedHeaderIsRefused) while the registry still opens it for stdio.
     "tok+en=",
     "a~b",
     "a+b",
@@ -189,12 +191,13 @@ class TestResolveSessionId:
     @pytest.mark.parametrize("candidate", REFUSED)
     def test_every_unusable_shape_is_refused_rather_than_coerced(self, candidate):
         if candidate == "":
-            # An empty or whitespace-only header means "no session supplied" and
-            # resolves to the default; only a present, non-empty, unusable value
-            # is an error. Asserted rather than skipped so the distinction stays
+            # An empty or whitespace-only header means "no session supplied". It
+            # resolves to the unidentified session, never the default, which a
+            # request may not have; only a present, non-empty, unusable value is
+            # an error. Asserted rather than skipped so the distinction stays
             # covered.
             assert resolve_session_id({MCP_SESSION_ID_HEADER: candidate}) == (
-                DEFAULT_SESSION_ID
+                UNIDENTIFIED_SESSION_ID
             )
             return
         with pytest.raises(ValueError):

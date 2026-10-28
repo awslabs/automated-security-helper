@@ -1,0 +1,68 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Fixture for StarResourceAccessPolicyRule and ResourcePolicyStarAccessVerbPolicyRule
+  (automated_security_helper/assets/appsec_cfn_rules). A statement can name who or what it
+  excludes instead of who or what it covers. Allow with NotPrincipal grants access to
+  everyone except the named principals, and Allow with NotAction grants every action
+  except the named ones. Neither rule read those two keys, so neither statement was
+  reported.
+
+  Reported by StarResourceAccessPolicyRule: AllowNotPrincipal.
+  Reported by ResourcePolicyStarAccessVerbPolicyRule: AllowNotAction.
+  Not reported by either rule: DenyNotPrincipal and DenyNotAction. A Deny statement with
+  NotPrincipal or NotAction narrows access, so they are the controls that must stay quiet.
+  AllowNotPrincipal allows only es:ESHttpGet and AllowNotAction names one account as the
+  principal, so each resource is reported by one rule and the two rules can be told apart.
+
+Resources:
+  AllowNotPrincipal:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-allow-not-principal
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            NotPrincipal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action: "es:ESHttpGet"
+            Resource: "*"
+
+  AllowNotAction:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-allow-not-action
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            NotAction: "es:ESHttpDelete"
+            Resource: "*"
+
+  DenyNotPrincipal:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-deny-not-principal
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Deny
+            NotPrincipal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action: "es:ESHttpGet"
+            Resource: "*"
+
+  DenyNotAction:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-deny-not-action
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Deny
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            NotAction: "es:ESHttpDelete"
+            Resource: "*"

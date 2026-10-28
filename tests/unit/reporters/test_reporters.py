@@ -39,10 +39,11 @@ class TestHTMLFormatter:
         result = formatter.report(sample_ash_model)
         assert result is not None
         assert isinstance(result, str)
-        assert result.startswith("\n<!DOCTYPE html>")
-        assert "<html>" in result
+        assert result.lstrip().startswith("<!DOCTYPE html>")
+        assert '<html lang="en"' in result
         assert "</html>" in result
-        assert "<table>" in result
+        assert 'id="scanner-results"' in result
+        assert 'id="findings"' in result
 
 
 class TestCSVFormatter:
