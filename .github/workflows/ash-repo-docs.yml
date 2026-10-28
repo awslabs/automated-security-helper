@@ -2,15 +2,20 @@ name: Docs Deploy
 # Publishes the documentation site. It only deploys: the strict site build and the
 # versioned-site check run in ash-unified-ci.yml (the build-docs job), on every pull
 # request and merge queue entry, where required-checks depends on them.
+#
+# A tag push never deploys. A tag pushed on any commit runs that commit's own copy of
+# this file, and the deploy job holds a contents: write token, so the push trigger
+# has no tags filter. Release tags are created by ash-tag-on-merge.yml with
+# GITHUB_TOKEN, and a push made with GITHUB_TOKEN starts no workflow. The site is
+# deployed from main; a maintainer publishes a release by workflow_dispatch on the
+# tag.
 on:
   push:
     branches:
       - main
-    tags:
-      - "*"
   workflow_dispatch: {}
-  # The tag workflow calls this one for a release it has just tagged. It does not
-  # dispatch it: that would need write access to Actions, which can start any workflow.
+  # A release is published by calling this workflow with the tag as `ref`, or by
+  # running it with workflow_dispatch on the tag. A tag push does neither.
   workflow_call:
     inputs:
       ref:
@@ -47,15 +52,17 @@ jobs:
       contents: write
     # A push to main publishes the version main; a release tag vX.Y.Z publishes X.Y.Z
     # (scripts/docs_versions.py decides, and publishes nothing for any other tag, such
-    # as the floating v3). The tag workflow creates release tags with GITHUB_TOKEN,
-    # whose pushes start no workflow, so it calls this workflow with the tag as
-    # `ref`; a maintainer can run workflow_dispatch on the tag to publish it again.
+    # as the floating v3). A tag push never reaches this job: the push trigger has no
+    # tags filter, and this condition admits a push only on main, so a tag trigger
+    # added later would still start no deploy. A release is published by running
+    # this workflow with workflow_dispatch on the tag, or by a workflow_call that
+    # passes the tag as `ref`.
     # In a called workflow github.ref and github.event_name belong to the caller, so
     # a call is recognized by its `ref` input, which the other events never set.
     if: >-
       inputs.ref != ''
-      || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-      && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
+      || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      || (github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
     env:
       RELEASE_TAG: ${{ inputs.ref }}
 
