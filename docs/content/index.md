@@ -43,12 +43,14 @@ function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@
 
 #### Using `pip`
 
+<!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
 pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
 ```
 
 #### Clone the Repository
 
+<!-- doctest: illustrative reason="clones the ASH repository and installs it over the network" -->
 ```bash
 git clone https://github.com/awslabs/automated-security-helper.git --branch v3.7.0
 cd automated-security-helper
@@ -58,6 +60,7 @@ pip install .
 
 ## Basic Usage
 
+<!-- doctest: illustrative reason="container mode needs a container runtime, and every mode runs a scan with all scanner tools" -->
 ```bash
 # Run a scan in local mode (the scanner tools installed on this machine)
 ash --mode local
@@ -113,6 +116,7 @@ repos:
 
 ## Help
 
+<!-- doctest: illustrative reason="runs the ash hook through pre-commit, which needs a .pre-commit-config.yaml and the network to fetch the hook repository" -->
 ```bash
 pre-commit run ash --all-files
 ```

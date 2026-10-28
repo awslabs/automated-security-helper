@@ -24,6 +24,7 @@ The phases are designed to be used by the `ScanExecutionEngine` class. Each phas
 
 Example:
 
+<!-- doctest: illustrative reason="a fragment that uses objects the scan engine creates for a run (the plugin context, the plugin classes, the progress display and the results model)" -->
 ```python
 # Every phase takes the run's PluginContext (source, output and work
 # directories, and the config), the plugin classes it runs, a progress display
@@ -76,6 +77,8 @@ To add a new phase:
 Example:
 
 ```python
+from typing import Any
+
 from automated_security_helper.base.engine_phase import EnginePhase
 
 

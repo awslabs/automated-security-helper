@@ -85,6 +85,7 @@ uv sync --extra cdk --extra symbols
 
 Integration tests and slow tests are skipped unless you ask for them:
 
+<!-- doctest: illustrative reason="runs this repository's tests, whose --run-integration option comes from the repository's own tests/conftest.py, so it needs a checkout of this repository" -->
 ```bash
 uv run pytest tests/integration --run-integration
 uv run pytest tests/integration/scanners --run-integration
@@ -95,6 +96,7 @@ CI's unit-test step (`.github/actions/run-unit-tests/action.yml`) installs both 
 fails instead of skipping when a test cannot find its extra, and fails the run when total
 coverage is below 80%. To run the suite the way it does:
 
+<!-- doctest: illustrative reason="installs the extras from this repository's pyproject.toml and runs its test suite, so it needs a checkout of this repository" -->
 ```bash
 uv sync --extra cdk --extra symbols
 ASH_REQUIRE_CDK_EXTRA=1 ASH_REQUIRE_SYMBOLS_EXTRA=1 uv run pytest \
@@ -122,6 +124,7 @@ exercise.
 
 Install the hooks, the commit-message one included, and run them over the whole tree:
 
+<!-- doctest: illustrative reason="installs and runs this repository's pre-commit hooks, so it needs a checkout of this repository" -->
 ```bash
 uv run pre-commit install --hook-type pre-commit --hook-type commit-msg
 uv run pre-commit run --all-files
@@ -167,6 +170,7 @@ only after the test has been shown to differ between runs or between time zones 
 several times, and under `TZ=Pacific/Kiritimati` and `TZ=America/Adak`), opt in to
 masking for that test or module:
 
+<!-- doctest: illustrative reason="one line for a test module, which needs pytest imported and a test file to put it in" -->
 ```python
 pytestmark = pytest.mark.snapshot_masking(mask_instants=True, mask_durations=True)
 ```
@@ -192,6 +196,7 @@ timezone.
 
 1. Run the tests and read the diff syrupy prints:
 
+   <!-- doctest: illustrative reason="runs this repository's snapshot tests, so it needs a checkout of this repository" -->
    ```bash
    uv run pytest tests/snapshot
    ```
@@ -199,6 +204,7 @@ timezone.
 2. Decide whether the new output is what you intended. If it is not, fix the code.
 3. If it is, rewrite the snapshots for the tests you changed:
 
+   <!-- doctest: illustrative reason="rewrites this repository's snapshot files, so it needs a checkout of this repository" -->
    ```bash
    uv run pytest tests/snapshot/<area>/test_snapshot_<area>_<topic>.py -n 0 --snapshot-update
    ```
@@ -215,6 +221,7 @@ timezone.
 5. Commit the code change and its snapshots together, with a trailer saying why the
    output changed:
 
+   <!-- doctest: illustrative reason="commits the changes staged in a contributor's clone, and nothing is staged here" -->
    ```bash
    git commit --trailer "Snapshot-Update: the summary table now shows suppressed findings"
    ```
@@ -286,6 +293,7 @@ uv run ruff format .
 
 - Run a specific script:
 
+<!-- doctest: illustrative reason="runs ash from this repository's own environment, so it needs a checkout of this repository" -->
 ```bash
 uv run ash
 ```
@@ -305,6 +313,7 @@ Scanner tools (Bandit, Checkov, Semgrep) are managed via UV tool isolation at ru
 itself. The weekly ASH - Pinned Tool Versions workflow compares those pins with each
 upstream's latest release; to run the same check locally:
 
+<!-- doctest: illustrative reason="runs a script from this repository's scripts directory that asks GitHub for each tool's latest release" -->
 ```bash
 uv run python scripts/check_pinned_tool_versions.py
 uv run python scripts/check_pinned_tool_versions.py --fail-on-outdated --markdown
@@ -337,6 +346,7 @@ python --version
 
 2. Try cleaning and rebuilding the environment:
 
+<!-- doctest: illustrative reason="removes and reinstalls this repository's virtual environment over the network, so it needs a checkout of this repository" -->
 ```bash
 rm -rf .venv
 uv sync
@@ -344,6 +354,7 @@ uv sync
 
 3. Update UV and dependencies:
 
+<!-- doctest: illustrative reason="updates uv itself over the network and upgrades this repository's dependencies" -->
 ```bash
 uv self update
 uv sync --upgrade
@@ -351,6 +362,7 @@ uv sync --upgrade
 
 4. If using a devfile-compatible IDE and encountering issues, try running the devfile commands manually:
 
+<!-- doctest: illustrative reason="downloads the uv installer over the network, then builds and tests this repository" -->
 ```bash
 # Install dependencies
 curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR="$HOME/.local/bin" sh && export PATH="$HOME/.local/bin:$PATH" && uv sync
@@ -366,6 +378,7 @@ export PATH="$HOME/.local/bin:$PATH" && uv run pytest
 
 The project includes a migration validator to help diagnose UV-related issues:
 
+<!-- doctest: illustrative reason="runs a module of this repository's package through the repository's own environment, so it needs a checkout of this repository" -->
 ```bash
 # Check migration status
 uv run python -m automated_security_helper.utils.migration_validator
@@ -455,6 +468,7 @@ To confirm the setup, run the release workflow and check that the **Mint a GitHu
 
 ### Manual Version Bumping
 
+<!-- doctest: illustrative reason="bumps the version of this repository with commitizen, so it needs a checkout of this repository and its commit history" -->
 ```bash
 # Show current version
 uv run cz version --project
@@ -481,6 +495,7 @@ To cut 4.0.0 once v4 is on `main`: set `RELEASE_LINE` to `auto` in the change th
 
 Preview either line locally:
 
+<!-- doctest: illustrative reason="previews a version bump of this repository with commitizen, so it needs a checkout of this repository and its commit history" -->
 ```bash
 uv run cz bump --dry-run --changelog --increment MINOR   # what RELEASE_LINE 3.x produces when a major is detected
 uv run cz bump --dry-run --changelog                     # what RELEASE_LINE auto produces
@@ -566,6 +581,7 @@ class MyCustomScanner(ScannerPluginBase[MyCustomScannerConfig]):
 
 The `_get_tool_version_constraint()` method is **optional** and only needs to be implemented if your scanner requires specific version constraints for UV tool installation:
 
+<!-- doctest: illustrative reason="a method for a scanner plugin class, shown without the class around it" -->
 ```python
 def _get_tool_version_constraint(self) -> Optional[str]:
     """Get version constraint for tool installation.
@@ -601,6 +617,7 @@ When testing custom scanner plugins:
 1. Unit tests: test scanner logic in isolation
 2. Integration tests: test with actual tool execution
 
+<!-- doctest: illustrative reason="runs this repository's own unit and integration tests, so it needs a checkout of this repository" -->
 ```bash
 # Run scanner-specific unit tests
 uv run pytest tests/unit/plugin_modules/ -v

@@ -79,6 +79,7 @@ Python interpreter that runs ASH, which is where `ash dependencies install` puts
 **ASH (Recommended)** — installs the version the plugin is tested against into
 the Python environment that runs ASH, with pip or uv, whichever owns that
 environment (a uv tool, uvx or `uv venv` install has no pip):
+<!-- doctest: illustrative reason="reads .ash/.ash_community_plugins.yaml, a file of the ASH repository that a project does not have until it adds one, and installs ferret-scan over the network" -->
 ```bash
 ash dependencies install --config .ash/.ash_community_plugins.yaml
 ```
