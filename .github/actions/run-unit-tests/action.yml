@@ -99,12 +99,25 @@ runs:
     # did not finish inside any job timeout on a 4-worker runner. A shard covers part of
     # the package, so the next step runs it without the threshold, and the unit-coverage
     # job applies the same 80% to the shards' combined data.
+    #
+    # PYTEST_DEBUG_TEMPROOT moves pytest's basetemp (tmp_path and friends) off the
+    # runner's shared /tmp. The sandbox backends deliberately treat anything under
+    # /tmp as already covered by --private-tmp and the fresh `--tmpfs /tmp` mount
+    # (automated_security_helper/utils/sandbox/backends.py, _TMP_ROOT), so a fake
+    # home a test builds under tmp_path gets no --blacklist args when basetemp is
+    # /tmp/pytest-of-runner, and a passwd home under /tmp reads the `--tmpfs /tmp`
+    # value as an ancestor grant: 29 sandbox-policy tests fail on the hosted Linux
+    # runners and pass wherever basetemp lives off /tmp. runner.temp is
+    # /home/runner/work/_temp on the Linux images, so the tests measure the
+    # intended scenario, a home that is NOT inside the sandbox's private tmp.
+    # tests/conftest.py sets this knob with setdefault, so the value here wins.
     - name: Run PyTest
       if: inputs.shard == '1of1'
       shell: bash
       env:
         ASH_REQUIRE_SYMBOLS_EXTRA: "1"
         ASH_REQUIRE_CDK_EXTRA: "1"
+        PYTEST_DEBUG_TEMPROOT: ${{ runner.temp }}
       run: |
         uv run pytest \
           --cov=automated_security_helper \
@@ -114,7 +127,7 @@ runs:
           --cov-report=html:test-results/coverage_html \
           --cov-fail-under=80
 
-    # One shard of the suite, with the same extras gates as "Run PyTest" above.
+    # One shard of the suite, with the same extras gates and basetemp as "Run PyTest" above.
     #
     # ASH_TEST_SHARD makes tests/conftest.py's pytest_ignore_collect hook (tests/utils/
     # sharding.py) ignore the test modules another shard owns. No file is named on the
@@ -135,6 +148,7 @@ runs:
       env:
         ASH_REQUIRE_SYMBOLS_EXTRA: "1"
         ASH_REQUIRE_CDK_EXTRA: "1"
+        PYTEST_DEBUG_TEMPROOT: ${{ runner.temp }}
         ASH_TEST_SHARD: ${{ inputs.shard }}
       run: |
         uv run pytest \
