@@ -116,7 +116,9 @@ def test_the_dependency_check_probes_of_an_offline_scanner_get_the_variables(
         seen.append((list(map(str, args)), dict(kwargs.get("env") or {})))
         return subprocess.CompletedProcess(args, 0, stdout="checkov 3.2.0\n", stderr="")
 
-    monkeypatch.setattr(subprocess_utils.subprocess, "run", run)
+    # subprocess_utils._runner: _run_plain outside a sandbox, _run_stoppable
+    # inside one; neither calls subprocess.run.
+    monkeypatch.setattr(subprocess_utils, "_run_plain", run)
     monkeypatch.setattr(subprocess_utils, "_run_stoppable", run)
 
     with plugin_probe_scope(scanner, context):
