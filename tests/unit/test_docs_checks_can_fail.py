@@ -1605,12 +1605,6 @@ DEPLOY_WORKFLOW = """jobs:
       - run: uv run python scripts/docs_versions.py deploy --ref "$GITHUB_REF" --push
 """
 
-TAG_WORKFLOW = """jobs:
-  publish-docs:
-    steps:
-      - run: gh workflow run ash-repo-docs.yml --repo "$GITHUB_REPOSITORY" --ref "v${VERSION}"
-"""
-
 
 def _site(
     tmp_path: Path,
@@ -1621,7 +1615,6 @@ def _site(
     mkdocs: str = MKDOCS,
     workflow: str | None = WORKFLOW,
     deploy_workflow: str | None = DEPLOY_WORKFLOW,
-    tag_workflow: str = TAG_WORKFLOW,
     versions_script: bool = True,
 ) -> Path:
     root = _git_root(tmp_path / "repo")
@@ -1633,7 +1626,6 @@ def _site(
         _write(root, dc.DOCS_BUILD_WORKFLOW, workflow)
     if deploy_workflow is not None:
         _write(root, dc.DOCS_WORKFLOW, deploy_workflow)
-    _write(root, dc.RELEASE_TAG_WORKFLOW, tag_workflow)
     if versions_script:
         _write(root, dc.DOCS_VERSIONS_SCRIPT, "# script\n")
     _write(root, "README.md", "# Project\n\n## Getting started\n")
@@ -2174,13 +2166,6 @@ VERSIONING_DEFECTS = [
             )
         },
         "scripts/docs_versions.py check is not run",
-    ),
-    (
-        "releases never start the docs deploy",
-        {
-            "tag_workflow": "jobs:\n  release:\n    steps:\n      - run: gh release create\n"
-        },
-        "does not start ash-repo-docs.yml on the release tag",
     ),
     (
         "the versions script is gone",
