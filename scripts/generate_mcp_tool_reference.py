@@ -473,16 +473,29 @@ TOOL_NOTES: dict[str, dict] = {
     },
     "check_installation": {
         "intro": (
-            "Report whether ASH can scan: its version, and for each built-in scanner whether "
-            "its tool is available. Run before the first scan in a session if you're unsure "
-            "of the install state. Each scanner's check may run its tool, so the call takes "
-            "seconds."
+            "Reports whether ASH can scan: its version and, for each built-in scanner, "
+            "whether its tool can run. Enabled means enabled in ASH's defaults: the "
+            "call reads no project's config and checks no plugin scanner. It runs each "
+            "scanner's dependency check, which can start the tool, so it takes several "
+            "seconds, and it installs and downloads nothing. The tool of a scanner "
+            "that ASH installs with uv is installed when `uv tool list` lists it, or "
+            "when its executable is on `PATH` or in a directory ASH also searches, "
+            "such as `~/.ash/bin`. A scanner whose tool is not, when the server is "
+            "online and has uv, is listed in `installs_on_first_scan`, because the "
+            "first scan installs it with uv, which needs network access. Offline, or "
+            "without uv, it is listed in `missing_dependencies`. Offline, semgrep is "
+            "also missing when it has no rules cache."
         ),
         "no_params_sentence": (
-            "No parameters. Returns `installed` (at least one enabled scanner can run), "
-            "`ready` (all of them can), `version`, `scanners` (name, enabled, "
-            "`dependencies_satisfied`, version) and the enabled scanners in "
-            "`missing_dependencies` and `undetermined_dependencies`."
+            "No parameters. Returns `installed` (at least one enabled scanner can run, "
+            "or will once the first scan installs its tool), `ready` (every enabled "
+            "scanner can run or will), `version`, `scanners` (each scanner's `name`, "
+            "`enabled`, `dependencies_satisfied`, `installs_on_first_scan`, and "
+            "`version`), `installs_on_first_scan`, `missing_dependencies` and "
+            "`undetermined_dependencies` (the enabled scanners whose tool is missing "
+            "and that a scan cannot install, or whose check could not run), and "
+            "`ash_command_available` (whether an `ash` executable is on `PATH`, which "
+            "the server does not need)."
         ),
     },
     "set_source_zip_chunk": {
