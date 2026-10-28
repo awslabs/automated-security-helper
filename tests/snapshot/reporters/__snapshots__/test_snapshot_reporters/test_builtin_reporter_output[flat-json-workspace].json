@@ -191,9 +191,6 @@
           "npm-audit": "MISSING",
           "bandit": "FAILED"
         },
-        "scanner_reasons": {
-          "npm-audit": "its dependencies were not available; no reason was recorded, and ash.log has the scanner's own message"
-        },
         "incomplete_scanners": [
           "npm-audit"
         ],
@@ -203,11 +200,6 @@
         "partial_coverage_scanners": [],
         "stale_content_databases": [],
         "inputs_not_scanned": [],
-        "incomplete_scanner_details": {
-          "npm-audit": "MISSING"
-        },
-        "partial_coverage_scanners": [],
-        "stale_content_databases": [],
         "no_scanner_ran": false,
         "incomplete_converters": {},
         "scan_incomplete": true,
@@ -235,15 +227,11 @@
           "checkov": "FAILED",
           "semgrep": "PASSED"
         },
-        "scanner_reasons": {},
         "incomplete_scanners": [],
         "incomplete_scanner_details": {},
         "partial_coverage_scanners": [],
         "stale_content_databases": [],
         "inputs_not_scanned": [],
-        "incomplete_scanner_details": {},
-        "partial_coverage_scanners": [],
-        "stale_content_databases": [],
         "no_scanner_ran": false,
         "incomplete_converters": {},
         "scan_incomplete": false,
