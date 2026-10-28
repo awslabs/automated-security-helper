@@ -229,6 +229,13 @@ def test_without_a_usable_temporary_directory_the_output_directory_is_used(
 
 posix_only = pytest.mark.skipif(os.name == "nt", reason="POSIX modes and owners")
 
+#: Root passes every mode and ownership check the kernel makes by user id, so a
+#: refusal that depends on one cannot be provoked when the runner is root.
+not_root = pytest.mark.skipif(
+    os.name != "nt" and os.geteuid() == 0,
+    reason="root ignores file modes and ownership gates",
+)
+
 
 def _temp_dir(monkeypatch: pytest.MonkeyPatch, path: Path, mode: int) -> Path:
     path.mkdir(parents=True, exist_ok=True)
@@ -309,6 +316,7 @@ def test_with_no_private_directory_nothing_is_written(
 
 
 @posix_only
+@not_root
 def test_a_directory_another_account_owns_is_not_used(
     tree, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
