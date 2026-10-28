@@ -1331,10 +1331,10 @@ def _a_stand_in_context_with_unset_headers_is_the_in_process_caller(request):
 
     real = session_identity.resolve_session_id
 
-    def with_unset_headers_read_as_none(headers):
+    def with_unset_headers_read_as_none(headers, *, refuse_reserved=False):
         if isinstance(headers, NonCallableMock) and not isinstance(headers, Mapping):
             headers = None
-        return real(headers)
+        return real(headers, refuse_reserved=refuse_reserved)
 
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(
