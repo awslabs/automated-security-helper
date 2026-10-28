@@ -139,13 +139,17 @@ def deferred_tool_version_probes() -> Iterator[None]:
 
     The scan phase constructs every registered scanner, because a scanner's
     selectable name is only known on an instance, and bandit, checkov and semgrep
-    probe their version while constructed, with ``uv tool run --from <spec> <tool>
-    --version``. uv resolves that spec against the package index when the
-    environment is not cached, so a scan of one scanner reached the index for
-    scanners it would never run. Constructed inside this block, a scanner keeps
-    its probe for ``resolve_deferred_tool_version``, which the scan phase calls
-    only for a scanner that was selected. A scanner constructed anywhere else
-    (``ash dependencies``, the MCP server, a test) probes at once, as before.
+    used to probe their version while constructed, with ``uv tool run --from
+    <spec> <tool> --version``. uv resolves that spec against the package index
+    when the environment is not cached, so a scan of one scanner reached the
+    index for scanners it would never run. Construction starts nothing, whoever
+    constructs the scanner: the built-in scanners record the probe themselves
+    (``_deferred_tool_version_probe``), and ``resolve_deferred_tool_version`` runs
+    it once, from the dependency check, the SARIF step or the inventory. A
+    scanner constructed outside a scan (``ash dependencies``, the MCP server, a
+    test) therefore probes only when that is called. This block covers a plugin
+    that still calls ``_get_uv_tool_version`` while constructed: inside it the
+    call is recorded the same way; outside it the call probes at once.
     """
     token = _DEFER_VERSION_PROBES.set(True)
     try:
