@@ -318,6 +318,10 @@ class TestTheSourceTarget:
             assert container.status != ScannerStatus.ERROR, _errors(container)
             assert _received(record) is not None, "the stand-in snyk did not run"
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Windows file names cannot hold a newline or an escape character",
+    )
     def test_the_first_path_is_shown_with_its_controls_escaped(self, tmp_path, record):
         context = _context(tmp_path, ["thirdparty/**"])
         name = "a\nb\x1b[31m.js"
