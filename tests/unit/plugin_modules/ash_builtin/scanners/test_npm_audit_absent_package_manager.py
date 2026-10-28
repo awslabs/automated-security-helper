@@ -239,14 +239,13 @@ def test_an_audit_that_failed_raises_naming_the_lockfile(context, monkeypatch):
 
 
 def test_offline_past_the_dependency_check_yarn_2_is_not_run(context, monkeypatch):
-    """The offline branches in scan() serve a caller that skips the dependency check.
+    """The offline skip in scan() serves a caller that skips the dependency check.
 
-    A scan never reaches them: validate_plugin_dependencies refuses offline first.
-    A caller that bypasses it still gets a failure for an audit that cannot run
-    offline rather than a clean report.
+    A scan never reaches it: validate_plugin_dependencies refuses offline first.
+    A caller that bypasses the check gets the same outcome: the offline branch skips
+    before any yarn runs, records the lockfile as not audited and returns False,
+    rather than a clean report.
     """
-    from automated_security_helper.core.exceptions import ScannerError
-
     monkeypatch.setenv("ASH_OFFLINE", "true")
     _package(context.source_dir, "yarn.lock")
     monkeypatch.setattr(npm_audit_scanner, "find_executable", _without("none"))
@@ -263,9 +262,14 @@ def test_offline_past_the_dependency_check_yarn_2_is_not_run(context, monkeypatc
         patch.object(
             NpmAuditScanner, "_run_subprocess", autospec=True, side_effect=yarn_four
         ),
-        pytest.raises(ScannerError, match=r"no offline mode, so it was not run"),
     ):
-        scanner.scan(target=context.source_dir, target_type="source")
+        result = scanner.scan(target=context.source_dir, target_type="source")
+
+    # Offline no audit runs: the lockfile is recorded as not audited and scan()
+    # returns False, which the executor records MISSING (npm_audit_scanner.py,
+    # scan() before the lockfile loop; _skip_offline), not a clean report.
+    assert result is False
+    assert [entry["path"] for entry in scanner.inputs_not_scanned] == ["yarn.lock"]
 
 
 @pytest.mark.parametrize("tree", ["empty", "no-lockfile"])

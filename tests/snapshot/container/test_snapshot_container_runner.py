@@ -11,11 +11,19 @@ messages and the exit code are all ASH's own.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from tests.snapshot.container.conftest import FakeStep
 
 SCAN = ["scan", "--mode", "container", "--no-progress", "--source-dir", "src"]
+
+#: The snapshots are POSIX text by construction: they name /nonexistent/ash-test/docker.
+_POSIX_TEXT = pytest.mark.skipif(
+    os.name == "nt",
+    reason="the recorded text is POSIX by construction: it names /nonexistent/ash-test/docker",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -28,6 +36,7 @@ def _src(in_tmp, project_build_files_in_cwd, monkeypatch):
 
 
 class TestRunnerSelection:
+    @_POSIX_TEXT
     def test_no_runner_on_path(self, run_cli, snapshot, fake_docker, monkeypatch):
         # None of finch, docker, nerdctl or podman is installed.
         from automated_security_helper.interactions import run_ash_container
@@ -36,6 +45,7 @@ class TestRunnerSelection:
         assert run_cli([*SCAN, "--output-dir", "out"]) == snapshot
         assert fake_docker.calls == []
 
+    @_POSIX_TEXT
     def test_named_runner_not_installed(self, run_cli, snapshot, fake_docker):
         assert (
             run_cli([*SCAN, "--output-dir", "out", "--oci-runner", "podman"])
@@ -77,6 +87,7 @@ class TestRefusals:
 
 
 class TestDockerfileLookup:
+    @_POSIX_TEXT
     def test_no_build_outside_a_checkout(self, run_cli, snapshot, fake_docker, in_tmp):
         # ASH is installed from a checkout (revision LOCAL) and the working directory
         # is outside it and holds no Dockerfile. --no-build does not look one up at
@@ -93,6 +104,7 @@ class TestBuildFailure:
         stderr='Error: building at STEP "RUN grype --version": exit status 127\n',
     )
 
+    @_POSIX_TEXT
     def test_scan_after_failed_build(self, run_cli, snapshot, fake_docker):
         fake_docker.build = self.BUILD_ERROR
         assert run_cli([*SCAN, "--output-dir", "out"]) == snapshot

@@ -193,8 +193,44 @@ def test_the_detect_secrets_and_cdk_nag_workers_may_start(
         ]
     )
     _popen_event([sys.executable, "-c", _CHILD_BOOTSTRAP, "request.json", "out.jsonl"])
+    # python_child puts -P right after the interpreter on Python 3.11 and later.
+    _popen_event(
+        [
+            sys.executable,
+            "-P",
+            "-m",
+            "automated_security_helper.utils.detect_secrets_worker",
+            "request.json",
+            "output.json",
+        ]
+    )
+    _popen_event(
+        [sys.executable, "-P", "-c", _CHILD_BOOTSTRAP, "request.json", "out.jsonl"]
+    )
 
     assert guard.started == [], guard.started
+
+
+def test_a_flag_other_than_the_safe_path_flag_does_not_make_a_worker(
+    monkeypatch, tmp_path_factory
+):
+    """Control: only the leading -P is set aside, so another interpreter option before
+    -m is still a start the guard records."""
+    guard = install_tool_guard(monkeypatch, tmp_path_factory.mktemp("guard-bin"))
+
+    _popen_event(
+        [
+            sys.executable,
+            "-X",
+            "dev",
+            "-m",
+            "automated_security_helper.utils.detect_secrets_worker",
+            "request.json",
+            "output.json",
+        ]
+    )
+
+    assert len(guard.started) == 1, guard.started
 
 
 def test_a_tool_inside_the_landlock_wrapper_is_judged_by_itself(

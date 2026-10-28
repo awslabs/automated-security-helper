@@ -179,17 +179,28 @@ def trivy_default_misconfig_scanners(
     return listed
 
 
-def _existing_file(key: str, value: Any, path: Path) -> str:
+def _existing_file(key: str, value: Any, path: Path, show_value: bool = False) -> str:
     """``path`` as trivy is given it; a configured file that is missing fails.
 
-    The value is quoted with ``repr`` and the resolved path with its control
-    characters escaped, so a line break in either cannot forge a log line.
+    The refusal names ``key`` only unless ``show_value``: an option key, or an
+    environment variable such as TRIVY_IGNOREFILE, whose value the scanner also
+    redacts from every record, is never printed (config/path_trust.py: a value
+    the environment chose is never printed). With ``show_value`` the value is
+    quoted with ``repr`` and the resolved path with its control characters
+    escaped, so a line break in either cannot forge a log line; TRIVY_CONFIG,
+    the operator's config path, is shown that way, as its tests pin.
     """
     if not path.is_file():
+        if show_value:
+            raise ScannerError(
+                f"{key} is {str(value)!r}, which is not a file (resolved to "
+                f"{escape_controls(path.as_posix())}). Fix the path or unset "
+                "it; trivy is not run without it."
+            )
         raise ScannerError(
-            f"{key} is {str(value)!r}, which is not a file (resolved to "
-            f"{escape_controls(path.as_posix())}). Fix the path or unset it; "
-            "trivy is not run without it."
+            f"{key} does not name a file: the path it is set to does not "
+            "exist or is not a file. Fix the path or unset it; trivy is not "
+            "run without it."
         )
     return path.as_posix()
 
@@ -272,7 +283,11 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         chosen = self._operator_config_choice()
         if chosen is not None:
             key, value, path = chosen
-            self._scan_config_file = _existing_file(key, value, path)
+            # TRIVY_CONFIG's value is the operator's config path and is shown, escaped; the
+            # options.config_file refusal stays key-only like the other option refusals.
+            self._scan_config_file = _existing_file(
+                key, value, path, show_value=(key == "TRIVY_CONFIG")
+            )
             return self._scan_config_file
         if self.context is not None:
             in_tree = Path(self.context.source_dir) / "trivy.yaml"
@@ -424,6 +439,9 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                 source_dir=source_dir,
                 key=env,
                 config=getattr(self.context, "config", None),
+                # The value is the environment's: the refusal names the variable
+                # and shows the path as <value> (path_trust._named).
+                env_named=True,
             )
             if path is not None:
                 return _existing_file(env, from_env, path)

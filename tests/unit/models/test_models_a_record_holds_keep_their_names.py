@@ -24,7 +24,7 @@ two such str cannot be sent between workers.
 from __future__ import annotations
 
 import json
-import os
+import sys
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -51,7 +51,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.suppression_matcher import ignore_path_matches
 
-ODD = os.fsdecode(b"secr\xe9t.py")
+# Decoded with surrogateescape on every platform: os.fsdecode gives that on POSIX,
+# but on Windows the filesystem encoding is UTF-8 with surrogatepass (PEP 529), so
+# the lone 0xe9 would raise UnicodeDecodeError while this module is collected.
+ODD = b"secr\xe9t.py".decode(sys.getfilesystemencoding(), "surrogateescape")
 RECORDED = "secr\\udce9t.py"
 
 

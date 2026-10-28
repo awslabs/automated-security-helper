@@ -1020,6 +1020,19 @@ def load_config_file(
     try:
         return document, build_config(data, config_overrides)
     except ValidationError as e:
+        if _has_a_client_file(document):
+            # A chain that holds a file an MCP client supplied, by any name on
+            # the way (a link inside a delivered tree included), is refused in
+            # the words a client's file gets everywhere else
+            # (_client_validation_error, the form validate_config_document
+            # gives it): each problem's location, with a key the schema does
+            # not name as <key>, and its kind; no value and no key of the file.
+            raise ConfigFileRefused(
+                str(_client_validation_error(config_path, e)),
+                document=document,
+                validation_error=e,
+                after_overrides=False,
+            ) from None
         # Without pydantic's own text, which quotes every input: an input can
         # be a value the file read from the environment. And without the
         # values and keys the chain read from the environment: a key is
@@ -2357,9 +2370,26 @@ def resolve_config(
     reporter_source = (
         named_config_source if named_config_source is not None else tier_two_source
     )
+    # The base the reporter confinement compares against is the operator's own
+    # reporters view: the trusted base with the reporters sections the
+    # operator's own chain files wrote, and their patch operations, merged over
+    # it (_with_operator_chain_reporters). The trusted base alone is the
+    # defaults whenever the operator's chain extends a repository file
+    # (trusted_base_config, operator_in_tree), so it holds nothing the operator's
+    # own files set for an off-host reporter, and comparing the resolved config
+    # against it replaced the operator's own region and enable with the
+    # defaults' and named them as the repository's. The view holds only what
+    # operator-owned files wrote, never a repository file's values, so a
+    # repository's write that differs from it is still replaced and named. The
+    # reporters overrides are replayed onto this base by the confinement itself,
+    # and onto the recorded view below by _with_reporter_overrides, each on a
+    # copy, so an override is applied once per use.
+    chain_reporters = _with_operator_chain_reporters(
+        trusted, view_chain, in_tree, reads, environment_paths
+    )
     confine_reporter_destinations(
         config,
-        trusted,
+        chain_reporters,
         tier_two_overrides,
         list(in_tree),
         source=reporter_source,
@@ -2463,13 +2493,10 @@ def resolve_config(
     # warning for an off-host reporter's section can name what reporter_section
     # will ignore as well. The operator's own chain files (the ones outside the
     # tree: a --config that extends the repository's) merge over the trusted
-    # base first, then the operator's reporters overrides apply on top.
+    # base first (chain_reporters, built above for the reporter confinement),
+    # then the operator's reporters overrides apply on top.
     operator_reporters = _with_reporter_overrides(
-        _with_operator_chain_reporters(
-            trusted, view_chain, in_tree, reads, environment_paths
-        ),
-        operator_overrides,
-        config,
+        chain_reporters, operator_overrides, config
     )
     settled = confine_operator_only_options(
         config,

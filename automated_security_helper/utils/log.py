@@ -1544,12 +1544,16 @@ def get_logger(
         "_environ": {},  # Prevent environment variable issues
     }
 
-    # Set color system based on platform and encoding capabilities
+    # Set color system based on the color preference. "auto" on every platform:
+    # Rich detects the color system from the file the console writes to, so on a
+    # Windows console it finds the console (legacy_windows above tells it which
+    # escapes that console takes) and behind a pipe or a captured stream it finds
+    # no terminal and writes plain text. The "windows" color system this branch
+    # once named outright was used whatever the file was, so a child ash whose
+    # output a test captured wrote escapes around every level name and every
+    # highlighted number, on Windows and nowhere else.
     if use_color:
-        if platform.system().lower() == "windows":
-            console_base_params["color_system"] = "windows"
-        else:
-            console_base_params["color_system"] = "auto"
+        console_base_params["color_system"] = "auto"
     else:
         console_base_params["color_system"] = None
 

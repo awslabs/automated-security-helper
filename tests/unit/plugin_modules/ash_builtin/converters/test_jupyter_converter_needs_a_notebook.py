@@ -16,7 +16,8 @@ converter that has nothing to do.
 What the test does
 ------------------
 A child interpreter, with a stand-in ``uv`` first on ``PATH`` that records every
-call and fails, constructs the converter, checks its dependencies and converts. The
+call and fails, constructs the converter as the convert phase does, inside
+``deferred_tool_version_probes()``, checks its dependencies and converts. The
 child turns off the lookup of the uv installed beside its interpreter, which comes
 before ``PATH``, so the stand-in is the uv the converter runs. With
 no notebook in the tree, uv is asked nothing about nbconvert. With one, it is, as
@@ -57,6 +58,7 @@ DRIVER = textwrap.dedent(
     from pathlib import Path
 
     from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.base.uv_tool_mixin import deferred_tool_version_probes
     from automated_security_helper.config.ash_config import AshConfig
     from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter import (
         JupyterConverter,
@@ -79,7 +81,11 @@ DRIVER = textwrap.dedent(
         output_dir=source.parent / "out",
         config=AshConfig(project_name="jupyter-needs-a-notebook"),
     )
-    converter = JupyterConverter(context=context)
+    # Built as the convert phase builds it (core/phases/convert_phase.py): the
+    # version probe is kept for the dependency check, which runs it only once a
+    # notebook needs nbconvert.
+    with deferred_tool_version_probes():
+        converter = JupyterConverter(context=context)
     satisfied = converter.validate_plugin_dependencies()
     count = converter.candidate_input_count()
     converted = None if count is None else len(converter.convert())

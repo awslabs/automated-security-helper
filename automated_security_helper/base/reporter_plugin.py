@@ -75,7 +75,7 @@ from automated_security_helper.base.plugin_config import (
 )
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 
 
 class ReporterWorkspaceBehaviour(str, Enum):
@@ -388,7 +388,9 @@ def warn_off_host_section_without_enabled(
     nothing; this names the reporter and the key that turns it on. It changes
     nothing: the reporter still does not run, so a section in the scanned
     repository's own config gains nothing from it. Only the reporter's config
-    key is logged, never an option value (a bucket name, an account id).
+    key is logged, never an option value (a bucket name, an account id). It is
+    logged with markup off, so a reporter key that reads as markup is shown as
+    written.
 
     Call it where an off-host reporter that the run would otherwise use is left
     out because :func:`off_host_reporter_refused` says so. ``plugin_config`` is
@@ -408,9 +410,11 @@ def warn_off_host_section_without_enabled(
         _UNENABLED_SECTIONS_WARNED.add(key)
     ASH_LOGGER.warning(
         f"Reporter '{key}' sends findings off the host and is disabled by default. "
-        "Its config section sets options but not 'enabled', so it does not run. "
+        "Its config section sets options but not 'enabled': it does not set "
+        "enabled: true, so it does not run. "
         f"To run it, set reporters.{key}.enabled: true in the operator's config, or "
-        f"pass --config-overrides reporters.{key}.enabled=true."
+        f"pass --config-overrides reporters.{key}.enabled=true.",
+        extra=NO_MARKUP,
     )
 
 

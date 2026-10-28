@@ -778,7 +778,11 @@ def test_every_tool_process_runs_with_its_update_check_off(
     monkeypatch.setenv(
         "PATH", f"{Path(host.tool_path).parent}{os.pathsep}{os.environ['PATH']}"
     )
-    monkeypatch.setattr(subprocess, "run", host.run)
+    # Every ASH spawn runs through subprocess_utils._runner, which hands an
+    # unsandboxed spawn to _run_plain and a sandboxed one to _run_stoppable
+    # (subprocess_utils.py, _runner); subprocess.run itself is never called.
+    monkeypatch.setattr(subprocess_utils, "_run_plain", host.run)
+    monkeypatch.setattr(subprocess_utils, "_run_stoppable", host.run)
     resets = (
         uv_tool_runner._reset_uv_tool_runner_caches,
         uv_tool_runner.reset_uv_tool_runner,

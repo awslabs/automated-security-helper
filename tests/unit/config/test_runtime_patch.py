@@ -1249,6 +1249,7 @@ class TestDenialsMatchEveryPluginSpelling:
                 }
             ],
             allowlist=allowlist,
+            config=None,
         )
 
     def test_another_section_is_not_refused_by_the_plugins_denial(self) -> None:
@@ -1267,6 +1268,7 @@ class TestDenialsMatchEveryPluginSpelling:
             check_runtime_ops(
                 [{"op": "add", "path": "/reporters/TrivyRepo/options/x", "value": "x"}],
                 allowlist=allowlist,
+                config=None,
             )
         assert "denied_paths" not in excinfo.value.rule, excinfo.value.rule
         assert "'TrivyRepo'" in excinfo.value.rule, excinfo.value.rule
@@ -1374,7 +1376,7 @@ class TestOffHostReporterSections:
         op, section = _OFF_HOST_WRITES[case]
 
         with pytest.raises(RuntimePatchDeniedError) as excinfo:
-            check_runtime_ops([op], allowlist=self._ALLOWLIST)
+            check_runtime_ops([op], allowlist=self._ALLOWLIST, config=AshConfig())
 
         rule = excinfo.value.rule
         assert repr(section) in rule or "denied_paths entry '/reporters/" in rule, rule
@@ -1399,6 +1401,7 @@ class TestOffHostReporterSections:
             check_runtime_ops(
                 [{"op": "add", "path": path, "value": value}],
                 allowlist=self._ALLOWLIST,
+                config=None,
             )
 
         assert f"reaches the {section!r} reporters section" in excinfo.value.rule, (
@@ -1412,14 +1415,14 @@ class TestOffHostReporterSections:
         swapped["reporters"]["s3"] = {"options": {"bucket_name": "clients-bucket"}}
         op = {"op": "replace", "path": "", "value": swapped}
         with pytest.raises(RuntimePatchDeniedError):
-            check_runtime_ops([op], allowlist=self._ALLOWLIST)
+            check_runtime_ops([op], allowlist=self._ALLOWLIST, config=None)
         assert _off_host_reporter_section(op) == "s3"
 
     def test_a_test_of_the_whole_document_is_refused(self) -> None:
         """It compares every reporters section, the operator's bucket included."""
         op = {"op": "test", "path": "", "value": {}}
         with pytest.raises(RuntimePatchDeniedError):
-            check_runtime_ops([op], allowlist=self._ALLOWLIST)
+            check_runtime_ops([op], allowlist=self._ALLOWLIST, config=None)
         assert _off_host_reporter_section(op) == "reporters"
 
     def test_control_the_rule_leaves_a_whole_built_in_reporters_section(
@@ -1433,7 +1436,7 @@ class TestOffHostReporterSections:
         op = {"op": "replace", "path": "/reporters", "value": sections}
         assert _off_host_reporter_section(op) is None
         with pytest.raises(RuntimePatchDeniedError) as excinfo:
-            check_runtime_ops([op], allowlist=self._ALLOWLIST)
+            check_runtime_ops([op], allowlist=self._ALLOWLIST, config=AshConfig())
         assert "denied_paths entry '/reporters/" in excinfo.value.rule
 
     @pytest.mark.parametrize(
@@ -1510,6 +1513,7 @@ class TestOffHostReporterSections:
                 }
             ],
             allowlist=self._ALLOWLIST,
+            config=None,
         )
 
 
@@ -1610,7 +1614,9 @@ class TestGlobPluginDenials:
                 checked += 1
                 with pytest.raises(RuntimePatchDeniedError) as excinfo:
                     check_runtime_ops(
-                        [_write(section, written, field)], allowlist=allowlist
+                        [_write(section, written, field)],
+                        allowlist=allowlist,
+                        config=AshConfig(),
                     )
                 assert "denied_paths" in excinfo.value.rule, written
         # The lookup reads most of the generated spellings; a run that checked
@@ -1636,7 +1642,9 @@ class TestGlobPluginDenials:
         for key in uncovered:
             for written in [key, *_spellings(key)]:
                 check_runtime_ops(
-                    [_write(section, written, field)], allowlist=allowlist
+                    [_write(section, written, field)],
+                    allowlist=allowlist,
+                    config=AshConfig(),
                 )
 
     def test_a_value_pattern_bound_through_a_glob_covers_every_spelling(self) -> None:
@@ -1656,7 +1664,7 @@ class TestGlobPluginDenials:
             }
         ]
         with pytest.raises(RuntimePatchDeniedError) as excinfo:
-            check_runtime_ops(ops, allowlist=allowlist)
+            check_runtime_ops(ops, allowlist=allowlist, config=AshConfig())
         assert "denied_value_patterns" in excinfo.value.rule
 
 
@@ -1705,9 +1713,9 @@ class TestGlobDenialsNameKnownPlugins:
                 or fnmatch.fnmatchcase(folded, glob.replace("-", "_"))
             ):
                 with pytest.raises(RuntimePatchDeniedError):
-                    check_runtime_ops(ops, allowlist=allowlist)
+                    check_runtime_ops(ops, allowlist=allowlist, config=None)
             else:
-                check_runtime_ops(ops, allowlist=allowlist)
+                check_runtime_ops(ops, allowlist=allowlist, config=None)
 
     @pytest.mark.parametrize(
         "denial",
@@ -1725,6 +1733,7 @@ class TestGlobDenialsNameKnownPlugins:
             check_runtime_ops(
                 [_write("scanners", "TrivyRepo", "options/ignore_file")],
                 allowlist=allowlist,
+                config=None,
             )
 
     def test_a_section_the_config_already_has_is_a_known_key(self) -> None:

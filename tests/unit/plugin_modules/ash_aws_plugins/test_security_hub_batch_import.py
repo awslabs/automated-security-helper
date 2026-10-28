@@ -1324,12 +1324,12 @@ def test_an_override_turns_it_off_whatever_the_repositorys_config_says(tmp_path)
         "      findings_scope: someone-elses-repo\n",
         encoding="utf-8",
     )
-    # The control: without the override the repository's enabled: true applies,
-    # so it is the override that turns the reporter off below. (On this branch
-    # alone. The repository-config trust rules may stop an in-tree file from
-    # enabling it at all, and then this control changes with them.)
+    # The control: the repository's own enabled: true does not apply either
+    # (_confine_enabled in config/reporter_trust.py holds an off-host reporter's
+    # enabled to the trusted base's), so the reporter is off with or without
+    # the override, and the override below is the operator's word on top.
     control = resolve_config(source_dir=checkout)
-    assert _reporter_from(control, tmp_path).config.enabled is True
+    assert _reporter_from(control, tmp_path).config.enabled is False
 
     config = resolve_config(
         source_dir=checkout,
@@ -2100,15 +2100,20 @@ def test_a_base_the_repository_s_file_reaches_is_the_repository_s(
     resolved = config.get_plugin_config(plugin_type="reporter", plugin_name="s3")
     assert (resolved or {}).get("enabled") is True, resolved
     for section in (hub, s3):
-        assert (section or {}).get("enabled") is None, section
+        assert (section or {}).get("enabled") is not True, section
         assert _REPOSITORY_CHOSE not in json.dumps(section or {}), section
-    # One warning charges the repository's file the chain came through, and
-    # what it says is ignored is in fact not what runs (checked above), never
-    # the operator's file or the base's value.
-    [warning] = _security_hub_warnings(caplog)
-    assert ".ash.yaml" in warning, warning
-    assert "operator.yaml" not in warning, warning
-    assert _REPOSITORY_CHOSE not in warning, warning
+    # The warnings charge the repository's file the chain came through (the
+    # destination step names the region, profile and enabled it replaced,
+    # config/reporter_trust.py; the settle step names the scope,
+    # config/operator_only_options.py), and what they say is ignored is in
+    # fact not what runs (checked above), never the operator's file or the
+    # base's value.
+    warnings = _security_hub_warnings(caplog)
+    assert warnings
+    for warning in warnings:
+        assert ".ash.yaml" in warning, warning
+        assert "operator.yaml" not in warning, warning
+        assert _REPOSITORY_CHOSE not in warning, warning
 
 
 @pytest.mark.parametrize("spelling", ["aws_security_hub", "AWS-Security-Hub"])
@@ -2374,11 +2379,13 @@ def test_a_repository_file_that_names_its_base_twice_still_confines_it(
         config = resolve_config(config_path=operator, source_dir=checkout)
         section = reporter_section(config, SecurityHubReporter)
 
-    assert (section or {}).get("enabled") is None, section
+    assert (section or {}).get("enabled") is not True, section
     assert _REPOSITORY_CHOSE not in json.dumps(section or {}), section
-    [warning] = _security_hub_warnings(caplog)
-    assert ".ash.yaml" in warning, warning
-    assert "operator.yaml" not in warning, warning
+    warnings = _security_hub_warnings(caplog)
+    assert warnings
+    for warning in warnings:
+        assert ".ash.yaml" in warning, warning
+        assert "operator.yaml" not in warning, warning
 
 
 @pytest.mark.parametrize(
@@ -3239,12 +3246,14 @@ def test_a_repository_patch_of_the_section_does_not_run(tmp_path, caplog):
         config = resolve_config(config_path=operator, source_dir=checkout)
         section = reporter_section(config, SecurityHubReporter)
 
-    assert (section or {}).get("enabled") is None, section
+    assert (section or {}).get("enabled") is not True, section
     assert _REPOSITORY_CHOSE not in json.dumps(section or {}), section
-    [warning] = _security_hub_warnings(caplog)
-    assert ".ash.yaml" in warning, warning
-    assert "operator.yaml" not in warning, warning
-    assert _REPOSITORY_CHOSE not in warning, warning
+    warnings = _security_hub_warnings(caplog)
+    assert warnings
+    for warning in warnings:
+        assert ".ash.yaml" in warning, warning
+        assert "operator.yaml" not in warning, warning
+        assert _REPOSITORY_CHOSE not in warning, warning
 
 
 @pytest.mark.parametrize("shape", ["empty-list", "single-string"])
@@ -4172,11 +4181,14 @@ def _resolve_and_select(checkout: Path, caplog) -> Any:
         return reporter_section(config, SecurityHubReporter)
 
 
-def test_one_warning_names_what_both_confinements_ignore(tmp_path, caplog):
-    """The repository's section sets archiving and a profile. Confinement drops
-    the archiving when the config resolves, and reporter_section then gives the
-    reporter the operator's whole section. A single warning names both, so one
-    section draws one warning, not two."""
+def test_each_confinement_names_what_it_ignores_from_the_repositorys_section(
+    tmp_path, caplog
+):
+    """The repository's section sets archiving and a profile. The destination
+    step (config/reporter_trust.py) replaces the profile and names it; the
+    settle step (config/operator_only_options.py) settles the archiving and
+    names it. Each names the repository's file, and reporter_section, whose
+    operator section the resolved one now lies within, adds nothing."""
     checkout = _checkout_with_config(
         tmp_path,
         "reporters:\n"
@@ -4188,9 +4200,15 @@ def test_one_warning_names_what_both_confinements_ignore(tmp_path, caplog):
 
     section = _resolve_and_select(checkout, caplog)
 
-    [warning] = _security_hub_warnings(caplog)
-    assert "reporters.aws-security-hub.options.archive_resolved_findings" in warning
-    assert "the rest of reporters.aws-security-hub" in warning
+    warnings = _security_hub_warnings(caplog)
+    assert any(
+        "reporters.aws-security-hub.options.archive_resolved_findings" in w
+        for w in warnings
+    ), warnings
+    assert any(
+        "reporters.aws-security-hub.options.aws_profile" in w for w in warnings
+    ), warnings
+    assert all(".ash.yaml" in w for w in warnings), warnings
     assert "aws_profile" not in section["options"]
 
 
@@ -4213,9 +4231,13 @@ def test_the_options_alone_draw_the_options_warning(tmp_path, caplog):
     assert "the rest of" not in warning
 
 
-def test_reporter_section_warns_where_nothing_was_dropped(tmp_path, caplog):
-    """A section that sets no operator-only option is left to reporter_section,
-    which says it ignores it."""
+def test_the_destination_step_names_a_profile_only_the_repository_wrote(
+    tmp_path, caplog
+):
+    """A section that sets no operator-only option but a destination option:
+    the destination step (config/reporter_trust.py) replaces the profile and
+    names it from the repository's file; reporter_section then finds the
+    resolved section within the operator's and adds nothing."""
     checkout = _checkout_with_config(
         tmp_path,
         "reporters:\n"
@@ -4227,7 +4249,10 @@ def test_reporter_section_warns_where_nothing_was_dropped(tmp_path, caplog):
     section = _resolve_and_select(checkout, caplog)
 
     [warning] = _security_hub_warnings(caplog)
-    assert warning.startswith("Ignoring reporters.aws-security-hub from")
+    assert warning.startswith(
+        "Ignoring reporters.aws-security-hub.options.aws_profile from"
+    ), warning
+    assert ".ash.yaml" in warning, warning
     assert "aws_profile" not in section["options"]
 
 
@@ -4451,12 +4476,21 @@ def _not_in_a_checkout(path: Path) -> Path:
 
 
 def _get_config_from_elsewhere(tmp_path, monkeypatch, config: Path) -> dict[str, Any]:
+    """get_config of ``config``, a file the operator names, from a working
+    directory that does not hold it.
+
+    A path named to get_config is the client's unless it is in a directory
+    ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` names, and a client's file that sets the
+    Security Hub section is refused outright. These tests are about how a file
+    the operator names is shown, so the test's directory is set aside as the
+    operator's."""
     from automated_security_helper.cli.mcp_tools import mcp_get_config
 
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(tmp_path))
     return mcp_get_config(config_path=str(config))
 
 
@@ -4478,7 +4512,11 @@ def test_get_config_marks_the_operator_only_options_a_repository_file_sets(
     them. A scan of that checkout ignores both, so they are shown marked. The
     file counts as the repository's by the name it was given or by its target,
     and so does a base it extends. A scope the file reads from the
-    environment is marked by the reference it wrote, never by the value."""
+    environment is marked by the reference it wrote, never by the value. The
+    rest of the section (aws_region) is the operator's too and is confined
+    for a file in another checkout, so it is absent rather than shown as
+    applied (docs/content/docs/plugins/aws/security-hub-reporter.md, "Options
+    only the operator sets")."""
     _not_in_a_checkout(tmp_path)
     repository_options = _REPOSITORY_OPTIONS
     if scope == "from-the-environment":
@@ -4524,7 +4562,7 @@ def test_get_config_marks_the_operator_only_options_a_repository_file_sets(
     assert options["archive_resolved_findings"] == (
         "<operator only; ignored from this file: true>"
     )
-    assert options["aws_region"] == "us-west-2"
+    assert "aws_region" not in options
 
 
 @pytest.mark.parametrize(
@@ -4608,6 +4646,8 @@ def test_get_config_does_not_judge_a_named_file_by_ash_configs_checkout(
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
     monkeypatch.setenv("ASH_CONFIG", str(ash_config))
+    # The operator names the file (see _get_config_from_elsewhere).
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(tmp_path))
 
     options = _security_hub_options(mcp_get_config(config_path=str(named)))
 
@@ -4625,6 +4665,8 @@ def test_get_config_shows_the_operators_value_where_the_target_holds_the_file(
     mark_git_checkout(checkout)
     monkeypatch.chdir(checkout)
     monkeypatch.setenv("ASH_CONFIG", str(_operator_file(tmp_path, "operator-scope")))
+    # The operator names the file (see _get_config_from_elsewhere).
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(tmp_path))
 
     options = _security_hub_options(
         mcp_get_config(config_path=str(checkout / ".ash" / ".ash.yaml"))
@@ -6007,31 +6049,25 @@ def test_an_invalid_option_is_refused_when_the_reporter_is_built(tmp_path):
     assert "max_retries" in str(raised.value)
 
 
-def test_a_config_read_as_the_base_class_does_not_turn_the_reporter_on(
-    tmp_path, caplog
+def test_a_config_named_for_another_reporter_is_refused_when_the_reporter_is_built(
+    tmp_path,
 ):
-    """A section SecurityHubReporterConfig refuses and ReporterPluginConfigBase
-    accepts (a `name` that is not aws-security-hub) is still read as the base
-    class, whose enabled defaults to True. The reporter turns itself off and
-    report() refuses, naming what was wrong."""
-    with caplog.at_level(logging.ERROR):
-        reporter = SecurityHubReporter(
-            context=PluginContext(
-                source_dir=tmp_path,
-                output_dir=tmp_path / "out",
-                config=AshConfig(project_name="fixture-project"),
-            ),
-            config={"enabled": True, "name": "not-security-hub"},
-        )
-
-    assert isinstance(reporter.config, SecurityHubReporterConfig)
-    assert reporter.config.enabled is False
-    assert "aws-security-hub is disabled" in caplog.text
-
+    """A section whose `name` is not aws-security-hub is validated by this
+    reporter's own config model (config_validated_by_declared_model in
+    base/plugin_config.py), never read as ReporterPluginConfigBase, whose
+    enabled defaults to True. So no reporter is built, and nothing contacts
+    AWS."""
     session = MagicMock(side_effect=AssertionError("AWS was contacted"))
     with patch.object(securityhub_module.boto3, "Session", session):
-        assert _filter_enabled(reporter, reporter.context) == []
-        with pytest.raises(SecurityHubImportError) as raised:
-            reporter.report(_model(_many(1)))
+        with pytest.raises(ValidationError) as raised:
+            SecurityHubReporter(
+                context=PluginContext(
+                    source_dir=tmp_path,
+                    output_dir=tmp_path / "out",
+                    config=AshConfig(project_name="fixture-project"),
+                ),
+                config={"enabled": True, "name": "not-security-hub"},
+            )
     session.assert_not_called()
-    assert "name: Input should be 'aws-security-hub'" in str(raised.value)
+    assert "name" in str(raised.value)
+    assert "aws-security-hub" in str(raised.value)

@@ -81,17 +81,21 @@ def test_a_list_another_writer_replaced_after_this_run_wrote_it_is_not_read(tmp_
     this run's."""
     source, output = _tree(tmp_path)
     other_runs_list = str(source / "planted.py").encode("utf-8")
-    real_replace = atomic_write._replace
+    real_write = gss.write_bytes_atomically
 
-    def _replace_then_another_run_replaces_the_list(staging, target):
-        real_replace(staging, target)
-        if Path(target).name == SCAN_SET_LIST:
-            Path(target).write_bytes(other_runs_list)
+    # The other run lands right after this run's replace returns and before the
+    # digest is recorded. The list is written through fs_guard's directory
+    # descriptor, whose rename is not atomic_write._replace, so the interleaving
+    # is planted around the writer _write_lists calls, not inside the rename.
+    def _write_then_another_run_replaces_the_list(path, data, **kwargs):
+        real_write(path, data, **kwargs)
+        if Path(path).name == SCAN_SET_LIST:
+            Path(path).write_bytes(other_runs_list)
 
     with patch.object(
-        atomic_write,
-        "_replace",
-        side_effect=_replace_then_another_run_replaces_the_list,
+        gss,
+        "write_bytes_atomically",
+        side_effect=_write_then_another_run_replaces_the_list,
     ):
         written = scan_set(source=str(source), output=str(output), run_id=RUN_A)
 

@@ -16,7 +16,10 @@ semgrep's own switch for the check is ``--disable-version-check``, or the variab
 ``SEMGREP_ENABLE_VERSION_CHECK=0`` that the same option reads. The check only
 shows upgrade banners, which ASH never reads. The scan gets the variable from
 ``extra_subprocess_env``, and the version probe, which ASH starts through uv and
-cannot give an argument, gets it for the length of the probe.
+cannot give an argument, gets it for the length of the probe. The probe is recorded
+at construction and run by resolve_deferred_tool_version, which the dependency
+check, the SARIF step and the inventory call, so the probe tests call it as those
+readers do.
 
 What stays as it was: the sandbox requirements (no ``~/.cache`` path is granted),
 the ``metrics`` option and the exit codes the scanner accepts.
@@ -95,13 +98,16 @@ def test_version_probe_runs_with_the_version_check_off(
     probes, online, test_plugin_context
 ):
     scanner = SemgrepScanner(context=test_plugin_context, config=SemgrepScannerConfig())
+    # The probe construction recorded, run as the dependency check runs it.
+    scanner.resolve_deferred_tool_version()
 
     assert probes == [("semgrep", "0")]
     assert scanner.tool_version == "1.2.3"
 
 
 def test_version_probe_puts_the_environment_back(probes, online, test_plugin_context):
-    SemgrepScanner(context=test_plugin_context, config=SemgrepScannerConfig())
+    scanner = SemgrepScanner(context=test_plugin_context, config=SemgrepScannerConfig())
+    scanner.resolve_deferred_tool_version()
 
     assert VERSION_CHECK not in os.environ
 
@@ -111,7 +117,8 @@ def test_version_probe_puts_back_a_value_the_host_exported(
 ):
     online.setenv(VERSION_CHECK, "1")
 
-    SemgrepScanner(context=test_plugin_context, config=SemgrepScannerConfig())
+    scanner = SemgrepScanner(context=test_plugin_context, config=SemgrepScannerConfig())
+    scanner.resolve_deferred_tool_version()
 
     assert probes == [("semgrep", "0")]
     assert os.environ[VERSION_CHECK] == "1"
@@ -124,6 +131,8 @@ def test_failed_version_probe_puts_the_environment_back(online, test_plugin_cont
     online.setattr(UVToolRunner, "get_tool_version", broken)
 
     scanner = SemgrepScanner(context=test_plugin_context, config=SemgrepScannerConfig())
+    # The mixin's probe catches the failure: no version, environment restored.
+    scanner.resolve_deferred_tool_version()
 
     assert scanner.tool_version is None
     assert VERSION_CHECK not in os.environ

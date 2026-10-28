@@ -72,6 +72,20 @@ from tests.utils.processes import process_running
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
 
+#: SIGHUP where the platform has one. Windows has none, and a bare
+#: ``signal.SIGHUP`` at module level raised AttributeError at collection there,
+#: before the skipif above could apply to any test, so every unit-test job on
+#: Windows reported the whole module as a collection error. Read with getattr,
+#: as the product does (cli/mcp/__init__.py), and the sighup parameter of each
+#: test below is skipped, with its reason, where the signal is absent.
+_SIGHUP = getattr(signal, "SIGHUP", None)
+_SIGHUP_PARAM = pytest.param(
+    _SIGHUP,
+    marks=[]
+    if _SIGHUP is not None
+    else [pytest.mark.skip(reason="this platform has no SIGHUP")],
+)
+
 STARTUP_TIMEOUT_SECONDS = 180
 
 #: Long enough to tell a server that does not stop from a slow one.
@@ -317,7 +331,7 @@ def _probe(port: int, transport: str) -> tuple:
 
 
 @pytest.mark.parametrize(
-    "ignored", [signal.SIGINT, signal.SIGHUP], ids=["sigint", "sighup"]
+    "ignored", [signal.SIGINT, _SIGHUP_PARAM], ids=["sigint", "sighup"]
 )
 @pytest.mark.parametrize("transport", ["streamable-http", "sse"])
 def test_an_http_server_started_with_a_signal_ignored_keeps_it_ignored(
@@ -490,9 +504,10 @@ with patch(
 #: has stopped, which ends the process by SIGTERM.
 STOPPED_BY = {
     signal.SIGINT: INTERRUPTED,
-    signal.SIGHUP: 0,
     signal.SIGTERM: -signal.SIGTERM,
 }
+if _SIGHUP is not None:
+    STOPPED_BY[_SIGHUP] = 0
 
 
 def _client(transport: str, port: int, http_client):
@@ -517,7 +532,7 @@ def _wait_until_busy(tmp_path: Path) -> Dict[str, int]:
 
 @pytest.mark.parametrize(
     "signum",
-    [signal.SIGINT, signal.SIGHUP, signal.SIGTERM],
+    [signal.SIGINT, _SIGHUP_PARAM, signal.SIGTERM],
     ids=["sigint", "sighup", "sigterm"],
 )
 @pytest.mark.parametrize("transport", ["streamable-http", "sse"])
@@ -754,7 +769,7 @@ DOCKER_STOP_GRACE_SECONDS = 10
 
 @pytest.mark.parametrize(
     "signum",
-    [signal.SIGINT, signal.SIGTERM, signal.SIGHUP],
+    [signal.SIGINT, signal.SIGTERM, _SIGHUP_PARAM],
     ids=["sigint", "sigterm", "sighup"],
 )
 @pytest.mark.parametrize("transport", ["streamable-http", "sse"])

@@ -65,6 +65,7 @@ from automated_security_helper.utils.directory_refusals import output_dir_unmake
 from automated_security_helper.utils.numeric_text import MIN_REDACTED_LENGTH
 from automated_security_helper.utils.error_text import (
     carry_environment_values,
+    config_environment_values,
     error_text,
     log_unexpected_error,
     os_error_without_named_file,
@@ -1941,7 +1942,7 @@ async def mcp_scan_directory(
         elif not claimed_session.try_start_scan(limit):
             claimed_session.release_scan()
             # try_start_scan turns a scan away only when a limit is reached.
-            return session_scan_limit_refusal("scan_directory", cast(int, limit))
+            return session_scan_limit_refusal("scan_directory", limit)
         counted = claimed_session
     elif limit is not None:
         shared = sessionless_scan_count()
@@ -4439,6 +4440,7 @@ def _answer_get_config(
         repository_settings_for_root,
     )
     from automated_security_helper.config.sandbox_grants import (
+        files_inside,
         in_a_checkout,
         working_directory,
     )
@@ -4730,6 +4732,7 @@ def _answer_get_config(
         # Before the open: a FIFO's open waits for a writer, and a directory or a
         # device is not a config.
         from automated_security_helper.config.config_sources import (
+            read_config_bytes,
             read_opened_config_bytes,
             refuse_unless_a_file,
         )
@@ -4745,15 +4748,23 @@ def _answer_get_config(
         # is refused as a resolved read refuses it, not left to the tool's
         # generic handler. (json.JSONDecodeError and UnicodeDecodeError are both
         # ValueErrors.)
+        # Raw mode asks for a document, not a run: it judges nothing and refuses
+        # no file for reading the environment, whoever named it, because it
+        # resolves no reference. Each value the loader would read from the
+        # environment comes back as the reference the file writes, marked
+        # (ENV_VALUE_PREFIX), so the answer holds the client's own text and
+        # nothing of the server's. Whether a file may resolve its references is
+        # the resolved read's question (env_refused_for), answered there.
         try:
             # Read from the descriptor of the file the check judged, which the
             # call holds open; a name the check could not open is opened once,
-            # and only if it is the file that was checked.
+            # and only if it is the file that was checked. One read: the bytes
+            # below are what the answer is made of.
             opened = held.files.get(checked) if checked is not None else None
             content = (
                 read_opened_config_bytes(opened, Path(path))
                 if opened is not None
-                else None
+                else read_config_bytes(Path(path), expect=checked)
             )
             return _config_as_written(path, expect=checked, content=content) or {}
         except (
@@ -4926,34 +4937,114 @@ def _answer_get_config(
     # chain is the load's own list (chain_out), so a base BOTH chains extend
     # stays the selected chain's own file for the checkout guard below, and a
     # chain file changed on disk since the load is still judged as read.
-    if not resolved._repository_config_files and any(
-        # The fail-closed verdict: a file whose walk never decided it is
-        # marked too, as the resolution's own membership read it.
+    # The record is the resolution's own (repository_out): the chain is not
+    # resolved again, so a chain file that changed on disk since the read
+    # cannot raise past the structured refusals above or put a second read's
+    # values in the answer.
+    [written] = chain_repository
+    # Marked when no chain file is inside the scanned trees -- judged against
+    # the trees the resolution confined with (RepositorySettings.trees), with
+    # the same fail-closed walk, so an undecided name counts as the trees' here
+    # as it did there -- and one is in a checkout. The resolution's list of
+    # repository files is not that test: it also holds a chain file in another
+    # checkout, which the confinement left out as the repository's and which
+    # is exactly the file whose options are marked here, so a guard keyed on it
+    # skipped the marker and answered without the option.
+    if not files_inside([path, *chain], written.trees, [path, *chain]) and any(
+        # The fail-closed answer: a file whose walk never decided it is in a
+        # checkout, as the resolution's own membership read it.
         in_a_checkout(file)
         for file in [path, *chain]
     ):
         # Marked only where a checkout file of the chain writes one: the dump
         # holds a scanner's typed options whether or not any file named them,
         # and a file of the chain outside every checkout is an operator's,
-        # whose values a scan keeps (set_elsewhere skips those places). The
-        # record is the resolution's own (repository_out): the chain is not
-        # resolved again, so a chain file that changed on disk since the read
-        # cannot raise past the structured refusals above or put a second
-        # read's values in the answer. No chain file is inside the scanned
-        # trees here (the guard above), so the resolution confined each
-        # checkout file of the chain exactly as the dropped re-read did.
-        [written] = chain_repository
-        # The resolution's references, the ones at places the load left out
-        # included (the confinement rewrite that drops them runs only when a
-        # chain file is inside the scanned trees): an option the chain read
-        # from the environment is marked by the reference it was written as,
-        # never by its value.
-        shown = mark_operator_only_options(
+        # whose values a scan keeps (set_elsewhere skips those places). No
+        # chain file is inside the scanned trees here (the guard above), so
+        # the resolution confined each checkout file of the chain exactly as
+        # the dropped re-read did.
+        # The resolution's references: an option the chain read from the
+        # environment is marked by the reference it was written as, never by
+        # its value. The confinement rewrite (_take_confined_references) drops
+        # the references at the places it settled, a chain file in another
+        # checkout included, so a marker for an environment-read option may
+        # find no reference and would fall back to the value the server's
+        # environment gave. Such a marker is not written: the option stays as
+        # the load left it, absent or at the configuration's own value.
+        shown = _without_environment_read_markers(
             shown,
-            written,
-            tuple(getattr(resolved, "_environment_references", ()) or ()),
+            mark_operator_only_options(
+                shown,
+                written,
+                tuple(getattr(resolved, "_environment_references", ()) or ()),
+            ),
+            config_environment_values(resolved),
         )
     return shown_config(resolved, shown)
+
+
+_OPERATOR_ONLY_MARKER_HEAD = "<operator only; ignored from this file: "
+
+
+def _without_environment_read_markers(
+    before: Dict[str, Any],
+    marked: Dict[str, Any],
+    environment_values: Tuple[str, ...],
+) -> Dict[str, Any]:
+    """*marked*, with each operator-only marker that would print a value the
+    configuration read from the environment put back to what *before* held.
+
+    ``mark_operator_only_options`` shows an environment-read value as the
+    reference the file wrote only when a reference still sits at the place;
+    otherwise it shows the value itself, as JSON. The references at a settled
+    place are the ones the confinement rewrite drops, so for a chain file in
+    another checkout the fallback is reached, and the value is one the server's
+    environment gave. A marker whose text is that fallback for any of
+    *environment_values* (the configuration's own record of what its chain read,
+    every read included) is withdrawn: the option is left as *before* has it,
+    absent where the load left it out, or at the value the configuration holds
+    there. A literal that happens to equal an environment value is withheld
+    too, which errs toward showing less. *marked* is changed in place and
+    returned.
+    """
+    import json as _json
+
+    from automated_security_helper.utils.terminal_text import shown_on_one_line
+
+    fallbacks = {
+        f"{_OPERATOR_ONLY_MARKER_HEAD}{shown_on_one_line(_json.dumps(value))}>"
+        for value in environment_values
+        if isinstance(value, str)
+    }
+    if not fallbacks:
+        return marked
+    for kind in ("reporters", "scanners"):
+        sections = marked.get(kind)
+        if not isinstance(sections, dict):
+            continue
+        before_sections = before.get(kind)
+        before_sections = before_sections if isinstance(before_sections, dict) else {}
+        for key, section in sections.items():
+            options = section.get("options") if isinstance(section, dict) else None
+            if not isinstance(options, dict):
+                continue
+            before_section = before_sections.get(key)
+            before_options = (
+                before_section.get("options")
+                if isinstance(before_section, dict)
+                else None
+            )
+            before_options = before_options if isinstance(before_options, dict) else {}
+            for option, text in list(options.items()):
+                if not isinstance(text, str) or text not in fallbacks:
+                    continue
+                if before_options.get(option) == text:
+                    continue
+                if option in before_options:
+                    options[option] = before_options[option]
+                else:
+                    options.pop(option)
+    return marked
 
 
 def _config_problem(field: str, message: str, kind: str) -> Dict[str, Any]:

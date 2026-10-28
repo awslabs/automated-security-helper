@@ -16,6 +16,7 @@ from automated_security_helper.base.options import (
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
+from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -364,10 +365,10 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # Set up explicit UV tool installation commands
         self._setup_uv_tool_install_commands()
 
-        # Under a scan phase the probe is deferred until the dependency check
-        # asks (uv_tool_mixin.deferred_tool_version_probes), so nothing runs
-        # here then; see resolve_deferred_tool_version.
-        self.tool_version = self._get_uv_tool_version("bandit")
+        # The version probe is recorded here and run once, by the dependency
+        # check, the SARIF step or the inventory (resolve_deferred_tool_version):
+        # construction must start nothing, whoever constructs the scanner.
+        self._deferred_tool_version_probe = ("bandit", self._uv_from_spec())
         self.description = "Bandit is a Python source code security analyzer."
         extra_args = [
             ToolExtraArg(
@@ -503,23 +504,6 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # Final fallback: consolidated UV-or-direct-binary resolver.
         return get_uv_tool_command(self.command) is not None
 
-    def _use_empty_ini(self) -> None:
-        """Hand bandit an empty ini file ASH writes.
-
-        Given no ``--ini``, bandit walks its targets for a ``.bandit`` file,
-        which can set ``skips`` and ``exclude``, and would put the repository's
-        file where the operator's refused or missing one was. An explicit
-        ``--ini`` ends the search. The path is recorded now and the file is
-        written when the arguments are resolved (``_neutral_tool_file``), so
-        building a scanner writes nothing.
-        """
-        self.args.extra_args.append(
-            ToolExtraArg(
-                key="--ini",
-                value=self._neutral_tool_file("bandit-empty.ini", "[bandit]\n"),
-            )
-        )
-
     def _process_config_options(self):
         # The operator's config file, if there is one. A config file inside the
         # scanned tree does not choose it (config/tool_config_trust.py), and ASH
@@ -608,14 +592,13 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             self.args.extra_args.append(
                 ToolExtraArg(key="--ini", value=configured_path.as_posix())
             )
-        else:
-            if configured_path is not None:
-                self.args.extra_args.append(
-                    ToolExtraArg(key="--configfile", value=configured_path.as_posix())
-                )
-            # With no operator .bandit, the --ini is the empty file, so bandit
-            # never reads one from the scanned tree, --configfile or not.
-            self._use_empty_ini()
+        elif configured_path is not None:
+            self.args.extra_args.append(
+                ToolExtraArg(key="--configfile", value=configured_path.as_posix())
+            )
+        # With no operator .bandit, each scan passes an empty --ini ASH writes
+        # for that scanner run (_execute_scan), so bandit never reads one from
+        # the scanned tree, --configfile or not.
 
         self.args.extra_args.append(
             ToolExtraArg(
@@ -842,9 +825,27 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
 
         # A new list: the one extra_args holds is put back as it was, unchanged.
         original_extra_args = self.args.extra_args
-        self.args.extra_args = [
+        resolution_args = [
             arg for arg in original_extra_args if not arg.key.startswith("--exclude=")
-        ] + [ToolExtraArg(key=f"--exclude={','.join(entries)}", value=None)]
+        ]
+        if self._ini_file is None:
+            # Given no --ini, bandit walks its targets for a .bandit file, which
+            # can set skips and exclude. The --ini is an empty file ASH writes
+            # for this scanner run, outside the scanned tree and removed when
+            # the run ends (config/tool_config_trust.empty_tool_config), never
+            # the results directory, which the default layout puts inside the
+            # tree.
+            resolution_args.append(
+                ToolExtraArg(
+                    key="--ini",
+                    value=empty_tool_config(
+                        "bandit-empty.ini", "[bandit]\n", context=self.context
+                    ).as_posix(),
+                )
+            )
+        self.args.extra_args = resolution_args + [
+            ToolExtraArg(key=f"--exclude={','.join(entries)}", value=None)
+        ]
         try:
             final_args = self._resolve_arguments(
                 target=target, results_file=results_file

@@ -5,10 +5,11 @@
 
 The orchestrator writes the scan set under the run's ID before any plugin runs,
 and a plugin that calls ``scan_set`` with ``run_id=context.run_id`` reads that list
-back instead of walking the tree again (``get_scan_set``). Six places call it for
+back instead of walking the tree again (``get_scan_set``). Nine places call it for
 the plugins: the archive and Jupyter converters, detect-secrets, npm-audit,
-snyk-code's copy of the tree, and ``utils/cfn_template_model``, which picks the
-candidate templates for cdk-nag and cfn-nag.
+actionlint, zizmor, snyk-code's copy of the tree, ``utils/cfn_template_model``,
+which picks the candidate templates for cdk-nag and cfn-nag, and
+``utils/cfn_template_discovery``, which does the same for cfn-lint and cfn-guard.
 
 What pinned those calls was an AST test that each passes a ``run_id=`` keyword,
 which a call passing ``getattr(self.context, "runid", None)`` satisfies, and which
@@ -144,14 +145,47 @@ def _snyk_code(context: PluginContext) -> Callable[[], object]:
     return _stage
 
 
+def _actionlint(context: PluginContext) -> Callable[[], object]:
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner import (
+        ActionlintScanner,
+        ActionlintScannerConfig,
+    )
+
+    scanner = ActionlintScanner(context=context, config=ActionlintScannerConfig())
+    return lambda: scanner._workflow_files(
+        context.source_dir, "source", [], report=False
+    )
+
+
+def _zizmor(context: PluginContext) -> Callable[[], object]:
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
+        ZizmorScanner,
+        ZizmorScannerConfig,
+    )
+
+    scanner = ZizmorScanner(context=context, config=ZizmorScannerConfig())
+    return lambda: scanner._collect_inputs(
+        context.source_dir, "source", [], report=False
+    )
+
+
+def _cfn_template_discovery(context: PluginContext) -> Callable[[], object]:
+    from automated_security_helper.utils.cfn_template_discovery import candidate_files
+
+    return lambda: candidate_files(context, "source")
+
+
 #: Each place that calls scan_set for a plugin, by the module the call is in,
 #: relative to the package, with the plugin steps that reach it.
 CALL_SITES = {
     "plugin_modules/ash_builtin/converters/archive_converter.py": (_archive,),
     "plugin_modules/ash_builtin/converters/jupyter_converter.py": (_jupyter,),
+    "plugin_modules/ash_builtin/scanners/actionlint_scanner.py": (_actionlint,),
     "plugin_modules/ash_builtin/scanners/detect_secrets_scanner.py": (_detect_secrets,),
     "plugin_modules/ash_builtin/scanners/npm_audit_scanner.py": (_npm_audit,),
+    "plugin_modules/ash_builtin/scanners/zizmor_scanner.py": (_zizmor,),
     "plugin_modules/ash_snyk_plugins/snyk_code_scanner.py": (_snyk_code,),
+    "utils/cfn_template_discovery.py": (_cfn_template_discovery,),
     "utils/cfn_template_model.py": (_cdk_nag, _cfn_nag),
 }
 

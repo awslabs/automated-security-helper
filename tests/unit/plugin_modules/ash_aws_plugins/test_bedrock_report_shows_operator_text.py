@@ -299,7 +299,10 @@ def _model_with_hostile_finding(
                 )
             )
         ],
-        properties=PropertyBag(scanner_type="SAST"),
+        # The type the product reads (utils/scanner_tool_types.result_tool_types):
+        # a tool_type:: tag or the engine's scanner_name. A finding of unknown
+        # type has its snippet dropped before rendering (fail closed).
+        properties=PropertyBag(scanner_type="SAST", tags=["tool_type::SAST"]),
     )
     run = Run(
         tool=Tool(driver=ToolComponent(name="ASH", version="1.0.0")),

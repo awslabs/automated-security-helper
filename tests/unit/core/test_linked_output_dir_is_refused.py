@@ -598,15 +598,17 @@ class TestOpeningInPlace:
         (source / "a.py").write_text("x = 1\n")
         output = tmp_path / "out"
         output.mkdir()
-        # Dangling: scan_set reuses a list that exists, so only a link to nothing
-        # reaches the write.
+        # Dangling, so a write through the link would show as a new file.
+        # write_lists=True: with neither it nor a run_id, scan_set writes no pair
+        # at all and leaves whatever is at the names (get_scan_set.scan_set).
         victim = tmp_path / "victim.txt"
         (output / name).symlink_to(victim)
 
         with pytest.raises(OutputDirLinkRefused):
-            scan_set(source=str(source), output=str(output))
+            scan_set(source=str(source), output=str(output), write_lists=True)
 
         assert not victim.exists(), "the list was written through the link"
+        assert (output / name).is_symlink(), "the link was replaced"
 
 
 # ---------------------------------------------------------------------------

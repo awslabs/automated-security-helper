@@ -141,9 +141,11 @@ LIST = ("external_reports_to_include:\n  - ${ASH_PN}\n  - other.sarif\n") + _all
 # A key the profile read from the environment, in a mapping the client may
 # replace. An extra plugin's options: a mapping with built-in keys (a plugin
 # section) makes every patch of the profile refused
-# (test_runtime_patch_refuses_a_profile_whose_key_can_name_a_built_in.py).
+# (test_runtime_patch_refuses_a_profile_whose_key_can_name_a_built_in.py). The
+# variable is ASH_KEY_NAME: a name ending in _KEY is secret-shaped
+# (core/constants.py, ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES) and never read.
 KEYED = (
-    "scanners:\n  customx:\n    enabled: true\n    options:\n      ${ASH_KEY}: x\n"
+    "scanners:\n  customx:\n    enabled: true\n    options:\n      ${ASH_KEY_NAME}: x\n"
 ) + _allowing(["/scanners/customx/options"])
 
 
@@ -218,7 +220,7 @@ def _session(environment, monkeypatch, profile_text, ops) -> dict:
         ),
         pytest.param(
             KEYED,
-            "ASH_KEY",
+            "ASH_KEY_NAME",
             lambda guess: {
                 "op": "replace",
                 "path": "/scanners/customx/options",
