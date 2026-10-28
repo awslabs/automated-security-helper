@@ -1410,6 +1410,37 @@ def test_the_act_event_names_the_head_and_the_base_of_the_pull_request():
         )
 
 
+def test_local_uses_reads_uses_keys_and_not_comments_or_prose():
+    local_uses = _api("run_act", "local_uses")
+    comment = "      # (`uses: ./.github/workflows/...`) has that repository as\n"
+    assert local_uses(comment) == [], "a comment that quotes uses: names no file"
+    text = (
+        comment
+        + "#        uses: ./.github/workflows/commented-out.yml\n"
+        + "jobs:\n"
+        + "  scan:\n"
+        + "    uses: ./.github/workflows/scan.yml # uses: ./.github/workflows/after.yml\n"
+        + "  other:\n"
+        + "    steps:\n"
+        + "      - uses: ./.github/actions/run-scan-test\n"
+        + '      - uses: "./.github/actions/quoted"\n'
+        + f"      - uses: actions/checkout@{SHA}\n"
+        + "      - run: echo uses: ./.github/actions/in-a-command\n"
+    )
+    assert local_uses(text) == [
+        "./.github/workflows/scan.yml",
+        "./.github/actions/run-scan-test",
+        "./.github/actions/quoted",
+    ]
+
+
+@pytest.mark.parametrize("name", ["run-ash-security-scan.yml", "upload-ash-sarif.yml"])
+def test_every_local_uses_of_a_fixture_workflow_names_a_file_in_the_repository(name):
+    text = (REPO_ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+    for uses in _api("run_act", "local_uses")(text):
+        assert (REPO_ROOT / uses).exists(), f"{name}: uses: {uses} names nothing"
+
+
 # ---------------------------------------------------------------------------
 # gitlab-ci-local
 # ---------------------------------------------------------------------------
