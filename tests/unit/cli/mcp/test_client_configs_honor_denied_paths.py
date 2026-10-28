@@ -797,7 +797,9 @@ def test_a_clients_runtime_override_turning_one_off_is_accepted_and_ignored(
 
     assert not isinstance(config, Exception), config
     assert _enabled_under(config, reporter) is True
-    assert _warned(ash_log, f"reporters.{reporter}.enabled")
+    # The client's value is named when select_profile drops it
+    # (runtime_patch._without_turn_offs), so the copy the scan reads holds none.
+    assert _warned(ash_log, f"/reporters/{reporter}/enabled")
 
 
 #: A setting of each off-host reporter that config/reporter_trust.py does not
