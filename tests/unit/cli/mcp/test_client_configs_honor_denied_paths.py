@@ -1516,7 +1516,7 @@ def test_delivery_is_refused_while_a_workspace_scan_of_the_session_runs(
     )
     attempts: List[Any] = []
 
-    def deliver_during_the_scan(plan: Any, settings: Any) -> Any:
+    def deliver_during_the_scan(plan: Any, settings: Any, **_kwargs: Any) -> Any:
         try:
             _upload({"ash.yaml": "project_name: swapped\n"})
             attempts.append("delivered")
@@ -1597,7 +1597,7 @@ def test_a_waiting_workspace_scan_sets_offline_only_once_it_holds_the_lock(
     monkeypatch.setattr(
         workspace_module,
         "execute_workspace",
-        lambda plan, settings: seen.append(os.environ.get("ASH_OFFLINE")),
+        lambda plan, settings, **_kwargs: seen.append(os.environ.get("ASH_OFFLINE")),
     )
     lock = get_default_registry().get_or_create(SESSION).lock
     lock.acquire()
