@@ -76,6 +76,7 @@ pip install <my-plugin-package-name>
 
 ### Configuration
 
+<!-- doctest: config kind=other reason="a template for a plugin page, whose plugin name and options are placeholders" -->
 ```yaml
 # Example configuration in your ASH config file (.ashrc.yaml in a new project)
 plugins:

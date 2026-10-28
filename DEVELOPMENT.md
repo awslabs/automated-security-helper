@@ -104,9 +104,9 @@ ASH_REQUIRE_CDK_EXTRA=1 ASH_REQUIRE_SYMBOLS_EXTRA=1 uv run pytest \
   --cov-report=term-missing --cov-fail-under=80
 ```
 
-The 80% threshold applies to the full suite only. Pass `--cov` options to a partial run to
-see its coverage, but leave out `--cov-fail-under`, or the run fails on code it did not
-exercise.
+The 80% threshold applies to the full suite only. Pass `pytest --cov` options to a partial
+run to see its coverage, but leave out `pytest --cov-fail-under`, or the run fails on code
+it did not exercise.
 
 ## Pre-commit hooks
 
@@ -239,11 +239,11 @@ Then run `git push --force-with-lease`. Pull requests are squash-merged with eve
 message kept, and the check reads trailers from each commit's section of the squash
 message, so the trailer survives the merge.
 
-CI never passes `--snapshot-update`, and `tests/snapshot/conftest.py` refuses it when the
+CI never passes `pytest --snapshot-update`, and `tests/snapshot/conftest.py` refuses it when the
 `CI` or `GITHUB_ACTIONS` environment variable equals `true` (exactly that string, so
 `CI=1` does not trigger the refusal). `tests/snapshot/test_snapshot_policy.py` fails if
-any workflow, action, script or pytest configuration passes `--snapshot-update` or
-`--snapshot-warn-unused`. A missing snapshot fails.
+any workflow, action, script or pytest configuration passes `pytest --snapshot-update`
+or `pytest --snapshot-warn-unused`. A missing snapshot fails.
 
 ### Orphaned snapshots
 
@@ -274,13 +274,13 @@ in-process, with only the runner process or the `nix develop` call replaced, und
 `tests/snapshot/container/`. What only a real runtime can produce (output from inside
 the image, a real container or Nix scan, the `./ash` and `ash_helpers.ps1` wrappers) is
 in `tests/snapshot/container/runtime/`, marked `container_runtime` or `nix_runtime`.
-`tests/conftest.py` deselects those unless `--run-container-snapshots` or
-`--run-nix-snapshots` is passed, which the scan-validation container legs and the Nix
-legs do after their scans. Keep such modules in `runtime/`: syrupy reads every file in a
+`tests/conftest.py` deselects those unless `pytest --run-container-snapshots` or
+`pytest --run-nix-snapshots` is passed, which the scan-validation container legs and the
+Nix legs do after their scans. Keep such modules in `runtime/`: syrupy reads every file in a
 `__snapshots__` directory once one test beside it runs, so a deselected module's
 snapshots next to collected ones would fail the default run as unused. To update them,
-build the image (or have Nix) and run the module with its flag, `-n 0` and
-`--snapshot-update`; see the module docstrings for the environment they read.
+build the image (or have Nix) and run the module with `pytest -n 0 --snapshot-update`
+and its flag; see the module docstrings for the environment they read.
 
 ## Development Commands
 
@@ -326,8 +326,9 @@ fixtures). A gem (cfn-nag, Bundler) is compared with the newest release the imag
 Ruby can run, read from the Dockerfile's `ruby=` apt pin; a newer release that needs
 a newer Ruby is named in the report but does not count as outdated.
 
-It exits 0 when nothing is behind (or without `--fail-on-outdated`), 1 when a pin is
-behind with `--fail-on-outdated` or a Dockerfile apt pin is no longer installable, and
+It exits 0 when nothing is behind, and also when a pin is behind but
+`check_pinned_tool_versions.py --fail-on-outdated` was not asked for. It exits 1 when a
+pin is behind with that flag or a Dockerfile apt pin is no longer installable, and
 2 when a lookup failed or the pins could not be read. GitHub allows 60 anonymous API
 requests an hour per address; set `GITHUB_TOKEN` or `GH_TOKEN` to lift that. A lookup
 GitHub refuses with 403 while the token is set is retried once without it, and GitHub's
@@ -374,27 +375,6 @@ export PATH="$HOME/.local/bin:$PATH" && uv build
 export PATH="$HOME/.local/bin:$PATH" && uv run pytest
 ```
 
-### Migration Validation
-
-The project includes a migration validator to help diagnose UV-related issues:
-
-<!-- doctest: illustrative reason="runs a module of this repository's package through the repository's own environment, so it needs a checkout of this repository" -->
-```bash
-# Check migration status
-uv run python -m automated_security_helper.utils.migration_validator
-
-# Get detailed JSON output for debugging
-uv run python -m automated_security_helper.utils.migration_validator --json
-```
-
-The validator checks:
-
-- UV installation and version compatibility
-- Project configuration (pyproject.toml) structure
-- Dependency resolution capability
-- CLI tool availability via UV tool run
-- Build system configuration
-
 ## Version Management
 
 ASH uses [Semantic Versioning](https://semver.org/). The version is defined in `pyproject.toml` and propagated to documentation files via a template system.
@@ -410,7 +390,7 @@ ASH uses [Semantic Versioning](https://semver.org/). The version is defined in `
 
 PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/) format. A required check ("Validate PR title") enforces this. Since PRs are squash-merged, the PR title becomes the commit message that drives changelog generation.
 
-```
+```text
 feat: add OpenGrep scanner support
 fix(detect-secrets): apply global_ignore_paths
 chore: bump dependencies
@@ -423,7 +403,7 @@ A pre-commit hook (`commitizen`) also validates local commit messages.
 
 ASH scans its own repository on every pull request, in two workflows:
 
-- `ash / SAST, SCA, and IaC Scan` (`.github/workflows/ash-repo-scan.yml`) is a required check. On a pull request it installs ASH, and the cfn-nag Gemfile it pins, from this repository at the pull request's base commit, for same-repository and fork pull requests alike. In the merge queue it installs from the branch the queue merges into (`merge_group.base_ref`), the default branch here. The job's first step resolves that ref to a commit, and every later step, the config fetch included, uses that commit, so a merge that lands mid-run cannot mix two versions of ASH or pair one version's ASH with another's config. A pull request is therefore never judged by the ASH it changes: a change that makes a scanner stop reporting, or the gate exit 0, has no effect on its own required check. On a pull request and in the merge queue the scan job also restores no cache (no uv cache, grype database or OpenGrep binary): another job running the pull request's code in the same cache scope could have written those entries. Each is downloaded and verified instead, which costs one uncached ASH install and one grype database download per run.
+- "ash / SAST, SCA, and IaC Scan" (`.github/workflows/ash-repo-scan.yml`) is a required check. On a pull request it installs ASH, and the cfn-nag Gemfile it pins, from this repository at the pull request's base commit, for same-repository and fork pull requests alike. In the merge queue it installs from the branch the queue merges into (`merge_group.base_ref`), the default branch here. The job's first step resolves that ref to a commit, and every later step, the config fetch included, uses that commit, so a merge that lands mid-run cannot mix two versions of ASH or pair one version's ASH with another's config. A pull request is therefore never judged by the ASH it changes: a change that makes a scanner stop reporting, or the gate exit 0, has no effect on its own required check. On a pull request and in the merge queue the scan job also restores no cache (no uv cache, grype database or OpenGrep binary): another job running the pull request's code in the same cache scope could have written those entries. Each is downloaded and verified instead, which costs one uncached ASH install and one grype database download per run.
 - `ash (pull request head, informational only -- does not gate) / SAST, SCA, and IaC Scan` (`.github/workflows/ash-repo-scan-pr-head.yml`) runs the pull request's own ASH against the same tree. It is not a required check and must not be added to a ruleset. It posts no PR comment, publishes no JUnit check and uploads no SARIF, and the job that runs the pull request's ASH holds a read-only token, so neither its inputs nor its code can post a result under the required scan's name; its findings are in the job summary and in the run's `ash_output` artifact. (In the reusable workflow the scan job always holds `contents: read` only; the PR comment, the JUnit check and the SARIF upload run in a separate job, `Report ASH results`, which downloads the scan's artifact and runs nothing from it.) When you change ASH itself, this is the run that shows what your change does.
 
 The required check also reads its ASH config from the base commit, not from the pull request: `.ash/.ash.yaml` as of the pull request's base commit (in the merge queue, as of the branch the queue merges into) is fetched outside the checkout and passed as `--config`. Every tool config file that config names by a relative path (`scanners.<name>.options.config_file`, here `.ash/bandit.yaml`, `.ash/.checkov.yaml` and `.ash/.grype.yaml`), and opengrep's or semgrep's `config` when it names a rules file or directory, is read from the same commit, and the scan fails if that commit lacks one. The fetched copies sit outside the checkout, so they apply as operator files: ASH honors them where it refuses a tool config file inside the scanned tree, such as `.ash/.checkov.yaml`. Paths written inside them still resolve in the checkout, so a fetched checkov config whose `external-checks-dir` or `config-file` is relative, which would load code from the pull request's tree, fails the scan; use an absolute path outside the repository. A pull request therefore cannot change `.ash/.ash.yaml`, or the tool config files it names, for the check that gates it. Config edits in a pull request affect the required check only after they are merged; until then the informational check, which scans with the pull request's own config, shows their effect. What still comes from the pull request: its `.gitignore` and `.ignore` files, which shrink the set of files ASH scans; config files a scanner finds by name in the scanned tree when the config names none; and inline suppression markers such as `# nosec` and `# pragma: allowlist secret`. Review changes to those like any other change to the gate. The reusable workflow exposes this as the `config-ref` input, which other callers can set the same way. If the base commit has no file at the configured path, the required check fails rather than scanning with ASH's defaults; a caller whose first config is still in a pull request can set `config-ref-missing: defaults` for that pull request.
@@ -450,7 +430,7 @@ The documentation site is published by the `deploy-docs` job of `.github/workflo
 
 #### Release App setup
 
-The release PR's required checks (`ash / SAST, SCA, and IaC Scan`, `Validate PR title`, `required-checks`) run on `pull_request`. When the PR is opened with the workflow's `GITHUB_TOKEN`, GitHub creates those runs in an approval-required state, and nothing starts until a maintainer with write access selects **Approve workflows to run** in the PR's merge box. The release PR says so in its description when that happens. To have the checks start on their own, the workflow opens the PR with a GitHub App token instead, which needs this one-time setup by a repository admin:
+The release PR's required checks ("ash / SAST, SCA, and IaC Scan", `Validate PR title`, `required-checks`) run on `pull_request`. When the PR is opened with the workflow's `GITHUB_TOKEN`, GitHub creates those runs in an approval-required state, and nothing starts until a maintainer with write access selects **Approve workflows to run** in the PR's merge box. The release PR says so in its description when that happens. To have the checks start on their own, the workflow opens the PR with a GitHub App token instead, which needs this one-time setup by a repository admin:
 
 1. Create a GitHub App owned by the organization. It needs no webhook and no callback URL.
 2. Repository permissions: **Pull requests: Read and write**. Metadata read is implicit; GitHub adds it automatically. No Contents permission, not even read, and nothing else. The branch push stays on `GITHUB_TOKEN`, so the App only opens the PR. The workflow requests exactly `pull-requests: write` when it mints the token, so the mint step fails if the App lacks it, and it would also fail if the workflow asked for a permission the App was not granted.

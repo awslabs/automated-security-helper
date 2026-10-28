@@ -436,12 +436,15 @@ echo "Total findings: $finding_count"
 <!-- doctest: illustrative reason="a fragment of plugin code that names objects defined elsewhere" -->
 ```python
 # performance_monitor.py
+# Needs psutil, which is not part of ASH: pip install psutil
+import importlib
 import json
 import time
-import psutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
+
+psutil = importlib.import_module("psutil")
 
 
 class TrivyPerformanceMonitor:
@@ -533,6 +536,7 @@ wait
 
 #### Container-Based Scaling
 
+<!-- doctest: config kind=docker-compose -->
 ```yaml
 # docker-compose.yml for distributed scanning
 version: '3.8'
@@ -648,6 +652,7 @@ fi
 ```
 
 #### Pull Request Scanning
+<!-- doctest: config kind=github-actions runner=none reason="a workflow for the reader's own repository, which installs ASH from GitHub" -->
 ```yaml
 # .github/workflows/pr-security-scan.yml
 name: PR Security Scan
@@ -1297,6 +1302,7 @@ EOF
    global_settings:
      suppressions:
        - rule_id: "CVE-2023-12345"
+         path: "**/*"
          reason: "Not applicable to our use case"
        - path: "test/**"
          reason: "Test files only"
@@ -1386,6 +1392,7 @@ ash --mode container --scanners trivy-repo
 - Time constraints
 
 **Solutions**:
+<!-- doctest: config kind=github-actions runner=none reason="steps for a job in the reader's own workflow, shown without the workflow around them" -->
 ```yaml
 # GitHub Actions example
 - name: Setup Trivy Cache
@@ -1452,6 +1459,7 @@ env | grep -i ash
 
 #### GitHub Actions
 
+<!-- doctest: config kind=github-actions runner=none reason="a workflow for the reader's own repository, which installs ASH from GitHub" -->
 ```yaml
 name: Security Scan
 on: [push, pull_request]
@@ -1485,6 +1493,7 @@ jobs:
 
 #### GitLab CI
 
+<!-- doctest: config kind=gitlab-ci runner=none reason="a pipeline for the reader's own project, which installs ASH from GitHub" -->
 ```yaml
 security-scan:
   stage: test
@@ -1502,6 +1511,7 @@ security-scan:
 
 ### Pre-commit Hook
 
+<!-- doctest: config kind=pre-commit -->
 ```yaml
 # .pre-commit-config.yaml
 repos:
@@ -1617,6 +1627,7 @@ global_settings:
   suppressions:
     # Suppress specific CVEs
     - rule_id: "CVE-2023-12345"
+      path: "**/*"
       reason: "Patched in our custom build"
       expiration: "2024-12-31"
     
@@ -1992,10 +2003,13 @@ echo "Security baseline established. Review and approve suppressions in .ash/bas
 <!-- doctest: illustrative reason="a fragment of plugin code that names objects defined elsewhere" -->
 ```python
 # trend_analysis.py
+# Needs matplotlib, which is not part of ASH: pip install matplotlib
+import importlib
 import json
-import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 from pathlib import Path
+
+plt = importlib.import_module("matplotlib.pyplot")
 
 
 def analyze_security_trends():
