@@ -53,6 +53,13 @@ from tests.unit.characterization._harness import Exit, Hang, LaunchViolation
 
 NONEXISTENT = "/nonexistent-char-probe/x"
 
+# By the build, not the platform: CPython leaves os.waitid out on some systems
+# (macOS, Windows). The harness installs its refusing stub only where the function
+# exists, so a test that calls os.waitid itself has nothing to run against there.
+needs_waitid = pytest.mark.skipif(
+    not hasattr(os, "waitid"), reason="this build of Python has no os.waitid"
+)
+
 # Bound at collection, before any guard is installed.
 _THIRD_PARTY = types.ModuleType("char_third_party_probe")
 _THIRD_PARTY.Popen = subprocess.Popen
@@ -641,6 +648,7 @@ def _zombie(char) -> subprocess.Popen:
     return proc
 
 
+@needs_waitid
 def test_a_hang_that_leaves_a_zombie_is_observed_unreaped_and_reachable(char):
     """``leaves_zombie``: the SIGTERM ends it with ``returncode`` still None;
     ``os.waitid`` with ``WNOWAIT`` reports the exit, every time, without reaping it;
@@ -668,6 +676,7 @@ def test_a_hang_that_leaves_a_zombie_is_observed_unreaped_and_reachable(char):
     ]
 
 
+@needs_waitid
 @pytest.mark.parametrize("reap", ["poll", "wait", "communicate"])
 def test_the_first_wait_of_a_zombie_reaps_it_and_sets_its_code(char, reap):
     proc = _zombie(char)
@@ -728,6 +737,7 @@ def _reap_with_waitid(pid: int) -> tuple[int, int]:
 _OUTSIDE_REAPS = {"waitpid": _reap_with_waitpid, "waitid": _reap_with_waitid}
 
 
+@needs_waitid
 @pytest.mark.parametrize("wait", list(_POPEN_WAITS))
 @pytest.mark.parametrize("child", ["zombie", "exited"])
 @pytest.mark.parametrize("reap", list(_OUTSIDE_REAPS))
@@ -754,6 +764,7 @@ def test_an_outside_reap_takes_the_exit_and_every_popen_wait_then_records_0(
         os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
 
 
+@needs_waitid
 def test_an_exited_tool_looked_at_with_wnowait_is_not_waited_for(char):
     """``os.waitid`` with ``WNOWAIT`` reads the exit of a tool that has exited and
     waits for nothing, as it does for a zombie: the Popen is not told, so
@@ -779,6 +790,7 @@ def test_an_exited_tool_looked_at_with_wnowait_is_not_waited_for(char):
     ]
 
 
+@needs_waitid
 def test_an_exited_leader_is_a_zombie_to_every_look_and_reaped_by_waitpid(char):
     """The questions a launcher puts to its leader, in its order: look without
     waiting, signal the group, look again, reap. A tool that has exited and that
@@ -878,6 +890,7 @@ def test_kill_getpgid_getsid_and_waitpid_answer_for_the_fake(char):
     ]
 
 
+@needs_waitid
 def test_waitid_observes_a_fake_and_reaps_it_only_without_wnowait(char):
     char.tool("tool", lambda call: Exit(3))
     char.tool("slow", lambda call: Hang())
@@ -978,11 +991,13 @@ def test_a_wait_cell_is_skipped_unless_the_worker_has_no_child(tmp_path):
             lambda: os.waitid(os.P_PID, os.getpid(), os.WEXITED | os.WNOHANG),
             False,
             id="waitid-self",
+            marks=needs_waitid,
         ),
         pytest.param(
             lambda: os.waitid(os.P_ALL, 0, os.WEXITED | os.WNOHANG),
             True,
             id="waitid-any",
+            marks=needs_waitid,
         ),
         pytest.param(
             lambda: os.pidfd_open(1),
