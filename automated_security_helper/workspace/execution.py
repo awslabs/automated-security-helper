@@ -707,7 +707,7 @@ def prewarm_plugin_registry(plan: WorkspacePlan, settings: ProjectScanSettings) 
                     record=record,
                     values=environment_values,
                 )
-                discover_plugins(plugin_modules=operator, shown=shown)
+                discover_plugins(plugin_modules=operator, shown=shown, failed=record)
             # A module only the projects name is imported as an untrusted config's,
             # like ScanExecutionEngine imports one, so that a later scan in this
             # process that does not load it is not offered what it registered. The
@@ -724,7 +724,9 @@ def prewarm_plugin_registry(plan: WorkspacePlan, settings: ProjectScanSettings) 
                         record=record,
                         values=environment_values,
                     )
-                    discover_plugins(plugin_modules=[module_name], shown=shown)
+                    discover_plugins(
+                        plugin_modules=[module_name], shown=shown, failed=record
+                    )
             # The scan prints str(error), so the environment remedy for an entry
             # only ASH_PLUGIN_MODULES contributed is built into the message here.
             # The run's option list is `operator`; the projects' entries are the
