@@ -481,10 +481,13 @@ jobs:
   # split each combination into eight shards that run in parallel. A shard owns the test
   # modules whose path hashes to its number, and ignores the others at collection time
   # (tests/utils/sharding.py, through the ASH_TEST_SHARD variable the action sets), so
-  # pytest still applies its own testpaths, python_files and ignore rules. At the measured
-  # rate that is an estimated ten minutes of tests per shard on a 4-core runner, plus a
-  # few minutes of setup, and the 30-minute timeout below is the guard for the slower
-  # macOS and Windows runners. That estimate is arithmetic, not a measurement.
+  # pytest still applies its own testpaths, python_files and ignore rules. I sized the
+  # shards for an estimated ten minutes of tests each, but the measured runs take between
+  # about 8 and 31 minutes per shard on the hosted runners. The heaviest shard, 8of8 with
+  # about 7,000 collected items, needs about 32 minutes on windows, ubuntu and macOS at
+  # Python 3.12, so the job timeout below is 45 minutes and a shard that is long but still
+  # progressing is not cancelled. Rebalancing the module-to-shard assignment
+  # (tests/utils/sharding.py) is the next step once per-shard durations are read.
   #
   # The 80% total-coverage gate cannot run per shard, since a shard covers part of the
   # package. Each shard uploads its coverage data, and the `unit-coverage` job below
@@ -500,7 +503,7 @@ jobs:
   unit-test:
     name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})"
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: read
       pull-requests: write
