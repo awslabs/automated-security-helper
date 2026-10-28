@@ -1701,9 +1701,6 @@ def _pytest_ini_addopts() -> list[str]:
 #: * ``--verbose``: left out. A failure prints in full either way, and the junit file
 #:   names every test. pytest.ini's live logging would turn it back on, so the steps
 #:   also pass ``-o log_cli=false`` (PYTEST_INI_IN_CI).
-#: * The ``--cov*`` options: left out. The runs' process imports none of the code the
-#:   pipelines run (each installs the wheel in its own environment), so coverage would
-#:   read close to 0% and .coveragerc's fail_under would fail every leg.
 #: * ``--junit-xml``: the step's own file under the output directory, which the census
 #:   checks read and the upload takes. ``("--junit-xml=",)`` stands for the option
 #:   with a value of the step's own.
@@ -1716,15 +1713,10 @@ def _pytest_ini_addopts() -> list[str]:
 #:   to distribute.
 ADDOPTS_IN_CI = (
     (("--verbose",), ()),
-    (("--cov=automated_security_helper",), ()),
-    (("--cov-report=term-missing",), ()),
-    (("--cov-report=xml:test-results/pytest.coverage.xml",), ()),
-    (("--cov-report=html:test-results/coverage_html",), ()),
     (("--junit-xml=test-results/pytest.junit.xml",), ("--junit-xml=",)),
     (("--durations=10",), ("--durations=0", "--durations-min=0")),
     (("-n", "auto"), ("-n", "0")),
     (("--dist", "worksteal"), ()),
-    (("--cov-config=.coveragerc",), ()),
 )
 
 
@@ -1767,7 +1759,8 @@ def test_every_addopts_option_of_pytest_ini_is_decided_for_the_ci_runs():
     for name in PYTEST_STEPS:
         tokens = _pytest_command_tokens(steps[name])
         assert _has_run(tokens, ("-o", "addopts=")), (
-            f"{name}: without -o addopts=, pytest.ini's coverage options apply"
+            f"{name}: without -o addopts=, pytest.ini's addopts apply (-n auto starts "
+            "workers the blocks cannot share the Docker daemon across)"
         )
         for ini, ci in ADDOPTS_IN_CI:
             if ci:
