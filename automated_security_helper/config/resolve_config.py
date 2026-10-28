@@ -4648,6 +4648,13 @@ def _config_file_not_loadable(config_path: Path) -> ASHConfigSourceError:
         return ASHConfigSourceError(
             f"Configuration file {where} cannot be read: {exc.strerror}"
         )
+    except ValueError:
+        # os.stat raises ValueError for a NUL in the path and UnicodeEncodeError,
+        # a ValueError, for a name the file system encoding cannot carry.
+        return ASHConfigSourceError(
+            f"Configuration file {where} cannot be read: the path is not a name "
+            "the file system can carry."
+        )
     return ASHConfigSourceError(
         f"Configuration file {where} is not a regular file, so it cannot be read."
     )
@@ -4664,9 +4671,13 @@ def check_config_path(config_path: Path | str) -> Path:
     path = Path(config_path)
     # os.stat, not Path.is_file: before Python 3.14 is_file raises for an error
     # other than "not found" (a directory above that cannot be searched).
+    # os.stat raises ValueError for a string with an embedded NUL, and
+    # UnicodeEncodeError, a ValueError, for a name the file system encoding
+    # cannot carry; both are "not a file that can be read", refused as a missing
+    # file is.
     try:
         regular = stat.S_ISREG(os.stat(path).st_mode)
-    except OSError:
+    except (OSError, ValueError):
         regular = False
     if not regular:
         raise _config_file_not_loadable(path)
