@@ -218,9 +218,11 @@ output in `converted/` as a second target:
   files such as `Dockerfile` or `go.mod` inside an archive, and archives inside
   archives, are not extracted. `.tgz`, `.bz2`, `.xz`, `.jar`, and `.whl` files are not
   opened. A `.gz` file whose name does not end in `.tar.gz` and that holds one compressed
-  file rather than a tar archive, such as `data.json.gz`, is skipped and does not count as
-  a failed input. Any other file with one of the three extensions that Python cannot read
-  as a zip or tar archive is a failed input.
+  file rather than a tar archive, such as `data.json.gz`, is decompressed and scanned. It is
+  a failed input only when it cannot be decompressed (a damaged stream or a bad CRC), and is
+  refused when it exceeds an extraction limit or decompresses to an archive name. A `.gz`
+  file that is neither gzip nor tar data is skipped. Any other file with one of the three
+  extensions that Python cannot read as a zip or tar archive is a failed input.
 - `jupyter` converts each `.ipynb` notebook to a script with nbconvert. ASH runs
   nbconvert on a copy of the notebook named `notebook.ipynb`, in a temporary directory
   that holds nothing else, so nbconvert does not pick up a Python module or template
