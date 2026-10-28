@@ -302,63 +302,6 @@ TOOL_NOTES: dict[str, dict] = {
     }
   }
 }""",
-        "caveats": [
-            (
-                "There is no overall percentage field. To compute progress, use "
-                "`finished_scanners / total_scanners`, which counts every scanner that "
-                "ended; `completed_scanners` counts those that PASSED only — but **guard against "
-                "`total_scanners == 0`** during the pre-flight phase (before any scanner has "
-                'registered). Show "initializing" or 0% when `total_scanners` is zero.'
-            ),
-            (
-                "severity_threshold",
-                '  "severity_threshold": "<the threshold the scan was judged by once it is completed or incomplete; null before that, and for a failed or cancelled scan>"',
-            ),
-            (
-                "requested_severity_threshold",
-                '  "requested_severity_threshold": "<run_ash_scan\'s severity_threshold, upper-cased, or null>"',
-            ),
-            ("config_path", '  "config_path": "<path | null>"'),
-            ("warnings", '  "warnings": [...]'),
-            ("error_message", '  "error_message": "<str | null>"'),
-            ("is_complete", '  "is_complete": bool'),
-            ("results_available", '  "results_available": bool'),
-            (
-                "output_holds_previous_results",
-                '  "output_holds_previous_results": bool',
-            ),
-            ("coverage_complete", '  "coverage_complete": "bool | null"'),
-            (
-                "incomplete_scanners",
-                '  "incomplete_scanners": [\n    { "scanner": "grype", "status": "MISSING", "reason": "missing_dependencies", "detail": "MISSING" }\n  ]',
-            ),
-            ("no_scanner_ran", '  "no_scanner_ran": bool'),
-            (
-                "incomplete_converters",
-                '  "incomplete_converters": [{ "converter": "...", "reason": "..." }]',
-            ),
-            ("unevaluated_rules", '  "unevaluated_rules": ["..."]'),
-            (
-                "stale_content_databases",
-                '  "stale_content_databases": [{ "name": "grype-db", "scanner": "grype", "built": "<iso8601 | null>", "age": "...", "max_age": "...", "refresh": "..." }]',
-            ),
-            ("completed_scanners", '  "completed_scanners": int'),
-            ("finished_scanners", '  "finished_scanners": int'),
-            ("total_scanners", '  "total_scanners": int'),
-            (
-                "scanner_status_counts",
-                '  "scanner_status_counts": { "passed": int, "failed": int, "skipped": int, "running": int, "pending": int }',
-            ),
-            ("total_findings", '  "total_findings": int'),
-            (
-                "severity_counts",
-                '  "severity_counts": { "critical": int, "high": int, "medium": int, "low": int, "info": int, "suppressed": int }',
-            ),
-            (
-                "scanners",
-                '  "scanners": {\n    "<scanner_name>": {\n      "<target_type>": { ... per-scanner-target progress ... }\n    }\n  }',
-            ),
-        ],
         # A caveat is a string, or a dict that is printed only when the server
         # returns what it describes: "needs" are response keys, "needs_types"
         # error types. "otherwise" is what is printed instead, when there is one.
@@ -449,20 +392,6 @@ TOOL_NOTES: dict[str, dict] = {
                     "Comma-separated subset of `critical,high,medium,low,info,suppressed`; "
                     "not set means every severity"
                 ),
-            },
-            "actionable_only": {
-                "notes": (
-                    "`true` to add `findings` and `findings_count` to a `full` "
-                    "response: one entry for each unsuppressed finding at or above the "
-                    "severity threshold its scanner was judged by, the findings that "
-                    "give an `ash` scan exit code 2. Findings below it are left "
-                    "out. Each entry has `rule_id`, `severity`, `message`, `scanner`, "
-                    "`file_path`, `line_start`, and `line_end`. The list honors "
-                    "`scanners` and `severities`, and a "
-                    "`summary` or `minimal` response has none. It also sets the "
-                    "suppressed counts to zero and `summary_stats.total` to the "
-                    "actionable count"
-                )
             },
             "actionable_only": {
                 "notes": (
@@ -588,12 +517,6 @@ TOOL_NOTES: dict[str, dict] = {
                     "refused"
                 ),
             },
-            "depth": {
-                "notes": (
-                    "Clone depth, a positive whole number of commits; any other value, "
-                    "`0` included, is refused before anything is created"
-                )
-            },
             "depth": {"notes": "Clone depth, a whole number of commits from 1 to 1000"},
         },
         "caveats": [
@@ -686,32 +609,6 @@ TOOL_NOTES: dict[str, dict] = {
                 "`config_input_not_permitted`, `config_field_denied`, "
                 "`config_policy_unreadable` or `config_env_not_resolved`, as `run_ash_scan` "
                 "does for the same file."
-            ),
-        ],
-    },
-    "validate_config": {
-        "caveats": [
-            (
-                "Each error is `{field, message, type}`. A remote caller's "
-                "`config_content` counts as the client's config, and so does a "
-                "`config_path` that a client delivered or that is outside the directories "
-                "`ASH_MCP_ALLOWED_CONFIG_ROOTS` names, unless it is a profile file the "
-                "server wrote in the calling session's `config/` directory. "
-                "On stdio, `config_content` is the caller's own, because the caller "
-                "started the server. Besides schema and parse errors, `type` can be "
-                "`config_input_not_permitted` (a `config_path` this session may not "
-                "read), `config_policy_unreadable` (the session's runtime-override policy "
-                "cannot be established for the client's config), "
-                "`denied_by_runtime_policy` (a field of the client's config that policy "
-                "denies, named in `field`, with the message `<field> may not be set by a "
-                "config an MCP client delivers: <reason>`), or `config_env_not_resolved`. "
-                "A `${VAR}` or `${VAR:default}` reference at the start of a plain value, "
-                "or an `!ENV` tag, is an error of type `config_env_not_resolved` "
-                "anywhere in a remote caller's client config, and for a stdio caller "
-                "only in a file a client delivered. A policy check that cannot finish on "
-                "the client's config makes it invalid, with an error of type "
-                "`validation_error` that starts `The config could not be checked against "
-                "this session's runtime-override policy`."
             ),
         ],
     },

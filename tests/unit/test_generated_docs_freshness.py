@@ -1682,8 +1682,9 @@ def test_mcp_notes_match_the_server() -> None:
     assert "previous scan's results" in clean and "put back" in clean
     git = _section(text, "## set_source_git")
     depth = next(r for r in git.splitlines() if r.startswith("| `depth` |"))
-    # The depth is a positive whole number; 0 is refused, not a full clone.
-    assert "positive whole number" in depth and "full clone" not in depth
+    # The depth is a whole number from 1 to 1000 (MAX_CLONE_DEPTH); 0 is refused,
+    # not a full clone.
+    assert "from 1 to 1000" in depth and "full clone" not in depth
     ssh_key = next(r for r in git.splitlines() if r.startswith("| `ssh_key_id` |"))
     assert "refused" in ssh_key and "private repos" not in ssh_key
     threshold = next(
