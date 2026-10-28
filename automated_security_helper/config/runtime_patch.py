@@ -938,6 +938,30 @@ def config_document_denials(
         if config is not None
         else None
     )
+    # A client-patched copy is the trusted profile written whole, so a leaf it
+    # repeats can differ from ``dump`` only in how it is written: a defaulted key
+    # the writer left out, a spelling the model normalizes. Such a leaf is also
+    # compared as the model reads the whole document (validated, then dumped as
+    # ``dump`` is), so a repeat in another serialization is not a change, while a
+    # value the client changed still differs after validation. Read once, on the
+    # first leaf that needs it; a document the model refuses gets no exemption.
+    read: Optional[Tuple[AshConfig, Dict[str, Any]]] | bool = False
+
+    def as_read(pointer: str) -> Tuple[bool, Any]:
+        nonlocal read
+        if read is False:
+            try:
+                validated = AshConfig.model_validate(document)
+                read = (
+                    validated,
+                    _as_json(validated.model_dump(mode="json", by_alias=True)),
+                )
+            except Exception:  # noqa: BLE001 -- an unreadable copy is compared as written
+                read = None
+        if not read:
+            return False, None
+        return _trusted_value(read[0], read[1], pointer, plugin_keys)
+
     denials: List[DocumentDenial] = []
     for key, op, kind in _document_writes(document):
         path = op["path"]
@@ -980,6 +1004,10 @@ def config_document_denials(
                 or (kind != "key" and value == _as_json(op["value"]))
             ):
                 continue
+            if present and kind != "key" and repeats_trusted:
+                read_present, read_value = as_read(path)
+                if read_present and value == read_value:
+                    continue
         denials.append(DocumentDenial(key, path, reason, kind == "patch"))
     return denials
 
