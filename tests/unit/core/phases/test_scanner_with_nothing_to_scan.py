@@ -1120,17 +1120,22 @@ DATE_LIKE_VALUES = ["2024-13-01", "2024-02-30"]
 
 
 def _cfn_nag_answers_with_a_finding_for(marker: str):
-    """cfn_nag_scan's answer: one finding for a staged copy whose name holds *marker*."""
+    """cfn_nag_scan's answer: one finding for a template whose name holds *marker*.
+
+    The tool reads a copy of the template under a fixed name, in a directory named
+    for the template's path (``_stage_cfn_nag_input``), so the finding names the
+    template by that directory: ``..__merged__yaml`` is ``merged.yaml``."""
 
     def answer(command=None, **_kwargs):
         staged = next((str(a) for a in command or [] if marker in str(a)), None)
         results = []
         if staged is not None:
+            stem, extension = Path(staged).parent.parent.name.rsplit("__", 2)[-2:]
             results = [
                 {
                     "ruleId": "W51",
                     "level": "warning",
-                    "message": {"text": f"finding in {Path(staged).name}"},
+                    "message": {"text": f"finding in {stem}.{extension}"},
                 }
             ]
         return {
