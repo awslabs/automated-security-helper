@@ -63,6 +63,12 @@ import pytest
 from automated_security_helper.cli import mcp_server
 from automated_security_helper.utils import subprocess_utils
 
+# Windows has no SIGHUP, and the status tables further down read signal.SIGHUP when
+# the module is imported, which raised AttributeError at collection. The whole
+# module is about POSIX signals, so it is skipped before those lines run.
+if sys.platform == "win32":
+    pytest.skip("POSIX signals", allow_module_level=True)
+
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
 
 _SLEEP = [sys.executable, "-c", "import time; time.sleep(60)"]

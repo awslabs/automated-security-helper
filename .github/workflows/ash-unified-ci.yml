@@ -497,7 +497,8 @@ jobs:
   # tests/unit/test_unit_test_shards.py for all of the combinations. GitHub rejects a
   # matrix of more than 256 jobs, and this one is 200; test_unified_ci_job_counts.py
   # fails before the workflow does.
-  unit-test:
+  # One of three unit-test jobs split by OS so each runner pool has its own cap. Edit all three alike.
+  unit-test-linux:
     name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -508,8 +509,10 @@ jobs:
       statuses: write
     strategy:
       fail-fast: false
+      # cap the Linux unit-test fan-out; the Linux runner pool is the largest
+      max-parallel: 24
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         shard: [1of8, 2of8, 3of8, 4of8, 5of8, 6of8, 7of8, 8of8]
         # No exclusions. macos-14 was excluded from 3.10 and 3.11 on the stated
@@ -562,6 +565,70 @@ jobs:
           python-version: ${{ matrix.python-version }}
           shard: ${{ matrix.shard }}
 
+  # One of three unit-test jobs split by OS so each runner pool has its own cap. Edit all three alike.
+  unit-test-macos:
+    name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+      statuses: write
+    strategy:
+      fail-fast: false
+      # cap the macOS unit-test fan-out because the macOS runner pool is the smallest
+      max-parallel: 10
+      matrix:
+        os: [macos-latest, macos-14]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        shard: [1of8, 2of8, 3of8, 4of8, 5of8, 6of8, 7of8, 8of8]
+        # No exclusions; the notes under the unit-test-linux matrix apply here too.
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: ${{ matrix.python-version }}
+          install-ash: "false"
+      - uses: ./.github/actions/run-unit-tests
+        with:
+          os: ${{ matrix.os }}
+          python-version: ${{ matrix.python-version }}
+          shard: ${{ matrix.shard }}
+
+  # One of three unit-test jobs split by OS so each runner pool has its own cap. Edit all three alike.
+  unit-test-windows:
+    name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+      statuses: write
+    strategy:
+      fail-fast: false
+      # cap the Windows unit-test fan-out between the macOS and Linux caps
+      max-parallel: 12
+      matrix:
+        os: [windows-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        shard: [1of8, 2of8, 3of8, 4of8, 5of8, 6of8, 7of8, 8of8]
+        # No exclusions; the notes under the unit-test-linux matrix apply here too.
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: ${{ matrix.python-version }}
+          install-ash: "false"
+      - uses: ./.github/actions/run-unit-tests
+        with:
+          os: ${{ matrix.os }}
+          python-version: ${{ matrix.python-version }}
+          shard: ${{ matrix.shard }}
+
   # Applies the 80% total-coverage gate to the sharded unit-test run, once per OS family.
   #
   # Each leg combines the eight shards of one runner type on Python 3.12 and fails below 80%.
@@ -584,7 +651,7 @@ jobs:
   # `needs` to carry one of the two.
   unit-coverage:
     name: "unit-coverage (${{ matrix.os }})"
-    needs: unit-test
+    needs: [unit-test-linux, unit-test-macos, unit-test-windows]
     if: ${{ !cancelled() }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
@@ -592,6 +659,8 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
+      # run all four coverage jobs at once, one per OS family
+      max-parallel: 4
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
     steps:
@@ -668,6 +737,8 @@ jobs:
       cancel-in-progress: false
     strategy:
       fail-fast: false
+      # warm both architectures at once; each already has its own cache group
+      max-parallel: 2
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm]
     steps:
@@ -744,6 +815,8 @@ jobs:
     timeout-minutes: ${{ (matrix.oci-runner == 'podman' || matrix.oci-runner == 'finch') && 45 || 20 }}
     strategy:
       fail-fast: false
+      # cap the scan matrix so the container-runtime scan jobs do not crowd out other runs
+      max-parallel: 8
       matrix:
         # WHY THERE IS NO `platform` KEY HERE ANY MORE
         #
@@ -932,6 +1005,8 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
+      # run both external-target scan jobs at once, one per OS
+      max-parallel: 2
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
@@ -1015,6 +1090,8 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
+      # run both sandbox escape jobs at once, one per OS
+      max-parallel: 2
       matrix:
         include:
           - os: ubuntu-latest
@@ -1094,6 +1171,8 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
+      # run both scanner parity jobs at once, one per OS
+      max-parallel: 2
       matrix:
         include:
           - os: ubuntu-latest
@@ -1267,6 +1346,8 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
+      # run both attribution jobs at once, one per OS
+      max-parallel: 2
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
@@ -1657,6 +1738,8 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
+      # run both converter integration jobs at once, one per OS
+      max-parallel: 2
       matrix:
         os: [macos-latest, windows-latest]
     steps:
@@ -1772,6 +1855,8 @@ jobs:
     timeout-minutes: ${{ ((matrix.method == 'podman' || matrix.method == 'finch' || matrix.method == 'nerdctl') && 45) || (matrix.method == 'bundle' && 30) || 20 }}
     strategy:
       fail-fast: false
+      # cap the install-validation fan-out so one run leaves room on the shared runner pool
+      max-parallel: 20
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
@@ -2241,7 +2326,9 @@ jobs:
       - lint
       - actionlint
       - snapshot-trailers
-      - unit-test
+      - unit-test-linux
+      - unit-test-macos
+      - unit-test-windows
       - unit-coverage
       - scan-validation
       - non-root-image-permissions

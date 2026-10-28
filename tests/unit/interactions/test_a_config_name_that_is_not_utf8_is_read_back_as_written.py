@@ -20,6 +20,7 @@ repository's own ``.ash`` config is read that way too, so a pull request can add
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Dict, List
 
@@ -37,6 +38,13 @@ from tests.utils.undecodable_names import (
     RECORDED,
     REPORTED,
 )
+
+# Every test here plants a file whose name is not UTF-8.
+if os.name == "nt":
+    pytest.skip(
+        "a file name that is not UTF-8 cannot exist on NTFS (names are UTF-16)",
+        allow_module_level=True,
+    )
 
 #: An ignore path naming the file that is not UTF-8, in the YAML and JSON that read
 #: its escape as the surrogate, and a suppression whose reason holds one.
