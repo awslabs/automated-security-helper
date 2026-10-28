@@ -3,13 +3,13 @@
 
 """The refusal of a named config file that is not there.
 
-``resolve_config`` answers a named path that does not exist with the default
-configuration and a warning. A scan and ``ash report`` check the path themselves
-before they resolve anything. ``ash plugin list`` and ``ash dependencies install``
-did not: the first listed the plugins of a configuration other than the one named,
-and the second installed the dependencies of the built-in plugin set. Both call
-:func:`refuse_a_named_config_that_does_not_exist` first, so the rule is written once
-and each command prints the refusal in its own format.
+``resolve_config`` refuses a named path that does not exist with
+``ASHConfigFileNotFoundError``; it never answers one with the default
+configuration, which would run with none of the named file's settings. A command
+that prints the refusal in its own format and exits 3 before any resolution runs
+checks the path first, and :func:`refuse_a_named_config_that_does_not_exist` is
+that check, written once. A scan and ``ash report`` make their own check. ``ash
+plugin list`` and ``ash dependencies install`` call this one.
 """
 
 from __future__ import annotations
