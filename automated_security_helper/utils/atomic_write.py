@@ -95,7 +95,9 @@ def open_atomically(path: Path, encoding: str = "utf-8") -> Iterator[TextIO]:
         raise
 
 
-def write_bytes_atomically(path: Path, data: bytes) -> None:
+def write_bytes_atomically(
+    path: Path, data: bytes, root: Path | str | None = None
+) -> None:
     """Write ``data`` to ``path`` as :func:`write_text_atomically` writes text.
 
     The bytes reach the file as given: nothing is encoded and no newline is
@@ -103,21 +105,16 @@ def write_bytes_atomically(path: Path, data: bytes) -> None:
     ``data`` rather than read the file back, which another writer may have replaced
     by then.
 
-    The staging file is created as :func:`open_atomically` creates it: through
-    ``fs_guard.open_for_write``, exclusively and in binary.
+    ``fs_guard.open_for_atomic_write`` does the writing, as for the text writer: a
+    link at ``path`` itself is refused (``OutputLinkRefused``) and not replaced, which
+    a rename by name would do. ``root`` names the directory to guard when no output
+    directory is registered for ``path``.
     """
     # Not at the top: fs_guard imports the sandbox package. Do not hoist.
-    from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+    from automated_security_helper.utils.sandbox.fs_guard import open_for_atomic_write
 
-    path = Path(path)
-    staging = _staging_path(path)
-    try:
-        with open_for_write(staging, binary=True, exclusive=True) as handle:
-            handle.write(data)
-        _replace(staging, path)
-    except BaseException:
-        staging.unlink(missing_ok=True)
-        raise
+    with open_for_atomic_write(path, binary=True, root=root) as handle:
+        handle.write(data)
 
 
 def read_text_of_replaced_file(path: Path, encoding: str = "utf-8") -> str:

@@ -2618,7 +2618,9 @@ def _write_lists(
     digests = {}
     for name, lines in zip(SCAN_START_FILE_NAMES, (ignore_lines, scan_set_lines)):
         data = _list_bytes(lines)
-        write_bytes_atomically(output_path / name, data)
+        # Guarded as the lists were when written through open_for_write: a link
+        # at a list's name is refused, not replaced.
+        write_bytes_atomically(output_path / name, data, root=output_path)
         digests[name] = hashlib.sha256(data).hexdigest()
     if run_id is not None:
         reusable = not any("\n" in line for line in scan_set_lines)
