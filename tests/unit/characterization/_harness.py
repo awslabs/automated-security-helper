@@ -1994,9 +1994,11 @@ def _fd_path(fd: int) -> Optional[str]:
     try:
         import fcntl
 
-        raw = fcntl.fcntl(fd, fcntl.F_GETPATH, bytes(4096))  # type: ignore[attr-defined]
+        # macOS takes a buffer of exactly MAXPATHLEN (1024) bytes here and raises
+        # ValueError ("fcntl string arg too long") for a larger one.
+        raw = fcntl.fcntl(fd, fcntl.F_GETPATH, bytes(1024))  # type: ignore[attr-defined]
         return os.fsdecode(raw.rstrip(b"\0"))
-    except (ImportError, AttributeError, OSError):
+    except (ImportError, AttributeError, OSError, ValueError):
         return None
 
 
