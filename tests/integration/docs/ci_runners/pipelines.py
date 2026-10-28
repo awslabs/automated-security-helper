@@ -16,7 +16,7 @@ every way the run fails to show what the page claims:
   workflow's ids, once per matrix entry) ended as its commands say it should, the
   gate job failed (gitlab-ci-local), the build failed (Jenkinsfile Runner, the
   CircleCI CLI), the BUILD phase failed (the CodeBuild agent);
-* ASH's verdict line, exiting 2, with the count the fixture plants: two findings in
+* ASH's verdict line, exiting 2, with the count the fixture plants: three findings in
   app.py, one more in changed.py on a pull or merge request branch, only that one for
   a scan of the changed files; exactly one verdict from each job that gates on
   findings (under act, in each of its runs) and none from any other job;

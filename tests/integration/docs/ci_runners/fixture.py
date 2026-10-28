@@ -30,7 +30,7 @@ without templates (so with no hooks), and commits skip hooks and signing. Nothin
 the invoking user's git configuration (identity, signing, hooks, default branch)
 reaches the commits.
 
-expected_findings says what a scan of the result finds: the fixture's two in
+expected_findings says what a scan of the result finds: the fixture's three in
 ``app.py``, plus CHANGED_FILE's one when the branch exists; a changed-files scan finds
 only CHANGED_FILE's.
 """
@@ -72,8 +72,10 @@ AUTHOR_NAME = "Docs Example"
 AUTHOR_EMAIL = "docs-example@example.com"
 COMMIT_DATE = "2026-01-01T00:00:00Z"
 
-#: What a full scan of the sample project finds, by file.
-FIXTURE_FINDINGS: Mapping[str, int] = {"app.py": 2}
+#: What a full scan of the sample project finds, by file. The three in app.py are
+#: bandit B602 (line 7), detect-secrets SECRET-SECRET-KEYWORD (line 3) and gitleaks
+#: generic-api-key (line 3, the same hardcoded password detect-secrets flags).
+FIXTURE_FINDINGS: Mapping[str, int] = {"app.py": 3}
 #: What CHANGED_FILE adds.
 CHANGED_FINDINGS: Mapping[str, int] = {CHANGED_FILE: 1}
 

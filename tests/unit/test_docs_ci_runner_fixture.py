@@ -22,7 +22,7 @@ it. tests/integration/docs/ci_runners/fixture.py makes it:
 * a new, empty HOME for every run, so tools installed by one pipeline are not found by
   the next.
 
-The findings a run expects follow from that: a full scan finds the fixture's two in
+The findings a run expects follow from that: a full scan finds the fixture's three in
 ``app.py``, and ``changed.py``'s one when the branch exists; a changed-files scan finds
 only ``changed.py``'s.
 """
@@ -397,10 +397,10 @@ def test_the_fixture_s_commits_are_made_with_an_empty_home(tmp_path):
 @pytest.mark.parametrize(
     "event,changed_files,expected",
     [
-        (None, False, {"app.py": 2}),
-        ("push", False, {"app.py": 2}),
-        ("pull_request", False, {"app.py": 2, "changed.py": 1}),
-        ("merge_request", False, {"app.py": 2, "changed.py": 1}),
+        (None, False, {"app.py": 3}),
+        ("push", False, {"app.py": 3}),
+        ("pull_request", False, {"app.py": 3, "changed.py": 1}),
+        ("merge_request", False, {"app.py": 3, "changed.py": 1}),
         ("pull_request", True, {"changed.py": 1}),
         ("merge_request", True, {"changed.py": 1}),
     ],
