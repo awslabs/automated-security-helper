@@ -4512,7 +4512,11 @@ def test_get_config_marks_the_operator_only_options_a_repository_file_sets(
     them. A scan of that checkout ignores both, so they are shown marked. The
     file counts as the repository's by the name it was given or by its target,
     and so does a base it extends. A scope the file reads from the
-    environment is marked by the reference it wrote, never by the value."""
+    environment is marked by the reference it wrote, never by the value. The
+    rest of the section (aws_region) is the operator's too and is confined
+    for a file in another checkout, so it is absent rather than shown as
+    applied (docs/content/docs/plugins/aws/security-hub-reporter.md, "Options
+    only the operator sets")."""
     _not_in_a_checkout(tmp_path)
     repository_options = _REPOSITORY_OPTIONS
     if scope == "from-the-environment":
@@ -4558,7 +4562,7 @@ def test_get_config_marks_the_operator_only_options_a_repository_file_sets(
     assert options["archive_resolved_findings"] == (
         "<operator only; ignored from this file: true>"
     )
-    assert options["aws_region"] == "us-west-2"
+    assert "aws_region" not in options
 
 
 @pytest.mark.parametrize(
