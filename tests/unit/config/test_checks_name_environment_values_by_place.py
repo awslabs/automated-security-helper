@@ -1130,6 +1130,22 @@ def test_an_invalid_policy_regex_the_file_wrote_keeps_its_reason(
     assert raised.value.__cause__ is None
 
 
+def _assert_denied_paths_hold(policy: Any, expected: List[str]) -> None:
+    """The policy's ``denied_paths`` holds ``expected`` and only shipped entries besides.
+
+    ``RuntimeOverridesConfig`` adds each entry of ``ALWAYS_DENIED_PATHS`` that a
+    profile's own list leaves out, at the list's end
+    (``_keep_the_always_denied_paths``): 25 entries at this base. The list a
+    profile writes is therefore a subset of the policy's, never equal to it, and
+    any entry in the policy beyond the expected ones has to be a shipped one.
+    """
+    from automated_security_helper.config.ash_config import ALWAYS_DENIED_PATHS
+
+    entries = set(policy.denied_paths)
+    assert set(expected) <= entries, policy.denied_paths
+    assert entries - set(expected) <= set(ALWAYS_DENIED_PATHS), policy.denied_paths
+
+
 def test_a_policy_entry_the_file_wrote_is_named_as_written_beside_one_read_from_the_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1162,7 +1178,7 @@ def test_a_policy_entry_the_file_wrote_is_named_as_written_beside_one_read_from_
     config = load_config_file_for_run(profile)[1]
     assert config.global_settings.mcp is not None
     policy = config.global_settings.mcp.runtime_overrides
-    assert policy.denied_paths == ["/probeqzprefix/qzxi9lit", "/probeqzprefix"]
+    _assert_denied_paths_hold(policy, ["/probeqzprefix/qzxi9lit", "/probeqzprefix"])
 
     refusals = []
     # The first only the entry the file wrote refuses (it is checked first), the
@@ -1247,7 +1263,7 @@ def test_a_policy_entry_a_patch_moves_is_named_by_its_place(
     assert config.global_settings.mcp is not None
     policy = config.global_settings.mcp.runtime_overrides
     # The check reads the value: the entry is where the operation left it.
-    assert sorted(policy.denied_paths) == sorted([*written, "/probeqzprefix"])
+    _assert_denied_paths_hold(policy, [*written, "/probeqzprefix"])
 
     def refusal(path: str) -> str:
         op = {"op": "replace", "path": path, "value": 1}
@@ -1681,7 +1697,7 @@ def test_a_shipped_default_entry_read_from_the_environment_is_named_in_both_mode
     config = load_config_file_for_run(profile)[1]
     assert config.global_settings.mcp is not None
     policy = config.global_settings.mcp.runtime_overrides
-    assert policy.denied_paths == ["/fail_on_findings"]
+    _assert_denied_paths_hold(policy, ["/fail_on_findings"])
     op = {"op": "replace", "path": "/fail_on_findings", "value": False}
 
     with pytest.raises(RuntimePatchDeniedError) as raised:
