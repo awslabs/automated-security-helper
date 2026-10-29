@@ -96,11 +96,49 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
     #: The markdown copy written beside the JSON report when ``output_format`` is
     #: ``both``.
     MARKDOWN_FILE_NAME: ClassVar[str] = "ash.unused-suppressions.md"
+    #: The extension the report is written under when ``output_format`` is
+    #: ``markdown``: the report text is markdown, so the file is named as such.
+    #: Left as the JSON extension, the markdown landed in
+    #: ``ash.unused-suppressions.json``, which ``ash config lint --fix-unused``
+    #: then read as JSON.
+    MARKDOWN_EXTENSION: ClassVar[str] = "unused-suppressions.md"
+
+    #: What the report says in place of its counts when the scan ran with
+    #: ``--ignore-suppressions``. No suppression was matched against a finding
+    #: on such a run, so ``used_suppressions`` is empty by construction and
+    #: every configured entry would read as unused. Reported as unused, each
+    #: would then be commented out by ``ash config lint --fix-unused``, which
+    #: reads this file.
+    NOT_EVALUATED: ClassVar[str] = (
+        "The scan ran with --ignore-suppressions, so no suppression was matched "
+        "against a finding and this report says nothing about which are unused. "
+        "Run a scan without --ignore-suppressions to evaluate them."
+    )
 
     def model_post_init(self, context):
         if self.config is None:
             self.config = UnusedSuppressionsReporterConfig()
+        self._name_the_report_file_by_its_format()
         return super().model_post_init(context)
+
+    def configure(self, config=None) -> None:
+        super().configure(config)
+        self._name_the_report_file_by_its_format()
+
+    def _name_the_report_file_by_its_format(self) -> None:
+        """Under ``output_format: markdown`` the report is markdown, so it is
+        written under MARKDOWN_EXTENSION, not the JSON one. An extension the
+        operator set is kept as set."""
+        if isinstance(self.config, dict):
+            self.config = UnusedSuppressionsReporterConfig.model_validate(self.config)
+        output_format = getattr(
+            getattr(self.config, "options", None), "output_format", "both"
+        )
+        default_extension = UnusedSuppressionsReporterConfig.model_fields[
+            "extension"
+        ].default
+        if output_format == "markdown" and self.config.extension == default_extension:
+            self.config.extension = self.MARKDOWN_EXTENSION
 
     def companion_file_names(self) -> Tuple[str, ...]:
         """The markdown copy, when ``output_format`` is ``both`` (the default)."""
@@ -118,8 +156,22 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
         if isinstance(self.config, dict):
             self.config = UnusedSuppressionsReporterConfig.model_validate(self.config)
 
-        # Get all configured suppressions
-        all_suppressions = self.context.config.global_settings.suppressions or []
+        # The configured suppressions this report is about. In workspace mode
+        # those are the workspace-level ones, of which this phase has none (see
+        # the class docstring): the context's config is the invoking config,
+        # whose suppressions were matched inside each project's own scan and
+        # are reported there. Subtracting the unified file's empty
+        # used_suppressions from that config listed every one of them unused.
+        workspace = is_workspace_scan(model)
+        if workspace:
+            all_suppressions: List[AshSuppression] = []
+        else:
+            all_suppressions = self.context.config.global_settings.suppressions or []
+
+        # Under --ignore-suppressions nothing was matched, so the subtraction
+        # below has no meaning: the report says so instead of listing every
+        # entry as unused (NOT_EVALUATED).
+        suppressions_ignored = bool(getattr(self.context, "ignore_suppressions", False))
 
         # Get used suppressions from the model
         used_suppressions = getattr(model, "used_suppressions", set())
@@ -146,6 +198,8 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
         used_ids = set(used_suppressions)
         unused_suppressions = []
         for suppression in all_suppressions:
+            if suppressions_ignored:
+                break
             if written[id(suppression)] in used_ids:
                 continue
             if suppression.id in used_ids and suppression.id not in written_ids:
@@ -156,11 +210,19 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
         # not the recorded ids, so the three numbers always add up: an id that
         # matches no configured entry (one from a config edited since, say) is
         # counted nowhere, where counting the ids read "total 3, used 1,
-        # unused 3".
+        # unused 3". When suppressions were ignored both counts are 0 and
+        # "evaluated" says why they add up to nothing: a reader that checks
+        # neither key comments nothing out, where "every one unused" would have
+        # had it comment out every entry.
+        used_count = (
+            0
+            if suppressions_ignored
+            else len(all_suppressions) - len(unused_suppressions)
+        )
         report_data: Dict[str, Any] = {
             "summary": {
                 "total_suppressions": len(all_suppressions),
-                "used_suppressions": len(all_suppressions) - len(unused_suppressions),
+                "used_suppressions": used_count,
                 "unused_suppressions": len(unused_suppressions),
             },
             "unused_suppressions": [
@@ -168,6 +230,9 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                 for s in unused_suppressions
             ],
         }
+        if suppressions_ignored:
+            report_data["summary"]["evaluated"] = False
+            report_data["not_evaluated"] = self.NOT_EVALUATED
 
         # In workspace mode the scope has to be stated, because the numbers above
         # are honest only about workspace-level suppressions. Read as a merge,
@@ -176,8 +241,8 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
         # unused", and the per-project answers live in the per-project reports.
         # Leaving that implicit would let an operator conclude their per-project
         # suppressions are all in use on the strength of no evidence at all.
-        if is_workspace_scan(model):
-            workspace = model.workspace
+        if workspace:
+            workspace_results = model.workspace
             report_data["scope"] = "workspace"
             report_data["scope_detail"] = (
                 "Counts cover workspace-level suppressions only. Each project's "
@@ -192,7 +257,7 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                         f"{project.output_path}/reports/ash.{self.config.extension}"
                     ),
                 }
-                for project in workspace.projects
+                for project in workspace_results.projects
             ]
 
         # Check if we should generate both formats
@@ -291,11 +356,25 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
         lines.append(f"- **Unused Suppressions**: {summary['unused_suppressions']}")
         lines.append("")
 
-        # Status indicator
-        if summary["unused_suppressions"] == 0:
+        # Status indicator. A report that evaluated nothing says so in place of
+        # a judgment, and a workspace-level report names its scope before its
+        # counts: "all suppressions are being used" read over a workspace
+        # would mean every project's, which this report cannot know.
+        if report_data.get("not_evaluated"):
+            lines.append(
+                f"⚠️  **Suppressions were not evaluated**: {report_data['not_evaluated']}"
+            )
+            lines.append("")
+        elif report_data.get("scope") == "workspace":
+            lines.append(f"**Scope**: {report_data.get('scope_detail', '')}")
+            lines.append("")
+            if summary["unused_suppressions"] == 0:
+                lines.append("✅ **No workspace-level suppression is unused.**")
+                lines.append("")
+        elif summary["unused_suppressions"] == 0:
             lines.append("✅ **All suppressions are being used!**")
             lines.append("")
-        else:
+        if summary["unused_suppressions"] != 0:
             percentage = (
                 (summary["unused_suppressions"] / summary["total_suppressions"] * 100)
                 if summary["total_suppressions"] > 0
@@ -368,6 +447,22 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
             )
             lines.append(
                 "4. **Still needed**: Verify the suppression is correctly configured"
+            )
+            lines.append("")
+        elif report_data.get("not_evaluated"):
+            lines.append("## Details")
+            lines.append("")
+            lines.append(
+                "No suppression was evaluated on this run, so none is listed here "
+                "as unused."
+            )
+            lines.append("")
+        elif report_data.get("scope") == "workspace":
+            lines.append("## Details")
+            lines.append("")
+            lines.append(
+                "No workspace-level suppression is unused. Each project's own "
+                "suppressions are reported in that project's report."
             )
             lines.append("")
         else:
