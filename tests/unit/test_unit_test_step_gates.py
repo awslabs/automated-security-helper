@@ -52,6 +52,7 @@ from tests.utils.optional_extras import (
     REQUIRE_CDK_EXTRA_ENV,
     require_cdk_extra,
 )
+from tests.utils.ci_tiers import INTEGRATION_TEST_JOB_IDS, UNIT_TEST_JOB_IDS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUN_UNIT_TESTS = REPO_ROOT / ".github" / "actions" / "run-unit-tests" / "action.yml"
@@ -639,13 +640,6 @@ class TestTheCdkNagPathRunsInTheIntegrationTier:
     marker, so the tier job runs it everywhere without a second step.
     """
 
-    INTEGRATION_JOB_IDS = (
-        "integration-test-linux",
-        "integration-test-macos",
-        "integration-test-windows",
-    )
-    UNIT_JOB_IDS = ("unit-test-linux", "unit-test-macos", "unit-test-windows")
-
     @staticmethod
     def _jobs() -> dict[str, Any]:
         return yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))["jobs"]
@@ -667,7 +661,8 @@ class TestTheCdkNagPathRunsInTheIntegrationTier:
         )
 
     @pytest.mark.parametrize(
-        ("integration_id", "unit_id"), zip(INTEGRATION_JOB_IDS, UNIT_JOB_IDS)
+        ("integration_id", "unit_id"),
+        zip(INTEGRATION_TEST_JOB_IDS, UNIT_TEST_JOB_IDS),
     )
     def test_the_integration_job_covers_every_os_and_python_of_its_unit_job(
         self, integration_id, unit_id
@@ -684,7 +679,6 @@ class TestTheCdkNagPathRunsInTheIntegrationTier:
         ]
         assert len(uses) == 1, jobs[integration_id]["steps"]
         assert uses[0]["with"]["marker"] == "integration"
-        # No step-level condition, and the job's only condition keeps it running after a
-        # failed unit leg (it is skipped only by a cancelled run).
+        # No step-level condition. The job-level condition is pinned in
+        # tests/unit/test_required_checks_census.py.
         assert "if" not in uses[0]
-        assert jobs[integration_id]["if"] == "${{ !cancelled() }}"

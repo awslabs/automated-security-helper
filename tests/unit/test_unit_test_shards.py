@@ -44,8 +44,12 @@ hold the hook to the unsharded run's collection.
 What it does not cover
 ----------------------
 It does not run the workflow. That a runner finishes a shard inside its timeout is a
-measurement the CI run makes, and so is whether any shard of ``-m integration`` collects
-nothing, which would make pytest exit 5 in that leg.
+measurement the CI run makes. An empty shard is handled in code: a shard that owns
+modules but holds no test of the tier is admitted (pytest would exit 5; the hook turns
+that into 0 and says so), while a shard that collects nothing at all keeps exit 5. Both
+cases are run in a real pytest below. Whether the whole tier is empty is not checked by
+any one leg; the tier's other legs and the unit and e2e tiers would still exit 5 on
+their own.
 """
 
 from __future__ import annotations
@@ -67,6 +71,12 @@ import pytest
 import yaml
 
 from tests.utils import sharding
+from tests.utils.ci_tiers import (
+    E2E_TEST_JOB_IDS,
+    INTEGRATION_TEST_JOB_IDS,
+    POOLS,
+    UNIT_TEST_JOB_IDS,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 UNIFIED_CI = REPO_ROOT / ".github" / "workflows" / "ash-unified-ci.yml"
@@ -85,20 +95,6 @@ COVERAGE_RUNNERS = [
     ("windows-latest", "X64"),
 ]
 COVERAGE_PYTHON = "3.12"
-
-#: The unit-test matrix, split by OS family so each runner pool has its own max-parallel
-#: cap. Together the three jobs run the unit tier.
-UNIT_TEST_JOB_IDS = ("unit-test-linux", "unit-test-macos", "unit-test-windows")
-#: The integration tier, cut the same way, with a shard axis.
-INTEGRATION_TEST_JOB_IDS = (
-    "integration-test-linux",
-    "integration-test-macos",
-    "integration-test-windows",
-)
-#: The e2e tier, cut the same way, with neither a shard axis nor a Python axis.
-E2E_TEST_JOB_IDS = ("e2e-test-linux", "e2e-test-macos", "e2e-test-windows")
-#: The pool each job id belongs to, in the order the three families list them.
-POOLS = ("linux", "macos", "windows")
 
 #: The shard axis of the integration tier. Four is a reading from the real classification
 #: and the per-file medians of one run of the earlier layout (eight was the figure before
@@ -431,15 +427,49 @@ class TestTheFilterInARealCollection:
 
 @pytest.mark.integration
 class TestAnEmptyShardOfATierRunInARealPytest:
-    """The exit status of pytest itself, on a planted tree with one module per tier."""
+    """The exit status of pytest itself, on a planted tree with one module per tier.
+
+    The tree carries a conftest that wires the sharding module in the way
+    tests/conftest.py does (``pytest_ignore_collect`` and ``pytest_configure_node``
+    imported by name, ``sharding.configure`` called from its own ``pytest_configure``)
+    and defines the hooks that conftest also defines, ``pytest_testnodedown`` and a
+    ``pytest_sessionfinish`` wrapper, so a clash between those and the admission would
+    show here. Nothing else loads the module: CI loads it only through that conftest.
+    """
 
     COUNT = 8
     MODULES = {
         "suite/test_only_unit.py": "unit",
         "suite/test_only_integration.py": "integration",
     }
+    CONFTEST = textwrap.dedent(
+        """\
+        import pytest
+
+        from tests.utils import sharding
+        from tests.utils.sharding import (  # noqa: F401
+            pytest_configure_node,
+            pytest_ignore_collect,
+        )
+
+
+        def pytest_configure(config):
+            sharding.configure(config)
+
+
+        @pytest.hookimpl(optionalhook=True)
+        def pytest_testnodedown(node, error):
+            pass
+
+
+        @pytest.hookimpl(hookwrapper=True, trylast=True)
+        def pytest_sessionfinish(session, exitstatus):
+            yield
+        """
+    )
 
     def _plant(self, root: Path) -> None:
+        (root / "conftest.py").write_text(self.CONFTEST, encoding="utf-8")
         (root / "pytest.ini").write_text(
             textwrap.dedent(
                 """\
@@ -467,7 +497,7 @@ class TestAnEmptyShardOfATierRunInARealPytest:
         return sharding.owner(relative, self.COUNT)
 
     def _empty_shard(self) -> int:
-        """A shard that owns neither planted module, so it holds no test of any tier."""
+        """A shard that owns neither planted module, so it collects nothing at all."""
         taken = {self._owner("unit"), self._owner("integration")}
         return next(i for i in range(1, self.COUNT + 1) if i not in taken)
 
@@ -485,8 +515,6 @@ class TestAnEmptyShardOfATierRunInARealPytest:
                 "--confcutdir",
                 str(root),
                 "-p",
-                "tests.utils.sharding",
-                "-p",
                 "no:cacheprovider",
                 "-p",
                 "no:randomly",
@@ -502,20 +530,76 @@ class TestAnEmptyShardOfATierRunInARealPytest:
             timeout=300,
         )
 
-    def test_an_empty_shard_without_a_marker_expression_still_exits_5(self, tmp_path):
-        """Control: the status the admission replaces is the one pytest gives."""
-        self._plant(tmp_path)
-        done = self._run(tmp_path, self._empty_shard())
-        assert done.returncode == 5, done.stdout + done.stderr
+    def test_the_planted_shards_are_the_three_cases_the_tests_below_need(self):
+        assert self._owner("unit") != self._owner("integration")
+        assert self._empty_shard() not in {
+            self._owner("unit"),
+            self._owner("integration"),
+        }
 
-    def test_an_empty_shard_with_a_marker_expression_exits_0_and_says_so(
+    def test_a_shard_that_owns_only_unit_modules_is_admitted_under_a_tier(
         self, tmp_path
     ):
+        """The case the admission is for: every item deselected by ``-m integration``."""
         self._plant(tmp_path)
-        index = self._empty_shard()
+        index = self._owner("unit")
         done = self._run(tmp_path, index, "-m", "integration")
         assert done.returncode == 0, done.stdout + done.stderr
         assert f"shard {index}of{self.COUNT} holds no test selected by" in done.stdout
+        assert "(1 deselected); admitted" in done.stdout, done.stdout
+
+    def test_a_shard_that_owns_only_unit_modules_just_runs_them_without_a_marker(
+        self, tmp_path
+    ):
+        """Without ``-m`` the same shard runs its unit test and passes: nothing to admit."""
+        self._plant(tmp_path)
+        done = self._run(tmp_path, self._owner("unit"))
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert "1 passed" in done.stdout, done.stdout
+        assert "admitted" not in done.stdout, done.stdout
+
+    def test_a_shard_that_collects_nothing_at_all_exits_5_even_under_a_tier(
+        self, tmp_path
+    ):
+        """A shard count larger than the suite must still fail the leg."""
+        self._plant(tmp_path)
+        done = self._run(tmp_path, self._empty_shard(), "-m", "integration")
+        assert done.returncode == 5, done.stdout + done.stderr
+        assert "admitted" not in done.stdout, done.stdout
+
+    def test_a_shard_that_collects_nothing_at_all_exits_5_without_a_marker(
+        self, tmp_path
+    ):
+        self._plant(tmp_path)
+        done = self._run(tmp_path, self._empty_shard())
+        assert done.returncode == 5, done.stdout + done.stderr
+        assert "admitted" not in done.stdout, done.stdout
+
+    def test_the_admission_holds_under_xdist_where_the_controller_collects_nothing(
+        self, tmp_path
+    ):
+        """As CI runs it: ``-n 2``, the wiring conftest loaded, a shard of unit modules.
+
+        The controller never collects; each worker collects and deselects, and the
+        controller learns the count from the workers' ``workeroutput``.
+        """
+        import xdist  # noqa: F401 - the run below needs the plugin
+
+        self._plant(tmp_path)
+        index = self._owner("unit")
+        done = self._run(tmp_path, index, "-m", "integration", "-n", "2")
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert f"shard {index}of{self.COUNT} holds no test selected by" in done.stdout
+
+    def test_a_shard_that_collects_nothing_at_all_exits_5_under_xdist_too(
+        self, tmp_path
+    ):
+        import xdist  # noqa: F401 - the run below needs the plugin
+
+        self._plant(tmp_path)
+        done = self._run(tmp_path, self._empty_shard(), "-m", "integration", "-n", "2")
+        assert done.returncode == 5, done.stdout + done.stderr
+        assert "admitted" not in done.stdout, done.stdout
 
     def test_the_shard_that_owns_the_tier_runs_it_and_says_nothing(self, tmp_path):
         self._plant(tmp_path)
@@ -540,8 +624,9 @@ class TestAShardThatHoldsNoTestOfTheTierIsAdmitted:
     """A shard owns modules, not tiers, so with ``-m`` it can hold none of the tier.
 
     Exit 5 there would fail a leg that has nothing to run while the tier's other shards
-    carry the rest. The admission needs a shard AND a ``-m`` expression, and acts only on
-    pytest's "no tests collected" status.
+    carry the rest. The admission needs a shard, a ``-m`` expression and at least one
+    deselected item, and acts only on pytest's "no tests collected" status. The real
+    pytest runs of these cases are in TestAnEmptyShardOfATierRunInARealPytest.
     """
 
     @staticmethod
@@ -559,16 +644,28 @@ class TestAShardThatHoldsNoTestOfTheTierIsAdmitted:
     def test_it_turns_exit_5_into_success_and_says_which_shard(self):
         written: list[str] = []
         session = self._session("3of8", "integration", written)
-        assert sharding.admit_empty_shard(session, pytest.ExitCode.NO_TESTS_COLLECTED)
+        assert sharding.admit_empty_shard(
+            session, pytest.ExitCode.NO_TESTS_COLLECTED, 4
+        )
         assert session.exitstatus == pytest.ExitCode.OK
         assert len(written) == 1, written
         assert "shard 3of8" in written[0] and "integration" in written[0], written
+        assert "(4 deselected)" in written[0], written
+
+    def test_a_shard_that_deselected_nothing_keeps_exit_5(self):
+        """It collected nothing at all: a shard count larger than the suite."""
+        written: list[str] = []
+        session = self._session("3of8", "integration", written)
+        assert not sharding.admit_empty_shard(
+            session, pytest.ExitCode.NO_TESTS_COLLECTED, 0
+        )
+        assert session.exitstatus == 5 and not written
 
     def test_a_run_without_a_marker_expression_keeps_exit_5(self):
         written: list[str] = []
         session = self._session("3of8", "", written)
         assert not sharding.admit_empty_shard(
-            session, pytest.ExitCode.NO_TESTS_COLLECTED
+            session, pytest.ExitCode.NO_TESTS_COLLECTED, 4
         )
         assert session.exitstatus == 5 and not written
 
@@ -576,7 +673,7 @@ class TestAShardThatHoldsNoTestOfTheTierIsAdmitted:
         written: list[str] = []
         session = self._session("", "integration", written)
         assert not sharding.admit_empty_shard(
-            session, pytest.ExitCode.NO_TESTS_COLLECTED
+            session, pytest.ExitCode.NO_TESTS_COLLECTED, 4
         )
         assert session.exitstatus == 5 and not written
 
@@ -594,32 +691,58 @@ class TestAShardThatHoldsNoTestOfTheTierIsAdmitted:
         written: list[str] = []
         session = self._session("3of8", "integration", written)
         session.exitstatus = status
-        assert not sharding.admit_empty_shard(session, status)
+        assert not sharding.admit_empty_shard(session, status, 4)
         assert session.exitstatus == status and not written
 
     def test_configure_registers_the_admission_once_for_a_run_with_a_shard(
         self, monkeypatch
     ):
+        """On a real plugin manager: a second ``configure`` of one config adds nothing."""
         monkeypatch.setenv(sharding.ENV_VAR, "2of3")
-        registered: dict[str, object] = {}
-        plugins = SimpleNamespace(
-            has_plugin=lambda name: name in registered,
-            register=lambda plugin, name: registered.setdefault(name, plugin),
-        )
-        config = SimpleNamespace(stash=pytest.Stash(), pluginmanager=plugins)
+        manager = pytest.PytestPluginManager()
+        config = SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager)
         sharding.configure(config)
+        first = manager.get_plugin("ash-shard-empty-admitted")
+        assert first is not None
         sharding.configure(config)
-        assert list(registered) == ["ash-shard-empty-admitted"], registered
+        assert manager.get_plugin("ash-shard-empty-admitted") is first
 
     def test_configure_registers_nothing_for_a_whole_run(self, monkeypatch):
         monkeypatch.delenv(sharding.ENV_VAR, raising=False)
-        registered: dict[str, object] = {}
-        plugins = SimpleNamespace(
-            has_plugin=lambda name: name in registered,
-            register=lambda plugin, name: registered.setdefault(name, plugin),
-        )
-        sharding.configure(SimpleNamespace(stash=pytest.Stash(), pluginmanager=plugins))
-        assert not registered
+        manager = pytest.PytestPluginManager()
+        sharding.configure(SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager))
+        assert manager.get_plugin("ash-shard-empty-admitted") is None
+
+    def test_the_plugin_counts_what_the_run_and_its_workers_deselected(self):
+        plugin = sharding._AdmitAnEmptyShard()
+        plugin.pytest_deselected([object(), object()])
+        plugin.pytest_deselected([object()])
+        finished = SimpleNamespace(workeroutput={sharding.WORKEROUTPUT_KEY: 3})
+        plugin.pytest_testnodedown(finished, None)
+        crashed = SimpleNamespace(workeroutput=None)
+        plugin.pytest_testnodedown(crashed, RuntimeError("worker crashed"))
+        assert plugin.deselected == 6
+
+    def test_a_worker_reports_its_count_and_leaves_the_exit_status_alone(self):
+        written: list[str] = []
+        session = self._session("3of8", "integration", written)
+        session.config.workeroutput = {}
+        plugin = sharding._AdmitAnEmptyShard()
+        plugin.pytest_deselected([object(), object()])
+        plugin.pytest_sessionfinish(session, pytest.ExitCode.NO_TESTS_COLLECTED)
+        assert session.config.workeroutput == {sharding.WORKEROUTPUT_KEY: 2}
+        assert session.exitstatus == 5 and not written
+
+    def test_the_controller_admits_on_the_sum_of_its_workers_counts(self):
+        written: list[str] = []
+        session = self._session("3of8", "integration", written)
+        plugin = sharding._AdmitAnEmptyShard()
+        for count in (1, 1):
+            node = SimpleNamespace(workeroutput={sharding.WORKEROUTPUT_KEY: count})
+            plugin.pytest_testnodedown(node, None)
+        plugin.pytest_sessionfinish(session, pytest.ExitCode.NO_TESTS_COLLECTED)
+        assert session.exitstatus == pytest.ExitCode.OK
+        assert "(2 deselected)" in written[0], written
 
 
 class TestTheSettingStaysInTheRunThatWasGivenIt:
@@ -1106,8 +1229,12 @@ class TestTheUnitTestMatrixIsSplitByOs:
 
 
 @pytest.mark.unit
-class TestTheIntegrationAndE2eFamiliesFollowTheUnitFamily:
-    """Each tier family is the unit family's pool split, waiting for its own pool's unit job."""
+class TestTheIntegrationAndE2eFamiliesMirrorTheUnitFamily:
+    """Each tier family is the unit family's pool split, running beside it.
+
+    The tiers run in parallel: none waits for a unit job. Their `needs:` and `if:` are
+    pinned in one place, tests/unit/test_required_checks_census.py.
+    """
 
     @staticmethod
     def _all() -> dict[str, dict[str, Any]]:
@@ -1122,18 +1249,15 @@ class TestTheIntegrationAndE2eFamiliesFollowTheUnitFamily:
             E2E_TEST_JOB_IDS
         )
 
-    @pytest.mark.parametrize("pool", POOLS)
-    def test_each_job_waits_for_the_unit_job_of_its_pool(self, pool):
-        """The cheap tier runs first: a unit failure spares the expensive tiers."""
-        for family in ("integration-test", "e2e-test"):
-            needs = _workflow_job(f"{family}-{pool}")["needs"]
-            assert needs == ["ensure-cache", f"unit-test-{pool}"], (family, pool, needs)
-
     @pytest.mark.parametrize("job_id", [*INTEGRATION_TEST_JOB_IDS, *E2E_TEST_JOB_IDS])
-    def test_the_tier_jobs_run_even_when_a_unit_leg_failed(self, job_id):
-        """One flaky unit leg must not skip a whole OS family's integration and e2e
-        results; the gate sees the unit failure through its own needs."""
-        assert _workflow_job(job_id)["if"] == "${{ !cancelled() }}"
+    def test_no_tier_job_waits_for_a_unit_job(self, job_id):
+        """A wait on the unit job would only add its slowest leg to the critical path.
+
+        Nothing is saved by it either: a failed unit leg must not skip the other tiers'
+        results, so the tiers would run after it whatever it reported.
+        """
+        needs = _workflow_job(job_id)["needs"]
+        assert not set(needs) & set(UNIT_TEST_JOB_IDS), (job_id, needs)
 
     @pytest.mark.parametrize("job_id", UNIT_TEST_JOB_IDS)
     def test_the_unit_jobs_carry_no_condition(self, job_id):
@@ -1170,8 +1294,7 @@ class TestTheIntegrationAndE2eFamiliesFollowTheUnitFamily:
             differing = [
                 k for k in base.keys() | other.keys() if base.get(k) != other.get(k)
             ]
-            # The pool's own unit job is the one thing each waits for.
-            assert sorted(differing) == ["needs"], f"{job_id}: {sorted(differing)}"
+            assert not differing, f"{job_id} differs from {first_id} in {differing}"
 
     @pytest.mark.parametrize(
         "job_id", [*UNIT_TEST_JOB_IDS, *INTEGRATION_TEST_JOB_IDS, *E2E_TEST_JOB_IDS]

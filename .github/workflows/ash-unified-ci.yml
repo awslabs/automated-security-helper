@@ -832,15 +832,24 @@ jobs:
   # ubuntu and 19 on Windows against the 30-minute timeout (eight was the figure before the
   # tests were classified); the arithmetic is in the note above the unit-test jobs. It is a
   # reading, so the first run on this branch is the measurement and the count moves with
-  # it. A shard that holds no integration test is admitted by tests/utils/sharding.py (a
-  # `-m` run with an empty shard is not a failure), so the count can be raised without a
-  # leg failing for being empty.
+  # it. A shard whose modules hold no integration test (every item deselected by `-m`) is
+  # admitted by tests/utils/sharding.py, so the count can be raised without a leg failing
+  # for having nothing to run. A shard that collects nothing at all still fails with
+  # pytest's exit 5.
   #
-  # Each family waits for the unit family of its own pool, so the cheap tier starts first,
-  # but runs under `!cancelled()`: one flaky unit leg must not skip a whole OS family's
-  # integration and e2e signal. The gate still sees the unit failure through its own
-  # `needs`, so nothing reads as green that was not. (A job that waits on a unit job with no
-  # status function would be skipped whenever any leg of that unit job failed.)
+  # The tiers run in parallel: each tier job waits only for ensure-cache, not for the unit
+  # job of its pool. A wait on the unit job would only add the slowest unit leg (about 8
+  # minutes on ubuntu, 10 on Windows, plus queueing) to the critical path, and it would
+  # save no runner time, because a failed unit leg must not skip the other tiers' signal.
+  # The condition `!cancelled() && needs.ensure-cache.result == 'success'` keeps the one
+  # skip that does save runners: when a leg of ensure-cache fails, the unit jobs are
+  # skipped, and so are these. Without the second term these jobs would run all 105 legs of
+  # a run that is already red, and a re-run of failed jobs would pay for them twice. The
+  # gate sees that skip through ensure-cache, which is in its own `needs`. The per-job
+  # `max-parallel` caps below stay per job, so the macOS pool can now see up to 22 legs
+  # at once (10 unit, 10 integration, 2 e2e) where it saw at most 12; the caps were chosen
+  # per job and the repository's macOS concurrency limit is not read from here, so extra
+  # legs queue rather than fail.
   # ASH_REQUIRE_CDK_EXTRA is set by the action, and
   # tests/integration/scanners/test_cdk_nag_real_pack.py carries the integration marker,
   # so the cdk-nag path runs on every OS and Python version here. The separate
@@ -848,8 +857,8 @@ jobs:
   # One of three integration-test jobs split by OS so each runner pool has its own cap. Edit all three alike.
   integration-test-linux:
     name: "integration-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})"
-    needs: [ensure-cache, unit-test-linux]
-    if: ${{ !cancelled() }}
+    needs: [ensure-cache]
+    if: ${{ !cancelled() && needs.ensure-cache.result == 'success' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     permissions:
@@ -883,8 +892,8 @@ jobs:
   # One of three integration-test jobs split by OS so each runner pool has its own cap. Edit all three alike.
   integration-test-macos:
     name: "integration-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})"
-    needs: [ensure-cache, unit-test-macos]
-    if: ${{ !cancelled() }}
+    needs: [ensure-cache]
+    if: ${{ !cancelled() && needs.ensure-cache.result == 'success' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     permissions:
@@ -918,8 +927,8 @@ jobs:
   # One of three integration-test jobs split by OS so each runner pool has its own cap. Edit all three alike.
   integration-test-windows:
     name: "integration-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})"
-    needs: [ensure-cache, unit-test-windows]
-    if: ${{ !cancelled() }}
+    needs: [ensure-cache]
+    if: ${{ !cancelled() && needs.ensure-cache.result == 'success' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     permissions:
@@ -957,12 +966,13 @@ jobs:
   # 3.12 only. The tier drives the whole product once per operating system; the Python
   # version axis is the unit and integration tiers' job. It is unsharded because the tier
   # is small by the reading of the test files, and the first run on this branch measures
-  # it. The family waits for the unit family of its own pool, like the integration tier.
+  # it. Like the integration tier, it waits only for ensure-cache and runs alongside the
+  # unit tier.
   # One of three e2e-test jobs split by OS so each runner pool has its own cap. Edit all three alike.
   e2e-test-linux:
     name: "e2e-test (${{ matrix.os }})"
-    needs: [ensure-cache, unit-test-linux]
-    if: ${{ !cancelled() }}
+    needs: [ensure-cache]
+    if: ${{ !cancelled() && needs.ensure-cache.result == 'success' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     permissions:
@@ -990,8 +1000,8 @@ jobs:
   # One of three e2e-test jobs split by OS so each runner pool has its own cap. Edit all three alike.
   e2e-test-macos:
     name: "e2e-test (${{ matrix.os }})"
-    needs: [ensure-cache, unit-test-macos]
-    if: ${{ !cancelled() }}
+    needs: [ensure-cache]
+    if: ${{ !cancelled() && needs.ensure-cache.result == 'success' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     permissions:
@@ -1019,8 +1029,8 @@ jobs:
   # One of three e2e-test jobs split by OS so each runner pool has its own cap. Edit all three alike.
   e2e-test-windows:
     name: "e2e-test (${{ matrix.os }})"
-    needs: [ensure-cache, unit-test-windows]
-    if: ${{ !cancelled() }}
+    needs: [ensure-cache]
+    if: ${{ !cancelled() && needs.ensure-cache.result == 'success' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     permissions:
@@ -2643,12 +2653,12 @@ jobs:
   # when the run is cancelled, or when ensure-cache failed: the jobs that need it and carry no
   # `if:` are skipped then, and ensure-cache's own failure is in `needs`, so the `failure` term
   # covers it. The other job-level conditions among the dependencies are `if: ${{ !cancelled() }}`
-  # on scan-validation, unit-coverage and the six integration-test and e2e-test jobs (which wait
-  # for a unit-test job that itself waits for ensure-cache, and so would otherwise be skipped
-  # by any failed unit leg), and tests/unit/test_required_checks_census.py requires
-  # every gated job with `needs` to carry `!cancelled()` or `always()`, or else to wait only for
-  # jobs that always run and have no `needs` of their own. So `cancelled()` and `failure` between
-  # them cover skipped too.
+  # on scan-validation and unit-coverage, and `if: ${{ !cancelled() && needs.ensure-cache.result
+  # == 'success' }}` on the six integration-test and e2e-test jobs (they wait only for
+  # ensure-cache, and are skipped when it fails, a skip the `failure` term above covers). The
+  # rule in tests/unit/test_required_checks_census.py is that every gated job with `needs`
+  # carries `!cancelled()` or `always()`, or else waits only for jobs that always run and have
+  # no `needs` of their own. So `cancelled()` and `failure` between them cover skipped too.
   #
   # The condition used to name `skipped` directly, and that term had to go. With
   # warm-image-layers skipped upstream of scan-validation, `contains(needs.*.result, 'skipped')`

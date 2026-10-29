@@ -37,6 +37,12 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.utils.ci_tiers import (
+    E2E_TEST_JOB_IDS,
+    INTEGRATION_TEST_JOB_IDS,
+    UNIT_TEST_JOB_IDS,
+)
+
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -44,20 +50,6 @@ WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 UNIFIED_CI = WORKFLOWS / "ash-unified-ci.yml"
 IAC_DRIFT = WORKFLOWS / "ash-iac-drift.yml"
 
-#: The unit-test matrix is three jobs, one per runner pool, so each pool has its own
-#: max-parallel cap. The workflow's comments count the three as one family, "unit-test",
-#: which is also what every one of their check names starts with.
-UNIT_TEST_JOB_IDS = ("unit-test-linux", "unit-test-macos", "unit-test-windows")
-#: The integration tier is three jobs by runner pool as well, each with a shard axis, and
-#: the e2e tier is three more without one. The comments list each of the six by its job
-#: id, since the single `integration-test` job (the one that installs the real scanners)
-#: already owns that name.
-INTEGRATION_TEST_JOB_IDS = (
-    "integration-test-linux",
-    "integration-test-macos",
-    "integration-test-windows",
-)
-E2E_TEST_JOB_IDS = ("e2e-test-linux", "e2e-test-macos", "e2e-test-windows")
 RUN_UNIT_TESTS_USES = "./.github/actions/run-unit-tests"
 
 
