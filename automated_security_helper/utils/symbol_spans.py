@@ -102,7 +102,6 @@ def symbols_extra_install_hint() -> str:
 #: allowed; ``$`` covers JavaScript and ``#`` a JavaScript private member.
 _SEGMENT = r"#?(?!\d)[\w$]+"
 SYMBOL_PATTERN = re.compile(rf"^{_SEGMENT}(?:\.{_SEGMENT})*$")
-_SEGMENT_PATTERN = re.compile(rf"^{_SEGMENT}$")
 
 
 def is_valid_symbol(symbol: str) -> bool:
@@ -335,12 +334,25 @@ def _definition_name(node: Any, grammar: SymbolGrammar) -> Optional[str]:
             name_node = node.child_by_field_name(name_field)
     if name_node is None or name_node.text is None:
         return None
-    # A name that is not one identifier -- a computed or string-keyed method,
-    # a destructuring pattern -- cannot be written as a qualified name. Bytes
-    # that are not UTF-8 decode to U+FFFD, which is not an identifier character,
-    # so such a name never matches rather than matching by accident.
+    # A dotted name (TypeScript's ``namespace A.B {}``) contributes its segments,
+    # so a member is ``A.B.member``. A name that is not identifiers -- a
+    # string-named module (``module "x" {}``), a computed or string-keyed
+    # method, a destructuring pattern -- cannot be written as a qualified name,
+    # and neither can anything defined inside it: it is kept as a segment no
+    # symbol can spell, so its members are not indexed under the enclosing scope
+    # and a suppression for an enclosing name does not cover them by that name.
+    # Bytes that are not UTF-8 decode to U+FFFD, which is not an identifier
+    # character, so such a name never matches rather than matching by accident.
     name = name_node.text.decode("utf-8", errors="replace")
-    return name if _SEGMENT_PATTERN.match(name) else None
+    if SYMBOL_PATTERN.match(name):
+        return name
+    return _UNSPELLABLE + name
+
+
+#: Prefixed to a definition's name that no symbol can spell (``_definition_name``):
+#: a character outside every identifier, so the qualified names under it match no
+#: suppression.
+_UNSPELLABLE = chr(0x00)
 
 
 def _first_error_line(root: Any) -> int:
@@ -515,8 +527,11 @@ class SymbolResolver:
     def _resolve(self, file_path: str) -> Optional[Path]:
         # Opened by the name the file has on disk: a finding holds a file name that
         # is not UTF-8 in its record form (\udcNN, utils/undecodable_text.py), read
-        # back first, so the escape's backslash is not taken for a separator.
-        candidate = Path(undecodable_of_text(file_path).replace("\\", "/"))
+        # back first. The path is taken as the finding wrote it: on Windows, Path
+        # reads either separator; on POSIX a backslash is a character of a file
+        # name, and rewriting it to "/" checked a suppression against a file other
+        # than the finding's.
+        candidate = Path(undecodable_of_text(file_path))
         if not candidate.is_absolute():
             candidate = self._source_dir / candidate
         try:
