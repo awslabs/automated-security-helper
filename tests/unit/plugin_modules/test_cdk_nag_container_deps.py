@@ -45,11 +45,11 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scann
     _cdk_extra_requirements_from_metadata,
 )
 
+pytestmark = pytest.mark.unit
+
 # The packages the "cdk" extra actually exists to install. Names only -- the
 # version bounds are asserted against metadata in TestCdkExtraResolution rather
 # than duplicated here, so bumping a bound does not require editing this file.
-pytestmark = pytest.mark.unit
-
 _REAL_CDK_PACKAGES = ("aws-cdk-lib", "cdk-nag", "constructs")
 
 
