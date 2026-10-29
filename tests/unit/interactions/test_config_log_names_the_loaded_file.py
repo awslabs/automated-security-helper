@@ -126,8 +126,10 @@ def test_the_line_names_the_file_the_loader_read(tmp_path, scan, monkeypatch):
     )
     real = resolve_config_module.discover_config_source
 
-    def _prefers_ashrc(source_dir):
-        discovery = real(source_dir)
+    def _prefers_ashrc(source_dir, permit=None):
+        # resolve_config.py passes the caller's gate as ``permit=``
+        # (discover_config_source(source_dir, permit=permit_base)).
+        discovery = real(source_dir, permit=permit)
         ashrc = [s for s in [discovery.selected, *discovery.ignored] if s is not None]
         chosen = next(s for s in ashrc if s.path.name == ".ashrc.yaml")
         return type(discovery)(
