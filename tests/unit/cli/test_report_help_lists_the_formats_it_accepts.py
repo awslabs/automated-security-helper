@@ -24,6 +24,8 @@ from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.core.enums import ExportFormat
 from tests.unit.cli.test_report_format_output import _report, _write_results
 
+pytestmark = pytest.mark.unit
+
 AWS_MODULE = "automated_security_helper.plugin_modules.ash_aws_plugins"
 FORMATS = sorted(fmt.value for fmt in ExportFormat)
 

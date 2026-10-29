@@ -18,6 +18,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import app
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def results_dir(tmp_path: Path, monkeypatch) -> Path:

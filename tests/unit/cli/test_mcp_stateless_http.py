@@ -34,6 +34,8 @@ from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.core.exceptions import ASHValidationError
 from tests.utils.mcp_transport_harness import LOOPBACK_PORT
 
+pytestmark = pytest.mark.unit
+
 INITIALIZE = {
     "jsonrpc": "2.0",
     "id": 1,

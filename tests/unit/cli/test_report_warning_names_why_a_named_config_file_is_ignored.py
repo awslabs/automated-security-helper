@@ -135,6 +135,7 @@ def _warning_about(result: Dict) -> str:
     return " ".join(" ".join(named).split())
 
 
+@pytest.mark.integration
 def test_the_warning_gives_the_reason_for_a_file_the_command_cannot_place(
     tmp_path, plugin_site
 ):
@@ -145,6 +146,7 @@ def test_the_warning_gives_the_reason_for_a_file_the_command_cannot_place(
     assert " ".join(REPORT_CONFIG_FILE.remedy.split()) in warning, warning
 
 
+@pytest.mark.integration
 def test_the_warning_does_not_call_the_file_part_of_a_checkout(tmp_path, plugin_site):
     result = _report(tmp_path, plugin_site)
 
@@ -153,6 +155,7 @@ def test_the_warning_does_not_call_the_file_part_of_a_checkout(tmp_path, plugin_
     assert " ".join(IN_TREE_OR_DELIVERED.remedy.split()) not in warning, warning
 
 
+@pytest.mark.integration
 def test_the_refusal_itself_is_unchanged(tmp_path, plugin_site):
     """Control: the file enables nothing, as before; only the warning's words change."""
     result = _report(tmp_path, plugin_site)
@@ -163,6 +166,7 @@ def test_the_refusal_itself_is_unchanged(tmp_path, plugin_site):
     assert FILE_ENDPOINT not in result["output"], result["output"]
 
 
+@pytest.mark.integration
 def test_a_file_in_the_working_directory_keeps_the_reason_for_a_file_in_a_tree(
     tmp_path, plugin_site
 ):
@@ -174,6 +178,7 @@ def test_a_file_in_the_working_directory_keeps_the_reason_for_a_file_in_a_tree(
     assert " ".join(REPORT_CONFIG_FILE.reason.split()) not in warning, warning
 
 
+@pytest.mark.integration
 def test_a_file_in_the_working_directory_gets_the_remedy_that_works_in_this_command(
     tmp_path, plugin_site
 ):
@@ -189,6 +194,7 @@ def test_a_file_in_the_working_directory_gets_the_remedy_that_works_in_this_comm
     assert " ".join(IN_TREE_OR_DELIVERED.remedy.split()) not in warning, warning
 
 
+@pytest.mark.unit
 def test_the_source_for_a_named_file_in_a_tree_joins_the_reason_and_the_remedy():
     assert REPORT_CONFIG_FILE_IN_TREE.reason == IN_TREE_OR_DELIVERED.reason
     assert REPORT_CONFIG_FILE_IN_TREE.remedy == REPORT_CONFIG_FILE.remedy
@@ -201,6 +207,7 @@ def test_the_source_for_a_named_file_in_a_tree_joins_the_reason_and_the_remedy()
     )
 
 
+@pytest.mark.unit
 def test_the_source_for_a_named_file_in_a_tree_differs_only_in_the_two_remedies():
     """Every other field follows ``IN_TREE_OR_DELIVERED``, whatever fields it gains."""
     differing = {
@@ -212,6 +219,7 @@ def test_the_source_for_a_named_file_in_a_tree_differs_only_in_the_two_remedies(
     assert differing == {"remedy", "modules_remedy"}, differing
 
 
+@pytest.mark.integration
 def test_a_file_in_the_working_directory_is_refused_the_same_way(tmp_path, plugin_site):
     """Control: only the warning's words depend on where the file is."""
     result = _report(tmp_path, plugin_site, inside=True)
@@ -234,6 +242,7 @@ def _warnings_about_the_two_reporters(result: Dict) -> list[str]:
     return named
 
 
+@pytest.mark.integration
 def test_a_built_in_and_a_plugin_reporter_of_one_file_in_a_tree_share_one_remedy(
     tmp_path, plugin_site
 ):
@@ -250,6 +259,7 @@ def test_a_built_in_and_a_plugin_reporter_of_one_file_in_a_tree_share_one_remedy
         assert " ".join(IN_TREE_OR_DELIVERED.remedy.split()) not in warning, warning
 
 
+@pytest.mark.integration
 def test_a_file_in_a_tree_keeps_the_reason_for_both_reporters(tmp_path, plugin_site):
     """Only the remedy changes: the file is still described as inside a tree."""
     result = _report(tmp_path, plugin_site, inside=True, builtin=True)
@@ -258,6 +268,7 @@ def test_a_file_in_a_tree_keeps_the_reason_for_both_reporters(tmp_path, plugin_s
         assert " ".join(IN_TREE_OR_DELIVERED.reason.split()) in warning, warning
 
 
+@pytest.mark.integration
 def test_a_file_outside_every_tree_gets_one_remedy_for_both_reporters(
     tmp_path, plugin_site
 ):
@@ -269,12 +280,14 @@ def test_a_file_outside_every_tree_gets_one_remedy_for_both_reporters(
         assert " ".join(IN_TREE_OR_DELIVERED.remedy.split()) not in warning, warning
 
 
+@pytest.mark.unit
 def test_the_two_reasons_differ():
     """Control: the assertions above can tell the two reasons apart."""
     assert REPORT_CONFIG_FILE.reason != IN_TREE_OR_DELIVERED.reason
     assert REPORT_CONFIG_FILE.remedy != IN_TREE_OR_DELIVERED.remedy
 
 
+@pytest.mark.unit
 def test_the_two_sources_fill_a_section_the_file_leaves_out_alike():
     """Choosing between them changes the warning's words and nothing else.
 
@@ -329,6 +342,7 @@ def _s3_warning_for_a_file_outside_that_extends_one_inside(
     return " ".join(warnings)
 
 
+@pytest.mark.unit
 def test_a_named_file_outside_every_tree_that_extends_one_inside_gets_one_remedy(
     tmp_path, caplog
 ):
@@ -341,6 +355,7 @@ def test_a_named_file_outside_every_tree_that_extends_one_inside_gets_one_remedy
     assert " ".join(IN_TREE_OR_DELIVERED.remedy.split()) not in warning, warning
 
 
+@pytest.mark.unit
 def test_without_a_named_source_the_warning_keeps_the_remedy_for_a_file_in_a_tree(
     tmp_path, caplog
 ):

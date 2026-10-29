@@ -21,6 +21,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 
+pytestmark = pytest.mark.unit
+
 
 def _skip_unless_permission_bits_hold():
     if os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0):

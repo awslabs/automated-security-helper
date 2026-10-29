@@ -28,6 +28,8 @@ from automated_security_helper.base.uv_tool_mixin import UVToolMixin
 from automated_security_helper.cli.dependencies import dependencies_app
 from automated_security_helper.utils.tool_downloads import THIRD_PARTY_LICENSES
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "automated_security_helper" / "assets" / "install-pinned-tool.py"
 DOCKERFILE = REPO_ROOT / "Dockerfile"

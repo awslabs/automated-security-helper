@@ -22,9 +22,12 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="Windows file names hold no newline"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="Windows file names hold no newline"
+    ),
+]
 
 VALID = "project_name: t\n"
 #: A value the model refuses.

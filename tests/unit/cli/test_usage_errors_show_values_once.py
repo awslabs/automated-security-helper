@@ -79,6 +79,7 @@ def _assert_shown_once(output: str, value: str) -> None:
         pytest.param(["scan", "--shard-index"], id="integer-shard-index"),
     ],
 )
+@pytest.mark.integration
 def test_a_refused_option_value_is_shown_once(tmp_path, option, value):
     result = _ash(tmp_path, *option, value)
 
@@ -86,6 +87,7 @@ def test_a_refused_option_value_is_shown_once(tmp_path, option, value):
     _assert_shown_once(result.stdout + result.stderr, value)
 
 
+@pytest.mark.integration
 def test_a_real_override_and_the_text_of_its_escape_stay_distinct(tmp_path):
     """Shown once each, the two read differently: one escape, then an escaped
     backslash and the text. Shown twice, the override read as the text."""
@@ -101,6 +103,7 @@ def test_a_real_override_and_the_text_of_its_escape_stay_distinct(tmp_path):
     "value",
     [pytest.param(_RLO, id="right-to-left-override"), pytest.param(_ESC, id="esc")],
 )
+@pytest.mark.integration
 def test_an_unknown_command_is_shown_once(tmp_path, value):
     result = _ash(tmp_path, value)
 
@@ -116,6 +119,7 @@ def test_an_unknown_command_is_shown_once(tmp_path, value):
         pytest.param({"mo\x1b[31mde": "local"}, "unknown key", id="an-unknown-key"),
     ],
 )
+@pytest.mark.integration
 def test_a_cli_json_input_refusal_is_shown_once(tmp_path, document, needle):
     """The JSON input names its keys, and the refused value's own message, by repr."""
     source = tmp_path / "input.json"
@@ -129,6 +133,7 @@ def test_a_cli_json_input_refusal_is_shown_once(tmp_path, document, needle):
     _assert_shown_once(output, _ESC if "mode" in document else "mo\x1b[31mde")
 
 
+@pytest.mark.integration
 def test_a_duplicated_cli_json_input_key_is_shown_once(tmp_path):
     source = tmp_path / "input.json"
     source.write_text('{"x\\u001b[31my": 1, "x\\u001b[31my": 2}', encoding="utf-8")
@@ -155,6 +160,7 @@ def _lookalike_line(output: str) -> bool:
     )
 
 
+@pytest.mark.integration
 def test_a_value_with_a_newline_stays_on_one_line(tmp_path):
     """The repr kept it on one line ("\\n"); put back as typed, its newlines laid
     the panel out, so the panel held a line the value wrote."""
@@ -173,6 +179,7 @@ def test_a_value_with_a_newline_stays_on_one_line(tmp_path):
         pytest.param({"mo\n Error: --mode was accepted\nde": "local"}, id="a-key"),
     ],
 )
+@pytest.mark.integration
 def test_a_cli_json_input_value_or_key_with_a_newline_stays_on_one_line(
     tmp_path, document
 ):
@@ -186,6 +193,7 @@ def test_a_cli_json_input_value_or_key_with_a_newline_stays_on_one_line(
     assert not _lookalike_line(output), output
 
 
+@pytest.mark.integration
 def test_a_value_holding_a_quote_keeps_the_quotes_its_repr_chose(tmp_path):
     """repr quotes a'b with double quotes; put back between single ones, it read
     as 'a' followed by b'."""
@@ -196,6 +204,7 @@ def test_a_value_holding_a_quote_keeps_the_quotes_its_repr_chose(tmp_path):
     assert '"a\'b" is not one of' in output, output
 
 
+@pytest.mark.integration
 def test_an_unknown_option_was_shown_once_already(tmp_path):
     """The control: click names an unknown option as typed, so it was shown once."""
     result = _ash(tmp_path, "scan", "--nope" + "\x1b[31m")
@@ -204,6 +213,7 @@ def test_an_unknown_option_was_shown_once_already(tmp_path):
     _assert_shown_once(result.stdout + result.stderr, "--nope\x1b[31m")
 
 
+@pytest.mark.unit
 def test_a_path_typer_names_by_repr_is_given_as_typed():
     """No ash option makes typer check a path's existence today, so its message is
     checked where the usage error's text is made."""
@@ -227,6 +237,7 @@ def test_a_path_typer_names_by_repr_is_given_as_typed():
     )
 
 
+@pytest.mark.unit
 def test_text_that_only_looks_like_a_repr_is_left_as_it_is():
     """Only a literal that is its value's own repr is put back: a quoted Windows
     path holding "\\x64" is no repr ("\\x64" would be "d"), and stays as it was,
@@ -266,6 +277,7 @@ def test_text_that_only_looks_like_a_repr_is_left_as_it_is():
         pytest.param(["dependencies", "install"], id="dependencies-install"),
     ],
 )
+@pytest.mark.integration
 def test_an_unknown_option_holding_a_newline_stays_on_one_line(tmp_path, command):
     """click writes an unknown option's token into its message as typed, so a
     newline in it laid out a line of the error panel that the token set, in
@@ -278,6 +290,7 @@ def test_an_unknown_option_holding_a_newline_stays_on_one_line(tmp_path, command
     assert "\\x0a Error: --mode was accepted\\x0a" in output, output
 
 
+@pytest.mark.integration
 def test_an_extra_argument_holding_a_newline_stays_on_one_line(tmp_path):
     """The same for the extra-arguments message, the other message that embeds
     argv as typed."""
@@ -293,6 +306,7 @@ def test_an_extra_argument_holding_a_newline_stays_on_one_line(tmp_path):
     "command",
     [pytest.param(["scan"], id="scan"), pytest.param(["merge"], id="merge")],
 )
+@pytest.mark.integration
 def test_a_refused_output_format_stays_on_one_line(tmp_path, command):
     """The format refusals build their own message around the value as typed."""
     if command == ["merge"]:
@@ -317,6 +331,7 @@ def test_a_refused_output_format_stays_on_one_line(tmp_path, command):
     assert "\\x0a Error: --mode was accepted\\x0a" in output, output
 
 
+@pytest.mark.integration
 def test_two_config_files_are_named_on_one_line(tmp_path):
     """config get's two-files refusal embeds both paths as typed."""
     proc = _ash(
@@ -337,6 +352,7 @@ def test_two_config_files_are_named_on_one_line(tmp_path):
     assert "other.yaml" in output, output
 
 
+@pytest.mark.unit
 def test_a_missing_parameter_with_a_multi_line_message_prints_on_one_line(
     capfd, monkeypatch
 ):
@@ -367,6 +383,7 @@ def test_a_missing_parameter_with_a_multi_line_message_prints_on_one_line(
     assert "\\x0a Error: --mode was accepted\\x0a" in output, output
 
 
+@pytest.mark.unit
 def test_a_newline_in_the_message_gives_the_output_no_fold_point_at_width_80(
     capfd, monkeypatch
 ):
@@ -406,6 +423,7 @@ def test_a_newline_in_the_message_gives_the_output_no_fold_point_at_width_80(
     assert plain_pads == [], plain_pads
 
 
+@pytest.mark.unit
 def test_a_token_wider_than_the_panel_prints_whole_without_a_panel(capfd, monkeypatch):
     """A message holding a token wider than the panel's usable line (its width
     minus two border and two padding columns; tokens of 77 break at width 80,
@@ -436,6 +454,7 @@ def test_a_token_wider_than_the_panel_prints_whole_without_a_panel(capfd, monkey
     assert non_empty[0].startswith("Error: "), output
 
 
+@pytest.mark.unit
 def test_a_spaced_message_also_prints_on_one_line(capfd, monkeypatch):
     """The panel folds at every space in the message, so a spaced message can
     start a bordered row at any word: pad words position the fold, and the
@@ -468,6 +487,7 @@ def test_a_spaced_message_also_prints_on_one_line(capfd, monkeypatch):
     assert non_empty[0].startswith("Error: "), output
 
 
+@pytest.mark.unit
 def test_a_wide_character_token_prints_whole_without_a_panel(capfd, monkeypatch):
     """Rich wraps by cells, not by characters: a token of 45 characters and 90
     cells is wider than the console, so a panel had to break it mid-run at a
@@ -494,6 +514,7 @@ def test_a_wide_character_token_prints_whole_without_a_panel(capfd, monkeypatch)
     assert non_empty[0].startswith("Error: "), output
 
 
+@pytest.mark.unit
 def test_choose_from_in_a_message_without_a_choice_parameter_stays_escaped():
     """Only a missing Choice parameter's own layout is flattened. The phrase
     says nothing about where the text came from: a MissingParameter raised
@@ -520,6 +541,7 @@ def test_choose_from_in_a_message_without_a_choice_parameter_stays_escaped():
     assert "Choose from: local, container" not in shown, shown
 
 
+@pytest.mark.unit
 def test_a_missing_choice_parameter_stays_on_one_line(capfd, monkeypatch):
     """click's text for a missing choice lists the choices a line each, the one
     message of its type that holds newlines. Built the way click builds it (a
@@ -564,6 +586,7 @@ def test_a_missing_choice_parameter_stays_on_one_line(capfd, monkeypatch):
     assert "\\x09" not in output, output
 
 
+@pytest.mark.unit
 def test_a_missing_choice_message_from_a_translated_builder_still_flattens(
     capfd, monkeypatch
 ):

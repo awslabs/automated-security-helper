@@ -205,6 +205,7 @@ REFUSED = [
 
 
 @pytest.mark.parametrize("cell", REFUSED)
+@pytest.mark.integration
 def test_a_file_that_is_not_a_regular_file_in_the_scan_is_not_read(tmp_path, cell):
     root, outside = _tree(tmp_path)
     uri = _plant(cell, root, outside)
@@ -221,6 +222,7 @@ def test_a_file_that_is_not_a_regular_file_in_the_scan_is_not_read(tmp_path, cel
 @pytest.mark.parametrize(
     "cell", ["regular-file-in-the-root", "in-root-link-to-a-regular-file"]
 )
+@pytest.mark.integration
 def test_a_regular_file_in_the_scan_shows_the_lines_around_the_finding(tmp_path, cell):
     root, outside = _tree(tmp_path)
     uri = _plant(cell, root, outside)
@@ -234,6 +236,7 @@ def test_a_regular_file_in_the_scan_shows_the_lines_around_the_finding(tmp_path,
     assert "  9: value_9 = 9" not in snippet, snippet
 
 
+@pytest.mark.integration
 def test_a_line_that_never_ends_is_read_only_so_far(tmp_path):
     root, outside = _tree(tmp_path)
     uri = _plant("one-huge-line", root, outside)
@@ -276,6 +279,7 @@ def _drawn_text(app) -> str:
     return console.export_text()
 
 
+@pytest.mark.unit
 def test_a_hard_link_in_the_tree_is_read_as_an_in_tree_file(tmp_path):
     """A hard link inside the scanned tree is the file it names, as
     it is for the scanners, which read and report it. Only a local user who can
@@ -290,6 +294,7 @@ def test_a_hard_link_in_the_tree_is_read_as_an_in_tree_file(tmp_path):
     assert excerpt is not None and f"→ 3: {OUTSIDE_MARKER} = 1" in excerpt, excerpt
 
 
+@pytest.mark.unit
 def test_the_help_says_where_a_findings_code_comes_from():
     """The help names each case: the results' own snippet, from anywhere; the
     file, only from results in <root>/.ash/ash_output and a regular file inside
@@ -330,6 +335,7 @@ MANY_LINES_BOUND_S = 2.0
         pytest.param(40_000_000, 39_999_990, False, id="the-line-past-the-budget"),
     ],
 )
+@pytest.mark.unit
 def test_a_file_of_many_short_lines_is_read_in_bounded_time(
     tmp_path, lines, line, shown
 ):
@@ -354,6 +360,7 @@ def test_a_file_of_many_short_lines_is_read_in_bounded_time(
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_the_detail_view_says_the_source_is_not_shown(tmp_path):
     from automated_security_helper.cli.inspect.inspect_findings_app import (
         FindingsExplorerApp,
@@ -402,6 +409,7 @@ async def test_the_detail_view_says_the_source_is_not_shown(tmp_path):
         pytest.param("results", "results", None, id="an-output-directory-elsewhere"),
     ],
 )
+@pytest.mark.unit
 def test_the_scan_root_is_the_directory_the_results_were_written_in(
     tmp_path, monkeypatch, output_dir, report, scan_root
 ):

@@ -21,6 +21,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 
+pytestmark = pytest.mark.unit
+
 #: The value's text must never reach the refusal.
 CANARY = "s3cretcanary"
 

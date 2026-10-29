@@ -48,6 +48,8 @@ from tests.utils.isolated_tool_env import (
 )
 from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
 
+pytestmark = pytest.mark.integration
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 INVALID_CONFIG_EXIT = 3
 RESULTS_FILE_NAME = "ash_aggregated_results.json"

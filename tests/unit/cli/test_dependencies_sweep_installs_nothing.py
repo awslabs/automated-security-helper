@@ -35,7 +35,10 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanne
 )
 from tests.utils.install_containment import InstallSandbox, sandbox_env
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX stand-ins")
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(sys.platform == "win32", reason="POSIX stand-ins"),
+]
 
 
 @pytest.fixture

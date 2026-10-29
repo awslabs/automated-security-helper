@@ -28,6 +28,8 @@ from typing import Dict, List
 import pytest
 from typer.testing import CliRunner
 
+pytestmark = pytest.mark.unit
+
 VALIDATED = "Configuration is valid! A scan accepts it."
 
 PREFIX = "starts with './' and matches no path"

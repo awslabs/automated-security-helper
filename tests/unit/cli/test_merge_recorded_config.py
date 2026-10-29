@@ -372,6 +372,7 @@ def _assert_merged(result, harness: _Harness) -> None:
     assert (harness.output_dir / RESULTS_FILE_NAME).is_file(), result.output
 
 
+@pytest.mark.unit
 class TestRecordedReporterDestinations:
     def test_a_shards_s3_destination_is_not_used_and_the_warning_names_it(
         self, harness
@@ -540,6 +541,7 @@ class TestRecordedReporterDestinations:
         assert AWS not in recorded["ash_plugin_modules"]
 
 
+@pytest.mark.unit
 class TestRecordedPluginModules:
     def test_a_shards_off_host_plugin_package_is_not_loaded(self, harness):
         shard_paths = harness.write_shards(SHARD_CONFIG)
@@ -585,6 +587,7 @@ def _reporter_overrides(document: Dict[str, Any]) -> List[str]:
     return args
 
 
+@pytest.mark.unit
 class TestTheOperatorsBase:
     def test_a_recorded_config_repeating_the_operators_values_merges_without_a_warning(
         self, harness
@@ -757,6 +760,7 @@ class TestTheOperatorsBase:
         assert set(SHARD_DESTINATION_KEYS) <= scan_ignored
 
 
+@pytest.mark.unit
 class TestOverridesApplyOverTheRecordedConfig:
     def test_an_override_reaches_the_pre_merge_completion_gate(self, harness):
         """The recorded config's ``fail_on_incomplete_scanners`` is the operator's to change.
@@ -819,6 +823,7 @@ def _write_each(harness: _Harness, models, documents) -> List[Path]:
     return paths
 
 
+@pytest.mark.unit
 class TestEnablementIsTheOperators:
     def test_a_shard_does_not_turn_on_s3_the_operators_config_turns_off(self, harness):
         """The operator's config names a bucket and turns S3 off; a shard turns it on."""
@@ -1005,6 +1010,7 @@ def _documented_s3_example_overrides() -> List[str]:
     ]
 
 
+@pytest.mark.unit
 class TestTheDocumentedS3Example:
     def test_the_example_uploads_to_s3_and_runs_no_other_aws_reporter(self, harness):
         for reporter_class in harness.aws_reporters:
@@ -1024,6 +1030,7 @@ class TestTheDocumentedS3Example:
         assert harness.loaded_modules == [[AWS]]
 
 
+@pytest.mark.unit
 class TestMergeWarnings:
     def test_the_warnings_name_the_results_file_and_ash_merges_options(self, harness):
         shard_paths = harness.write_shards(SHARD_CONFIG)
@@ -1089,6 +1096,7 @@ class TestMergeWarnings:
             assert "Set them with" not in message, message
 
 
+@pytest.mark.unit
 class TestRecordedThirdPartyModules:
     MODULE = "merge_probe_ash_plugins"
 
@@ -1129,6 +1137,7 @@ class TestRecordedThirdPartyModules:
         assert not [m for m in harness.ignoring() if self.MODULE in m]
 
 
+@pytest.mark.unit
 class TestShardOrder:
     def test_the_lowest_indexed_shard_supplies_the_config_in_any_argument_order(
         self, harness
@@ -1253,6 +1262,7 @@ VERDICT_DISAGREEMENTS = [
 ]
 
 
+@pytest.mark.unit
 class TestVerdictSettings:
     @pytest.mark.parametrize(
         "key, first, second",
@@ -1479,6 +1489,7 @@ class TestVerdictSettings:
         assert not [m for m in harness.warnings if "ash merge's --config sets" in m]
 
 
+@pytest.mark.unit
 class TestAnOperatorConfigThatNamesNothingReadable:
     """A ``--config`` that is missing, a directory or unparseable exits 3, unmerged."""
 
@@ -1500,6 +1511,7 @@ class TestAnOperatorConfigThatNamesNothingReadable:
         assert not (harness.output_dir / RESULTS_FILE_NAME).exists()
 
 
+@pytest.mark.unit
 class TestOperatorConfigOutsideTheRecordedConfig:
     """``--config`` supplies values for what the shards recorded, and its modules.
 
@@ -1628,6 +1640,7 @@ class TestOperatorConfigOutsideTheRecordedConfig:
         )
 
 
+@pytest.mark.integration
 class TestTheRealChain:
     """``ash merge`` in a fresh process, with nothing patched.
 

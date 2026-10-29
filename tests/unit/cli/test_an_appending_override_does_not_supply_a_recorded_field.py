@@ -49,6 +49,8 @@ from automated_security_helper.models.asharp_model import (
     ScannerStatusInfo,
 )
 
+pytestmark = pytest.mark.unit
+
 FIELD = "output_formats"
 REFERENCE = "${ASH_PROBE_FORMATS}"
 APPEND = 'output_formats+=["sarif"]'

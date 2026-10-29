@@ -79,6 +79,7 @@ def _markdown_name(base: Path) -> str:
     return written[0]
 
 
+@pytest.mark.integration
 def test_a_link_at_a_file_the_reporter_writes_refuses_the_command(tmp_path):
     name = _markdown_name(tmp_path / "clean")
     output = _output_with_results(tmp_path)
@@ -95,6 +96,7 @@ def test_a_link_at_a_file_the_reporter_writes_refuses_the_command(tmp_path):
     assert link.is_symlink()
 
 
+@pytest.mark.unit
 def test_a_companion_name_outside_reports_refuses_the_command(
     tmp_path, monkeypatch, capfd
 ):
@@ -143,6 +145,7 @@ def test_a_companion_name_outside_reports_refuses_the_command(
     assert not list(tmp_path.rglob("companion-escape.md"))
 
 
+@pytest.mark.integration
 def test_a_link_at_a_name_the_reporter_does_not_write_is_not_examined(tmp_path):
     """``ash report --format sarif`` writes nothing in reports/, so a link there is no matter."""
     output = _output_with_results(tmp_path)

@@ -19,6 +19,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 
+pytestmark = pytest.mark.unit
+
 INVALID_CONFIG_EXIT = 3
 
 FILE_ENTRY = "wsgiref"

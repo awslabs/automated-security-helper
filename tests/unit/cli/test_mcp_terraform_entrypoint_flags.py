@@ -30,6 +30,8 @@ from automated_security_helper.cli.mcp import (
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.core.exceptions import ASHValidationError
 
+pytestmark = pytest.mark.unit
+
 ENTRYPOINT = (
     Path(__file__).resolve().parents[3]
     / "deploy/terraform/modules/ash-image-pipeline/files/ash-mcp-serve"

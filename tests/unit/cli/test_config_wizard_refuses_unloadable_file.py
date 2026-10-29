@@ -20,6 +20,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.config import config_app
 
+pytestmark = pytest.mark.unit
+
 ANSWERS = "\n" * 200
 
 

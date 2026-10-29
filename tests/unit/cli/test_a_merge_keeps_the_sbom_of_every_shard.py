@@ -43,6 +43,8 @@ from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import (
 )
 from tests.unit.cli.test_merge import as_loaded, build_shards
 
+pytestmark = pytest.mark.unit
+
 REQUESTS = {"name": "requests", "version": "2.19.1", "purl": "pkg:pypi/requests@2.19.1"}
 FLASK = {"name": "flask", "version": "3.0.0", "purl": "pkg:pypi/flask@3.0.0"}
 DJANGO = {"name": "django", "version": "5.0.0", "purl": "pkg:pypi/django@5.0.0"}

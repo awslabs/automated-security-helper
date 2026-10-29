@@ -20,10 +20,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 from tests.unit.cli.test_merge import build_shards, write_shards
 from tests.utils.helpers import importing_this_checkout
+
+pytestmark = pytest.mark.integration
 
 BROKEN = "mergebroken_ash_plugins"
 DEPENDENCY = "mergebrokendep_for_refusal"

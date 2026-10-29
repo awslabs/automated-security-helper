@@ -44,10 +44,12 @@ runner = CliRunner()
 ALIASES = [("ArchiveConverter", "archive")]
 
 
+@pytest.mark.unit
 def test_the_alias_table_holds_exactly_the_measured_renames():
     assert DEPRECATED_TOOL_ALIASES == dict(ALIASES)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(("old_name", "new_key"), ALIASES)
 def test_each_alias_names_the_class_it_used_to_select(old_name, new_key):
     """The old name was a class name; the new key must be that same class's key.
@@ -67,6 +69,7 @@ def test_each_alias_names_the_class_it_used_to_select(old_name, new_key):
     assert plugin_config_key(classes[0]) == new_key
 
 
+@pytest.mark.unit
 class TestDeprecatedToolAliases:
     @pytest.fixture(autouse=True)
     def _isolate(self, tmp_path, monkeypatch):
@@ -185,6 +188,7 @@ class TestDeprecatedToolAliases:
         assert self.warnings.getvalue() == ""
 
 
+@pytest.mark.integration
 def test_the_warning_reaches_a_real_stderr(tmp_path, monkeypatch):
     """Out of process, so the stream the warning lands on is the real one.
 

@@ -46,6 +46,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-5b1d-9876543210"
 SHARD_CONFIG = (
     "project_name: ${ASH_PROBE_CANARY}\n"

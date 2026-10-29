@@ -13,9 +13,12 @@ the variable produced.
 
 from __future__ import annotations
 
+import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
+
+pytestmark = pytest.mark.unit
 
 
 def test_the_help_names_the_environment_module_input():

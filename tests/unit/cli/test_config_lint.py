@@ -19,6 +19,8 @@ from automated_security_helper.config.config_linter import (
 )
 from automated_security_helper.cli.config import INVALID_CONFIG_EXIT_CODE
 
+pytestmark = pytest.mark.unit
+
 
 def _option_default(segment: str, section: str, field_name: str):
     """The default of the option ``field_name`` of a built-in plugin's options model."""

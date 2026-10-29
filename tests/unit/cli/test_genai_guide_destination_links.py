@@ -17,7 +17,10 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli import main as cli_main
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX links")
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(sys.platform == "win32", reason="POSIX links"),
+]
 
 GUIDE = "# GenAI guide\n\nUse ash_aggregated_results.json.\n"
 ORIGINAL = "outside content\n"

@@ -28,6 +28,8 @@ from automated_security_helper.cli.mcp.profile_registry import (
     get_profile_registry,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch) -> None:

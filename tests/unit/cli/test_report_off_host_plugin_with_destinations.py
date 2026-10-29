@@ -20,6 +20,8 @@ registers its plugins for the rest of the process.
 
 from __future__ import annotations
 
+import pytest
+
 from tests.unit.cli.off_host_plugin_support import (
     DECLARED_ON_PLUGIN,
     DECLARED_ON_REPORTER,
@@ -30,6 +32,8 @@ from tests.unit.cli.off_host_plugin_support import (
     OVERRIDE_ENDPOINT,
     run_report,
 )
+
+pytestmark = pytest.mark.integration
 
 REFUSAL = "sends findings off the host and is not enabled"
 

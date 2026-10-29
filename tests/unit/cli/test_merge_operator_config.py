@@ -35,6 +35,8 @@ from tests.unit.cli.test_merge import build_shards, write_shards
 from tests.utils import aws_stand_in as stand_in
 from tests.utils.helpers import importing_this_checkout
 
+pytestmark = pytest.mark.integration
+
 AWS_PLUGIN_MODULE = "automated_security_helper.plugin_modules.ash_aws_plugins"
 
 

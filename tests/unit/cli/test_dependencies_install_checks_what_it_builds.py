@@ -19,6 +19,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli import dependencies as dependencies_module
 from automated_security_helper.cli.dependencies import dependencies_app
 
+pytestmark = pytest.mark.unit
+
 GOOD_TRIVY = "ignore_unfixed: true"
 GOOD_S3 = "bucket_name: demo-bucket"
 BAD = "no_such_option: true"
