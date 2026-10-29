@@ -201,12 +201,21 @@ def _code_span_ranges(source: str) -> List[Tuple[int, int]]:
 def _inline_as_written(source: str) -> str:
     """One block's inline text with HTML outside its code spans written as text
     and each span as the model wrote it, but for a "<" starting a line inside a
-    span, which stays text (_SPAN_LINE_START_TAG)."""
+    span, which stays text (_SPAN_LINE_START_TAG), and for a span that holds a
+    pipe, whose "<" are all written as text: the report is read by GitHub
+    Markdown viewers, which split a table row into columns at every pipe before
+    reading the spans, so a span that crosses a column boundary ends there and
+    the HTML after the pipe is outside any span. The cost is in raw Markdown
+    only."""
     pieces = []
     position = 0
     for start, end in _code_span_ranges(source):
         pieces.append(_html_as_text(source[position:start]))
-        pieces.append(_SPAN_LINE_START_TAG.sub(r"\1&lt;", source[start:end]))
+        span = source[start:end]
+        if "|" in span:
+            pieces.append(span.replace("<", "&lt;"))
+        else:
+            pieces.append(_SPAN_LINE_START_TAG.sub(r"\1&lt;", span))
         position = end
     pieces.append(_html_as_text(source[position:]))
     return "".join(pieces)
@@ -468,7 +477,11 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
             default_factory=lambda: os.environ.get(
                 "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
             ),
-            pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}",
+            # Every region name AWS publishes: the two-letter areas plus mx and
+            # the eusc, us-isof and eu-isoe partitions, with an optional
+            # country segment (eusc-de-east-1). A value refused here is refused
+            # as a configuration error (exit 3), so the pattern errs wide.
+            pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|mx|eusc|us-gov|us-iso|us-isob|us-isof|eu-isoe)(-[a-z]{2})?-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1,2}",
             description="AWS region to use for Bedrock. If not specified, the default region will be used. If specified, the region will be used for all Bedrock requests.",
         ),
     ]
@@ -959,12 +972,19 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                     append_to_stream="stderr",
                 )
 
-                # Check if fallback models are available
+                # Check if fallback models are available. The run walks the
+                # whole chain (_walk_fallbacks), so the check walks it too:
+                # checking the first fallback alone disabled the reporter when
+                # only a later one was usable. One listing serves every
+                # candidate (ListingsOnce), as in the run's walk.
                 if self.config.options.enable_fallback_models:
+                    listings = ListingsOnce(bedrock_client)
+                    visited = {model_id}
                     fallback_model = get_fallback_model(model_id)
-                    if fallback_model and fallback_model != model_id:
+                    while fallback_model and fallback_model not in visited:
+                        visited.add(fallback_model)
                         is_valid, error_message = validate_bedrock_model(
-                            bedrock_client, fallback_model, values=values
+                            listings, fallback_model, values=values
                         )
                         if is_valid:
                             self._plugin_log(
@@ -980,6 +1000,8 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                             )
                             # We can proceed with the fallback model
                             self.dependencies_satisfied = True
+                            break
+                        fallback_model = get_fallback_model(fallback_model)
             else:
                 # Primary model is valid
                 self.dependencies_satisfied = True
@@ -1016,6 +1038,11 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         self._control_client = None
         self._run_model = None
         self._configured_error = None
+        # The answer cache is keyed by fixed section names, so a second report()
+        # on one instance read the first run's answers for another model's
+        # findings; the cache is one run's.
+        self._cache = {}
+        self._secret_findings_exist = False
 
         all_findings, secret_findings, indexed_findings = self._extract_findings(model)
         outcome = self._scan_outcome(model)
@@ -1039,11 +1066,11 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             )
         else:
             ASH_LOGGER.info("Generating simple summary report")
+            # The whole list: legacy_summary counts the total from it and
+            # itself carries at most max_findings_to_analyze of them, so slicing
+            # here made the prompt's total read as the limit.
             summary = self._run_simple_report(
-                bedrock_runtime,
-                model,
-                all_findings[: self.config.options.max_findings_to_analyze],
-                secret_findings,
+                bedrock_runtime, model, all_findings, secret_findings
             )
 
         summary = (
@@ -1111,7 +1138,8 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             indexed = self._make_indexed_finding(i + 1, finding_dict)
             indexed_findings.append(indexed)
 
-            is_secret = self._is_secret_scanner(finding_dict) or (
+            excluded_types = self._excluded_tool_types(finding_dict)
+            is_secret = SECRETS_TOOL_TYPE in excluded_types or (
                 self._excludes_secrets()
                 and is_secret_detection(result, detection_rule_ids)
             )
@@ -1125,6 +1153,11 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 if is_actionable:
                     secret_findings.append(finding_dict)
                     self._secret_findings_exist = True
+            elif excluded_types:
+                # A type exclude_scanner_types names that is not the secrets
+                # type (IAC, say): counted in the scan outcome, not sent to the
+                # model, and not reported as a potential secret either.
+                continue
             elif is_actionable:
                 all_findings.append(finding_dict)
 
@@ -1174,20 +1207,27 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             SimpleNamespace(properties=properties, level=finding.get("level"))
         ).upper()
 
-    def _is_secret_scanner(self, finding_dict: Dict[str, Any]) -> bool:
-        """Whether the finding's scanner type is one ``exclude_scanner_types`` names.
+    def _excluded_tool_types(self, finding_dict: Dict[str, Any]) -> set:
+        """The finding's scanner types among the ones ``exclude_scanner_types``
+        names.
 
         The type comes from the scanner, looked up by the ``scanner_name`` the
         engine writes on every result, and from ``tool_type::`` tags
         (utils/scanner_tool_types.py). No scanner writes a ``scanner_type``
-        property.
+        property. Only the secrets type among them makes a finding a secret
+        finding; any other excluded type keeps the finding out of the prompts.
         """
         excluded = {
             normalize_tool_type(name)
             for name in self.config.options.exclude_scanner_types
         }
         excluded.discard(None)
-        return bool(result_tool_types(finding_dict) & excluded)
+        return result_tool_types(finding_dict) & excluded
+
+    def _is_secret_scanner(self, finding_dict: Dict[str, Any]) -> bool:
+        """Whether the finding's scanner type is the secrets type and
+        ``exclude_scanner_types`` names it."""
+        return SECRETS_TOOL_TYPE in self._excluded_tool_types(finding_dict)
 
     def _excludes_secrets(self) -> bool:
         """Whether ``exclude_scanner_types`` names the secrets type.
@@ -1309,6 +1349,11 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         builder = BedrockPromptBuilder()
         client = self._make_model_client(bedrock_runtime)
 
+        # The finding details show every finding as it was found: the
+        # summarized list below is for the prompts, and the Evidence section
+        # used to read it, so all but the first instance of each rule lost their
+        # Raw JSON and that one showed the synthesized record.
+        raw_findings = findings
         if opts.summarize_findings:
             ASH_LOGGER.info("Summarizing findings to reduce token usage")
             findings = self._summarize_findings(findings)
@@ -1319,6 +1364,10 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         included = set(opts.include_sections) - set(opts.exclude_sections)
 
         def _section_call(prompt: str, system: str, cache_key: str) -> str:
+            if not prompt:
+                # Nothing to analyze: the section says so itself. A builder's
+                # empty answer is never sent to the model as a prompt.
+                return self._nothing_to_analyze()
             prepared = builder.prepare_prompt(
                 prompt,
                 custom_prompt=opts.custom_prompt,
@@ -1382,7 +1431,11 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             report += "## Risk assessment\n\n"
             report += (
                 _section_call(
-                    builder.risk_assessment(findings, opts.compliance_frameworks),
+                    builder.risk_assessment(
+                        findings,
+                        opts.compliance_frameworks,
+                        opts.max_findings_to_analyze,
+                    ),
                     "You are a security expert providing risk assessment based on security scan findings.",
                     "risk_assessment",
                 )
@@ -1395,7 +1448,10 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             report += (
                 _section_call(
                     builder.compliance_impact(
-                        findings, opts.compliance_frameworks, opts.industry_context
+                        findings,
+                        opts.compliance_frameworks,
+                        opts.industry_context,
+                        opts.max_findings_to_analyze,
                     ),
                     "You are a compliance expert analyzing security findings against regulatory frameworks.",
                     "compliance_impact",
@@ -1405,10 +1461,20 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
 
         if "detailed_findings" not in opts.exclude_sections:
             report += self._render_finding_details(
-                findings, secret_findings, indexed_findings
+                raw_findings, secret_findings, indexed_findings
             )
 
         return report
+
+    def _nothing_to_analyze(self) -> str:
+        """What a section says when its builder had nothing to analyze: fixed
+        report text, not a model's reply to a placeholder prompt. Names the
+        secret findings when the run has them, so a secrets-only scan's risk
+        and technical sections point at where its findings are."""
+        text = "No actionable findings to analyze for this section."
+        if self._secret_findings_exist:
+            text += " The secret findings are reported in their own section."
+        return text
 
     def _render_by_severity(
         self,
@@ -1457,8 +1523,13 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
     ) -> str:
         if opts.batch_processing and len(findings) > opts.max_findings_to_analyze:
             return self._process_findings_by_batch(bedrock_runtime, model, findings)
+        summary_prompt = builder.findings_summary(
+            findings[: opts.max_findings_to_analyze]
+        )
+        if not summary_prompt:
+            return self._nothing_to_analyze()
         prompt = builder.prepare_prompt(
-            builder.findings_summary(findings[: opts.max_findings_to_analyze]),
+            summary_prompt,
             custom_prompt=opts.custom_prompt,
             industry_context=opts.industry_context,
             compliance_frameworks=opts.compliance_frameworks,
@@ -1695,6 +1766,14 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
     def _call_with_fallback(
         self, client: BedrockModelClient, prompt: str, system_prompt: str
     ) -> str:
+        """The text of ``_outcome_with_fallback``: an answer, or the "*Error
+        ...*" text of a failure. A caller that has to tell the two apart (the
+        batch synthesis) reads the outcome's ``ok`` instead of its text."""
+        return self._outcome_with_fallback(client, prompt, system_prompt).text
+
+    def _outcome_with_fallback(
+        self, client: BedrockModelClient, prompt: str, system_prompt: str
+    ) -> CallOutcome:
         """The report path's model call: the configured model first, then the
         fallback chain when the call errors and ``enable_fallback_models`` is
         on. The answer comes back as the model gave it; report text takes it
@@ -1725,9 +1804,9 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         if run_model is not None and opts.enable_fallback_models:
             kept = call(run_model)
             if kept.ok or not kept.model_specific:
-                return kept.text
+                return kept
             self._run_model = None
-            return self._walk_fallbacks(
+            return self._walk_outcome(
                 self._control_plane(),
                 opts.model_id,
                 call,
@@ -1737,9 +1816,9 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             )
         outcome = client.call(prompt, system_prompt)
         if outcome.ok or not opts.enable_fallback_models or not outcome.model_specific:
-            return outcome.text
+            return outcome
         self._configured_error = outcome.text
-        return self._walk_fallbacks(
+        return self._walk_outcome(
             self._control_plane(),
             opts.model_id,
             call,
@@ -1758,8 +1837,35 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         resume_error: Optional[str] = None,
         primary_check: Optional[Any] = None,
     ) -> str:
+        """The text of ``_walk_outcome``: the answer of the first candidate that
+        answered, or the failure text (the real error of a failure no other
+        model can answer, else the exhaustion text)."""
+        return self._walk_outcome(
+            bedrock_client,
+            primary,
+            call_model,
+            primary_error=primary_error,
+            primary_called=primary_called,
+            keep_as_run_model=keep_as_run_model,
+            resume_after=resume_after,
+            resume_error=resume_error,
+            primary_check=primary_check,
+        ).text
+
+    def _walk_outcome(
+        self,
+        bedrock_client: Any,
+        primary: str,
+        call_model: Callable[[str], CallOutcome],
+        primary_error: Optional[str] = None,
+        primary_called: bool = True,
+        keep_as_run_model: bool = True,
+        resume_after: Optional[str] = None,
+        resume_error: Optional[str] = None,
+        primary_check: Optional[Any] = None,
+    ) -> CallOutcome:
         """Walk the fallback chain from *primary*: the one walk the report
-        path (``_call_with_fallback``) and the shims (``_try_fallback_models``)
+        path (``_outcome_with_fallback``) and the shims (``_try_fallback_models``)
         share, so the two cannot drift.
 
         ``get_fallback_model`` falls through to its default model for a
@@ -1859,21 +1965,31 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                     )
                     if keep_as_run_model:
                         self._run_model = model
-                    return outcome.text
+                    return outcome
+                if not outcome.model_specific:
+                    # No connection, no credentials, the service down: every
+                    # later candidate fails the same way, so the walk ends here
+                    # with the real error, not the generic exhaustion text
+                    # after calling the rest of the chain for nothing.
+                    return outcome
             model = get_fallback_model(model)
-        return text_without_values(
-            _exhaustion_text(
-                primary,
-                called,
-                unavailable,
-                primary_error,
-                run_model=resume_after,
-                run_model_error=resume_error,
-                not_checked=not_checked,
-                listing_refused=listing_refused,
-                listing_client_side=listing_client_side,
+        return CallOutcome(
+            text_without_values(
+                _exhaustion_text(
+                    primary,
+                    called,
+                    unavailable,
+                    primary_error,
+                    run_model=resume_after,
+                    run_model_error=resume_error,
+                    not_checked=not_checked,
+                    listing_refused=listing_refused,
+                    listing_client_side=listing_client_side,
+                ),
+                values,
             ),
-            values,
+            ok=False,
+            model_specific=True,
         )
 
     # ------------------------------------------------------------------
@@ -1940,23 +2056,27 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 )
 
         if "technical_analysis" in included:
-            tech_prompt = builder.prepare_prompt(
-                builder.technical_analysis(
-                    all_findings,
-                    opts.max_findings_to_analyze,
-                    opts.include_code_snippets,
-                ),
-                custom_prompt=opts.custom_prompt,
-                industry_context=opts.industry_context,
-                compliance_frameworks=opts.compliance_frameworks,
-                custom_context=opts.custom_context,
+            analysis_prompt = builder.technical_analysis(
+                all_findings,
+                opts.max_findings_to_analyze,
+                opts.include_code_snippets,
             )
-            tech_content = self._model_answer(
-                client,
-                tech_prompt,
-                "You are a security expert providing detailed technical analysis of security findings.",
-                cache_key="technical_summary_only",
-            )
+            if analysis_prompt:
+                tech_prompt = builder.prepare_prompt(
+                    analysis_prompt,
+                    custom_prompt=opts.custom_prompt,
+                    industry_context=opts.industry_context,
+                    compliance_frameworks=opts.compliance_frameworks,
+                    custom_context=opts.custom_context,
+                )
+                tech_content = self._model_answer(
+                    client,
+                    tech_prompt,
+                    "You are a security expert providing detailed technical analysis of security findings.",
+                    cache_key="technical_summary_only",
+                )
+            else:
+                tech_content = self._nothing_to_analyze()
             tech_path = write_report_file(
                 reports_dir,
                 opts.output_technical_file,
@@ -1996,21 +2116,29 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         self,
         findings: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        """Summarize findings to reduce token usage."""
+        """Summarize findings to reduce token usage.
+
+        Grouped by rule AND severity: grouping by rule alone gave every instance
+        the first one's severity, so a CRITICAL instance of a rule whose first
+        instance was LOW was analyzed as LOW and the Critical section could
+        vanish. A summary carries every instance's location, in SARIF shape, so
+        the prompts list them instead of the first instance's alone, and
+        ``original_count`` so the builders count every instance.
+        """
         if not self.config.options.summarize_findings or not findings:
             return findings
 
-        grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        grouped: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
         for finding in findings:
             rule_id = (
                 finding.get("ruleId")
                 or (finding.get("rule") or {}).get("id")
                 or "unknown"
             )
-            grouped[rule_id].append(finding)
+            grouped[(rule_id, self._finding_severity(finding))].append(finding)
 
         summarized = []
-        for _rule_id, rule_findings in grouped.items():
+        for _group, rule_findings in grouped.items():
             if len(rule_findings) == 1:
                 summarized.append(rule_findings[0])
                 continue
@@ -2026,7 +2154,11 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                     )
                     if uri and uri not in seen_uris:
                         seen_uris.append(uri)
-                        locations.append({"uri": uri})
+                        locations.append(
+                            {"physicalLocation": {"artifactLocation": {"uri": uri}}}
+                        )
+            if locations:
+                base["locations"] = locations
             if "message" in base and isinstance(base["message"], dict):
                 base["message"]["text"] = (
                     f"Found {len(rule_findings)} instances of this issue"
@@ -2067,7 +2199,8 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         batches = [
             findings[i : i + batch_size] for i in range(0, len(findings), batch_size)
         ]
-        batch_results = []
+        answered: List[Tuple[int, str]] = []
+        failed: List[Tuple[int, str]] = []
         for i, batch in enumerate(batches):
             ASH_LOGGER.info(f"Processing batch {i + 1} of {len(batches)}")
             prompt = builder.prepare_prompt(
@@ -2078,26 +2211,46 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 custom_context=opts.custom_context,
             )
             # Each batch's answer is prompt input for the synthesis below, not
-            # report text, so it is kept as the model gave it.
-            batch_results.append(
-                self._call_with_fallback(
-                    client,
-                    prompt,
-                    "You are a security expert summarizing findings from a security scan.",
-                )
+            # report text, so it is kept as the model gave it. Whether a batch
+            # answered is the outcome's ``ok``, never its text: a failed batch's
+            # "*Error ...*" text used to be fed to the synthesis as that batch's
+            # summary, and the report showed no failure.
+            outcome = self._outcome_with_fallback(
+                client,
+                prompt,
+                "You are a security expert summarizing findings from a security scan.",
             )
+            (answered if outcome.ok else failed).append((i, outcome.text))
 
-        formatted = [f"BATCH {i + 1}:\n{s}" for i, s in enumerate(batch_results)]
+        if not answered:
+            # Every batch failed: the first failure is the section's text, shown
+            # as any model text is.
+            return _markdown_as_written(str(shown_not_obeyed(str(failed[0][1]))))
+
+        formatted = [f"BATCH {i + 1}:\n{s}" for i, s in answered]
         combined = (
             "Synthesize the following batch summaries into a cohesive overall summary:\n\n"
             + "\n".join(formatted)
             + "\n\nProvide a unified summary that captures the key insights from all batches.\n"
         )
-        return self._model_answer(
+        synthesis = self._model_answer(
             client,
             combined,
             "You are a security expert synthesizing multiple security scan batch summaries.",
         )
+        if failed:
+            # The report says which batches the synthesis does not cover, and
+            # why, in the failure's own (redacted) words.
+            notes = "\n".join(
+                f"- Batch {i + 1} of {len(batches)} was not summarized: "
+                + _markdown_as_written(str(shown_not_obeyed(str(_error_reason(text)))))
+                for i, text in failed
+            )
+            synthesis += (
+                f"\n\n{len(failed)} of {len(batches)} batches could not be "
+                f"summarized and are not covered above:\n{notes}"
+            )
+        return synthesis
 
     # ------------------------------------------------------------------
     # Backward-compat shims (existing tests call these methods directly)
