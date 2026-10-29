@@ -614,6 +614,47 @@ class ScannerExecutor:
         """Forward to the injected process function, or no-op if not wired."""
         return self._process_fn(results, aggregated_results)
 
+    def _process_each(
+        self,
+        scanner_name: str,
+        scanner_plugin: Any,
+        results_list: List[ScanResultsContainer],
+        aggregated_results: AshAggregatedResults,
+    ) -> Tuple[AshAggregatedResults, bool]:
+        """Process every container of one scanner; False when one could not be.
+
+        Each container is processed on its own, so a raise while merging one
+        target's results (a report the processor cannot read) leaves the
+        scanner's other targets' containers processed. Before this the raise
+        left the loop, dropped the remaining containers, and the scanner-level
+        handler then filed one failure container with no target, whose
+        per-target results file is written under "source" and so replaced the
+        source target's. The failure is logged here; the caller keeps the
+        scanner out of completed_scanners, so the completeness check records
+        it, and nothing overwrites a target's file.
+        """
+        all_processed = True
+        for container in results_list:
+            try:
+                aggregated_results = self._process_results_fn(
+                    container, aggregated_results
+                )
+            except Exception as process_error:
+                all_processed = False
+                environment_values = self._plugin_environment_values(scanner_plugin)
+                ASH_LOGGER.error(
+                    f"Failed to process {scanner_name}'s results on "
+                    f"{container.target_type}: "
+                    f"{error_text(process_error, environment_values)}",
+                    extra=NO_MARKUP,
+                )
+                ASH_LOGGER.debug(
+                    f"Stack trace for {scanner_name} results processing failure:\n"
+                    f"{traceback_text(values=environment_values)}",
+                    extra=NO_MARKUP,
+                )
+        return aggregated_results, all_processed
+
     def _assess_content_databases(self, scanner_plugin: Any, raw_results: Any) -> list:
         """Hold the scanner's content databases to their declared age bounds.
 
@@ -1781,13 +1822,17 @@ class ScannerExecutor:
                         description=f"[red]({escape_markup(scanner_name)}) Failed: returned None results",
                     )
                 else:
-                    for r in results_list:
-                        processed = self._process_results_fn(r, aggregated_results)
-                        aggregated_results = processed
+                    aggregated_results, all_processed = self._process_each(
+                        scanner_name, scanner_plugin, results_list, aggregated_results
+                    )
 
-                    if scanner_succeeded and all(
-                        getattr(c, "status", None) != ScannerStatus.ERROR
-                        for c in results_list
+                    if (
+                        scanner_succeeded
+                        and all_processed
+                        and all(
+                            getattr(c, "status", None) != ScannerStatus.ERROR
+                            for c in results_list
+                        )
                     ):
                         ASH_LOGGER.debug(
                             f"Appending {scanner_plugin.__class__.__name__} to completed_scanners"
@@ -2043,22 +2088,22 @@ class ScannerExecutor:
                             )
                     else:
                         ASH_LOGGER.debug(f"Got results from {scanner_name}, processing")
-                        for r in results_list:
-                            processed = self._process_results_fn(r, aggregated_results)
-                            aggregated_results = processed
+                        plugin_inst = next(
+                            (t[1] for t in self.scanner_tasks if t[0] == scanner_name),
+                            None,
+                        )
+                        aggregated_results, all_processed = self._process_each(
+                            scanner_name, plugin_inst, results_list, aggregated_results
+                        )
 
-                        if scanner_succeeded and all(
-                            getattr(c, "status", None) != ScannerStatus.ERROR
-                            for c in results_list
-                        ):
-                            plugin_inst = next(
-                                (
-                                    t[1]
-                                    for t in self.scanner_tasks
-                                    if t[0] == scanner_name
-                                ),
-                                None,
+                        if (
+                            scanner_succeeded
+                            and all_processed
+                            and all(
+                                getattr(c, "status", None) != ScannerStatus.ERROR
+                                for c in results_list
                             )
+                        ):
                             if plugin_inst is not None:
                                 ASH_LOGGER.debug(
                                     f"Appending {scanner_name} to completed_scanners"
