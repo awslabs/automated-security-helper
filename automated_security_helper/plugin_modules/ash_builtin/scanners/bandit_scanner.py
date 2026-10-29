@@ -205,6 +205,71 @@ def _skipped_file_paths(run: Any) -> set:
     return skipped
 
 
+#: bandit's file selection when no config file sets ``include``
+#: (``bandit/core/config.py``, 1.9.4).
+_BANDIT_DEFAULT_INCLUDE = ("*.py", "*.pyw")
+
+
+def _config_file_filters(final_args: Sequence[Any]) -> Tuple[List[str], List[str]]:
+    """bandit's ``include`` globs and ``exclude_dirs`` from the ``--configfile`` in ``final_args``.
+
+    As bandit 1.9.4 reads them (``core/config.py``: the top level of a YAML
+    file, or ``[tool.bandit]`` of a ``.toml`` file; ``core/manager.py``
+    ``discover_files``: ``include`` defaults to ``*.py`` and ``*.pyw``, and
+    ``exclude_dirs`` entries are matched like ``--exclude`` entries). Both are
+    applied before the ``--exclude`` argument, so the scanned-file check has to
+    know them: an operator config that leaves every Python file out was read as
+    bandit having scanned no file, an error. No ``--configfile``, a file that
+    cannot be read or parsed, or a value of another shape, leaves the defaults;
+    bandit itself then fails the scan on the same file, with its own message.
+    """
+    include = list(_BANDIT_DEFAULT_INCLUDE)
+    exclude_dirs: List[str] = []
+    arguments = [str(argument) for argument in final_args]
+    config_file: Optional[str] = None
+    for index, argument in enumerate(arguments):
+        if argument == "--configfile" and index + 1 < len(arguments):
+            config_file = arguments[index + 1]
+        elif argument.startswith("--configfile="):
+            config_file = argument[len("--configfile=") :]
+    if config_file is None:
+        return include, exclude_dirs
+    try:
+        with open(config_file, "rb") as handle:
+            raw = handle.read()
+    except OSError:
+        return include, exclude_dirs
+    data: Any = None
+    if config_file.endswith(".toml"):
+        try:
+            import tomllib
+        except ImportError:  # pragma: no cover - Python 3.10 without tomli
+            try:
+                import tomli as tomllib  # type: ignore[no-redef]
+            except ImportError:
+                return include, exclude_dirs
+        try:
+            data = tomllib.loads(raw.decode("utf-8")).get("tool", {}).get("bandit")
+        except (UnicodeDecodeError, ValueError, AttributeError):
+            data = None
+    else:
+        import yaml
+
+        try:
+            data = yaml.safe_load(raw)
+        except yaml.YAMLError:
+            data = None
+    if not isinstance(data, dict):
+        return include, exclude_dirs
+    configured_include = data.get("include")
+    if isinstance(configured_include, list) and configured_include:
+        include = [str(item) for item in configured_include]
+    configured_exclude = data.get("exclude_dirs")
+    if isinstance(configured_exclude, list):
+        exclude_dirs = [str(item) for item in configured_exclude if str(item)]
+    return include, exclude_dirs
+
+
 def _not_a_plain_substring(literal: str) -> str:
     """``literal`` as an ``fnmatch`` glob that matches only itself and holds a
     ``[``, so bandit's substring test cannot fire on an ordinary path.
@@ -1220,12 +1285,20 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             for entry in str(arg)[len(prefix) :].split(",")
             if entry
         ]
+        # The operator's --configfile can set bandit's include globs and
+        # exclude_dirs, which bandit applies before --exclude: a config that
+        # legitimately leaves every Python file out was read as "scanned no file".
+        include_globs, exclude_dirs = _config_file_filters(final_args)
+        entries += exclude_dirs
         root = Path(target).as_posix()
         all_files, _ = walked_files(target)
         python = [
             f"{root}/{relative}"
             for relative in all_files
-            if relative.endswith((".py", ".pyw"))
+            if any(
+                fnmatch.fnmatch(f"{root}/{relative}", glob_pattern)
+                for glob_pattern in include_globs
+            )
         ]
         unexcluded = [
             path
