@@ -266,8 +266,32 @@ def _unconstructed_scanner_name(plugin_config: Any, plugin_class: type) -> str:
     else:
         name = getattr(plugin_config, "name", None)
     if isinstance(name, str) and name:
-        return name
+        if _is_one_path_component(name):
+            return name
+        # The row's name becomes a directory under scanners/ when its results
+        # container is written (scan_result_processor), so a configured name
+        # with a separator, "..", or a NUL would put ASH.ScanResults.json
+        # outside the output directory. A constructed scanner's name is
+        # validated by its config model; this one never constructed, so its
+        # section was never validated. The class's key stands in.
+        ASH_LOGGER.warning(
+            f"Scanner section name {name!r} is not a plain name and is not used "
+            f"for the record of its construction failure; recorded as "
+            f"{plugin_config_key(plugin_class)!r}"
+        )
     return plugin_config_key(plugin_class)
+
+
+def _is_one_path_component(name: str) -> bool:
+    """Whether *name* can only ever name one entry of one directory.
+
+    No path separator of either kind, not the current or parent directory,
+    no NUL. The check is on the characters, not the platform: a results tree
+    written on one platform is read on another.
+    """
+    if name in (".", "..") or "\x00" in name:
+        return False
+    return "/" not in name and "\\" not in name
 
 
 class ScanPhase(EnginePhase):
