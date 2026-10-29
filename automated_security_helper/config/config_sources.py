@@ -4847,7 +4847,14 @@ def _environment_blind_error(
         )
     except ASHConfigSourceError as literal_error:
         if "${" not in str(literal_error):
-            return literal_error
+            # Without its traceback: that traceback runs through this frame,
+            # whose local `error` is the refused error (its text can quote a
+            # value read from the environment) and whose own traceback keeps
+            # the real resolution's frames, and their state, alive. The
+            # caller raises the returned error with the chain cut (`from
+            # None`), but a traceback is carried on the error itself, so it
+            # is cut here, where it would otherwise leave with the frame.
+            return literal_error.with_traceback(None)
     except (yaml.YAMLError, OSError, ValueError):
         # The file reads with the environment but not without it; nothing more
         # can be said without quoting what the environment supplied.

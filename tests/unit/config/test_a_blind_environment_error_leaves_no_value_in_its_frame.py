@@ -61,6 +61,32 @@ def test_the_resolving_frame_holds_no_environment_value(
             assert MARKER not in repr(value), (frame.f_code.co_name, name)
 
 
+def test_the_literal_route_returns_an_error_with_no_traceback(tmp_path: Path) -> None:
+    """The other arm: when the chain fails without the environment too, and
+    that failure names no reference, the literal resolution's own error is the
+    reason. It used to be returned with its traceback, which ran through
+    ``_environment_blind_error``'s frame (local ``error``: the refused error,
+    whose text can quote a value) and kept the real resolution's frames alive;
+    the outer ``raise ... from None`` cuts the exception chain but not a
+    traceback carried on the error itself. Red at the base: the returned
+    error's traceback held that frame, with the refused error among its locals.
+    """
+    from automated_security_helper.config.config_sources import (
+        _environment_blind_error,
+    )
+
+    root = tmp_path / ".ash.yaml"
+    root.write_text("extends: missing-base.yaml\nproject_name: p\n", encoding="utf-8")
+    refused = ASHConfigSourceError(f"quotes a value: {MARKER}")
+
+    result = _environment_blind_error(root, tmp_path, None, refused)
+
+    assert isinstance(result, ASHConfigSourceError)
+    assert result is not refused
+    assert "${" not in str(result) and MARKER not in str(result)
+    assert result.__traceback__ is None
+
+
 def test_the_same_chain_loads_once_the_variable_is_set(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
