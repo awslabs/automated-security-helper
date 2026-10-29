@@ -40,12 +40,15 @@ The other side of the same coin is a leg that collected tests and ran none of th
 tier leg whose every selected test is skipped (a tool is absent, a gate is off) exits 0
 and reads green while it measured nothing. ``fail_a_tier_run_that_executed_no_test``
 turns that into ``TESTS_FAILED`` and prints one line, but only for a CI tier run: a
-``-m`` expression was given AND the run opted in with ``ASH_TEST_TIER_FLOOR=1`` or has a
-shard. The run-unit-tests action sets the variable on its pytest step; ``configure``
-reads it once and removes it from ``os.environ``, as it does the shard variable, so a
-pytest that a test starts does not inherit it and the floor does not differ between a
-CI runner and a developer's machine. ``GITHUB_ACTIONS`` is not consulted: ``act`` and
-any other pytest under Actions would have set it too. The floor acts only when pytest is
+``-m`` expression was given AND the run opted in with ``ASH_TEST_TIER_FLOOR=1``. The
+opt-in is the only trigger; a shard alone does not turn the floor on, so a developer who
+reproduces a CI shard by hand is not failed for the gate skips of a missing
+``--run-integration``. The run-unit-tests action sets the variable on its pytest step;
+``configure`` reads it once and removes it from ``os.environ``, as it does the shard
+variable, so a pytest that a test starts does not inherit it and the floor does not
+differ between a CI runner and a developer's machine. ``GITHUB_ACTIONS`` is not
+consulted: ``act`` and any other pytest under Actions would have set it too. The floor
+acts only when pytest is
 about to exit
 ``OK``, at least one item was collected and selected, and none of them executed. An
 item executed when its call phase ran and did not skip, or when its setup failed (an
@@ -233,15 +236,21 @@ def admit_empty_shard(session: Any, exitstatus: Any, deselected: int) -> bool:
 
 def is_ci_tier_run(config: Any) -> bool:
     """Whether this is a CI tier run: a ``-m`` expression was given AND the run opted in
-    with ``ASH_TEST_TIER_FLOOR=1`` (as ``configure`` read it) or has a shard configured.
+    with ``ASH_TEST_TIER_FLOOR`` (as ``configure`` read it).
+
+    The opt-in is the only trigger. A shard does not turn the floor on: it drives the
+    sharding and the empty-shard admission, and nothing else. A developer who reproduces
+    a CI shard with ``ASH_TEST_SHARD=3of4 pytest -m integration`` and leaves out
+    ``--run-integration`` gets every test skipped by the conftest gate, and must not be
+    told by exit 1 that "a leg that runs nothing is not green".
 
     The one definition the floor and the tests that assert what a CI leg is provisioned
     with both use, so they cannot drift apart. It reads the config, not the environment:
-    ``configure`` has already removed the shard variable from ``os.environ``.
+    ``configure`` has already removed the variable from ``os.environ``.
     """
     if not config.getoption("markexpr", default=""):
         return False
-    return bool(config.stash.get(_TEXT_KEY, "") or config.stash.get(_FLOOR_KEY, False))
+    return bool(config.stash.get(_FLOOR_KEY, False))
 
 
 def fail_a_tier_run_that_executed_no_test(

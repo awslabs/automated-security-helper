@@ -667,10 +667,19 @@ class TestATierRunThatRanNothingInARealPytest:
                 encoding="utf-8",
             )
 
-    def _run(self, root: Path, *, under_ci: bool, extra: tuple[str, ...] = ()):
+    def _run(
+        self,
+        root: Path,
+        *,
+        under_ci: bool,
+        extra: tuple[str, ...] = (),
+        shard: str = "",
+    ):
         env = _clean_env(PYTHONPATH=str(REPO_ROOT))
         if under_ci:
             env[sharding.FLOOR_ENV_VAR] = "1"
+        if shard:
+            env[sharding.ENV_VAR] = shard
         return subprocess.run(
             [
                 sys.executable,
@@ -763,12 +772,32 @@ class TestATierRunThatRanNothingInARealPytest:
         assert "executed no test" not in done.stdout, done.stdout
 
     def test_the_same_run_on_a_developer_machine_stays_green(self, tmp_path):
-        """The control: without the opt-in and a shard, a skipped test is a skip."""
+        """The control: without the opt-in, a skipped test is a skip."""
         self._plant(tmp_path)
         done = self._run(tmp_path, under_ci=False)
         assert done.returncode == 0, done.stdout + done.stderr
         assert "1 skipped" in done.stdout, done.stdout
         assert "executed no test" not in done.stdout, done.stdout
+
+    def test_a_shard_alone_does_not_turn_the_floor_on(self, tmp_path):
+        """A developer's ``ASH_TEST_SHARD=1of1 pytest -m unit``: the same skip, exit 0.
+
+        The shard owns the planted module (one shard owns everything), so the run
+        collects the skipped test and executes nothing, exactly as the failing case
+        above; only the opt-in differs.
+        """
+        self._plant(tmp_path)
+        done = self._run(tmp_path, under_ci=False, shard="1of1")
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert "1 skipped" in done.stdout, done.stdout
+        assert "executed no test" not in done.stdout, done.stdout
+
+    def test_a_shard_with_the_opt_in_still_fails_a_leg_that_ran_nothing(self, tmp_path):
+        """The control for the case above: the opt-in is what turns the floor on."""
+        self._plant(tmp_path)
+        done = self._run(tmp_path, under_ci=True, shard="1of1")
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert self.LINE in done.stdout, done.stdout
 
 
 @pytest.mark.unit
@@ -977,9 +1006,20 @@ class TestATierRunThatExecutedNoTestFails:
         assert not sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
         assert session.exitstatus == pytest.ExitCode.OK and not written
 
-    def test_a_shard_is_a_ci_tier_run_without_github_actions(self):
+    def test_a_shard_alone_does_not_turn_the_floor_on(self):
+        """The opt-in is the only trigger.
+
+        ``ASH_TEST_SHARD=3of4 pytest -m integration`` without ``--run-integration`` skips
+        every test at the conftest gate; that run must not exit 1 for it.
+        """
         written: list[str] = []
         session = self._session(written, text="2of4", under_ci=False)
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
+        assert session.exitstatus == pytest.ExitCode.OK and not written
+
+    def test_a_shard_with_the_opt_in_is_still_a_ci_tier_run(self):
+        written: list[str] = []
+        session = self._session(written, text="2of4", under_ci=True)
         assert sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
         assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
 
@@ -995,7 +1035,8 @@ class TestATierRunThatExecutedNoTestFails:
         ("kwargs", "expected"),
         [
             pytest.param({}, True, id="under-ci"),
-            pytest.param({"under_ci": False, "text": "2of4"}, True, id="shard"),
+            pytest.param({"under_ci": False, "text": "2of4"}, False, id="shard-alone"),
+            pytest.param({"text": "2of4"}, True, id="shard-and-opt-in"),
             pytest.param({"under_ci": False}, False, id="neither"),
             pytest.param({"expression": ""}, False, id="no-marker-expression"),
             pytest.param(
