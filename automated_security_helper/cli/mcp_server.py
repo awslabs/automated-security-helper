@@ -104,6 +104,7 @@ from automated_security_helper.core.resource_management.result_filters import (
     add_findings_list,
 )
 from automated_security_helper.cli.mcp.profile_registry import (
+    ProfileRegistryError,
     resolve_session_config_path,
 )
 from automated_security_helper.cli.mcp.progress_monitor import monitor_scan_progress
@@ -710,7 +711,24 @@ async def run_ash_scan(
         # ASH's own discovery finds an in-tree .ash.yaml as it always has.
         config_check = None
         if config_path is None:
-            config_path = resolve_session_config_path(session_id)
+            try:
+                config_path = resolve_session_config_path(session_id)
+            except ProfileRegistryError as exc:
+                # The bound profile's file is gone and cannot be written again
+                # (the profile is no longer registered, or the session's
+                # workspace cannot be written). A config refusal, exit 3, as a
+                # named config that cannot be used is; not the catch-all's
+                # internal error, which would log it as an ASH bug.
+                await _tell_client_error(ctx, raw_controls_on_one_line(str(exc)))
+                return with_exit_code(
+                    {
+                        "success": False,
+                        "error": raw_controls_on_one_line(str(exc)),
+                        "error_type": "bound_profile_unavailable",
+                        "error_category": ErrorCategory.FILE_NOT_FOUND.value,
+                    },
+                    REFUSED_CONFIG_EXIT_CODE,
+                )
             if config_path is not None:
                 await _tell_client(
                     ctx,

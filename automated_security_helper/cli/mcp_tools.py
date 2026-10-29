@@ -2462,6 +2462,7 @@ async def _run_scan(
     )
 
     from automated_security_helper.cli.mcp.profile_registry import (
+        ProfileRegistryError,
         resolve_session_config_path,
         resolve_session_trusted_config_path,
     )
@@ -2745,9 +2746,21 @@ async def _run_scan(
     untrusted_config = config_path is not None and client_named_config_is_untrusted(
         config_path, session_id=session_id
     )
-    trusted_config_path = (
-        resolve_session_trusted_config_path(session_id) if untrusted_config else None
-    )
+    # The session's bound profile is written again here when its file is gone;
+    # a profile that cannot be written again (unregistered, or an unwritable
+    # workspace) refuses the scan. Caught here, not left to propagate: the
+    # runner's own try begins further down, and an exception out of this
+    # coroutine would leave the entry PENDING, which reads as running.
+    try:
+        trusted_config_path = (
+            resolve_session_trusted_config_path(session_id)
+            if untrusted_config
+            else None
+        )
+    except ProfileRegistryError as exc:
+        registry.finish_scan(scan_id, MCScanStatus.FAILED, str(exc))
+        _logger.error(f"Scan {scan_id} refused: {exc}")
+        return
     # For a remote caller, every config file the operator did not set aside
     # resolves no !ENV, the target's own .ash.yaml included; see "Environment
     # variables" in config/config_sources.py.
@@ -2771,7 +2784,14 @@ async def _run_scan(
     # so it is decided on the worker thread of the snapshot step below and
     # never here on the event loop. Only whether the config could be the
     # profile is known here.
-    session_profile = resolve_session_config_path(session_id)
+    try:
+        session_profile = resolve_session_config_path(session_id)
+    except ProfileRegistryError as exc:
+        # As above: a bound profile that cannot be read as registered refuses
+        # the scan, recorded on the entry rather than raised out of the runner.
+        registry.finish_scan(scan_id, MCScanStatus.FAILED, str(exc))
+        _logger.error(f"Scan {scan_id} refused: {exc}")
+        return
     config_may_be_the_profile = (
         config_path is not None and not untrusted_config and session_profile is not None
     )

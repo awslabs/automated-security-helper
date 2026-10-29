@@ -64,6 +64,20 @@ class ProfileRegistryError(ValueError):
     """
 
 
+class BoundProfileUnavailableError(ProfileRegistryError, RuntimeError):
+    """A session's bound profile cannot be read as the operator registered it.
+
+    Raised by the session config path readers when the materialized file is
+    gone and cannot be written again: the profile is no longer registered, or
+    the session's workspace cannot be written. A ``ProfileRegistryError``, so a
+    reader that handles the registry's refusals handles it; and a
+    ``RuntimeError``, the type the workspace tools already map to exit 3 for a
+    bound profile whose registered copy is missing (``_resolve_session_config``
+    in ``cli/mcp/workspace.py``), so the raise lands in that handler rather than
+    in a tool's catch-all.
+    """
+
+
 @dataclass(frozen=True)
 class ProfileEntry:
     """A single registered profile.
@@ -677,9 +691,11 @@ def resolve_session_config_path(session_id: Optional[str] = None) -> Optional[st
     the profile's client rules stay in force.
 
     Raises:
-        ProfileRegistryError: the file is gone and cannot be written again (the
-            profile is no longer registered, or the workspace cannot be written);
-            failing closed, as ``select_profile`` does when it cannot write it.
+        BoundProfileUnavailableError: the file is gone and cannot be written
+            again (the profile is no longer registered, or the workspace cannot
+            be written); failing closed, as ``select_profile`` does when it
+            cannot write it. A ``ProfileRegistryError`` and a ``RuntimeError``
+            both, so every caller's existing handling of either catches it.
     """
 
     return _bound_config_paths(session_id)[0]
@@ -719,7 +735,7 @@ def _rematerialize_binding(sid: str) -> Tuple[Optional[str], Optional[str]]:
         patched = state.bound_config if state.client_changed else None
     entry = get_profile_registry().get(profile_name)
     if entry is None:
-        raise ProfileRegistryError(
+        raise BoundProfileUnavailableError(
             f"this session's bound profile {profile_name!r} is no longer "
             "registered, and its materialized config is gone, so the scan cannot "
             "run under it. Bind a registered profile with select_profile."
@@ -727,7 +743,7 @@ def _rematerialize_binding(sid: str) -> Tuple[Optional[str], Optional[str]]:
     try:
         config_path, trusted = materialize_session_binding(sid, entry.config, patched)
     except (OSError, RuntimeError) as exc:
-        raise ProfileRegistryError(
+        raise BoundProfileUnavailableError(
             f"this session's bound profile {profile_name!r} could not be written "
             f"to the session's workspace again, so the scan cannot run under it: "
             f"{error_text(exc)}"
