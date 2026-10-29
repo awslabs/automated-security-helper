@@ -1,0 +1,307 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+"""A secret finding's source text outside its region snippets is masked whole.
+
+The snippets of a secret finding's own regions were masked whole, but the source
+text it carries elsewhere -- cdk-nag's ``properties.cfn_resource`` (the resource
+with every property value), a ``properties.snippet``, a fix's inserted content
+and deleted region, a fenced code block in its message -- was masked only where
+a value the finding quoted occurred. A credential finding that quotes no value
+(cdk-nag's and cfn-nag's never do; detect-secrets' do not) kept the credential.
+The message's markdown and arguments were likewise masked only when the value
+propagated.
+
+The values here are placeholders derived at import time or plain words; none is
+a credential.
+"""
+
+import hashlib
+import json
+import string
+
+import pytest
+
+from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.utils.secret_masking import (
+    MASKED_LINE,
+    _mask_secret_value,
+    mask_secrets_in_results,
+)
+
+pytestmark = pytest.mark.unit
+
+
+def _derived(label, length):
+    alphabet = string.ascii_lowercase + string.digits
+    digest = hashlib.sha256(label.encode()).digest()
+    return "".join(alphabet[byte % len(alphabet)] for byte in digest)[:length]
+
+
+VALUE = _derived("source-text-value", 14)
+#: Letters alone: masked in its own finding only, never propagated.
+WORD = "pass" + "word"
+HARDCODED = "Possible hardcoded " + WORD + ": "
+#: A plaintext property value that is letters alone, so no value masking
+#: reaches it; only the resource text as a whole can.
+PLAINTEXT = "placeholder-example-value"
+ASSIGN_LINE = f'{WORD} = "{VALUE}"\n'
+REPLACEMENT_LINE = f'{WORD} = os.environ["TOKEN"]\n'
+OTHER_LINE = "import os\n"
+
+
+def _result(rule_id, uri, line, message, scanner, extra=None, snippet=None):
+    region = {"startLine": line, "endLine": line}
+    if snippet is not None:
+        region["snippet"] = {"text": snippet}
+    result = {
+        "ruleId": rule_id,
+        "level": "warning",
+        "message": {"text": message},
+        "locations": [
+            {"physicalLocation": {"artifactLocation": {"uri": uri}, "region": region}}
+        ],
+        "properties": {"scanner_name": scanner, "tags": [scanner]},
+    }
+    for name, value in (extra or {}).items():
+        if name == "properties":
+            result["properties"].update(value)
+        else:
+            result[name] = value
+    return result
+
+
+def _fix(uri, line, deleted, inserted):
+    return {
+        "description": {"text": "Read the value from the environment."},
+        "artifactChanges": [
+            {
+                "artifactLocation": {"uri": uri},
+                "replacements": [
+                    {
+                        "deletedRegion": {
+                            "startLine": line,
+                            "endLine": line,
+                            "snippet": {"text": deleted},
+                        },
+                        "insertedContent": {"text": inserted},
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def _results(*results):
+    model = AshAggregatedResults()
+    model.sarif = SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [{"tool": {"driver": {"name": "test"}}, "results": list(results)}],
+        }
+    )
+    return model
+
+
+def _first(model):
+    return model.sarif.runs[0].results[0]
+
+
+def _replacement(result):
+    return result.fixes[0].artifactChanges[0].replacements[0]
+
+
+class TestASecretFindingsOwnSourceText:
+    def test_a_resource_level_credential_finding_masks_its_resource(self):
+        """cdk-nag: the message describes the credential and quotes no value;
+        the resource with its plaintext property is the finding's own excerpt."""
+        resource = {
+            "Resources": {
+                "Database": {
+                    "Type": "AWS::RDS::DBInstance",
+                    "Properties": {"MasterUserPassword": PLAINTEXT},
+                }
+            }
+        }
+        model = _results(
+            _result(
+                "AwsSolutions-RDS-1",
+                "template.yaml",
+                3,
+                "The database password must not be a plaintext string.\n\n"
+                "Exception Reason: N/A",
+                "cdk-nag",
+                extra={"properties": {"cfn_resource": resource}},
+                snippet="Resources:\n  Database:\n",
+            )
+        )
+
+        mask_secrets_in_results(model)
+
+        dumped = json.dumps(_first(model).model_dump(mode="json", by_alias=True))
+        assert PLAINTEXT not in dumped
+        masked = getattr(_first(model).properties, "cfn_resource")
+        assert masked["Resources"]["Database"]["Properties"] == {
+            "MasterUserPassword": MASKED_LINE
+        }
+
+    def test_a_properties_snippet_is_masked_whole(self):
+        model = _results(
+            _result(
+                "SECRET-KEYWORD",
+                "app.py",
+                2,
+                "Secret of type 'Keyword' detected",
+                "detect-secrets",
+                extra={"properties": {"snippet": ASSIGN_LINE}},
+            )
+        )
+
+        mask_secrets_in_results(model)
+
+        assert getattr(_first(model).properties, "snippet") == MASKED_LINE + "\n"
+
+    def test_a_fix_of_a_secret_finding_is_masked_whole(self):
+        model = _results(
+            _result(
+                "SECRET-KEYWORD",
+                "app.py",
+                2,
+                "Secret of type 'Keyword' detected",
+                "detect-secrets",
+                extra={"fixes": [_fix("app.py", 2, ASSIGN_LINE, REPLACEMENT_LINE)]},
+            )
+        )
+
+        mask_secrets_in_results(model)
+
+        replacement = _replacement(_first(model))
+        assert replacement.deletedRegion.snippet.text == MASKED_LINE + "\n"
+        assert replacement.insertedContent.text == MASKED_LINE + "\n"
+
+    def test_a_fenced_block_in_the_message_is_masked(self):
+        """The flat model reads the first fenced block as the finding's code."""
+        model = _results(
+            _result(
+                "SECRET-KEYWORD",
+                "app.py",
+                2,
+                "Secret of type 'Keyword' detected\n\n```python\n"
+                + ASSIGN_LINE
+                + "```",
+                "detect-secrets",
+            )
+        )
+
+        mask_secrets_in_results(model)
+
+        text = _first(model).message.root.text
+        assert VALUE not in text
+        assert text.startswith("Secret of type 'Keyword' detected\n\n```")
+        assert ASSIGN_LINE.rstrip("\n") not in text
+        assert MASKED_LINE in text
+
+    def test_the_markdown_and_arguments_of_the_message_are_masked(self):
+        """A value that does not propagate is still masked in its own message,
+        in every form the message carries it."""
+        model = _results(
+            _result(
+                "B105",
+                "app.py",
+                2,
+                HARDCODED + "'" + WORD + "'",
+                "bandit",
+                extra={
+                    "message": {
+                        "text": HARDCODED + "'" + WORD + "'",
+                        "markdown": "Finding: "
+                        + HARDCODED
+                        + "'"
+                        + WORD
+                        + "' in a module",
+                        "arguments": [WORD],
+                    }
+                },
+            )
+        )
+
+        mask_secrets_in_results(model)
+
+        root = _first(model).message.root
+        masked = _mask_secret_value(WORD)
+        assert root.text == HARDCODED + "'" + masked + "'"
+        assert root.markdown == "Finding: " + HARDCODED + "'" + masked + "' in a module"
+        assert root.arguments == [masked]
+
+
+class TestAnOverlappingFindingsSourceText:
+    def _secret(self):
+        return _result(
+            "SECRET-KEYWORD",
+            "app.py",
+            2,
+            "Secret of type 'Keyword' detected",
+            "detect-secrets",
+        )
+
+    def test_a_properties_snippet_at_a_reported_line_is_masked(self):
+        model = _results(
+            self._secret(),
+            _result(
+                "B404",
+                "app.py",
+                2,
+                "import",
+                "bandit",
+                extra={"properties": {"snippet": ASSIGN_LINE}},
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        neighbor = model.sarif.runs[0].results[1]
+        assert getattr(neighbor.properties, "snippet") == MASKED_LINE + "\n"
+
+    def test_a_fix_at_a_reported_line_is_masked(self):
+        model = _results(
+            self._secret(),
+            _result(
+                "B404",
+                "app.py",
+                5,
+                "import",
+                "bandit",
+                extra={"fixes": [_fix("app.py", 2, ASSIGN_LINE, REPLACEMENT_LINE)]},
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        replacement = _replacement(model.sarif.runs[0].results[1])
+        assert replacement.deletedRegion.snippet.text == MASKED_LINE + "\n"
+        assert replacement.insertedContent.text == MASKED_LINE + "\n"
+
+    def test_a_fix_and_a_snippet_away_from_every_reported_line_are_kept(self):
+        """Control."""
+        model = _results(
+            self._secret(),
+            _result(
+                "B404",
+                "app.py",
+                9,
+                "import",
+                "bandit",
+                extra={
+                    "properties": {"snippet": OTHER_LINE},
+                    "fixes": [_fix("app.py", 9, OTHER_LINE, "import sys\n")],
+                },
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        neighbor = model.sarif.runs[0].results[1]
+        assert getattr(neighbor.properties, "snippet") == OTHER_LINE
+        replacement = _replacement(neighbor)
+        assert replacement.deletedRegion.snippet.text == OTHER_LINE
+        assert replacement.insertedContent.text == "import sys\n"

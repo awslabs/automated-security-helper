@@ -645,6 +645,8 @@ class _SecretIndex:
         #: every finding that overlaps it has these values masked, whatever they
         #: look like. The lines are None when the location gives none.
         self.local_values: List[Tuple[str, Optional[int], Optional[int], Set[str]]] = []
+        #: id(secret finding) -> every value it exposed, whatever it looks like.
+        self.values_of: Dict[int, Set[str]] = {}
         self._pattern: Optional[re.Pattern[str]] = None
 
     def add_values(self, values: Iterable[str]) -> None:
@@ -827,6 +829,7 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
         # looks like, in every finding that overlaps where this one reports it.
         index.add_values(exposed)
         local = {value for value in exposed if value and "\n" not in value}
+        index.values_of[id(result)] = local
         for physical in _physical_locations_of(result):
             uri = _normalized_uri(
                 getattr(getattr(physical, "artifactLocation", None), "uri", None)
@@ -1119,6 +1122,142 @@ def _mask_region(region: Any, placed: Tuple[bool, _LineRanges]) -> None:
     )
 
 
+#: Properties under which a result carries source text outside its regions'
+#: snippets: a ``snippet`` a tool writes into the result's properties (the flat
+#: model reads it as the finding's code) and cdk-nag's ``cfn_resource``, the
+#: resource the finding is about with every property value. A fix's
+#: ``insertedContent`` and ``deletedRegion`` and a fenced code block in the
+#: message carry source text too. For a secret finding they are its excerpt of
+#: the secret and are masked whole, like its snippets: masked by value alone
+#: they kept a credential whose finding quotes no value.
+_SOURCE_FIELDS = frozenset({"snippet", "cfn_resource"})
+
+
+def _mask_text_whole(text: str) -> str:
+    """Every non-blank line of ``text`` replaced with ``MASKED_LINE``."""
+    return _mask_lines(text, None, True, _LineRanges())
+
+
+def _mask_source_whole(node: Any, seen: Set[int]) -> Any:
+    """Mask every line of every string in ``node`` in place; returns a string node's replacement."""
+    if isinstance(node, Enum):
+        return node
+    if isinstance(node, str):
+        return _mask_text_whole(node)
+    if id(node) in seen:
+        return node
+    if isinstance(node, BaseModel):
+        seen.add(id(node))
+        names = list(type(node).model_fields)
+        names.extend((node.__pydantic_extra__ or {}).keys())
+        for name in names:
+            if _is_skipped(name):
+                continue
+            value = getattr(node, name, None)
+            if value is None:
+                continue
+            masked = _mask_source_whole(value, seen)
+            if isinstance(value, str) and masked != value:
+                setattr(node, name, masked)
+        return node
+    if isinstance(node, list):
+        seen.add(id(node))
+        for position, item in enumerate(node):
+            masked = _mask_source_whole(item, seen)
+            if isinstance(item, str) and masked != item:
+                node[position] = masked
+        return node
+    if isinstance(node, dict):
+        seen.add(id(node))
+        for key in list(node):
+            if isinstance(key, str) and _is_skipped(key):
+                continue
+            item = node[key]
+            masked = _mask_source_whole(item, seen)
+            if isinstance(item, str) and masked != item:
+                node[key] = masked
+        return node
+    return node
+
+
+def _mask_fenced_code(text: str) -> str:
+    """``text`` with every line inside a pair of triple-backtick fences masked.
+
+    The flat model reads the first fenced block of a message as the finding's
+    code (``_extract_snippet_from_message``) and the HTML and text reports print
+    it, so a secret finding's fenced block is its snippet by another name.
+    """
+    if "```" not in text:
+        return text
+    parts = text.split("```")
+    for position in range(1, len(parts) - 1, 2):
+        parts[position] = _mask_text_whole(parts[position])
+    return "```".join(parts)
+
+
+def _extra_of(node: Any) -> Dict[str, Any]:
+    return getattr(node, "__pydantic_extra__", None) or {}
+
+
+def _set_extra(node: Any, name: str, value: Any) -> None:
+    extra = getattr(node, "__pydantic_extra__", None)
+    if isinstance(extra, dict):
+        extra[name] = value
+
+
+def _replacements_of(result: Any) -> Iterable[Tuple[Any, Any]]:
+    """(artifact change, replacement) of every fix a result proposes."""
+    for fix in getattr(result, "fixes", None) or []:
+        for change in getattr(fix, "artifactChanges", None) or []:
+            for replacement in getattr(change, "replacements", None) or []:
+                yield change, replacement
+
+
+def _mask_own_source_text(result: Any, index: _SecretIndex) -> None:
+    """Mask whole the source text a secret finding carries outside its snippets.
+
+    Its ``properties`` named in ``_SOURCE_FIELDS``, a ``snippet`` beside any of
+    its physical locations, the inserted content and deleted region of every fix
+    it proposes, and a fenced code block in its message. Its message's markdown
+    is masked at the values it quotes as its text is, and its message arguments
+    at the values the finding exposed, whatever they look like.
+    """
+    whole_file = (True, _LineRanges())
+    properties = getattr(result, "properties", None)
+    if properties is not None:
+        for name in _SOURCE_FIELDS:
+            value = _extra_of(properties).get(name)
+            if value is None:
+                continue
+            masked = _mask_source_whole(value, set())
+            if isinstance(value, str) and masked != value:
+                _set_extra(properties, name, masked)
+    for _, replacement in _replacements_of(result):
+        _mask_region(getattr(replacement, "deletedRegion", None), whole_file)
+        _mask_snippet(
+            getattr(replacement, "insertedContent", None), None, None, whole_file
+        )
+    message = getattr(result, "message", None)
+    root: Any = getattr(message, "root", message)
+    if root is None:
+        return
+    own = _SecretIndex()
+    own.values = set(index.values_of.get(id(result), ()))
+    for name in ("text", "markdown"):
+        text = getattr(root, name, None)
+        if isinstance(text, str):
+            masked = _mask_fenced_code(_mask_message_values(text))
+            if masked != text:
+                setattr(root, name, masked)
+    arguments = getattr(root, "arguments", None)
+    if isinstance(arguments, list):
+        for position, argument in enumerate(arguments):
+            if isinstance(argument, str):
+                masked = own.mask_values(_mask_message_values(argument))
+                if masked != argument:
+                    arguments[position] = masked
+
+
 def _mask_tree(node: Any, index: _SecretIndex, seen: Set[int]) -> Any:
     """Mask ``node`` in place; returns the replacement for a string node."""
     if isinstance(node, Enum):
@@ -1139,6 +1278,55 @@ def _mask_tree(node: Any, index: _SecretIndex, seen: Set[int]) -> Any:
             if placed is not None:
                 _mask_region(getattr(node, "region", None), placed)
                 _mask_region(getattr(node, "contextRegion", None), placed)
+        elif "artifactLocation" in fields and "replacements" in fields:
+            # A fix's change to one file: its deleted regions are placed by
+            # their lines; what it inserts at a reported line is masked whole.
+            placed = index.lines_for(
+                getattr(getattr(node, "artifactLocation", None), "uri", None)
+            )
+            if placed is not None:
+                whole, lines = placed
+                for replacement in getattr(node, "replacements", None) or []:
+                    deleted = getattr(replacement, "deletedRegion", None)
+                    _mask_region(deleted, placed)
+                    first = getattr(deleted, "startLine", None)
+                    last = getattr(deleted, "endLine", None)
+                    if (
+                        whole
+                        or not isinstance(first, int)
+                        or lines.overlaps(
+                            first, last if isinstance(last, int) else first
+                        )
+                    ):
+                        _mask_snippet(
+                            getattr(replacement, "insertedContent", None),
+                            None,
+                            None,
+                            (True, _LineRanges()),
+                        )
+        elif "ruleId" in fields and "locations" in fields:
+            # A result's properties.snippet is its first location's code.
+            properties = getattr(node, "properties", None)
+            snippet = _extra_of(properties).get("snippet")
+            if isinstance(snippet, str):
+                for physical in _physical_locations_of(node):
+                    placed = index.lines_for(
+                        getattr(
+                            getattr(physical, "artifactLocation", None), "uri", None
+                        )
+                    )
+                    if placed is None:
+                        continue
+                    whole, lines = placed
+                    first = getattr(
+                        getattr(physical, "region", None), "startLine", None
+                    )
+                    _set_extra(
+                        properties,
+                        "snippet",
+                        _mask_lines(snippet, first, whole, lines),
+                    )
+                    break
         elif "contents" in fields and "location" in fields:
             # An artifact whose contents a tool embedded: line 1 is the file's first.
             placed = index.lines_for(
@@ -1197,20 +1385,24 @@ def _mask_report(
     for result in sarif_report.get_all_results() or []:
         message = getattr(result, "message", None)
         root: Any = getattr(message, "root", message)
-        text = getattr(root, "text", None)
-        # A root with a text is never None; the check says so to the type checker.
-        if root is not None and isinstance(text, str):
-            masked = _mask_message_values(text)
-            if masked != text:
-                root.text = masked
+        if root is None:
+            continue
+        for name in ("text", "markdown"):
+            text = getattr(root, name, None)
+            if isinstance(text, str):
+                masked = _mask_message_values(text)
+                if masked != text:
+                    setattr(root, name, masked)
     # A secret finding's own snippets are its excerpt of the secret, so they are
     # masked whole rather than by line number: a tool's context can be numbered
     # one off (ferret-scan's is), and the line arithmetic would keep the secret.
+    # So is the source text it carries elsewhere (_mask_own_source_text).
     whole_file = (True, _LineRanges())
     for result in index.secret_results:
         for physical in _physical_locations_of(result, related=True):
             _mask_region(getattr(physical, "region", None), whole_file)
             _mask_region(getattr(physical, "contextRegion", None), whole_file)
+        _mask_own_source_text(result, index)
     if index.lines or index.values or index.shapes:
         seen: Set[int] = set()
         for run in sarif_report.runs:
