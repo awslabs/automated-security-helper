@@ -27,6 +27,8 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.schemas.sarif_schema_model import PropertyBag
 from tests.unit.cli import test_merge
 
+pytestmark = pytest.mark.unit
+
 # The constant below is a file name that is not UTF-8.
 if os.name == "nt":
     pytest.skip(

@@ -37,6 +37,8 @@ from automated_security_helper.config.ash_workspace_config import (
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-7f3e"
 
 AshConfig.model_rebuild()

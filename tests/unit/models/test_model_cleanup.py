@@ -5,10 +5,14 @@
 
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins.plugin_manager import AshPluginManager
+
+pytestmark = pytest.mark.unit
 
 
 class TestAshPluginManagerPrivateAttr:

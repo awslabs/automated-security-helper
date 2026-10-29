@@ -92,7 +92,11 @@ import subprocess  # nosec B404 — a fresh interpreter is the property under te
 import sys
 import textwrap
 
+import pytest
+
 from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, importing_this_checkout
+
+pytestmark = pytest.mark.integration
 
 # Exit code for "the premise is gone", kept distinct from the 1 that an
 # unresolved forward reference produces so the two are never confused.

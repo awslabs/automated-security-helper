@@ -16,6 +16,8 @@ from automated_security_helper.models.scan_results_container import (
     ScanResultsContainer,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _sarif_flag(attempted, failed, kept_flag=None, post_run_error=None) -> bool:
     scanner = SimpleNamespace(

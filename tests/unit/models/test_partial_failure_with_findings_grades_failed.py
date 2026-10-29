@@ -18,10 +18,14 @@ are poisoned, still grades ERROR unconditionally: nothing was evaluated, so
 there are no findings to outrank the loss.
 """
 
+import pytest
+
 from automated_security_helper.models.scan_results_container import (
     ScanResultsContainer,
 )
 from automated_security_helper.core.enums import ScannerStatus
+
+pytestmark = pytest.mark.unit
 
 
 def _partial_container(**counts) -> ScanResultsContainer:

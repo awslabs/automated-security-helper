@@ -45,6 +45,8 @@ from automated_security_helper.utils.suppression_matcher import (
 )
 from automated_security_helper.utils.unknown_keys import TOLERATE_STORED_CONFIG
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 

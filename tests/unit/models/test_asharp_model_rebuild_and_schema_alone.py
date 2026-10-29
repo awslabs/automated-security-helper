@@ -34,6 +34,8 @@ import pytest
 
 from tests.utils.helpers import importing_this_checkout
 
+pytestmark = pytest.mark.integration
+
 DRIVER = """
 import json, sys
 from automated_security_helper.models.asharp_model import AshAggregatedResults

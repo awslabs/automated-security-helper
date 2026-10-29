@@ -25,6 +25,8 @@ from automated_security_helper.models.workspace import (
     WorkspaceExitCode,
 )
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Tests: the exit-code contract

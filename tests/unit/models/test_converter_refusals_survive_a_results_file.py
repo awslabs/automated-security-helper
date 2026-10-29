@@ -16,6 +16,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.models.asharp_model import (
@@ -28,6 +30,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.flatjson_rep
     FlatJSONReporter,
 )
 from automated_security_helper.utils.converter_refusals import converter_refusals
+
+pytestmark = pytest.mark.unit
 
 
 def stored_and_loaded(tmp_path: Path) -> AshAggregatedResults:
