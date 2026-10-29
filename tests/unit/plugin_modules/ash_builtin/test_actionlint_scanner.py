@@ -2027,6 +2027,28 @@ def test_a_workflow_whose_local_reference_leaves_the_tree_is_not_linted(
     assert "outside the scanned tree" in caplog.text
 
 
+@pytest.mark.unit
+def test_a_local_reference_holding_a_nul_does_not_fail_the_scan(
+    repo, monkeypatch, on_path
+):
+    """A YAML escape can put a NUL into a "uses:" value. No operating system
+    opens such a path, so it names no file; os.path.realpath raises ValueError
+    on it, which used to escape the workflow selection and fail the whole scan
+    before actionlint ran."""
+    (repo / ".git").mkdir()
+    (repo / ".github" / "workflows" / "refs.yml").write_text(
+        "on: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n"
+        '      - uses: "./.github/actions/a\\0b"\n'
+    )
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, _EMPTY_RUN, 0)
+
+    scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    assert ".github/workflows/refs.yml" in argv[argv.index("--") + 1 :]
+
+
 @pytest.mark.parametrize("encoding", ["utf-16", "utf-16-be", "utf-8-sig"])
 @pytest.mark.unit
 def test_a_workflow_with_a_byte_order_mark_is_read_as_actionlint_reads_it(

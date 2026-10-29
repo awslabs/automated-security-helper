@@ -978,7 +978,12 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             text = decode_workflow(workflow.read_bytes())
         except OSError:
             return None
-        specs = sorted(local_uses_references(text))
+        # A value holding a NUL (a YAML escape can write one) names no file: no
+        # operating system opens such a path, so actionlint reads nothing through
+        # it, and os.path.realpath would raise ValueError on it below.
+        specs = sorted(
+            spec for spec in local_uses_references(text) if "\x00" not in spec
+        )
         if not specs:
             return None
         context_config = self.context.config if self.context is not None else None
