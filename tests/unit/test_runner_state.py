@@ -17,13 +17,20 @@ from pathlib import Path
 
 import pytest
 
-from tests.utils.runner_state import RECORD_ENV, developer_runner_env
+from tests.utils.runner_state import (
+    RECORD_ENV,
+    developer_environment_record,
+    developer_runner_env,
+)
 
 pytestmark = pytest.mark.unit
 
 
 def _record(monkeypatch: pytest.MonkeyPatch, record: dict) -> None:
-    monkeypatch.setenv(RECORD_ENV, json.dumps(record))
+    """Export ``record`` in the shape tests/conftest.py gives the developer's record."""
+    monkeypatch.setenv(
+        RECORD_ENV, json.dumps({"env": record, "home": record.get("HOME", "")})
+    )
 
 
 @pytest.mark.parametrize("runner", ["podman", "/usr/bin/podman", "podman.exe"])
@@ -66,3 +73,42 @@ def test_a_session_that_recorded_nothing_gives_podman_nothing(monkeypatch):
     monkeypatch.delenv(RECORD_ENV, raising=False)
 
     assert developer_runner_env("podman") == {}
+
+
+def test_the_record_name_is_the_one_the_root_conftest_exports():
+    """The readers and the writer name the record alike; they once did not.
+
+    tests/conftest.py exports the developer's environment under its own constant, and
+    two readers kept reading an older name that nothing set, so both saw no record.
+    """
+    from tests import conftest as root_conftest
+
+    assert RECORD_ENV == root_conftest._DEVELOPER_HOME_ENV
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        json.dumps({"home": "/developer/home"}),
+        json.dumps({"env": ["HOME"], "home": "/developer/home"}),
+        json.dumps(["HOME", "/developer/home"]),
+        "not json",
+    ],
+    ids=["no-env-key", "env-not-an-object", "not-an-object", "not-json"],
+)
+def test_a_record_that_is_not_the_exported_shape_gives_podman_nothing(
+    monkeypatch, value
+):
+    monkeypatch.setenv(RECORD_ENV, value)
+
+    assert developer_environment_record() == {}
+    assert developer_runner_env("podman") == {}
+
+
+def test_the_environment_record_is_the_env_part_with_string_values(monkeypatch):
+    monkeypatch.setenv(
+        RECORD_ENV,
+        json.dumps({"env": {"HOME": "/developer/home", "N": 3}, "home": "/x"}),
+    )
+
+    assert developer_environment_record() == {"HOME": "/developer/home", "N": "3"}

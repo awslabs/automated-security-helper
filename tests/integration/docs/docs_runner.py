@@ -42,7 +42,6 @@ where a doc's commands are trusted, as CI does.
 from __future__ import annotations
 
 import importlib.util
-import json
 import os
 import shutil
 import signal
@@ -53,6 +52,8 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from tests.utils.runner_state import developer_environment_record
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OUTPUT_TAIL_LINES = 25
@@ -172,7 +173,7 @@ SYSTEM_PATH = ("/usr/local/bin", "/usr/bin", "/bin")
 
 
 #: The variables tests/conftest.py moves into a private directory for the whole pytest
-#: run, and records (those that were set) as JSON in ASH_TEST_PRE_SESSION_HOME.
+#: run, and records (those that were set) as JSON in ASH_TEST_DEVELOPER_HOME.
 _MOVED_BY_THE_TEST_SESSION = (
     "HOME",
     "USERPROFILE",
@@ -189,16 +190,14 @@ def invoking_user_environment() -> dict[str, str]:
     directory before collection, so Path.home() here is that directory, which holds
     no tool. ``ash dependencies install`` ran as the invoking user, outside the test
     session, and put its tools under that user's home. The values the session replaced
-    are in ASH_TEST_PRE_SESSION_HOME, and a variable that was unset is absent from it.
+    are the ``env`` part of the JSON in ASH_TEST_DEVELOPER_HOME (read by
+    developer_environment_record), and a variable that was unset is absent from it.
     Without the record (this module run outside that conftest) nothing was moved and
     the environment is returned as it is.
     """
     env = dict(os.environ)
-    try:
-        recorded = json.loads(os.environ.get("ASH_TEST_PRE_SESSION_HOME") or "{}")
-    except ValueError:
-        recorded = {}
-    if isinstance(recorded, dict) and recorded:
+    recorded = developer_environment_record()
+    if recorded:
         for name in _MOVED_BY_THE_TEST_SESSION:
             value = recorded.get(name)
             if value:

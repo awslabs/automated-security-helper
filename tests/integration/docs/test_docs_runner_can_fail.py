@@ -414,7 +414,7 @@ def test_the_tools_in_the_home_the_test_session_replaced_are_on_the_session_path
     """The tools of the user's own home are found though the test session moved HOME.
 
     tests/conftest.py points HOME at a private directory for the whole pytest run and
-    records the value it replaced in ASH_TEST_PRE_SESSION_HOME. `ash dependencies
+    records the values it replaced in ASH_TEST_DEVELOPER_HOME. `ash dependencies
     install` ran as the user, outside the run, so its tools are under the recorded
     home, not under Path.home(). Planted here: a tool in each of the recorded home's
     two default tool directories, an empty private home, and none of the variables
@@ -428,7 +428,8 @@ def test_the_tools_in_the_home_the_test_session_replaced_are_on_the_session_path
     for name in ("ASH_BIN_PATH", "UV_TOOL_BIN_DIR", "XDG_BIN_HOME", "XDG_DATA_HOME"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv(
-        "ASH_TEST_PRE_SESSION_HOME", json.dumps({"HOME": str(real_home)})
+        "ASH_TEST_DEVELOPER_HOME",
+        json.dumps({"env": {"HOME": str(real_home)}, "home": str(real_home)}),
     )
     monkeypatch.setenv("HOME", str(private_home))
     found = [directory.resolve() for directory in runner.ash_tool_dirs()]
