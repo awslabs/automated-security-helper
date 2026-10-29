@@ -366,7 +366,7 @@ class BwrapBackend(SandboxBackend):
             "--dev",
             "/dev",
         ]
-        failure = _probe_run(base + ["true"])
+        failure = _probe_run(base + [_true()])
         if failure:
             return (
                 f"bwrap cannot create a sandbox here ({failure}). Unprivileged user "
@@ -380,7 +380,7 @@ class BwrapBackend(SandboxBackend):
             )
         with tempfile.TemporaryDirectory(prefix="ash-bwrap-probe-") as tmp:
             overlay_failure = _probe_run(
-                base + ["--overlay-src", tmp, "--tmp-overlay", tmp, "true"]
+                base + ["--overlay-src", tmp, "--tmp-overlay", tmp, _true()]
             )
         self._overlay = overlay_failure is None
         if not self._overlay:
