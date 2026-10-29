@@ -1665,6 +1665,38 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         """An int or a float, and not a bool (a bool adds as 0 or 1)."""
         return isinstance(value, (int, float)) and not isinstance(value, bool)
 
+    @staticmethod
+    def _response_summary(
+        binary: str, result: Dict[str, Any], values: Sequence[str] | None
+    ) -> str:
+        """One line about an audit's response for ash.log.
+
+        The exit code, the size of each stream, the response flags that are set,
+        and the first line of stderr redacted with the scan's env-read values.
+        Never the raw stdout or stderr: the whole response used to be logged at
+        INFO as it came back, with the stderr a registry token or proxy
+        credential can land in, while every other excerpt the scanner prints is
+        redacted first. ``values`` None (the values hook raised) drops the
+        excerpt rather than print it against an empty value set.
+        """
+        stdout = str(result.get("stdout") or "")
+        stderr = str(result.get("stderr") or "")
+        parts = [
+            f"{binary} audit responded: exit {result.get('returncode')}",
+            f"stdout {len(stdout)} chars",
+            f"stderr {len(stderr)} chars",
+        ]
+        parts.extend(
+            flag
+            for flag in ("timed_out", "post_run_error", "spawn_failed")
+            if result.get(flag)
+        )
+        if values is not None and stderr.strip():
+            shown = shown_tool_stderr(stderr, values).strip().splitlines()
+            if shown:
+                parts.append(f"stderr starts: {shown[0].strip()[:200]}")
+        return "; ".join(parts)
+
     def _sarif_exit_code_accepted(self) -> bool:
         """npm audit exits 0 or 1, and yarn classic exits a bitmask of the
         severity levels its audit found (1|2|4|8|16), so any code in 0-31
@@ -2079,9 +2111,16 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                 env=child.env,
                                 timeout=self._effective_scan_timeout(),
                             )
-                        # The tool's own output, which names the project's paths:
-                        # data to Rich, so a "[/x]" in it cannot raise.
-                        ASH_LOGGER.info(result, extra=NO_MARKUP)
+                        # One redacted line about the response, never the raw
+                        # streams: the runner returns them unredacted for the
+                        # caller to redact, and stdout is the report itself,
+                        # written beside the results. The tool's text names
+                        # the project's paths: data to Rich, so a "[/x]" in it
+                        # cannot raise.
+                        ASH_LOGGER.debug(
+                            self._response_summary(binary, result, record_values),
+                            extra=NO_MARKUP,
+                        )
 
                         # npm audit returns non-zero exit code when vulnerabilities are found
                         # but we still want to process the output
