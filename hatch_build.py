@@ -142,7 +142,13 @@ class CustomBuildHook(BuildHookInterface):
             dockerfile_copy_path = ASH_ASSETS_PATH.joinpath("Dockerfile")
 
             if dockerfile_path.exists():
-                content = dockerfile_path.read_text()
+                # utf-8 named on both ends: the Dockerfile's first lines hold
+                # characters outside every ANSI code page, and read_text() with no
+                # encoding takes the console's, so on a Japanese, Chinese or
+                # Korean Windows the read raised UnicodeDecodeError, no
+                # assets/Dockerfile was generated, and the handler below recorded
+                # "build-error" as the commit.
+                content = dockerfile_path.read_text(encoding="utf-8")
                 # Stage the package files the Dockerfile COPYs from outside assets/;
                 # staged_dockerfile_text points every COPY source at the staged
                 # copies and the bare asset names. Asserted rather than skipped
@@ -160,7 +166,9 @@ class CustomBuildHook(BuildHookInterface):
                         )
                     shutil.copyfile(source, ASH_ASSETS_PATH.joinpath(staged_name))
                     _say(f"Staged {source_rel} into assets/{staged_name}")
-                dockerfile_copy_path.write_text(staged_dockerfile_text(content))
+                dockerfile_copy_path.write_text(
+                    staged_dockerfile_text(content), encoding="utf-8"
+                )
                 _say("Successfully generated assets/Dockerfile from root Dockerfile")
             else:
                 _say(f"Warning: Dockerfile not found at {dockerfile_path}")
@@ -178,6 +186,14 @@ class CustomBuildHook(BuildHookInterface):
                 f"Successfully wrote git details '{commit_sha}' to {ASH_INSTALLED_REVISION_PATH}"
             )
 
+        except FileNotFoundError:
+            # The staging loop's own assertion: a Dockerfile source that does not
+            # exist. Re-raised so the build fails here, as the comment above says
+            # it must. The handler below used to catch it with everything else,
+            # so the build went on with a stale or missing assets/Dockerfile and
+            # recorded "build-error" as the commit: exactly the silently-dropped
+            # stage the assertion exists to refuse.
+            raise
         except Exception as e:
             _say(f"Unexpected error in build hook: {e}")
             # Ensure we have some revision file even if there's an error
