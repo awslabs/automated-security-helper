@@ -55,13 +55,28 @@ def _sets_a_limit(override: str) -> bool:
 
     True for an entry at one of the four options and for one at a section holding
     them (``converters.archive.options``, ``converters.archive``, ``converters``),
-    with either separator spelling, the way ``_apply_config_override`` reads keys.
+    spelled the way ``_apply_config_override`` reads keys: either separator at
+    every segment, and any spelling of the ``archive`` section that folds to the
+    declared converter (``Archive``, ``ARCHIVE``, ``arc_hive``), since the apply
+    folds such a segment onto the section the document holds
+    (``plugin_section_names.plugin_key_in``). An entry the apply lands on the
+    section is replayed, so the operator's raise is never capped back as the
+    in-tree file's value.
     """
+    from automated_security_helper.config.plugin_section_names import (
+        folded_section_name,
+    )
+
     key = override.partition("=")[0].removesuffix("+").strip()
     parts = [part.strip().replace("-", "_") for part in key.split(".")]
     depth = min(len(parts), len(_LIMITS_SECTION))
-    if parts[:depth] != list(_LIMITS_SECTION[:depth]):
-        return False
+    for index in range(depth):
+        wanted = _LIMITS_SECTION[index]
+        if index == 1:
+            if folded_section_name(parts[index]) != folded_section_name(wanted):
+                return False
+        elif parts[index] != wanted:
+            return False
     return len(parts) <= len(_LIMITS_SECTION) or parts[3] in EXTRACTION_LIMIT_OPTIONS
 
 
