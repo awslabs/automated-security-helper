@@ -1805,7 +1805,7 @@ jobs:
           # checkout -- first on sys.path, so an `automated_security_helper/` directory
           # in the repository being scanned would supply the pin. Measured: run from
           # an ASH checkout, the pin came from the checkout rather than from
-          # ASH_UVX_SOURCE. `--no-config` for the same reason one level up: uv
+          # ASH_UVX_SOURCE. The option --no-config is here for the same reason as one level up: uv
           # would otherwise resolve the pin lookup's dependencies from whatever
           # index the checkout's `[tool.uv]` or uv.toml names.
           if ! PINNED="$(uv run --no-config --no-project --with "${ASH_UVX_SOURCE}" -- python -I -c \
