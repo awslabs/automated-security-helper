@@ -7,9 +7,10 @@ is kept when the file is outside the scanned tree (``honored_path``), so
 these cells measure whether a config the repository wrote can hand the tool
 a file the scan derived from that same repository.
 
-Probe cell first; the two controls pin the behavior that must not move:
-an operator-written option naming the same file, and a repository-written
-entry naming a path outside both trees.
+The probe test comes first; the control pins the behavior that must not move: an
+operator-written option naming the same file. A repository-written entry naming
+a path outside both trees is refused (test_tool_config_files_are_the_operators.py
+pins that).
 """
 
 import contextlib

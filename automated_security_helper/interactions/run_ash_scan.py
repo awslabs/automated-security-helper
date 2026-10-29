@@ -2513,7 +2513,8 @@ def _host_resolved_config(opts: ScanOptions) -> Tuple["AshConfig", bool]:
 
     Raises:
         ASHConfigValidationError: The file, or discovery, or an override is one
-            resolution refuses (exit 3).
+            resolution refuses (exit 3), or the scanned directory cannot be
+            searched for the checkouts that confine a file.
     """
     from automated_security_helper.config.ash_config import AshConfig
     from automated_security_helper.config.default_config import _ash_config_file
@@ -2546,8 +2547,15 @@ def _host_resolved_config(opts: ScanOptions) -> Tuple["AshConfig", bool]:
         # is left out first (_loaded_config_file), so a value the option refuses,
         # which the scan ignores, does not hide the file's exit-code fields. The
         # checkout walk is part of the load, so a walk that fails is a load that
-        # failed, and the readers answer None.
-        settings = repository_settings_for_root(Path(opts.source_dir))
+        # failed, and the readers answer None. The host's config refusal catches
+        # only the refusals a load raises, so the walk's failure is raised as one.
+        try:
+            settings = repository_settings_for_root(Path(opts.source_dir))
+        except OSError as exc:
+            raise ASHConfigValidationError(
+                f"The directory {opts.source_dir} could not be searched for the "
+                f"git checkouts that decide whose config files these are: {exc}"
+            ) from None
         config = _load_with_confinement(
             config_path,
             opts.source_dir,

@@ -5449,10 +5449,17 @@ def _validated_document_denials(
     # working directory: check_config_file is given no source directory), so a
     # value that load leaves out never makes the rules unreadable. With the
     # working directory deleted the root is None and the read confines
-    # fail-closed.
-    rules = _session_client_rules(
-        session_id, repository_settings_for_root(working_directory())
-    )
+    # fail-closed. The settings walk the directory's git checkouts, and a walk
+    # that fails is a check that cannot finish, which refuses (as get_config
+    # does for the same walk) rather than raising out of the tool.
+    from automated_security_helper.core.exceptions import ASHConfigValidationError
+
+    try:
+        rules = _session_client_rules(
+            session_id, repository_settings_for_root(working_directory())
+        )
+    except (ASHConfigValidationError, OSError) as exc:
+        return [_unchecked_against_policy(exc)]
     checked = (
         caller_is_remote(session_id)
         if config_content is not None
