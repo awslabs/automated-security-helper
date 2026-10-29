@@ -506,19 +506,28 @@ def report_command(
             output_dir_path.joinpath("ash_output", "ash_aggregated_results.json"),
             output_dir_path.joinpath("ash_aggregated_results.json"),
         ]
+    for poss_result_file in results_file_paths:
+        if poss_result_file.exists():
+            results_file = poss_result_file
+            break
+    # The output directory is the one the results were read from. --output-dir
+    # may name the scanned repository's root (the first candidate reads
+    # <dir>/.ash/ash_output/); the plugin context, the work directory and the
+    # reports/ checks below then used <dir> itself, so a reporter that writes
+    # files of its own wrote them into <dir>/reports, inside the scanned tree,
+    # while the scan had written them under <dir>/.ash/ash_output/reports.
+    if results_file is not None:
+        output_dir_path = results_file.parent
     # Reporters write into reports/ here without the scan's clean-up first, so a
     # link at the output directory or reports/ is refused as a scan refuses it.
     try:
         refuse_linked_output_dir(Path.cwd(), output_dir_path)
     except OutputDirLinkRefused as refusal:
-        # The message names the output directory as given: on one line.
+        # The message names the output directory, built from the path as given:
+        # on one line.
         _print_refusal("[red]{}[/red]", refusal)
         # 3, as a scan exits for the same refusal (OUTPUT_DIR_REFUSED_EXIT_CODE).
         raise typer.Exit(3)
-    for poss_result_file in results_file_paths:
-        if poss_result_file.exists():
-            results_file = poss_result_file
-            break
 
     # A named file that does not exist is refused, as the config commands and a
     # scan refuse it: rendering with the defaults instead used settings the
