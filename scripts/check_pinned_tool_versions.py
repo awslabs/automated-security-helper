@@ -420,8 +420,11 @@ def parse_version(text: str) -> tuple[tuple[int, ...], tuple[int, str]]:
     """A sortable key for a release version, numeric part compared as numbers.
 
     ``v0.69.10`` sorts after ``v0.69.9``, ``1.2`` equals ``1.2.0``, and a final
-    release sorts after any pre-release of the same numbers. Build metadata after
-    ``+`` is ignored, as SemVer says it must be.
+    release sorts after any pre-release of the same numbers. A PEP 440
+    post-release (``1.2.3.post1``, also spelled ``rev`` or ``r``) sorts after
+    the final release it follows: read as a pre-release, a PyPI post-release
+    was reported as ``ahead`` of the pin for the same numbers instead of
+    ``outdated``. Build metadata after ``+`` is ignored, as SemVer says it must be.
 
     Raises:
         ValueError: for a string with no leading numeric version.
@@ -433,7 +436,15 @@ def parse_version(text: str) -> tuple[tuple[int, ...], tuple[int, str]]:
     while len(release) > 1 and release[-1] == 0:
         release = release[:-1]
     suffix = match.group(2).split("+", 1)[0].lstrip("-.")
-    return release, ((1, "") if not suffix else (0, suffix))
+    if not suffix:
+        return release, (1, "")
+    if _POST_RELEASE_RE.match(suffix):
+        return release, (2, suffix)
+    return release, (0, suffix)
+
+
+# PEP 440's post-release spellings, after the separator is stripped.
+_POST_RELEASE_RE = re.compile(r"^(?:post|rev|r)\d*$", re.IGNORECASE)
 
 
 def compare(pinned: str, latest: str) -> str:
@@ -808,11 +819,28 @@ def _dockerfile_args(tool: str, dockerfile: Path) -> list[str]:
     ]
 
 
+def _spelled_like(current: str, latest: str) -> str:
+    """``latest`` in the spelling of ``current``: with the leading ``v`` it has.
+
+    A uv-tool pin's latest comes from PyPI as the bare number, while its license
+    entry records the release tag (``v1.180.0`` for semgrep, cfn-lint, zizmor), and
+    the bump steps name that entry's new value and a ``gh api .../commits/<tag>``
+    lookup. Spelled bare, the step named a version that is not the tag and a
+    lookup that resolves no ref.
+    """
+    if current.startswith("v") and not latest.startswith("v"):
+        return "v" + latest
+    if not current.startswith("v") and latest.startswith("v"):
+        return latest[1:]
+    return latest
+
+
 def _license_steps(pins: Any, tool: str, latest: str) -> list[str]:
     entry = pins.THIRD_PARTY_LICENSES.get(tool)
     if entry is None:
         return []
     project = _github_project(entry.repository, f"THIRD_PARTY_LICENSES[{tool!r}]")
+    latest = _spelled_like(entry.version, latest)
     steps = [
         f'THIRD_PARTY_LICENSES["{tool}"].version -> {latest}',
         (
