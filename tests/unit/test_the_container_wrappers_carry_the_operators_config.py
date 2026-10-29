@@ -2406,6 +2406,30 @@ def test_the_bash_wrapper_judges_another_checkout_only_for_a_file_it_mounts_unma
 
 
 @pytest.mark.unit
+def test_the_bash_wrapper_refuses_when_it_cannot_judge_another_checkout():
+    """The twin of the launcher's check below, read from ./ash's text: an undecided
+    judgment inside in_another_checkout is a refusal with the code of any other
+    (refuse, exit 3), in the launcher's words, and never an unmarked file.
+    test_a_judgment_that_cannot_be_made_refuses_and_starts_nothing runs it."""
+    raw = ASH_SCRIPT.read_text(encoding="utf-8")
+    bash = _flat(raw)
+
+    judging = bash.index("in_another_checkout() {")
+    judged = bash[judging : bash.index("# Resolve one config input", judging)]
+    assert 'refuse_unjudged "${given}" "${reason}"' in judged, judged
+    assert judged.count("refuse_unjudged ") == 1, "one undecided exit, one refusal"
+
+    helper = bash.index("refuse_unjudged() {")
+    body = bash[helper : helper + 700]
+    assert body.index("refuse ") < body.index("could not be judged"), body
+    assert "git checkout other than the scanned one" in body, body
+    assert "without the mark a local scan's judgment would give it" in body, body
+    # refuse exits with the wrapper's refusal code, the same for every refusal.
+    assert 'exit "${WRAPPER_REFUSAL_EXIT}"' in bash
+    assert "WRAPPER_REFUSAL_EXIT=3" in bash
+
+
+@pytest.mark.unit
 def test_the_powershell_wrapper_marks_another_checkout_by_the_container_path_only():
     text = _flat(_ps1_text())
 
