@@ -668,21 +668,76 @@ def resolve_session_config_path(session_id: Optional[str] = None) -> Optional[st
     and pass nothing in the second case -- letting ASH's own config discovery
     find an in-tree ``.ash.yaml`` as it always has.
 
-    A recorded path that no longer exists on disk is also reported as None. The
-    session workspace is removed by ``clear_source`` and by the disconnect hook,
-    either of which can take the materialized config with it; returning a path to
-    a deleted file would fail the scan with a missing-config error naming a path
-    the client never supplied.
+    The binding is the source of truth, and the file is its materialization. A
+    recorded path that is no longer on disk (``clear_source`` removes the whole
+    session workspace, the materialized profile with it, and leaves the binding
+    recorded) is written again from the binding before it is returned
+    (:func:`_bound_config_paths`): a scan of a bound session runs under the
+    profile the client selected, never silently under in-tree discovery while
+    the profile's client rules stay in force.
+
+    Raises:
+        ProfileRegistryError: the file is gone and cannot be written again (the
+            profile is no longer registered, or the workspace cannot be written);
+            failing closed, as ``select_profile`` does when it cannot write it.
     """
 
+    return _bound_config_paths(session_id)[0]
+
+
+def _bound_config_paths(
+    session_id: Optional[str],
+) -> Tuple[Optional[str], Optional[str]]:
+    """``(config_path, trusted_config_path)`` of the session's binding, on disk.
+
+    ``(None, None)`` for an unbound session. When either recorded file is gone,
+    both are written again from the stored binding (the registered profile's
+    config and, for a client-patched binding, the patched config), and the
+    binding records the new paths.
+
+    Raises:
+        ProfileRegistryError: as :func:`resolve_session_config_path`.
+    """
+    sid = DEFAULT_SESSION_ID if session_id is None else session_id
     with _session_lock:
-        state = _session_state.get(
-            DEFAULT_SESSION_ID if session_id is None else session_id
+        state = _session_state.get(sid)
+        if state is None or state.config_path is None:
+            return None, None
+        config_path, trusted = state.config_path, state.trusted_config_path
+    if Path(config_path).is_file() and (trusted is None or Path(trusted).is_file()):
+        return config_path, trusted
+    return _rematerialize_binding(sid)
+
+
+def _rematerialize_binding(sid: str) -> Tuple[Optional[str], Optional[str]]:
+    """Write a bound session's profile files again and record the new paths."""
+    with _session_lock:
+        state = _session_state.get(sid)
+        if state is None or state.profile_name is None or state.bound_config is None:
+            return None, None
+        profile_name = state.profile_name
+        patched = state.bound_config if state.client_changed else None
+    entry = get_profile_registry().get(profile_name)
+    if entry is None:
+        raise ProfileRegistryError(
+            f"this session's bound profile {profile_name!r} is no longer "
+            "registered, and its materialized config is gone, so the scan cannot "
+            "run under it. Bind a registered profile with select_profile."
         )
-        recorded = state.config_path if state is not None else None
-    if recorded is None:
-        return None
-    return recorded if Path(recorded).is_file() else None
+    try:
+        config_path, trusted = materialize_session_binding(sid, entry.config, patched)
+    except (OSError, RuntimeError) as exc:
+        raise ProfileRegistryError(
+            f"this session's bound profile {profile_name!r} could not be written "
+            f"to the session's workspace again, so the scan cannot run under it: "
+            f"{error_text(exc)}"
+        ) from exc
+    with _session_lock:
+        current = _session_state.get(sid)
+        if current is not None and current.profile_name == profile_name:
+            current.config_path = config_path
+            current.trusted_config_path = trusted
+    return config_path, trusted
 
 
 def session_config_was_patched(config_path: Union[str, Path]) -> bool:
@@ -756,20 +811,15 @@ def resolve_session_trusted_config_path(
     The registered profile the session bound, as the operator registered it: its
     copy in the session's ``config/`` directory, never the client-patched copy
     ``resolve_session_config_path`` returns for a patched binding. None for an
-    unbound session, or when the file is gone, as for that function (the two
-    files are removed together, with the session workspace); the caller then
-    takes the server's default config as the trusted base, as for a client's
-    config in an unbound session.
+    unbound session. A file that is gone is written again from the binding, as
+    for that function (the two files are removed together, with the session
+    workspace, and are written again together).
+
+    Raises:
+        ProfileRegistryError: as :func:`resolve_session_config_path`.
     """
 
-    with _session_lock:
-        state = _session_state.get(
-            DEFAULT_SESSION_ID if session_id is None else session_id
-        )
-        recorded = state.trusted_config_path if state is not None else None
-    if recorded is None:
-        return None
-    return recorded if Path(recorded).is_file() else None
+    return _bound_config_paths(session_id)[1]
 
 
 def session_profile_entry(
@@ -836,8 +886,12 @@ def session_client_rules(
             entry.config if entry is not None else trusted_default_config(repository)
         )
     except Exception as exc:  # noqa: BLE001 -- held, and raised only where it applies
+        # Described (error_text), never the raw text: the reason is returned to
+        # the client with the refusal, and a validation error's own text quotes
+        # the refused input, which here is the operator's configuration.
         rules = unreadable_rules(
-            f"the trusted config could not be loaded: {type(exc).__name__}: {exc}"
+            "the trusted config could not be loaded: "
+            f"{type(exc).__name__}: {error_text(exc)}"
         )
     else:
         rules = rules_from(trusted)
