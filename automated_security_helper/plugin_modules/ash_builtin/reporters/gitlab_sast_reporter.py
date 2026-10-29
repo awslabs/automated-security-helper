@@ -245,17 +245,25 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         start_line = None
         raw_source_code_extract = None
 
+        # The FIRST location with a file, and that location's own line and
+        # snippet. The loop used to run over every location and overwrite the
+        # file each time without resetting the line and snippet, so a result
+        # with two locations was reported at the last location's file with an
+        # earlier location's line and source excerpt, a position that exists in
+        # neither.
         if result.locations and len(result.locations) > 0:
             for location in result.locations:
-                if location.physicalLocation:
-                    loc = location.physicalLocation
-                    if loc.root.artifactLocation and loc.root.artifactLocation.uri:
-                        file_path = loc.root.artifactLocation.uri
-                        if loc.root.region:
-                            if loc.root.region.startLine:
-                                start_line = loc.root.region.startLine
-                            if loc.root.region.snippet and loc.root.region.snippet.text:
-                                raw_source_code_extract = loc.root.region.snippet.text
+                if not location.physicalLocation:
+                    continue
+                loc = location.physicalLocation
+                if loc.root.artifactLocation and loc.root.artifactLocation.uri:
+                    file_path = loc.root.artifactLocation.uri
+                    if loc.root.region:
+                        if loc.root.region.startLine:
+                            start_line = loc.root.region.startLine
+                        if loc.root.region.snippet and loc.root.region.snippet.text:
+                            raw_source_code_extract = loc.root.region.snippet.text
+                    break
 
         # Get scanner name from properties
         scanner_name = None
