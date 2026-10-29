@@ -229,6 +229,23 @@ runs:
         else
           args+=(--run-integration --run-slow --no-cov)
         fi
+        if [ "$MARKER" = "e2e" ]; then
+          # The tests' can-run checks look for a scanner on PATH only, so a scanner that
+          # "Install the scanners the e2e tier runs for real" put in ASH's bin directory
+          # or uv's tool bin directory would be skipped as absent. Both directories are
+          # put on PATH for this step only, as the pre-tiers integration job did, not
+          # through GITHUB_PATH, which zizmor's github-env audit reports in a composite
+          # action. ASH's is ASH_BIN_PATH, else ~/.ash/bin (core/constants.py); uv's is
+          # what `uv tool dir --bin` prints. Neither comes from a workflow expression.
+          tool_dirs=""
+          for tool_dir in "${ASH_BIN_PATH:-${HOME}/.ash/bin}" "$(uv tool dir --bin)"; do
+            if [ "$RUNNER_OS" = Windows ]; then
+              tool_dir="$(cygpath -u "$tool_dir")"
+            fi
+            tool_dirs="${tool_dirs}${tool_dir}:"
+          done
+          export PATH="${tool_dirs}${PATH}"
+        fi
         uv run pytest "${args[@]}"
 
     # The run's coverage data, where the artifact upload below carries it to the
