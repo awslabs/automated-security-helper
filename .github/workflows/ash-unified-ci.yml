@@ -108,14 +108,14 @@ concurrency:
   # github.ref in the key, so the same commit pushed to two refs still gets two groups.
   # This is the form ash-typescript-ci.yml already uses for its own push trigger.
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || '' }}
-  # Only pull_request runs may be cancelled. A merge_group run must finish or the
-  # queue loses its verdict, a push to main is the verdict on a commit already on main,
-  # and a workflow_dispatch run was asked for by a person.
-  #
-  # Deliberately not extended to push: with the per-commit group above, a main push has
-  # no sibling to supersede, and cancelling one would discard the only report that
-  # commit will ever get.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # A newer run on any ref other than main or a tag supersedes the one in progress: a
+  # fresh push to a pull request or a branch makes the previous head's run moot, and a
+  # second dispatch on a branch replaces the first. Runs on main and on tags are never
+  # cancelled; each is the only report its commit gets, and the per-commit group above
+  # means a main push has no sibling to supersede anyway. A merge_group entry has its
+  # own per-entry ref, so a second run in its group only means the entry was rebuilt and
+  # the earlier run's answer is for a queue entry that no longer exists.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   # ---------------------------------------------------------------------------

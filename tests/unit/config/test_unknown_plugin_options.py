@@ -293,11 +293,13 @@ class TestStoredResults:
 
 
 def test_a_plugin_with_no_options_says_so():
-    """The archive converter declares no options; the message said "Accepted
-    keys: ." """
+    """The YAML reporter declares no options (``YAMLReporterConfigOptions`` is
+    ``ReporterOptionsBase`` with nothing added); the message said "Accepted
+    keys: ." The archive converter this test first used now declares its
+    extraction limits, so it is no longer a plugin without options."""
     with pytest.raises(ValidationError) as excinfo:
         AshConfig.model_validate(
-            {"project_name": "p", "converters": {"archive": {"options": {"x": 1}}}}
+            {"project_name": "p", "reporters": {"yaml": {"options": {"x": 1}}}}
         )
     message = str(excinfo.value)
     assert "Unknown key 'x'" in message

@@ -1103,6 +1103,14 @@ class TestVerifyThirdParty:
         monkeypatch.setattr(installer, "_uv_tool_dir", lambda: str(tools))
         self.uv_tools = tools
         self.rules = rules
+        # verify_third_party asks uv for its tool directory whenever any entry has a
+        # version probe, and resolves uv on the process PATH, where the unit tool
+        # guard's stand-in is first. The stand-in records `uv tool dir` as a tool
+        # start, so every test here failed at teardown. The only probe in the table
+        # (the rules bundle) reads its manifest from ASH_CFN_GUARD_RULES_DIR and
+        # names no `{uv_tool_dir}`, so the answer is not used; a probe that did
+        # need it would fail loudly as "uv did not answer".
+        monkeypatch.setattr(installer, "_uv_tool_dir", lambda: None)
 
     @staticmethod
     def _tree(tmp_path: Path):
@@ -1250,7 +1258,10 @@ class TestVerifyThirdParty:
         )
         (third_party / "index.json").unlink()
         (Path(path) / "uv").write_text('#!/bin/sh\necho "uv 0.1.0"\n')
-        self._fails(pins, third_party, searched, "does not report 0.12.23", site_dirs)
+        # The message names the pinned release, so read it from the pin instead of
+        # spelling it: the literal went stale when the uv pin moved.
+        pinned = THIRD_PARTY_LICENSES["uv"].version.lstrip("v")
+        self._fails(pins, third_party, searched, f"does not report {pinned}", site_dirs)
 
     def test_every_release_copy_is_checked_not_only_the_first(self, tmp_path):
         """grype is in both /usr/local/bin and /.ash/bin in the image."""
