@@ -326,6 +326,32 @@ class TestInstall:
         assert kwargs["offline"] is False
 
 
+class TestADeferredVersionProbeStaysOwedUntilItAnswers:
+    def test_a_transient_runner_failure_does_not_lose_the_probe(self):
+        """The probe deferred at construction is cleared before it runs, so one
+        timeout or spawn error left tool_version None for the instance's life.
+        A runner that raises once and then answers gives the version on the
+        second resolve."""
+        plugin = FakePlugin(command="bandit")
+        plugin._deferred_tool_version_probe = ("bandit", None)
+        runner = MagicMock()
+        runner.is_uv_available.return_value = True
+        runner.get_tool_version.side_effect = [
+            UVToolRunnerError("the probe timed out"),
+            "1.7.9",
+        ]
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+            return_value=runner,
+        ):
+            plugin.resolve_deferred_tool_version()
+            assert plugin.tool_version is None
+            plugin.resolve_deferred_tool_version()
+        assert plugin.tool_version == "1.7.9"
+        assert plugin._deferred_tool_version_probe is None
+        assert runner.get_tool_version.call_count == 2
+
+
 class TestThePluginsOwnOfflineMode:
     def test_a_scanner_offline_by_its_options_is_offline_to_uv(self, monkeypatch):
         monkeypatch.delenv("ASH_OFFLINE", raising=False)

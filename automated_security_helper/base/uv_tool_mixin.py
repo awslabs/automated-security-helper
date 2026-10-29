@@ -391,13 +391,23 @@ class UVToolMixin:
         The scanners that probe at construction assign the probe's answer to
         ``tool_version``, so this does the same. Nothing to do when nothing was
         deferred.
+
+        The probe stays owed until a version was read: ``_get_uv_tool_version``
+        answers a runner error, a spawn error or a timeout with None, and
+        clearing the deferral before the probe ran left ``tool_version`` None
+        for the instance's life after one transient failure, with the probe
+        never sent again. A later call resolves it; the runner memoizes a
+        completed probe's answer, so a tool that answered nothing costs a memo
+        read, not another process.
         """
         deferred = self._deferred_tool_version_probe
         if deferred is None:
             return
-        self._deferred_tool_version_probe = None
         tool_name, package_name = deferred
-        self.tool_version = self._get_uv_tool_version(tool_name, package_name)
+        version = self._get_uv_tool_version(tool_name, package_name)
+        self.tool_version = version
+        if version is not None:
+            self._deferred_tool_version_probe = None
 
     # ------------------------------------------------------------------
     # Execution
