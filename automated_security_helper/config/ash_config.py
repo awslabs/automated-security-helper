@@ -541,9 +541,10 @@ class BuildConfig(RedactedSection):
         reference sits in. The reference walk's own refusal is not used here:
         its advice is to write the value in the file, and the field never
         accepts one, so following it would end in this refusal anyway. The
-        message names the field, and the variable when a list item or mapping
-        value holds a reference (``first_env_scalar`` walks values only, so a
-        reference used as a mapping key draws the refusal unnamed). The check
+        message names the field, and the variable when a list item, a mapping
+        value or a mapping key holds a reference (``first_env_scalar`` reads a
+        mapping's keys before its values, so a reference used as a key names
+        the key's variable). The check
         reads only ``.variable`` from the first scalar in document order (for
         a YAML ``!!set``, which keeps no order, the one with the smallest
         variable name) and never the scalar's text, never returns it and never raises with it,

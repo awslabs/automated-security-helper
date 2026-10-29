@@ -1162,9 +1162,10 @@ def _dataclass_fields(
     A pydantic dataclass carries its aliases in ``__pydantic_fields__``, like
     a model. A standard-library dataclass has none of its own, and pydantic
     reads a field's ``Field(alias=...)`` or ``Field(validation_alias=...)``
-    off its ``Annotated`` metadata, under the config in force around the
-    dataclass (the holder's, which pydantic applies to a stdlib dataclass used
-    as a field), whose ``alias_generator`` names the keys of its fields
+    off its ``Annotated`` metadata, under the dataclass's own config
+    (``pydantic.with_config``) or, without one, the config in force around it
+    (the holder's, which pydantic applies to a stdlib dataclass used as a
+    field), whose ``alias_generator`` names the keys of its fields
     (:func:`_generated_aliases`), as for a TypedDict."""
     try:
         hints = get_type_hints(annotation)
@@ -1182,7 +1183,9 @@ def _dataclass_fields(
                 for path in _alias_paths(alias):
                     _add_alias_slot(by_name, path, own.get(name, Any))
         return by_name
-    config = _WALK_CONFIG.get()
+    config = getattr(annotation, "__pydantic_config__", None)
+    if config is None:
+        config = _WALK_CONFIG.get()
     generator = config.get("alias_generator") if config else None
     generated = (
         _generated_aliases(annotation, generator) if generator is not None else None

@@ -65,6 +65,46 @@ class _Open(BaseModel):
     name: str = ""
 
 
+class _Lenient(BaseModel):
+    """Ignores undeclared keys (pydantic's default) and types the one it has."""
+
+    count: int = 0
+
+
+def test_a_model_arm_given_an_undeclared_key_still_refuses_its_typed_field():
+    """The arm is walked before the filter decides whether it may admit: a
+    reference at the declared int field is refused by name even though the
+    undeclared key beside it means the arm cannot vouch for the value."""
+
+    class Section(RedactedSection):
+        value: Optional[_Lenient] = None
+
+    text = _refusal_text(
+        Section,
+        {
+            "value": {
+                "count": env_resolved_scalar(CANARY, VARIABLE),
+                "other": env_resolved_scalar("7", "ASH_ARM_OTHER"),
+            }
+        },
+    )
+    _assert_named_not_echoed(text, "value")
+
+
+def test_a_refused_arm_wins_over_a_lenient_models_silence():
+    """An open model given a reference under a key it does not declare reads
+    it as an extra and says nothing; the sibling that declares the key as an
+    int refuses it by name, and that finding is the union's answer."""
+
+    class Section(RedactedSection):
+        value: Optional[Union[_Open, _Lenient]] = None
+
+    text = _refusal_text(
+        Section, {"value": {"count": env_resolved_scalar(CANARY, VARIABLE)}}
+    )
+    _assert_named_not_echoed(text, "value")
+
+
 def test_a_model_arm_given_an_undeclared_marker_key_does_not_mask_a_sibling():
     class Section(RedactedSection):
         value: Optional[Union[_Closed, Dict[str, int]]] = None

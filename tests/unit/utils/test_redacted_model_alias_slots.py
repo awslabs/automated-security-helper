@@ -22,7 +22,7 @@ from typing import Annotated, Optional
 
 import pydantic.dataclasses
 import pytest
-from pydantic import ConfigDict, Field, ValidationError
+from pydantic import ConfigDict, Field, ValidationError, with_config
 from typing_extensions import TypedDict
 
 from automated_security_helper.utils.redacted_model import (
@@ -117,6 +117,26 @@ def test_a_stdlib_dataclass_generated_alias_is_a_typed_slot():
 
     text = _refusal_text(
         Section, {"LIMITS": {"LIMIT": env_resolved_scalar(CANARY, VARIABLE)}}
+    )
+    _assert_named_not_echoed(text, "limits")
+
+
+@with_config(ConfigDict(alias_generator=str.upper))
+@dataclasses.dataclass
+class _OwnConfig:
+    limit: int = 0
+
+
+def test_a_stdlib_dataclass_own_config_generated_alias_is_a_typed_slot():
+    """A stdlib dataclass can carry its own pydantic config, which names its
+    alias generator; the alias keys are read from it first, as pydantic reads
+    them, with no generator in force around the dataclass."""
+
+    class Section(RedactedSection):
+        limits: Optional[_OwnConfig] = None
+
+    text = _refusal_text(
+        Section, {"limits": {"LIMIT": env_resolved_scalar(CANARY, VARIABLE)}}
     )
     _assert_named_not_echoed(text, "limits")
 
