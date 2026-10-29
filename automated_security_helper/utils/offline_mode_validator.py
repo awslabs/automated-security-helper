@@ -15,6 +15,26 @@ from automated_security_helper.utils.content_databases import (
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
+def _guarded(scanner: str, check) -> Tuple[bool, List[str]]:
+    """``check()``, with a filesystem error answered as a failed validation.
+
+    The validators read the cache directory and stat each database file after
+    the glob that found it; a file removed in between, or one this process may
+    not read, raised out of the scanner's constructor, and the scanner was
+    dropped from the run without a word. These checks are advisory, so an
+    unreadable cache is reported the way an empty one is.
+    """
+    try:
+        return check()
+    except OSError as exc:
+        message = (
+            f"{scanner} offline mode: the cache could not be validated: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        ASH_LOGGER.warning(message)
+        return False, [message]
+
+
 def validate_grype_offline_mode() -> Tuple[bool, List[str]]:
     """
     Validate that Grype offline mode requirements are met.
@@ -22,6 +42,10 @@ def validate_grype_offline_mode() -> Tuple[bool, List[str]]:
     Returns:
         Tuple of (is_valid, list_of_messages)
     """
+    return _guarded("Grype", _validate_grype_offline_mode)
+
+
+def _validate_grype_offline_mode() -> Tuple[bool, List[str]]:
     messages = []
     is_valid = True
 
@@ -101,6 +125,10 @@ def validate_trivy_offline_mode() -> Tuple[bool, List[str]]:
     Returns:
         Tuple of (is_valid, list_of_messages)
     """
+    return _guarded("Trivy", _validate_trivy_offline_mode)
+
+
+def _validate_trivy_offline_mode() -> Tuple[bool, List[str]]:
     messages = []
     is_valid = True
 
