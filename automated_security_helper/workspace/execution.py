@@ -376,6 +376,7 @@ from automated_security_helper.utils.report_path_links import linked_report_path
 from automated_security_helper.utils.scan_source import recorded_scan_source
 from automated_security_helper.utils.secret_masking import (
     exposed_secret_values,
+    mask_secret_shapes_in_text,
     mask_secret_values_in_text,
     mask_secret_values_in_tree,
     mask_secrets_in_results,
@@ -2226,8 +2227,11 @@ def _mask_project_output(
     ``shapes`` and rewritten, so it records the workspace's shapes too. Every
     other file -- the project's own reports, which cannot be re-rendered without
     running its reporters again -- has each value masked in every text form a
-    report writes it (``mask_secret_values_in_text``). The tools' own output
-    (``_TOOL_OUTPUT_DIRS``) and links are left alone.
+    report writes it (``mask_secret_values_in_text``), and then each token of
+    ``shapes`` masked as the results file masks them
+    (``mask_secret_shapes_in_text``): a value another project knows only by its
+    masked form was masked by shape in the results file and left in clear here.
+    The tools' own output (``_TOOL_OUTPUT_DIRS``) and links are left alone.
     """
     if not project_output.is_dir():
         return
@@ -2255,7 +2259,9 @@ def _mask_project_output(
         except UnicodeDecodeError:
             # Not UTF-8: read byte for byte, so the rewrite changes nothing else.
             text, encoding = data.decode("latin-1"), "latin-1"
-        masked = mask_secret_values_in_text(text, values)
+        masked = mask_secret_shapes_in_text(
+            mask_secret_values_in_text(text, values), shapes
+        )
         if masked != text:
             write_text_atomically(path, masked, encoding=encoding)
 
@@ -2272,7 +2278,12 @@ def _remask_results_file(path: Path, values: Set[str], shapes: List[Any]) -> Non
         # rather than leave it as it is.
         ASH_LOGGER.warning(f"Could not read {path} to mask it again: {error}")
         text = path.read_text(encoding="utf-8", errors="replace")
-        write_text_atomically(path, mask_secret_values_in_text(text, values))
+        write_text_atomically(
+            path,
+            mask_secret_shapes_in_text(
+                mask_secret_values_in_text(text, values), shapes
+            ),
+        )
         return
     mask_secrets_in_results(model, values=values, shapes=shapes)
     write_text_atomically(path, model.model_dump_json(indent=2, by_alias=True))
