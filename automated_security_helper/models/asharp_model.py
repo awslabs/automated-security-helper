@@ -988,8 +988,15 @@ class ReportMetadata(StrippedRecordModel):
 
     @field_validator("project_name")
     @classmethod
-    def validate_non_empty_str(cls, v: str, info) -> str:
-        """Validate string fields are not empty."""
+    def validate_non_empty_str(cls, v: str | None, info) -> str | None:
+        """Validate string fields are not empty.
+
+        The field is optional, so a results file whose metadata records it as
+        null reaches this with None: that is the field's default, not an empty
+        name, and stripping it raised a bare AttributeError out of load_model.
+        """
+        if v is None:
+            return v
         v = v.strip()
         if not v:
             raise ValueError(f"{info.field_name} cannot be empty")
@@ -1488,8 +1495,23 @@ class AshAggregatedResults(RecordModel):
                     )
                     flat_vulns.append(flat_vuln)
 
-                    if flat_vuln.is_suppressed:
-                        self._apply_suppression_side_effects(flat_vuln.scanner)
+        # The suppressed counts are SET from the flattened findings, never
+        # bumped per finding: the unified metrics (core.unified_metrics, run at
+        # the end of the scan and by `ash merge`) already count every suppressed
+        # SARIF result into summary_stats and the scanner rows, so a bump here
+        # counted each one a second time in the saved results. Setting the same
+        # count twice is idempotent, and a model no metrics pass has visited
+        # still gets its counts from here.
+        suppressed_by_scanner: Dict[str, int] = {}
+        for flat_vuln in flat_vulns:
+            if flat_vuln.is_suppressed:
+                scanner_key = (flat_vuln.scanner or "").lower()
+                suppressed_by_scanner[scanner_key] = (
+                    suppressed_by_scanner.get(scanner_key, 0) + 1
+                )
+        self.metadata.summary_stats.suppressed = sum(suppressed_by_scanner.values())
+        for scanner_key, count in suppressed_by_scanner.items():
+            self._apply_suppression_side_effects(scanner_key, count)
 
         for scanner_name, results in self.additional_reports.items():
             if results is None:
@@ -1514,16 +1536,17 @@ class AshAggregatedResults(RecordModel):
         self._flat_cache = flat_vulns
         return flat_vulns
 
-    def _apply_suppression_side_effects(self, scanner: Optional[str]) -> None:
-        """Bump summary_stats.suppressed and the matching scanner_results entry.
+    def _apply_suppression_side_effects(
+        self, scanner: Optional[str], count: int
+    ) -> None:
+        """Set the matching scanner_results entry's suppressed count to ``count``.
 
         Extracted from the inline SARIF processing in to_flat_vulnerabilities()
-        so the conversion factory can stay side-effect free. Preserves the
-        legacy behavior: one ``suppressed`` bump per suppressed finding plus an
-        increment to the scanner_results entry when one exists.
+        so the conversion factory can stay side-effect free. The count is SET,
+        not added: the unified metrics already count every suppressed finding
+        into the row, so an increment per finding doubled it in the saved
+        results. The summary's own count is set by the caller.
         """
-        self.metadata.summary_stats.bump("suppressed")
-
         if not scanner:
             return
         key = scanner.lower()
@@ -1567,15 +1590,10 @@ class AshAggregatedResults(RecordModel):
             target_info = ScannerTargetStatusInfo.model_validate(target_info)
             self.scanner_results[key] = target_info
 
-        if target_info.suppressed_finding_count is None:
-            target_info.suppressed_finding_count = 1
-        else:
-            target_info.suppressed_finding_count += 1
-
-        # ScannerSeverityCount declares `suppressed: int = 0`, so the hasattr check
-        # that used to guard this was dead -- the attribute always exists, and the
-        # else arm always ran. Incrementing directly says the same thing honestly.
-        target_info.severity_counts.suppressed += 1
+        target_info.suppressed_finding_count = count
+        # ScannerSeverityCount declares `suppressed: int = 0`, so the attribute
+        # always exists; it is set, like the count above, never incremented.
+        target_info.severity_counts.suppressed = count
 
     @classmethod
     def from_json(cls, json_data: Union[str, Dict[str, Any]]) -> "AshAggregatedResults":
@@ -1601,9 +1619,15 @@ class AshAggregatedResults(RecordModel):
         This method populates the final metrics right before saving to ensure
         all metrics are aligned and based on the final processed SARIF data.
         """
-        # Populate final metrics right before saving (if not already done)
-        if not self.scanner_results:
-            self._populate_final_metrics()
+        # Populate the final metrics right before saving, from the SARIF this
+        # model holds now. Done only when scanner_results was empty, the
+        # scan-phase file (the scan-complete marker) carried all-zero
+        # summary_stats whenever any scanner was skipped, missing, excluded or
+        # errored: those scanners have rows before the rebuild, so the summary
+        # was never filled while the SARIF held findings. Recomputing is
+        # idempotent, so a model whose metrics were already populated is saved
+        # with the same counts.
+        self._populate_final_metrics()
 
         # No secret value a finding exposes is written to the file; see
         # utils/secret_masking.py. In place, so what is reported next is masked too.
@@ -1679,7 +1703,9 @@ class AshAggregatedResults(RecordModel):
         if not json_path.exists():
             return None
 
-        with open(json_path) as f:
+        # UTF-8, as every writer of this file writes it: the platform's locale
+        # encoding read it wrong, or refused it, on Windows.
+        with open(json_path, encoding="utf-8") as f:
             json_data = json.load(f)
 
         return cls.from_json(json_data)
@@ -1752,16 +1778,22 @@ def _resolve_forward_refs() -> None:
     if _forward_refs_resolved:
         return
 
+    # The import runs OUTSIDE the lock. The last line of config/ash_config.py
+    # calls this function, so a thread importing that module holds its import
+    # lock and then asks for this one; a thread that first used the model here
+    # held this lock and asked for the import lock. Importing first, under the
+    # import system's own locking, breaks the cycle: the thread that reaches
+    # the import from under ash_config's own import returns before the lock.
+    try:
+        from automated_security_helper.config.ash_config import AshConfig
+    except ImportError:
+        # Mid-cycle, so AshConfig does not exist yet: the model was used while
+        # the package was still being imported. Not logged; the next use, once
+        # the import has finished, resolves it.
+        return
+
     with _forward_refs_lock:
         if _forward_refs_resolved:
-            return
-
-        try:
-            from automated_security_helper.config.ash_config import AshConfig
-        except ImportError:
-            # Mid-cycle, so AshConfig does not exist yet: the model was used while
-            # the package was still being imported. Not logged; the next use, once
-            # the import has finished, resolves it.
             return
 
         globals()["AshConfig"] = AshConfig
