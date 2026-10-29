@@ -17,6 +17,7 @@ from typing_extensions import Self
 from pydantic import (
     Field,
     PrivateAttr,
+    ValidationError,
     ValidatorFunctionWrapHandler,
     field_validator,
     model_validator,
@@ -27,6 +28,7 @@ from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.plugin_config import (
     PluginConfigBase,
     config_validated_by_declared_model,
+    declared_config_model,
 )
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.asharp_model import (
@@ -113,11 +115,35 @@ class ConverterPluginBase(PluginBase, Generic[T]):
 
     def model_post_init(self, context):
         if self.config is None:
-            self.config = ConverterPluginConfigBase()
+            self.config = self._default_config()
         self.results_dir = self.context.work_dir.joinpath(
             self.config.name or self.__class__.__name__
         )
         return super().model_post_init(context)
+
+    def _default_config(self) -> ConverterPluginConfigBase:
+        """The config a converter runs with when it is given none.
+
+        An instance of the model the converter declares
+        (``ConverterPluginBase[XConfig]``), so its name, its declared ``enabled``
+        default and its options' defaults apply, as they do for a configured
+        run: a converter declared disabled by default stays disabled, and its
+        work directory is named for the converter. The generic base only for a
+        converter that declares no model, or one whose model needs a section to
+        be built.
+        """
+        declared = declared_config_model(type(self), ConverterPluginConfigBase)
+        if declared is None:
+            return ConverterPluginConfigBase()
+        try:
+            return declared()
+        except ValidationError as error:
+            ASH_LOGGER.debug(
+                f"{self.__class__.__name__}: its config model "
+                f"{declared.__name__} cannot be built without a section "
+                f"({error.error_count()} error(s)); using the generic one"
+            )
+            return ConverterPluginConfigBase()
 
     def configure(
         self,
@@ -264,13 +290,21 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         # A reason read from the environment is quoted by its reference, as
         # every quote of a suppression's reason is (written_suppression_reasons):
         # the log line and the record both reach the results and the reports.
-        accepted_reason = (
-            None
-            if accepting is None
-            else written_suppression_reasons(config).get(
-                id(accepting), accepting.reason
-            )
-        )
+        # Guarded as the id bookkeeping below is: recording a failure must not
+        # itself fail, and this reads the same environment record. Without the
+        # guard an error here lost the accepted input's record.
+        accepted_reason = None
+        if accepting is not None:
+            accepted_reason = accepting.reason
+            try:
+                accepted_reason = written_suppression_reasons(config).get(
+                    id(accepting), accepting.reason
+                )
+            except Exception as error:
+                ASH_LOGGER.debug(
+                    "could not read an accepted input's suppression reason as "
+                    f"written: {type(error).__name__}"
+                )
         accepted_id = None
         if accepting is not None:
             from automated_security_helper.utils.suppression_matcher import (
