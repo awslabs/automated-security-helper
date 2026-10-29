@@ -66,6 +66,7 @@ import os
 import secrets
 import shutil
 import stat
+import string
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -105,7 +106,7 @@ def is_no_yarnrc_name(value: object) -> bool:
         return False
     token = value[len(NO_YARNRC_PREFIX) : -len(".yml")]
     return len(token) == _NO_YARNRC_TOKEN_CHARS and all(
-        c in "0123456789abcdef" for c in token
+        c in string.digits or c in "abcdef" for c in token
     )
 
 

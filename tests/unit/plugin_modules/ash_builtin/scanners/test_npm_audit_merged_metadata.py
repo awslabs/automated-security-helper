@@ -203,7 +203,7 @@ def test_an_npm_and_a_pnpm_lockfile_in_one_scan_both_report(plugin_context):
 def test_the_merge_combines_whichever_report_comes_first(plugin_context, first):
     """The order the lockfiles are found in decides which type is merged into
     which; both orders have to survive. The converted tree is walked in the
-    filesystem's order, so the two cells together cover both orders only as
+    filesystem's order, so the two cases together cover both orders only as
     the filesystem lists them; ``test_merge_metadata_by_type`` pins each
     direction of the type pair directly."""
     pnpm = json.loads(PNPM_CAPTURE.read_text(encoding="utf-8"))
