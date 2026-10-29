@@ -58,6 +58,12 @@ from automated_security_helper.utils.uv_tool_runner import (
 if TYPE_CHECKING:
     pass
 
+#: "The stderr log's identity before the run was not read": the default of
+#: ``_uv_response`` and ``_explain_offline_resolve_failure`` for a caller that
+#: did not read it, under which the explainer reads the log as it always has.
+#: Distinct from None, which is a read that found no log.
+_LOG_NOT_READ: Any = object()
+
 __all__ = [
     "GuardedValues",
     "UVToolMixin",
@@ -194,9 +200,12 @@ class UVToolMixin:
         """The ``--from`` spec this plugin's scan will run under.
 
         Mirrors the construction in ``UVToolRunner.run_tool``, which builds the
-        spec from ``self.command`` plus this plugin's extras and version
-        constraint. Returns ``None`` when the scan passes no ``--from`` at all,
-        so the probe matches that too.
+        spec from the package that provides the tool (``uv_tool_package_name``,
+        else ``self.command``) plus this plugin's extras and version constraint.
+        Returns ``None`` when the scan passes no ``--from`` at all, so the probe
+        matches that too; a package named apart from the command is always a
+        ``--from`` (``uv tool run jupyter-nbconvert`` would resolve a package
+        named after the executable), so it is returned bare.
 
         Why the probe needs this: ``uv tool run bandit`` and
         ``uv tool run --from 'bandit[sarif,toml]>=1.7.0,<2.0.0' bandit`` resolve
@@ -209,10 +218,26 @@ class UVToolMixin:
         """
         extras = self._get_tool_package_extras()
         constraint = self._get_tool_version_constraint()
+        package = self.uv_tool_package_name or self.command
         if not extras and not constraint:
-            return None
-        base = f"{self.command}[{','.join(extras)}]" if extras else self.command
+            return package if package != self.command else None
+        base = f"{package}[{','.join(extras)}]" if extras else package
         return f"{base}{constraint}" if constraint else base
+
+    def _uv_stderr_log_identity(
+        self, results_dir: Optional[Path]
+    ) -> Optional[Tuple[int, int, int, int]]:
+        """The identity of this plugin's stderr log under ``results_dir`` now, or
+        None when there is none: read BEFORE a uv run, so the offline explainer
+        can tell a log that run wrote from one left by an earlier run
+        (``plugin_base._log_identity``)."""
+        if results_dir is None:
+            return None
+        from automated_security_helper.base.plugin_base import _log_identity
+
+        return _log_identity(
+            Path(results_dir) / f"{self.__class__.__name__}.stderr.log"
+        )
 
     def _uv_run_inputs(self) -> Tuple[str, ...]:
         """The plugin-built requirement strings of this plugin's uv runs: the
@@ -433,6 +458,10 @@ class UVToolMixin:
             )
             return None
         record_values: Tuple[str, ...] = read.values
+        # Whether a stderr log already sits where this run would write its own,
+        # for the offline explainer: a leftover from an earlier run in the same
+        # results directory is not this run's output.
+        stderr_log_before = self._uv_stderr_log_identity(results_dir)
         try:
             from automated_security_helper.utils.uv_tool_runner import (
                 get_uv_tool_runner,
@@ -507,6 +536,11 @@ class UVToolMixin:
             ):
                 result = uv_runner.run_tool(
                     tool_name=self.command,
+                    # The package that provides the command, when it is named
+                    # apart from it: the --from spec is built on it, so the
+                    # run resolves the package the install named, not one
+                    # named after the executable.
+                    package_name=self.uv_tool_package_name,
                     args=tool_args,
                     cwd=working_dir,
                     capture_output=True,
@@ -521,6 +555,9 @@ class UVToolMixin:
                     env=env,
                     timeout=timeout,
                     values=values,
+                    # This plugin's own offline mode (options.offline), which
+                    # the runner would otherwise not see.
+                    offline=self._is_offline_mode(),
                     **self._uv_python_kwargs(),
                 )
 
@@ -595,7 +632,9 @@ class UVToolMixin:
                 )
             return None
 
-        return self._uv_response(result, results_dir)
+        return self._uv_response(
+            result, results_dir, stderr_log_before=stderr_log_before
+        )
 
     def _uv_failure_after_the_start(
         self,
@@ -637,7 +676,13 @@ class UVToolMixin:
             )
         return after
 
-    def _uv_response(self, result: Any, results_dir: Optional[Path]) -> Dict[str, Any]:
+    def _uv_response(
+        self,
+        result: Any,
+        results_dir: Optional[Path],
+        *,
+        stderr_log_before: Any = _LOG_NOT_READ,
+    ) -> Dict[str, Any]:
         """The response for a uv run that returned, handled once.
 
         Every flag the result carries is copied, with its error: scan() and
@@ -646,6 +691,12 @@ class UVToolMixin:
         assembled is kept, with its flag, code and reason, and the error is added
         to the reason; post_run_error is added only to a response with no flag.
         Nothing here falls back to direct execution.
+
+        ``stderr_log_before`` is the identity of this plugin's stderr log under
+        ``results_dir`` as read before the run (``_uv_stderr_log_identity``), so
+        the offline explainer reads the log only when this run wrote it. A
+        caller that did not read it leaves the default, and the explainer reads
+        the log as it always has.
         """
         response: Optional[Dict[str, Any]] = None
         try:
@@ -688,7 +739,9 @@ class UVToolMixin:
             # other's inputs mid-call, weakening its redaction. The seam
             # stays the documented one-argument signature.
             self._process_command_response(response)
-            self._explain_offline_resolve_failure(response, results_dir)
+            self._explain_offline_resolve_failure(
+                response, results_dir, stderr_log_before=stderr_log_before
+            )
 
             self._plugin_log(
                 f"UV tool execution completed for {self.command} with exit code {response['returncode']}",
@@ -701,17 +754,23 @@ class UVToolMixin:
             # As at the mixin's other sites: the message and the traceback it
             # carries can quote a path with an env-read value, so both pass
             # through the plugin's redaction instead of exc_info's raw print.
+            # The values hook is overridable and read GUARDED here: a raise
+            # from it inside this handler would escape, and the tool that ran
+            # (and maybe timed out) would be recorded as a spawn failure. With
+            # no values the line is not shown, since nothing could redact it.
             if ASH_LOGGER.isEnabledFor(logging.DEBUG):
-                import traceback
+                debug_values = guarded_values(self)
+                if debug_values is not None:
+                    import traceback
 
-                ASH_LOGGER.debug(
-                    text_without_values(
-                        "UV tool response error details (redacted):\n"
-                        + "".join(traceback.format_exception(e)),
-                        self._values_to_redact(),
-                    ),
-                    extra=NO_MARKUP,
-                )
+                    ASH_LOGGER.debug(
+                        text_without_values(
+                            "UV tool response error details (redacted):\n"
+                            + "".join(traceback.format_exception(e)),
+                            debug_values,
+                        ),
+                        extra=NO_MARKUP,
+                    )
             if response is not None:
                 failed: Dict[str, Any] = dict(response)
             else:
@@ -799,10 +858,31 @@ class UVToolMixin:
             if not any(failed.get(flag) is True for flag in RESPONSE_FLAGS):
                 failed["post_run_error"] = True
                 failed["spawn_failed"] = False
+            # The tool ran and this is its code: folded into the plugin's exit
+            # code here, because _process_command_response, which does that
+            # fold on the normal path, raised or never ran, and a run that
+            # exited non-zero would otherwise leave the default looking
+            # accepted. A bool is no code (it passes isinstance(int)).
+            code = failed.get("returncode")
+            if isinstance(code, int) and not isinstance(code, bool):
+                from automated_security_helper.base.plugin_base import (
+                    worse_exit_code,
+                )
+
+                try:
+                    self.exit_code = worse_exit_code(
+                        getattr(self, "exit_code", None), code
+                    )
+                except Exception:  # noqa: BLE001 -- the response is the record
+                    pass
             return failed
 
     def _explain_offline_resolve_failure(
-        self, response: Dict[str, Any], results_dir: Optional[Path]
+        self,
+        response: Dict[str, Any],
+        results_dir: Optional[Path],
+        *,
+        stderr_log_before: Any = _LOG_NOT_READ,
     ) -> None:
         """Put the cause first when ``uv tool run --offline`` could not resolve.
 
@@ -829,6 +909,15 @@ class UVToolMixin:
             return
         if not stderr and results_dir is not None:
             log_path = Path(results_dir) / f"{self.__class__.__name__}.stderr.log"
+            if stderr_log_before is not _LOG_NOT_READ:
+                # Only a log THIS run wrote: one that is absent, or whose
+                # identity is the one read before the run, is a leftover of an
+                # earlier run in the same results directory, and its text would
+                # explain a resolve failure this run never had.
+                from automated_security_helper.base.plugin_base import _log_identity
+
+                if _log_identity(log_path) in (None, stderr_log_before):
+                    return
             try:
                 from automated_security_helper.base.plugin_base import (
                     read_log_bounded,
@@ -1163,13 +1252,17 @@ class UVToolMixin:
 
         extras = self._get_tool_package_extras()
         constraint = self._get_tool_version_constraint()
-        requirement = build_requirement(self.command, extras, constraint)
+        # The package that provides the command, when named apart from it: the
+        # requirement verified against the copy's environment is the one the
+        # scan runs under, not one named after the executable.
+        package = self.uv_tool_package_name or self.command
+        requirement = build_requirement(package, extras, constraint)
         # The values hook is read ONCE for the verify and every record below:
         # it is overridable, and two reads can disagree with each other.
         values = self._values_to_redact()
         verdict = verify_pre_installed_tool(
             executable,
-            self.command,
+            package,
             extras,
             constraint,
             uv_executable=find_uv_or_none(),
@@ -1202,6 +1295,11 @@ class UVToolMixin:
             )
             self.use_uv_tool = False
             self.dependencies_satisfied = True
+            if verdict.version:
+                # The copy that runs is this one, so the version the reports
+                # name (SARIF scanner_version) is its own, not the one the uv
+                # probe read from uv's environment.
+                self.tool_version = verdict.version
             return True
 
         # A tool from the Nix store is the pinned one `--mode nix` exists to run.
@@ -1410,6 +1508,13 @@ class UVToolMixin:
             # One argv element each, and the request must carry no whitespace:
             # get_installation_commands splits this string on whitespace.
             install_cmd_parts.extend(["--python", python_request])
+        # The plugin's extra dependencies, as the scan-time install passes
+        # them (UVToolRunner.install_tool_with_version): without them the
+        # command `ash dependencies` runs built a different environment than
+        # the scan's. A requirement string carries no whitespace, so the
+        # whitespace split above keeps each as one element.
+        for dependency in self._get_tool_with_dependencies() or []:
+            install_cmd_parts.extend(["--with", dependency])
         install_cmd_parts.append(tool_spec)
 
         install_cmd_str = " ".join(install_cmd_parts)
@@ -1439,14 +1544,29 @@ class UVToolMixin:
     # ------------------------------------------------------------------
 
     def _is_offline_mode(self) -> bool:
-        """Check if ASH is running in offline mode.
+        """Whether this plugin's uv calls run offline.
+
+        ASH's own mode first (``ASH_OFFLINE``), then the plugin's own: a scanner
+        resolves ``options.offline`` through ``_scanner_offline``
+        (``ScannerPluginBase``), which puts that scanner offline while the rest
+        of the run stays online. The mixin used to read only the global mode,
+        so a scanner's ``options.offline: true`` never reached uv: its
+        ``uv tool run``, version probe and install all went online.
 
         Returns:
             True if offline mode is enabled, False otherwise
         """
         from automated_security_helper.core.constants import is_offline_mode
 
-        return is_offline_mode()
+        if is_offline_mode():
+            return True
+        scanner_offline = getattr(self, "_scanner_offline", None)
+        if callable(scanner_offline):
+            try:
+                return bool(scanner_offline())
+            except Exception:  # noqa: BLE001 -- a config read that raises follows ASH
+                return False
+        return False
 
     # ------------------------------------------------------------------
     # Installation
@@ -1661,9 +1781,16 @@ class UVToolMixin:
             already_installed = runner.is_tool_installed(self.command)
             pre_install_check_time = time.time() - pre_install_check_start
 
+            # Whether the install below has to rebuild a tool uv already lists:
+            # the runner answers True without installing for a listed tool
+            # unless told to reinstall.
+            reinstall = False
             if already_installed:
+                # Probed under the scan's own --from spec (the extras and the
+                # constraint), the environment the scan runs in, not a bare
+                # package name's.
                 validation_result = runner.validate_cached_tool(
-                    self.command, self.uv_tool_package_name
+                    self.command, self._uv_from_spec()
                 )
 
                 if validation_result["is_functional"]:
@@ -1682,6 +1809,7 @@ class UVToolMixin:
                         "Proceeding with reinstallation",
                         level=logging.WARNING,
                     )
+                    reinstall = True
 
             if is_checking_only():
                 # A dependency question (core/scanner_inventory.py), not a scan.
@@ -1728,6 +1856,8 @@ class UVToolMixin:
                 # hidden from its debug line, so nothing degrades to an empty
                 # value set.
                 values=record_values,
+                reinstall=reinstall,
+                offline=self._is_offline_mode(),
                 **self._uv_python_kwargs(),
             )
 
@@ -1754,12 +1884,30 @@ class UVToolMixin:
                 # so the version silently read as unknown. After memoization it
                 # was worse: the failure was cached under the key
                 # "bandit::['sarif', 'toml']" and served to later callers.
-                post_install_version = runner.get_installed_tool_version(
-                    self.command,
-                    self._uv_from_spec(),
-                    values=record_values,
-                    **self._uv_python_kwargs(),
-                )
+                # Best effort: the install succeeded whatever this read does.
+                # A raise here (the listing timing out, a probe the sandbox
+                # refused) used to fall into the handlers below and report
+                # the successful install as [INSTALLATION_ERROR], False.
+                try:
+                    post_install_version = runner.get_installed_tool_version(
+                        self.command,
+                        self._uv_from_spec(),
+                        values=record_values,
+                        **self._uv_python_kwargs(),
+                    )
+                except Exception as version_error:  # noqa: BLE001
+                    post_install_version = None
+                    self._plugin_log(
+                        text_without_values(
+                            f"Could not read the installed version of "
+                            f"{self.command} after the install: {version_error}",
+                            record_values,
+                        )
+                        if record_values is not None
+                        else f"Could not read the installed version of "
+                        f"{self.command} after the install (not shown)",
+                        level=logging.DEBUG,
+                    )
 
                 self._plugin_log(
                     f"[INSTALLATION_SUCCESS] Successfully installed UV tool '{self.command}'",
@@ -1880,9 +2028,9 @@ class UVToolMixin:
                 return is_installed
 
             except UVToolRunnerError:
-                version = runner.get_tool_version(
-                    self.command, self.uv_tool_package_name
-                )
+                # Under the scan's own --from spec: the environment the scan
+                # runs in, not a bare package name's.
+                version = runner.get_tool_version(self.command, self._uv_from_spec())
                 is_installed = version is not None
 
                 self._plugin_log(
@@ -1929,9 +2077,10 @@ class UVToolMixin:
             )
 
             runner = get_uv_tool_runner()
-            info = runner.get_tool_installation_info(
-                self.command, self.uv_tool_package_name
-            )
+            # The version probe runs under the scan's own --from spec (the
+            # package, its extras and the constraint), the environment the scan
+            # runs in; a bare package name probed a different one.
+            info = runner.get_tool_installation_info(self.command, self._uv_from_spec())
             info["tool_name"] = self.command
 
             self._plugin_log(
