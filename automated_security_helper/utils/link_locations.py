@@ -13,13 +13,21 @@ location, so a check of who chose a file judges each link on the way as well
 
 from __future__ import annotations
 
+import errno
 import os
 from pathlib import Path
 from typing import List
 
+from automated_security_helper.utils.scanned_tree import _is_link_stat
+
 #: The most symlinks ``link_locations`` follows for one path, as Linux's own
 #: lookup does.
 MAX_LINKS_FOLLOWED = 40
+
+#: The errors ``Path.is_symlink`` reads as "not a link": a component that is not
+#: there, or is below a file, or is a loop. The walk steps through such a component
+#: as before; any other error ends it.
+_NOT_A_LINK_ERRNOS = frozenset({errno.ENOENT, errno.ENOTDIR, errno.EBADF, errno.ELOOP})
 
 _EXTENDED_PREFIX = "\\\\?\\"
 _EXTENDED_UNC_PREFIX = "\\\\?\\UNC\\"
@@ -45,7 +53,11 @@ def link_locations(path: str | Path) -> List[Path]:
     """Where each symlink sits that looking ``path`` up follows, in the order followed.
 
     Each entry is the link itself, under its parent directory with that
-    directory's own links resolved: the place the link was written. The path is
+    directory's own links resolved: the place the link was written. A Windows
+    directory junction is a link here as everywhere else in this family
+    (``scanned_tree._is_link_stat``): ``Path.is_symlink`` says it is none, and
+    stepping through it as a plain directory would examine the later components
+    under the junction's name, not where it leads. The path is
     walked one component at a time as the kernel walks it, so a link in a
     directory reached through another link is found as well, and a ``..`` after
     a link applies to the link's target. A component that cannot be read ends
@@ -73,7 +85,13 @@ def link_locations(path: str | Path) -> List[Path]:
             continue
         step = current / part
         try:
-            if not step.is_symlink():
+            try:
+                is_link = _is_link_stat(os.lstat(step))
+            except OSError as error:
+                if error.errno not in _NOT_A_LINK_ERRNOS:
+                    raise
+                is_link = False
+            if not is_link:
                 current = step
                 continue
             text = os.readlink(step)
