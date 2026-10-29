@@ -7,7 +7,7 @@ body:
     attributes:
       label: ASH Version
       description: Run `ash --version` and paste the version.
-      placeholder: "3.7.0"
+      placeholder: "3.7.1"
     validations:
       required: true
 

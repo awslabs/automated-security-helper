@@ -70,12 +70,12 @@ command is the same in a POSIX shell and in PowerShell:
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
-uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0'
+uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1'
 ash --version
 ```
 
 ```text
-awslabs/automated-security-helper v3.7.0
+awslabs/automated-security-helper v3.7.1
 ```
 
 The install provides three names for the same program: `ash`, `ashv3`, and
@@ -88,21 +88,21 @@ To move to another version, run the same command with the new tag and add `--for
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
-uvx --python 3.12 --from 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0' ash --version
+uvx --python 3.12 --from 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1' ash --version
 ```
 
 uvx builds the environment once and reuses it, so later runs start quickly. Every
 command needs the full `uvx --from` specification, so you may want a shell alias:
 
 ```bash
-alias ash="uvx --python 3.12 --from 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0' ash"
+alias ash="uvx --python 3.12 --from 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1' ash"
 ```
 
 ## Install with pipx
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
-pipx install --python python3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0'
+pipx install --python python3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1'
 ```
 
 Install pipx itself from your package manager, for example `apt install pipx` on
@@ -126,7 +126,7 @@ virtual environment.
     ```bash
     python3.12 -m venv ~/.venvs/ash
     . ~/.venvs/ash/bin/activate
-    pip install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0'
+    pip install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1'
     ash --version
     ```
 
@@ -138,7 +138,7 @@ virtual environment.
     ```powershell
     py -3.12 -m venv $HOME\.venvs\ash
     & $HOME\.venvs\ash\Scripts\Activate.ps1
-    pip install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0'
+    pip install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1'
     ash --version
     ```
 
@@ -175,7 +175,7 @@ the install needs a C compiler.
 
 | Reference | What you get |
 |---|---|
-| `@v3.7.0` | That release. The release process creates each version tag once and moves only the `v3` tag. |
+| `@v3.7.1` | That release. The release process creates each version tag once and moves only the `v3` tag. |
 | a full commit SHA | That commit. The only reference that cannot change. |
 | `@v3` | The latest 3.x release. It moves with each release. |
 | `@main` | The current development state. |

@@ -181,7 +181,7 @@ on:
 permissions:
   contents: read
 env:
-  INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+  INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1"
 jobs:
   shard:
     runs-on: ubuntu-latest
