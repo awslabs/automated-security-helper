@@ -222,6 +222,19 @@ def admit_empty_shard(session: Any, exitstatus: Any, deselected: int) -> bool:
     return True
 
 
+def is_ci_tier_run(config: Any) -> bool:
+    """Whether this is a CI tier run: a ``-m`` expression was given AND the run is under
+    GitHub Actions (as ``configure`` read it) or has a shard configured.
+
+    The one definition the floor and the tests that assert what a CI leg is provisioned
+    with both use, so they cannot drift apart. It reads the config, not the environment:
+    ``configure`` has already removed the shard variable from ``os.environ``.
+    """
+    if not config.getoption("markexpr", default=""):
+        return False
+    return bool(config.stash.get(_TEXT_KEY, "") or config.stash.get(_CI_KEY, False))
+
+
 def fail_a_tier_run_that_executed_no_test(
     session: Any, executed: int, skipped: int
 ) -> bool:
@@ -246,9 +259,7 @@ def fail_a_tier_run_that_executed_no_test(
     # Only the controller decides. A worker has ``workerinput``; the controller does not.
     if hasattr(config, "workerinput"):
         return False
-    if not config.getoption("markexpr", default=""):
-        return False
-    if not (config.stash.get(_TEXT_KEY, "") or config.stash.get(_CI_KEY, False)):
+    if not is_ci_tier_run(config):
         return False
     if any(
         config.getoption(name, default=False)

@@ -918,6 +918,25 @@ class TestATierRunThatExecutedNoTestFails:
         assert not sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
         assert session.exitstatus == pytest.ExitCode.OK and not written
 
+    @pytest.mark.parametrize(
+        ("kwargs", "expected"),
+        [
+            pytest.param({}, True, id="under-ci"),
+            pytest.param({"under_ci": False, "text": "2of4"}, True, id="shard"),
+            pytest.param({"under_ci": False}, False, id="neither"),
+            pytest.param({"expression": ""}, False, id="no-marker-expression"),
+            pytest.param(
+                {"under_ci": False, "text": "2of4", "expression": ""},
+                False,
+                id="shard-without-marker-expression",
+            ),
+        ],
+    )
+    def test_is_ci_tier_run_is_the_one_definition(self, kwargs, expected):
+        """The floor and the tests that assert a leg's provisioning share it."""
+        session = self._session([], **kwargs)
+        assert sharding.is_ci_tier_run(session.config) is expected
+
     def test_a_run_without_a_marker_expression_is_left_alone(self):
         written: list[str] = []
         session = self._session(written, expression="")

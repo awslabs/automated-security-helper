@@ -32,13 +32,13 @@ Provisioning them is a separate CI change. Until it lands, the executed-test flo
 tests/utils/sharding.py (``fail_a_tier_run_that_executed_no_test``) is what makes an
 e2e leg that ran nothing fail.
 
-The check applies to a CI tier run only: ``GITHUB_ACTIONS=true``, or a shard
-configured for the run. On a developer's machine it skips and names the tools.
+The check applies to a CI tier run only, as ``sharding.is_ci_tier_run`` in
+tests/utils/sharding.py defines it, the same test the executed-test floor uses. On a
+developer's machine it skips and names the tools.
 """
 
 from __future__ import annotations
 
-import os
 import shutil
 import sys
 import sysconfig
@@ -62,16 +62,6 @@ def _missing(names: Sequence[str], search_path: Optional[str]) -> list[str]:
     return [name for name in names if shutil.which(name, path=search_path) is None]
 
 
-def _is_a_ci_tier_run(config: pytest.Config) -> bool:
-    """Under GitHub Actions, or a shard is configured for this run.
-
-    The shard setting is removed from ``os.environ`` when the run starts (see
-    tests/utils/sharding.py), so it is read from the config's stash.
-    """
-    under_actions = os.environ.get(sharding.CI_ENV_VAR) == "true"
-    return under_actions or bool(config.stash.get(sharding._TEXT_KEY, ""))
-
-
 def test_the_e2e_runner_has_the_tools_its_tests_drive(request):
     # The control comes first and runs everywhere: the lookup must be able to find a
     # program that is there and to miss one that is not, or the assertion below proves
@@ -81,9 +71,9 @@ def test_the_e2e_runner_has_the_tools_its_tests_drive(request):
     assert _missing(["no-such-tool-7c41e2"], None) == ["no-such-tool-7c41e2"]
 
     wanted = ", ".join((*ENVIRONMENT_SCRIPTS, *SYSTEM_TOOLS))
-    if not _is_a_ci_tier_run(request.config):
+    if not sharding.is_ci_tier_run(request.config):
         pytest.skip(
-            f"not a CI tier run (GITHUB_ACTIONS is not true and no shard is set); "
+            "not a CI tier run (sharding.is_ci_tier_run is false); "
             f"on a CI e2e leg this asserts that {wanted} are found"
         )
 
