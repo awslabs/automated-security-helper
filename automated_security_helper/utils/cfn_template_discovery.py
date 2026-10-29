@@ -46,6 +46,7 @@ from typing import TYPE_CHECKING, Iterable, List, Literal, Optional, Tuple
 from automated_security_helper.utils.cfn_template_model import (
     CloudFormationTemplateModelError,
     get_model_from_template,
+    unevaluable_template_reason,
 )
 from automated_security_helper.utils.get_scan_set import honors_ignore_files, scan_set
 from automated_security_helper.utils.link_exclusions import drop_ignored
@@ -70,6 +71,12 @@ class TemplateDiscovery:
     templates: List[Path] = field(default_factory=list)
     unmodelable: List[Tuple[Path, str]] = field(default_factory=list)
     refused: List[Tuple[str, str]] = field(default_factory=list)
+    #: Candidates ASH could not open or decode (an OSError, bytes that are not
+    #: UTF-8), with the reason. Not known to be CloudFormation, so not a target;
+    #: named by the callers, and counted as something to scan by
+    #: :func:`cloudformation_templates_nothing_to_scan_reason`, since only MISSING
+    #: cannot hide a template.
+    unreadable: List[Tuple[str, str]] = field(default_factory=list)
 
 
 def candidate_files(
@@ -88,6 +95,21 @@ def candidate_files(
     if target_type == "converted":
         found = [str(p) for p in Path(context.work_dir).glob("**/*.*")]
     else:
+        if global_ignore_paths is None:
+            # The caller did not say (nothing_to_scan_reason has no scan() call
+            # to take them from): the config's own global ignore paths, as
+            # cfn-nag's cloudformation_candidate_files reads them, so a tree
+            # whose only templates are ignored is SKIPPED, not MISSING.
+            from automated_security_helper.utils.suppression_matcher import (
+                active_ignore_paths,
+            )
+
+            global_settings = getattr(
+                getattr(context, "config", None), "global_settings", None
+            )
+            global_ignore_paths = active_ignore_paths(
+                getattr(global_settings, "ignore_paths", None) or []
+            )
         found = drop_ignored(
             scan_set(
                 source=str(context.source_dir),
@@ -136,7 +158,26 @@ def discover_templates(
                 )
             )
             continue
+        except (OSError, UnicodeDecodeError) as exc:
+            # Not read, so not known to be CloudFormation. Named rather than
+            # dropped at TRACE: a template ASH cannot open or decode would
+            # otherwise vanish from cfn-lint's and cfn-guard's coverage silently.
+            result.unreadable.append(
+                (
+                    display_path(path, context.source_dir),
+                    f"the file could not be read: {type(exc).__name__}",
+                )
+            )
+            continue
         except Exception as exc:  # nosec B112 - not YAML/JSON, so not a template
+            # A file whose structure is a template but whose values the parser
+            # could not build, or that is nested deeper than ASH reads, is a
+            # failed target, as cfn-nag counts the same file; a file that is not
+            # YAML or JSON at all is not a template.
+            reason = unevaluable_template_reason(path, scan_root)
+            if reason is not None:
+                result.unmodelable.append((path, reason))
+                continue
             ASH_LOGGER.trace(f"Not a CloudFormation file: {path}. Exception: {exc}")
             continue
         if model is None:
@@ -153,13 +194,16 @@ def cloudformation_templates_nothing_to_scan_reason(
     From :func:`discover_templates`, the selection both scanners' ``scan()`` makes,
     over every tree a scan hands them (``utils/scan_targets.py``). A template is
     something to scan, and so is a CloudFormation file the model rejects, which
-    both scanners count as a target that failed. A file that is not CloudFormation
-    and one the scanned-tree rule refuses are not: ``scan()`` skips both, with its
-    tool or without it.
+    both scanners count as a target that failed, and so is a candidate ASH could
+    not read, since only MISSING cannot hide a template. A file that is not
+    CloudFormation and one the scanned-tree rule refuses are not: ``scan()`` skips
+    both, with its tool or without it. The selection drops the files the config's
+    global ignore paths ignore, as ``scan()`` is given them, so a tree whose only
+    templates are ignored reads SKIPPED, not MISSING.
     """
     for target_type, _ in scan_targets(context):
         found = discover_templates(context, target_type)
-        if found.templates or found.unmodelable:
+        if found.templates or found.unmodelable or found.unreadable:
             return None
     return NO_CLOUDFORMATION_TEMPLATE
 

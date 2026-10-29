@@ -1067,7 +1067,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             discovery = discover_templates(
                 self.context, target_type, global_ignore_paths
             )
-            for shown, reason in discovery.refused:
+            for shown, reason in [*discovery.refused, *discovery.unreadable]:
                 # Not read, so not known to be CloudFormation: skipped and named, as
                 # cfn-nag skips it.
                 self._plugin_log(
