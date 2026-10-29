@@ -1899,8 +1899,13 @@ jobs:
   # three numbers describe the keyword-gate measurement only):
   #
   #     115   items whose keywords contained "integration"
-  #     - 4   of those also carry @pytest.mark.slow, so --run-integration alone leaves them
-  #           skipped; this job passes --run-slow as well, which is why it sees them
+  #     - 4   of those also carried an explicit @pytest.mark.slow, so --run-integration alone
+  #           left them skipped; this job passes --run-slow as well, which is why it sees them.
+  #           Counted as explicit marks only: at that time a slow mark that
+  #           tests/integration/cli/conftest.py adds by test name (workflow, lifecycle,
+  #           end_to_end) was a label the --run-slow gate did not read, and today it is a
+  #           second gate (the slow skip reads the mark, explicit or added by name), so the
+  #           109 below does not reconcile under the current rule by this method
   #     - 2   unconditional @pytest.mark.skip in test_detect_secrets_scanner.py, which no
   #           flag reaches
   #     = 109 items that actually run under --run-integration by itself
@@ -1913,11 +1918,16 @@ jobs:
   #
   # WHY THESE SELECTORS AND NOT THE OBVIOUS ONES
   #
-  # Both flags, not just --run-integration. Four of the 115 also carried @pytest.mark.slow,
-  # which conftest gates separately, so --run-integration alone left them skipped -- the
-  # same silent pass this job exists to remove. --run-slow costs nothing in scope: a `unit`
-  # test may not carry `slow` (tests/conftest.py refuses the pair at collection, since the
-  # unit tier runs without --run-slow), so every slow-marked item is integration or e2e.
+  # Both flags, not just --run-integration. Four of the 115 carried an explicit
+  # @pytest.mark.slow, which conftest gates separately, so --run-integration alone left them
+  # skipped -- the same silent pass this job exists to remove. The slow gate reads the mark,
+  # explicit or added by name: tests/integration/cli/conftest.py adds `slow` to every test
+  # under tests/integration whose function name contains "workflow", "lifecycle" or
+  # "end_to_end", and such a test needs both flags too. The census above counted explicit
+  # marks only, so a re-measure counts the gate as "slow mark, explicit or added by name".
+  # --run-slow costs nothing in scope: a `unit` test may not carry `slow` (tests/conftest.py
+  # refuses the pair at collection, since the unit tier runs without --run-slow), so every
+  # slow-marked item is integration or e2e.
   #
   # One path: this job runs the tests under tests/integration/, the source-delivery
   # end-to-end test included (tests/integration/cli/). Tests under tests/unit/ that carry
