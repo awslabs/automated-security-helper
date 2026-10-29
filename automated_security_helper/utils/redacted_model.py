@@ -1279,6 +1279,136 @@ def _declared_field_annotations(annotation: Any) -> Optional[Dict[Any, Any]]:
     return None
 
 
+def _own_config(holder: Any) -> Any:
+    """The config *holder* (a model, dataclass, TypedDict or NamedTuple class)
+    carries itself; None when it has none of its own."""
+    if isinstance(holder, type) and issubclass(holder, BaseModel):
+        return holder.model_config
+    return getattr(holder, "__pydantic_config__", None)
+
+
+def _forbids_extra_keys(holder: Any) -> bool:
+    """Whether *holder* refuses a key it does not declare (``extra="forbid"``
+    in its own config)."""
+    config = _own_config(holder)
+    return bool(config) and config.get("extra") == "forbid"
+
+
+def _alias_generator_in_force(holder: Any) -> bool:
+    """Whether an ``alias_generator`` names *holder*'s keys: its own config's,
+    or, for a holder with no config of its own (a TypedDict, a NamedTuple, a
+    stdlib dataclass), the one in force around it. A model keeps its own
+    config, so the one around it does not reach its fields."""
+    config = _own_config(holder)
+    if config is None and not (
+        isinstance(holder, type) and issubclass(holder, BaseModel)
+    ):
+        config = _WALK_CONFIG.get()
+    return bool(config) and config.get("alias_generator") is not None
+
+
+def _keys_for(name: str, *aliases: Any) -> Set[Any]:
+    """The dict keys a field *name* can be given under: its own name and the
+    first key of every path its *aliases* read."""
+    keys: Set[Any] = {name}
+    for alias in aliases:
+        for path in _alias_paths(alias):
+            keys.add(path[0])
+    return keys
+
+
+def _required_field_keys(holder: Any) -> Optional[List[Set[Any]]]:
+    """For each field *holder* requires, the keys a dict can give it under;
+    None when the holder cannot be read, or an alias generator names its keys
+    (the generated keys are not resolved here, so every required field would
+    read as absent)."""
+    if _alias_generator_in_force(holder):
+        return None
+    if isinstance(holder, type) and issubclass(holder, BaseModel):
+        return [
+            _keys_for(name, field.alias, field.validation_alias)
+            for name, field in holder.model_fields.items()
+            if field.is_required()
+        ]
+    pydantic_fields = getattr(holder, "__pydantic_fields__", None)
+    if dataclasses.is_dataclass(holder) and pydantic_fields is not None:
+        return [
+            _keys_for(name, field.alias, field.validation_alias)
+            for name, field in pydantic_fields.items()
+            if field.is_required()
+        ]
+    if dataclasses.is_dataclass(holder):
+        names = [
+            field.name
+            for field in dataclasses.fields(holder)
+            if field.default is dataclasses.MISSING
+            and field.default_factory is dataclasses.MISSING
+        ]
+    elif typing_extensions.is_typeddict(holder):
+        names = list(getattr(holder, "__required_keys__", ()))
+    elif _is_named_tuple(holder):
+        defaults = getattr(holder, "_field_defaults", {})
+        names = [name for name in holder._fields if name not in defaults]
+    else:
+        return None
+    try:
+        declared = typing_extensions.get_type_hints(holder, include_extras=True)
+    except Exception:  # an unresolvable forward reference
+        return None
+    required: List[Set[Any]] = []
+    for name in names:
+        try:
+            info = FieldInfo.from_annotation(declared.get(name, Any))
+        except Exception:  # metadata pydantic would refuse as well
+            return None
+        required.append(_keys_for(name, info.alias, info.validation_alias))
+    return required
+
+
+def _arm_would_take(arm: Any, value: Any) -> bool:
+    """Whether a union *arm* that can hold the container *value* would also
+    accept it as pydantic validates it, as far as this reader can tell.
+
+    A fixed tuple takes a sequence of its own length, and a NamedTuple one
+    with at least its required fields and at most all of them. A model,
+    dataclass, TypedDict or NamedTuple takes a dict only when it declares
+    every key under which the value holds a marker (a marker under an
+    undeclared key is never read, so the arm cannot vouch for it), is given
+    every field it requires, and, when it forbids extras, is given no key it
+    does not declare. pydantic refuses an arm that fails one of these, and a
+    smart-mode union then hands the value to a sibling, so such an arm must
+    not speak for the markers. Anything this reader cannot classify is taken.
+    """
+    arm = _root_annotation(arm)
+    holder, _ = _typed_container_class(arm)
+    if isinstance(value, (list, tuple)):
+        if get_origin(arm) is tuple:
+            args = get_args(arm)
+            return not args or Ellipsis in args or len(args) == len(value)
+        if _is_named_tuple(holder):
+            defaults = getattr(holder, "_field_defaults", {})
+            return (
+                len(holder._fields) - len(defaults) <= len(value) <= len(holder._fields)
+            )
+        return True
+    if not isinstance(value, dict):
+        return True
+    fields = _declared_field_annotations(arm)
+    if fields is None:
+        return True
+    for key, item in value.items():
+        if key not in fields and (
+            isinstance(key, EnvResolvedScalar) or _holds_env_scalar(item)
+        ):
+            return False
+    if _forbids_extra_keys(holder) and any(key not in fields for key in value):
+        return False
+    required = _required_field_keys(holder)
+    return required is None or all(
+        any(key in value for key in keys) for keys in required
+    )
+
+
 def _marker_a_slot_would_type(
     annotation: Any, value: Any, as_item: bool = False
 ) -> Optional[Tuple["EnvResolvedScalar", Any, bool]]:
@@ -1290,10 +1420,14 @@ def _marker_a_slot_would_type(
     argument and its values against the value argument, a sequence's items
     against the item argument (positionally for a fixed tuple, whether the
     value is a list or a tuple), a union against each arm that can describe
-    the value at all (:func:`_shape_can_hold`), where one such arm that keeps
-    every marker as text admits the value. An arm that cannot describe the
-    value is skipped, never counted as admitting it. A slot the annotation
-    does not describe is left to the downcast, as before.
+    the value at all (:func:`_shape_can_hold`) and that pydantic would accept
+    it at (:func:`_arm_would_take`), where one such arm that keeps every
+    marker as text admits the value. An arm that cannot describe the value,
+    or that pydantic would refuse for a reason the walk can read (a fixed
+    tuple's length, a model's undeclared or missing keys), is skipped, never
+    counted as admitting it: a smart-mode union hands the value to a sibling
+    arm instead. A slot the annotation does not describe is left to the
+    downcast, as before.
 
     *as_item* says the slot being walked is a sequence's or a mapping's item.
     The field of a model sitting in such an item is not one: it is a field,
@@ -1327,7 +1461,11 @@ def _marker_a_slot_would_type(
     if origin in (Union, types.UnionType):
         found = None
         for arm in get_args(annotation):
-            if arm is type(None) or not _shape_can_hold(arm, value):
+            if (
+                arm is type(None)
+                or not _shape_can_hold(arm, value)
+                or not _arm_would_take(arm, value)
+            ):
                 continue
             typed = _marker_a_slot_would_type(arm, value, as_item)
             if typed is None:
