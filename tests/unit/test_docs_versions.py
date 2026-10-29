@@ -156,11 +156,13 @@ extra:
 REPO_URL = "https://github.com/awslabs/automated-security-" + "helper"
 
 #: A version-pinned page, as scripts/version_template_manager.py keeps one: a template
-#: at one of the manager's target paths, and the page rendered from it with the
-#: current version, COMMITTED_VERSION. The template uses every install-command form the
+#: at one of the manager's target paths (target_files; both the mkdocs hook and the
+#: check read only those), and the page rendered from it with the current version,
+#: COMMITTED_VERSION. The template uses every install-command form the
 #: manager lists, a bare {{VERSION}}, and {{RELEASE}} where it is allowed: in a text
 #: sample, in a sentence that is not a command, and in a table.
-PINNED_PAGE = "docs/content/how-to/install.md"
+PINNED_PAGE = "docs/content/docs/advanced-usage.md"
+PINNED_URL = "docs/advanced-usage"
 COMMITTED_VERSION = "9.9.9"
 INSTALL_TEMPLATE = f"""# Install
 
@@ -403,7 +405,7 @@ DEFECTS = [
                 "content",
             )
         },
-        "main/how-to/install/ has no refs/tags/ (git ls-remote) install command naming main",
+        f"main/{PINNED_URL}/ has no refs/tags/ (git ls-remote) install command naming main",
     ),
     (
         "a release keeps the committed pin",
@@ -454,9 +456,7 @@ def test_check_reports_a_root_left_unversioned(tmp_path, monkeypatch):
     repo = _site(tmp_path)
     monkeypatch.setattr(dv, "rewrite_root", lambda *args, **kwargs: None)
     problems, _summary = dv.check(repo)
-    assert any(
-        "the site root does not redirect /how-to/install/" in p for p in problems
-    )
+    assert any(f"the site root does not redirect /{PINNED_URL}/" in p for p in problems)
     assert any("stale root file sitemap.xml survived" in p for p in problems)
     assert any("the old page /old/page/" in p for p in problems)
 
@@ -554,7 +554,7 @@ def test_the_first_deploy_replaces_an_unversioned_site(tmp_path):
     assert root == {
         ".nojekyll",
         "404.html",
-        "how-to",
+        "docs",
         "guide",
         "index.html",
         "main",
@@ -636,9 +636,9 @@ def _text(out: Path, page: str) -> str:
 def test_the_main_build_installs_main(tmp_path):
     repo = _site(tmp_path)
     out = _build(repo, tmp_path, "main")
-    text = _text(out, "how-to/install")
+    text = _text(out, PINNED_URL)
     commands = dv.page_text(
-        (out / "how-to/install/index.html").read_bytes(), commands_only=True
+        (out / PINNED_URL / "index.html").read_bytes(), commands_only=True
     )
     assert _manager().release_pins(commands) == set(), commands
     for form, *_ in _install_forms():
@@ -671,7 +671,7 @@ def test_the_template_uses_every_install_form():
 
 def test_a_release_build_pins_that_release(tmp_path):
     repo = _site(tmp_path)
-    text = _text(_build(repo, tmp_path, "1.2.3"), "how-to/install")
+    text = _text(_build(repo, tmp_path, "1.2.3"), PINNED_URL)
     assert _manager().release_pins(text) == {"1.2.3"}, text
     assert "automated-security-helper v1.2.3" in text
     assert f"git ls-remote {REPO_URL} refs/tags/v1.2.3" in text
@@ -680,7 +680,7 @@ def test_a_release_build_pins_that_release(tmp_path):
 
 def test_any_other_build_uses_the_committed_page(tmp_path):
     repo = _site(tmp_path)
-    text = _text(_build(repo, tmp_path, None), "how-to/install")
+    text = _text(_build(repo, tmp_path, None), PINNED_URL)
     assert _manager().release_pins(text) == {COMMITTED_VERSION}, text
     assert "install commands in this version" not in text
 

@@ -7,9 +7,10 @@ is kept when the file is outside the scanned tree (``honored_path``), so
 these cells measure whether a config the repository wrote can hand the tool
 a file the scan derived from that same repository.
 
-Probe cell first; the two controls pin the behavior that must not move:
-an operator-written option naming the same file, and a repository-written
-entry naming a path outside both trees.
+The probe test comes first; the control pins the behavior that must not move: an
+operator-written option naming the same file. A repository-written entry naming
+a path outside both trees is refused (test_tool_config_files_are_the_operators.py
+pins that).
 """
 
 import contextlib
@@ -139,40 +140,6 @@ def test_a_repository_baseline_cannot_name_a_work_product_as_a_plugin(tmp_path):
     ), settings["plugins_used"]
 
 
-def test_a_baseline_entry_outside_both_trees_keeps_todays_answer(tmp_path):
-    """Control: a baseline-loaded entry naming a file outside the scanned
-    tree and outside the output directory is kept, as today."""
-    import json
-
-    layout = _layout(tmp_path)
-    elsewhere = tmp_path / "elsewhere" / "plugin.py"
-    elsewhere.parent.mkdir(parents=True, exist_ok=True)
-    elsewhere.write_text("")
-    baseline = layout["source"] / ".secrets.baseline"
-    baseline.write_text(
-        json.dumps(
-            {
-                "version": "1.5.0",
-                "plugins_used": [
-                    {"name": "StandIn", "path": f"file://{elsewhere.as_posix()}"}
-                ],
-                "results": {},
-            }
-        )
-    )
-    _repo_config(
-        layout["source"],
-        "scanners:\n"
-        "  detect-secrets:\n"
-        "    options:\n"
-        f"      baseline_file: {baseline.as_posix()}\n",
-    )
-    settings = _scanner_settings(layout, scanner_config=None)
-    assert any(
-        elsewhere.as_posix() in (path or "") for path in _plugin_paths(settings)
-    ), settings["plugins_used"]
-
-
 def test_an_operator_option_naming_the_same_work_product_is_kept(tmp_path):
     """Control: the operator's own configuration (not the repository's file)
     naming the same path keeps today's answer."""
@@ -266,32 +233,6 @@ def test_a_repository_config_cannot_name_a_work_product_as_checkovs_config(tmp_p
     )
     argv = _checkov_argv(layout)
     assert not any(layout["product"].as_posix() in a for a in argv), argv
-
-
-def test_a_refused_checkov_config_takes_no_discovered_replacement(tmp_path):
-    """The repository's config names the work product as checkov's config file,
-    and the checkout carries a config checkov would discover. The refused value
-    stops the candidate loop: no ``--config-file`` is passed, and the warning
-    says checkov runs without one."""
-    layout = _layout(tmp_path)
-    (layout["source"] / ".checkov.yaml").write_text("")
-    _repo_config(
-        layout["source"],
-        "scanners:\n"
-        "  checkov:\n"
-        "    options:\n"
-        f"      config_file: {layout['product'].as_posix()}\n",
-    )
-    log_path = tmp_path / "emitted.log"
-    with _emitted_warnings(log_path):
-        argv = _checkov_argv(layout)
-    lines = log_path.read_text(encoding="utf-8").splitlines()
-    assert "--config-file" not in argv, argv
-    assert not any(layout["product"].as_posix() in a for a in argv), argv
-    assert any(
-        "will run without a config file" in line and "in its place" in line
-        for line in lines
-    ), lines
 
 
 def test_a_missing_checkov_config_takes_no_discovered_replacement(tmp_path):
@@ -396,22 +337,6 @@ def test_a_refused_configured_checkov_config_ignores_a_link_candidate_leaving_th
     ), argv
 
 
-def test_a_discovered_link_candidate_leaving_the_tree_keeps_todays_answer(tmp_path):
-    """Control for the two cells above: with nothing configured at all, the
-    same linked candidate is handed over by discovery, as today. The absences
-    above come from the configured arms, not from the link."""
-    layout = _layout(tmp_path)
-    _repo_config(layout["source"], "")
-    outside = tmp_path / "outside" / "checkov.yaml"
-    outside.parent.mkdir(parents=True, exist_ok=True)
-    outside.write_text("")
-    (layout["source"] / ".checkov.yaml").symlink_to(outside)
-
-    argv = _checkov_argv(layout)
-
-    assert "--config-file" in argv, argv
-
-
 def test_an_honored_configured_checkov_config_draws_no_refusal_warning(tmp_path):
     """An operator-configured config file outside the scanned tree is handed
     to checkov once, and no warning says it was not used. A refusal warning
@@ -439,24 +364,6 @@ def test_an_honored_configured_checkov_config_draws_no_refusal_warning(tmp_path)
     assert argv.count("--config-file") == 1, argv
     assert argv[argv.index("--config-file") + 1] == honored.as_posix(), argv
     assert not any("was not used" in line for line in lines), lines
-
-
-def test_a_repository_checkov_config_outside_both_trees_keeps_todays_answer(tmp_path):
-    """Control: a repository-written entry naming a file outside the scanned
-    tree and outside the output directory is kept, as today."""
-    layout = _layout(tmp_path)
-    elsewhere = tmp_path / "elsewhere" / "ck.yaml"
-    elsewhere.parent.mkdir(parents=True, exist_ok=True)
-    elsewhere.write_text("")
-    _repo_config(
-        layout["source"],
-        "scanners:\n"
-        "  checkov:\n"
-        "    options:\n"
-        f"      config_file: {elsewhere.as_posix()}\n",
-    )
-    argv = _checkov_argv(layout)
-    assert argv[argv.index("--config-file") + 1] == elsewhere.resolve().as_posix()
 
 
 def _ferret_found(layout: dict, scanner_config=None):
@@ -533,24 +440,6 @@ def test_an_operator_option_naming_the_work_product_reaches_ferret(tmp_path):
     assert found == layout["product"].resolve(), found
 
 
-def test_a_repository_ferret_config_outside_both_trees_keeps_todays_answer(tmp_path):
-    """Control: a repository-written entry naming a file outside the scanned
-    tree and outside the output directory is kept, as today."""
-    layout = _layout(tmp_path)
-    elsewhere = tmp_path / "elsewhere" / "fr.yaml"
-    elsewhere.parent.mkdir(parents=True, exist_ok=True)
-    elsewhere.write_text("")
-    _repo_config(
-        layout["source"],
-        "scanners:\n"
-        "  ferret-scan:\n"
-        "    options:\n"
-        f"      config_file: {elsewhere.as_posix()}\n",
-    )
-    found = _ferret_found(layout)
-    assert found == elsewhere.resolve(), found
-
-
 def _trivy_passed_path(
     layout: dict, scanner_config=None, method: str = "_secret_config_file"
 ) -> str:
@@ -613,8 +502,11 @@ def test_an_operator_environment_value_naming_the_work_product_reaches_trivy(
 def test_an_operator_option_naming_the_work_product_reaches_trivy(
     tmp_path, _no_trivy_env
 ):
-    """Control: the operator's own configuration naming the same path keeps
-    today's answer."""
+    """Control: a scanner configuration the embedding caller built is the
+    operator's own write, as for syft, bandit, checkov and grype, so an option
+    naming the same path keeps today's answer even when the scanned tree holds a
+    config file of its own. The repository's entry for the same option is
+    refused (test_a_repository_config_cannot_name_a_work_product_as_trivys_input)."""
     from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
         TrivyRepoScannerConfig,
     )
@@ -628,26 +520,6 @@ def test_an_operator_option_naming_the_work_product_reaches_trivy(
         ),
     )
     assert passed == layout["product"].as_posix(), passed
-
-
-def test_a_repository_trivy_input_outside_both_trees_keeps_todays_answer(
-    tmp_path, _no_trivy_env
-):
-    """Control: a repository-written entry naming a file outside the scanned
-    tree and outside the output directory is kept, as today."""
-    layout = _layout(tmp_path)
-    elsewhere = tmp_path / "elsewhere" / "secret.yaml"
-    elsewhere.parent.mkdir(parents=True, exist_ok=True)
-    elsewhere.write_text("{}\n")
-    _repo_config(
-        layout["source"],
-        "scanners:\n"
-        "  trivy-repo:\n"
-        "    options:\n"
-        f"      secret_config_file: {elsewhere.as_posix()}\n",
-    )
-    passed = _trivy_passed_path(layout)
-    assert passed == elsewhere.resolve().as_posix(), passed
 
 
 def _bandit_scanner(layout: dict, scanner_config=None):
@@ -722,46 +594,6 @@ def _only_neutral_value(args: list, key: str, layout: dict, name: str) -> str:
     return values[0]
 
 
-def test_a_repository_config_naming_a_work_product_runs_bandit_with_an_empty_ini(
-    tmp_path,
-):
-    """The repository's config names the work product as bandit's config file.
-    The entry must not reach the tool, and the checkout's own config beside it
-    does not take its place. Bandit looks for a ``.bandit`` file itself when it
-    is given no ``--ini``, so it is given an empty one ASH writes, and the
-    warning says so."""
-    layout = _layout(tmp_path)
-    honest = layout["source"] / "bandit.yaml"
-    honest.write_text("")
-    _repo_config(
-        layout["source"],
-        "scanners:\n"
-        "  bandit:\n"
-        "    options:\n"
-        f"      config_file: {layout['product'].as_posix()}\n",
-    )
-    log_path = tmp_path / "emitted.log"
-    with _emitted_warnings(log_path):
-        scanner = _bandit_scanner(layout)
-    args = _construction_args(scanner)
-    lines = log_path.read_text(encoding="utf-8").splitlines()
-    assert not any(layout["product"].as_posix() in str(value) for _, value in args), (
-        args
-    )
-    assert not any(honest.as_posix() in str(value) for _, value in args), args
-    assert not any(key == "--configfile" for key, _ in args), args
-    assert not any(key == "--ini" for key, _ in args), args
-    argv = _bandit_scan_argv(scanner, layout)
-    assert not any(layout["product"].as_posix() in value for value in argv), argv
-    assert not any(honest.as_posix() in value for value in argv), argv
-    assert "--configfile" not in argv, argv
-    _only_per_run_empty_ini(argv, layout)
-    assert any(
-        "will run with an empty ini file" in line and "in its place" in line
-        for line in lines
-    ), lines
-
-
 def test_a_missing_bandit_config_takes_no_discovered_replacement(tmp_path):
     """Control for the missing arm: the configured file is not on disk and the
     checkout carries a config bandit would discover. Nothing takes its place:
@@ -829,35 +661,6 @@ def test_an_operator_option_naming_the_work_product_reaches_bandit(tmp_path):
     assert ("--configfile", layout["product"].as_posix()) in args, args
 
 
-def test_a_repository_bandit_config_outside_both_trees_keeps_todays_answer(tmp_path):
-    """Control: a repository-written entry naming a file outside the scanned
-    tree and outside the output directory is kept, as today."""
-    layout = _layout(tmp_path)
-    elsewhere = tmp_path / "elsewhere" / "bd.yaml"
-    elsewhere.parent.mkdir(parents=True, exist_ok=True)
-    elsewhere.write_text("")
-    _repo_config(
-        layout["source"],
-        "scanners:\n"
-        "  bandit:\n"
-        "    options:\n"
-        f"      config_file: {elsewhere.as_posix()}\n",
-    )
-    args = _bandit_args(layout)
-    assert ("--configfile", elsewhere.as_posix()) in args, args
-
-
-def test_an_honest_in_tree_bandit_config_is_still_discovered(tmp_path):
-    """Control: discovery of the checkout's own real config file is the
-    deliberate posture and keeps today's answer."""
-    layout = _layout(tmp_path)
-    _repo_config(layout["source"], "")
-    honest = layout["source"] / "bandit.yaml"
-    honest.write_text("")
-    args = _bandit_args(layout)
-    assert ("--configfile", honest.as_posix()) in args, args
-
-
 def _layout_with_output_above_source(tmp_path: Path) -> dict:
     """An output directory that holds the scanned checkout, as with
     ``--output-dir /ci/ws --source-dir /ci/ws/repo``."""
@@ -870,21 +673,6 @@ def _layout_with_output_above_source(tmp_path: Path) -> dict:
     product.parent.mkdir(parents=True)
     product.write_text("")
     return {"source": source, "output": output, "work": work, "product": product}
-
-
-def test_an_in_tree_bandit_config_is_discovered_when_the_output_dir_holds_the_tree(
-    tmp_path,
-):
-    """The output directory contains the scanned checkout, so every file in the
-    checkout sits under it. A directory that holds the scanned repository cannot
-    be a derived-products directory for its own files: the checkout's own
-    config is still discovered."""
-    layout = _layout_with_output_above_source(tmp_path)
-    _repo_config(layout["source"], "")
-    honest = layout["source"] / "bandit.yaml"
-    honest.write_text("")
-    args = _bandit_args(layout)
-    assert ("--configfile", honest.as_posix()) in args, args
 
 
 def test_a_repository_config_under_the_work_dir_stays_refused_with_output_above_source(
@@ -925,28 +713,6 @@ def test_a_file_under_the_output_dir_but_outside_the_tree_stays_refused(tmp_path
     )
     args = _bandit_args(layout)
     assert not any(derived.as_posix() in str(value) for _, value in args), args
-
-
-def test_an_env_chosen_missing_bandit_config_is_shown_not_named(tmp_path, monkeypatch):
-    """The repository's config reads bandit's config_file from the
-    environment and the file does not exist. The warning says so with the
-    shown form in place of the environment's value, which is in no emitted
-    line."""
-    layout = _layout(tmp_path)
-    value = (tmp_path / "gone" / "bandit.yaml").as_posix()
-    monkeypatch.setenv("ASH_STANDIN_BANDIT", value)
-    _repo_config(
-        layout["source"],
-        "scanners:\n  bandit:\n    options:\n      config_file: ${ASH_STANDIN_BANDIT}\n",
-    )
-    log_path = tmp_path / "emitted.log"
-    with _emitted_warnings(log_path):
-        _bandit_args(layout)
-    lines = log_path.read_text(encoding="utf-8").splitlines()
-    warning = [line for line in lines if "does not exist" in line]
-    assert warning, lines
-    assert all(value not in line for line in lines), lines
-    assert any("<value>" in line for line in warning), warning
 
 
 def _grype_scanner(layout: dict, scanner_config=None):
@@ -1009,23 +775,6 @@ def _is_the_neutral_file(layout: dict, passed, name: str) -> None:
     assert layout["source"] not in path.parents, passed
 
 
-def test_a_repository_config_naming_a_work_product_replaces_grypes_config(tmp_path):
-    """The repository's config names the work product as grype's config file.
-    The entry must not reach the tool, and the named option is replaced by the
-    empty config file ASH writes: grype reads ``.grype.yaml`` from the source
-    directory when it is given no ``--config``."""
-    layout = _layout(tmp_path)
-    (layout["source"] / ".grype.yaml").write_text("")
-    _repo_config(
-        layout["source"],
-        "scanners:\n"
-        "  grype:\n"
-        "    options:\n"
-        f"      config_file: {layout['product'].as_posix()}\n",
-    )
-    _is_the_neutral_file(layout, _grype_config_arg(layout), "grype-config-empty.yaml")
-
-
 def test_a_missing_grype_config_takes_no_discovered_replacement(tmp_path):
     """The configured grype config file is not on disk and the checkout carries
     a config grype would discover. Nothing takes its place: the empty config
@@ -1051,30 +800,6 @@ def test_a_missing_grype_config_takes_no_discovered_replacement(tmp_path):
     assert any("does not exist" in line and "in its place" in line for line in lines), (
         lines
     )
-
-
-def test_a_refused_grype_config_warns_that_none_takes_its_place(tmp_path):
-    """The refused configured value is replaced by the empty ``--config`` ASH
-    writes, and the warning says grype runs with it and that discovery did not
-    replace the value."""
-    layout = _layout(tmp_path)
-    (layout["source"] / ".grype.yaml").write_text("")
-    _repo_config(
-        layout["source"],
-        "scanners:\n"
-        "  grype:\n"
-        "    options:\n"
-        f"      config_file: {layout['product'].as_posix()}\n",
-    )
-    log_path = tmp_path / "emitted.log"
-    with _emitted_warnings(log_path):
-        passed = _grype_config_arg(layout)
-    lines = log_path.read_text(encoding="utf-8").splitlines()
-    _is_the_neutral_file(layout, passed, "grype-config-empty.yaml")
-    assert any(
-        "will run with an empty config file" in line and "in its place" in line
-        for line in lines
-    ), lines
 
 
 def test_a_discovered_grype_config_linking_to_a_work_product_is_refused(tmp_path):
@@ -1103,35 +828,6 @@ def test_an_operator_option_naming_the_work_product_reaches_grype(tmp_path):
         ),
     )
     assert passed == layout["product"].resolve().as_posix(), passed
-
-
-def test_a_repository_grype_config_outside_both_trees_keeps_todays_answer(tmp_path):
-    """Control: a repository-written entry naming a file outside the scanned
-    tree and outside the output directory is kept, as today."""
-    layout = _layout(tmp_path)
-    elsewhere = tmp_path / "elsewhere" / "gr.yaml"
-    elsewhere.parent.mkdir(parents=True, exist_ok=True)
-    elsewhere.write_text("")
-    _repo_config(
-        layout["source"],
-        "scanners:\n"
-        "  grype:\n"
-        "    options:\n"
-        f"      config_file: {elsewhere.as_posix()}\n",
-    )
-    passed = _grype_config_arg(layout)
-    assert passed == elsewhere.resolve().as_posix(), passed
-
-
-def test_an_honest_in_tree_grype_config_is_still_discovered(tmp_path):
-    """Control: discovery of the checkout's own real config file is the
-    deliberate posture and keeps today's answer."""
-    layout = _layout(tmp_path)
-    _repo_config(layout["source"], "")
-    honest = layout["source"] / ".grype.yaml"
-    honest.write_text("")
-    passed = _grype_config_arg(layout)
-    assert passed == honest.resolve().as_posix(), passed
 
 
 def _record_grype_parses(monkeypatch) -> list:
@@ -1186,43 +882,6 @@ def test_grype_never_parses_a_discovered_config_it_refused(tmp_path, monkeypatch
     assert parsed == [], parsed
 
 
-def test_grype_parses_only_the_config_it_selected(tmp_path, monkeypatch):
-    """Load-order pin, honored direction: the one path the parser receives is
-    the selected, non-refused candidate, and it is the path handed to the
-    tool as ``--config``."""
-    layout = _layout(tmp_path)
-    _repo_config(layout["source"], "")
-    honest = layout["source"] / ".grype.yaml"
-    honest.write_text("")
-    parsed = _record_grype_parses(monkeypatch)
-    passed = _grype_config_arg(layout)
-    assert passed == honest.resolve().as_posix(), passed
-    # Either read site may see it (the restricting-keys check, the db-bound
-    # read), so the property is the set of files read, not the number of reads.
-    assert parsed, parsed
-    assert {Path(p).resolve() for p in parsed} == {honest.resolve()}, parsed
-
-
-def test_grype_never_parses_a_configured_config_it_refused(tmp_path, monkeypatch):
-    """Load-order pin, configured arm: the repository's config names a work
-    product as grype's config file, and a checkout config that discovery would
-    otherwise pick sits beside it. The refused value is not read at any site,
-    and the ``--config`` is the empty file ASH writes, not the discovered one
-    (which is not read either)."""
-    layout = _layout(tmp_path)
-    (layout["source"] / ".grype.yaml").write_text("")
-    _repo_config(
-        layout["source"],
-        "scanners:\n"
-        "  grype:\n"
-        "    options:\n"
-        f"      config_file: {layout['product'].as_posix()}\n",
-    )
-    parsed = _record_grype_parses(monkeypatch)
-    _is_the_neutral_file(layout, _grype_config_arg(layout), "grype-config-empty.yaml")
-    assert parsed == [], parsed
-
-
 def _syft_scanner(layout: dict, scanner_config=None):
     from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
         SyftScanner,
@@ -1259,31 +918,6 @@ def _no_built_argument_names(scanner, path: Path, layout: dict | None = None) ->
         assert all(key != "--config" for key, _ in built), built
     else:
         _only_neutral_value(built, "--config", layout, "syft-config-empty.yaml")
-
-
-def test_a_repository_config_cannot_express_syfts_config_file(tmp_path):
-    """A repository config naming ``scanners.syft.options.config_file`` is
-    refused when the file is loaded (the option is ``Path``-typed and the
-    document's string does not validate), so the repository has no configured
-    route to syft's config at all; only discovery below reaches it.
-
-    Tripwire: a change that widens syft's ``config_file`` annotation to accept
-    strings must land the grype-shaped configured-arm drop cell for syft in the
-    same change; this cell going red (DID NOT RAISE) is the signal."""
-    import pytest as _pytest
-
-    from automated_security_helper.config.resolve_config import ConfigFileRefused
-
-    layout = _layout(tmp_path)
-    _repo_config(
-        layout["source"],
-        "scanners:\n"
-        "  syft:\n"
-        "    options:\n"
-        f"      config_file: {layout['product'].as_posix()}\n",
-    )
-    with _pytest.raises(ConfigFileRefused):
-        resolve_config(source_dir=layout["source"])
 
 
 def test_a_missing_syft_config_takes_no_discovered_replacement(tmp_path):
@@ -1339,17 +973,6 @@ def test_an_operator_option_naming_the_work_product_reaches_syft(tmp_path):
         ),
     )
     assert passed == layout["product"].resolve().as_posix(), passed
-
-
-def test_an_honest_in_tree_syft_config_is_still_discovered(tmp_path):
-    """Control: discovery of the checkout's own real config file is the
-    deliberate posture and keeps today's answer."""
-    layout = _layout(tmp_path)
-    _repo_config(layout["source"], "")
-    honest = layout["source"] / ".syft.yaml"
-    honest.write_text("")
-    passed = _syft_config_arg(layout)
-    assert passed == honest.resolve().as_posix(), passed
 
 
 def test_a_configured_syft_config_not_written_by_the_operator_is_dropped(
@@ -1570,9 +1193,9 @@ def _plugin_entry_config(written: str) -> str:
 
 def test_an_env_chosen_work_product_entry_is_shown_not_named(tmp_path, monkeypatch):
     """The repository's config names the work product through an environment
-    reference. The entry must not reach the tool, and the emitted warning
-    shows the shown form in place of the environment's value, which is never
-    in any emitted line."""
+    reference. The entry must not reach the tool, and the environment's value
+    is in no emitted line: the warning names the option and the file that
+    wrote it (config/tool_config_trust.py), never the value."""
     layout = _layout(tmp_path)
     value = layout["product"].as_posix()
     monkeypatch.setenv("ASH_STANDIN_PLUGIN", f"file://{value}")
@@ -1587,34 +1210,11 @@ def test_an_env_chosen_work_product_entry_is_shown_not_named(tmp_path, monkeypat
     warning = [line for line in lines if "Ignoring" in line]
     assert warning, lines
     assert all(value not in line for line in lines), lines
-    assert any("<value>" in line for line in warning), warning
-
-
-def test_a_literal_work_product_entry_stays_named(tmp_path):
-    """The literal twin: the repository writes the path itself, so the warning
-    names it, and the refusal stays actionable (no over-redaction)."""
-    layout = _layout(tmp_path)
-    value = layout["product"].as_posix()
-    _repo_config(layout["source"], _plugin_entry_config(f"file://{value}"))
-    log_path = tmp_path / "emitted.log"
-    with _emitted_warnings(log_path):
-        settings = _scanner_settings(layout, scanner_config=None)
-    assert not any(value in (path or "") for path in _plugin_paths(settings)), settings[
-        "plugins_used"
-    ]
-    warning = [
-        line
-        for line in log_path.read_text(encoding="utf-8").splitlines()
-        if "Ignoring" in line
-    ]
-    assert warning, log_path.read_text(encoding="utf-8")
-    assert any(value in line for line in warning), warning
 
 
 def test_an_env_chosen_in_tree_entry_is_shown_not_named(tmp_path, monkeypatch):
-    """The in-tree refusal's pair: an environment reference resolving to a
-    file inside the scanned tree is refused with the shown form, never the
-    value, in the emitted warning."""
+    """The in-tree pair: an environment reference resolving to a file inside
+    the scanned tree is refused, and the value is in no emitted line."""
     layout = _layout(tmp_path)
     inside = layout["source"] / "team_plugin.py"
     inside.write_text("")
@@ -1631,36 +1231,12 @@ def test_an_env_chosen_in_tree_entry_is_shown_not_named(tmp_path, monkeypatch):
     warning = [line for line in lines if "Ignoring" in line]
     assert warning, lines
     assert all(value not in line for line in lines), lines
-    assert any("<value>" in line for line in warning), warning
-
-
-def test_a_literal_in_tree_entry_stays_named(tmp_path):
-    """The in-tree literal twin: the repository's own spelling stays named."""
-    layout = _layout(tmp_path)
-    inside = layout["source"] / "team_plugin.py"
-    inside.write_text("")
-    value = inside.as_posix()
-    _repo_config(layout["source"], _plugin_entry_config(f"file://{value}"))
-    log_path = tmp_path / "emitted.log"
-    with _emitted_warnings(log_path):
-        settings = _scanner_settings(layout, scanner_config=None)
-    assert not any(value in (path or "") for path in _plugin_paths(settings)), settings[
-        "plugins_used"
-    ]
-    warning = [
-        line
-        for line in log_path.read_text(encoding="utf-8").splitlines()
-        if "Ignoring" in line
-    ]
-    assert warning, log_path.read_text(encoding="utf-8")
-    assert any(value in line for line in warning), warning
 
 
 def test_an_env_chosen_link_is_shown_without_its_resolved_target(tmp_path, monkeypatch):
     """Resolution can change the spelling: the environment's value is a link
     into the work directory, so the resolved path shares no text with the
-    value. The emitted warning shows the shown form; neither the value nor
-    the resolved target is in any emitted line."""
+    value. Neither the value nor the resolved target is in any emitted line."""
     layout = _layout(tmp_path)
     link = layout["source"] / "team.py"
     link.symlink_to(layout["product"])
@@ -1678,50 +1254,6 @@ def test_an_env_chosen_link_is_shown_without_its_resolved_target(tmp_path, monke
     assert warning, lines
     assert all(value not in line for line in lines), lines
     assert all(layout["product"].as_posix() not in line for line in lines), lines
-    assert any("<value>" in line for line in warning), warning
-
-
-def test_a_repository_entry_outside_both_trees_keeps_todays_answer(tmp_path):
-    """Control: a repository-written entry naming a file outside the scanned
-    tree AND outside the output directory is kept, as today."""
-    layout = _layout(tmp_path)
-    elsewhere = tmp_path / "elsewhere" / "plugin.py"
-    elsewhere.parent.mkdir(parents=True)
-    elsewhere.write_text("")
-    _repo_config(
-        layout["source"],
-        "scanners:\n"
-        "  detect-secrets:\n"
-        "    options:\n"
-        "      scan_settings:\n"
-        "        plugins_used:\n"
-        "          - name: StandIn\n"
-        f"            path: file://{elsewhere.as_posix()}\n",
-    )
-    settings = _scanner_settings(layout, scanner_config=None)
-    assert any(
-        elsewhere.as_posix() in (path or "") for path in _plugin_paths(settings)
-    ), settings["plugins_used"]
-
-
-def test_a_relative_bandit_option_names_the_scanned_trees_file(tmp_path, monkeypatch):
-    """The option as the tool will read it: a relative config_file value
-    names the scanned tree's file, not whatever file of the same name sits
-    in the directory the process happens to run in."""
-    layout = _layout(tmp_path)
-    honest = layout["source"] / "bandit.yaml"
-    honest.write_text("")
-    rundir = tmp_path / "rundir"
-    rundir.mkdir()
-    (rundir / "bandit.yaml").write_text("")
-    monkeypatch.chdir(rundir)
-    _repo_config(
-        layout["source"],
-        "scanners:\n  bandit:\n    options:\n      config_file: bandit.yaml\n",
-    )
-    args = _bandit_args(layout)
-    assert ("--configfile", "bandit.yaml") not in args, args
-    assert ("--configfile", honest.resolve().as_posix()) in args, args
 
 
 def _baseline_json() -> str:
@@ -1766,55 +1298,6 @@ def _detect_secrets_built(layout: dict, scanner_config=None):
 
 def _detect_secrets_options(layout: dict, scanner_config=None):
     return _detect_secrets_built(layout, scanner_config).config.options
-
-
-def test_a_repository_config_cannot_name_a_work_product_as_the_baseline(tmp_path):
-    """The probe: the repository's own config names a baseline the scan
-    derived from that repository, under the work dir. The baseline is a
-    suppression surface, so it must not be loaded: the scan settings stay at
-    their defaults, and the option stays on the config as written."""
-    layout = _layout(tmp_path)
-    derived = layout["work"] / "derived.baseline"
-    derived.write_text(_baseline_json())
-    _repo_config(
-        layout["source"],
-        "scanners:\n"
-        "  detect-secrets:\n"
-        "    options:\n"
-        f"      baseline_file: {derived.as_posix()}\n",
-    )
-    options = _detect_secrets_options(layout)
-    assert Path(options.baseline_file) == derived, options.baseline_file
-    assert options.scan_settings.version is None, options.scan_settings
-    assert "StandIn" not in _plugin_names(options), _plugin_names(options)
-
-
-def test_a_refused_baseline_takes_no_checkout_candidate(tmp_path):
-    """The repository's config names a work product as the baseline, and the
-    checkout carries a baseline by its conventional name. The refused value is
-    kept on the config as written and the checkout's baseline does not replace
-    it: the scan runs without a baseline, and the warning says so."""
-    layout = _layout(tmp_path)
-    derived = layout["work"] / "derived.baseline"
-    derived.write_text(_baseline_json())
-    (layout["source"] / ".secrets.baseline").write_text(_baseline_json())
-    _repo_config(
-        layout["source"],
-        "scanners:\n"
-        "  detect-secrets:\n"
-        "    options:\n"
-        f"      baseline_file: {derived.as_posix()}\n",
-    )
-    log_path = tmp_path / "emitted.log"
-    with _emitted_warnings(log_path):
-        options = _detect_secrets_options(layout)
-    lines = log_path.read_text(encoding="utf-8").splitlines()
-    assert Path(options.baseline_file) == derived, options.baseline_file
-    assert "StandIn" not in _plugin_names(options), _plugin_names(options)
-    assert any(
-        "will run without a baseline" in line and "in its place" in line
-        for line in lines
-    ), lines
 
 
 def test_a_missing_baseline_takes_no_checkout_candidate(tmp_path):
@@ -1910,28 +1393,6 @@ def test_an_operator_option_naming_the_work_product_baseline_is_loaded(tmp_path)
     assert _plugin_names(options) == ["StandIn"], _plugin_names(options)
 
 
-def test_a_repository_baseline_outside_both_trees_keeps_todays_answer(tmp_path):
-    """Control: a repository-named baseline outside the scanned tree and
-    outside the output directory is loaded, as today."""
-    layout = _layout(tmp_path)
-    elsewhere = tmp_path / "elsewhere" / "kept.baseline"
-    elsewhere.parent.mkdir(parents=True, exist_ok=True)
-    elsewhere.write_text(_baseline_json())
-    _repo_config(
-        layout["source"],
-        "scanners:\n"
-        "  detect-secrets:\n"
-        "    options:\n"
-        f"      baseline_file: {elsewhere.as_posix()}\n",
-    )
-    scanner = _detect_secrets_built(layout)
-    options = scanner.config.options
-    # The option keeps the value as written, and the scan loaded that
-    # baseline (its marker plugin is in the scan settings).
-    assert str(options.baseline_file) == elsewhere.as_posix(), options.baseline_file
-    assert _plugin_names(options) == ["StandIn"], _plugin_names(options)
-
-
 def _named_baseline_json(plugin_name: str) -> str:
     """A baseline whose one plugin entry carries *plugin_name*, so a cell can
     tell which of two same-named files was loaded."""
@@ -2023,56 +1484,6 @@ def test_a_relative_repo_baseline_reaching_a_work_product_from_the_cwd_is_refuse
     ), options.baseline_file
 
 
-@contextlib.contextmanager
-def _debug_records():
-    """The messages ASH's logger emits at DEBUG and above, as a list."""
-    from automated_security_helper.utils.log import ASH_LOGGER
-
-    messages: list = []
-
-    class _Collect(logging.Handler):
-        def emit(self, record):
-            messages.append(record.getMessage())
-
-    handler = _Collect(level=logging.DEBUG)
-    level = ASH_LOGGER.level
-    ASH_LOGGER.setLevel(logging.DEBUG)
-    ASH_LOGGER.addHandler(handler)
-    try:
-        yield messages
-    finally:
-        ASH_LOGGER.removeHandler(handler)
-        ASH_LOGGER.setLevel(level)
-
-
-def test_an_env_chosen_baseline_is_not_named_in_debug_lines(tmp_path, monkeypatch):
-    """The baseline path can come from the environment, and --debug puts the
-    selection's lines on the console: none of them carries the value. The
-    presence check keeps the cell from passing on silence."""
-    layout = _layout(tmp_path)
-    honest = layout["source"] / "env-chosen.baseline"
-    honest.write_text(_named_baseline_json("MarkerA"))
-    value = honest.as_posix()
-    monkeypatch.setenv("ASH_STANDIN_BASELINE", value)
-    _repo_config(
-        layout["source"],
-        "scanners:\n"
-        "  detect-secrets:\n"
-        "    options:\n"
-        "      baseline_file: ${ASH_STANDIN_BASELINE}\n",
-    )
-    with _debug_records() as messages:
-        options = _detect_secrets_options(layout)
-    assert _plugin_names(options) == ["MarkerA"], _plugin_names(options)
-    for prefix in (
-        "Possible baseline file paths",
-        "Checking for detect-secrets config",
-        "Identified detect-secrets config",
-    ):
-        assert any(m.startswith(prefix) for m in messages), (prefix, messages)
-    assert all(value not in m for m in messages), messages
-
-
 def test_a_discovered_baseline_linking_to_a_work_product_is_refused(
     tmp_path, monkeypatch
 ):
@@ -2088,102 +1499,6 @@ def test_a_discovered_baseline_linking_to_a_work_product_is_refused(
     options = _detect_secrets_options(layout)
     assert options.baseline_file is None, options.baseline_file
     assert "StandIn" not in _plugin_names(options), _plugin_names(options)
-
-
-# ---------------------------------------------------------------------------
-# The emitted surface of the refusal warnings through the checkov option route
-# ---------------------------------------------------------------------------
-
-
-def _checkov_route_emitted(tmp_path, monkeypatch, *, env_name, in_tree):
-    """The warning lines ash.log carries when checkov's ``config_file`` option
-    names a refused path, with the option written literally (*env_name* None)
-    or as a whole-scalar environment reference the loader resolves.
-
-    Returns (value, argv, every emitted line, the refusal warning lines)."""
-    layout = _layout(tmp_path)
-    if in_tree:
-        target = layout["source"] / "team_checkov_settings.yaml"
-        target.write_text("")
-    else:
-        target = layout["product"]
-    value = target.as_posix()
-    if env_name is not None:
-        monkeypatch.setenv(env_name, value)
-        written = "${" + env_name + "}"
-    else:
-        written = value
-    _repo_config(
-        layout["source"],
-        f"scanners:\n  checkov:\n    options:\n      config_file: {written}\n",
-    )
-    log_path = tmp_path / "emitted.log"
-    with _emitted_warnings(log_path):
-        argv = _checkov_argv(layout)
-    lines = log_path.read_text(encoding="utf-8").splitlines()
-    warning = [line for line in lines if "Ignoring" in line]
-    return value, argv, lines, warning
-
-
-def _in_any(value: str, lines) -> bool:
-    spellings = {value, Path(value).resolve().as_posix()}
-    return any(s in line for s in spellings for line in lines)
-
-
-def test_an_env_chosen_work_product_as_checkovs_config_is_shown_as_value(
-    tmp_path, monkeypatch
-):
-    """The refused path came from the environment, so the emitted warning
-    shows the value marker, and neither the value nor its resolved spelling
-    reaches checkov's argv or any emitted line."""
-    value, argv, lines, warning = _checkov_route_emitted(
-        tmp_path, monkeypatch, env_name="ASH_TEAM_CHECKOV_CONFIG", in_tree=False
-    )
-    assert not _in_any(value, argv), argv
-    assert warning, lines
-    assert not _in_any(value, lines), lines
-    assert any("<value>" in line for line in warning), warning
-
-
-def test_a_literal_work_product_as_checkovs_config_is_named_in_the_warning(
-    tmp_path, monkeypatch
-):
-    """Control: an operator-typed literal path is no environment value, so the
-    warning names it as written and the route does not over-redact."""
-    value, argv, lines, warning = _checkov_route_emitted(
-        tmp_path, monkeypatch, env_name=None, in_tree=False
-    )
-    assert not _in_any(value, argv), argv
-    assert warning, lines
-    assert _in_any(value, warning), warning
-
-
-def test_an_env_chosen_in_tree_file_as_checkovs_config_is_shown_as_value(
-    tmp_path, monkeypatch
-):
-    """The in-tree refusal arm through the same route: marker shown, value and
-    resolved spelling absent from every emitted line."""
-    value, argv, lines, warning = _checkov_route_emitted(
-        tmp_path, monkeypatch, env_name="ASH_TEAM_CHECKOV_IN_TREE", in_tree=True
-    )
-    assert not _in_any(value, argv), argv
-    in_tree_clause = [line for line in warning if "inside the scanned tree" in line]
-    assert in_tree_clause, lines
-    assert not _in_any(value, lines), lines
-    assert any("<value>" in line for line in warning), warning
-
-
-def test_a_literal_in_tree_file_as_checkovs_config_is_named_in_the_warning(
-    tmp_path, monkeypatch
-):
-    """Control for the in-tree arm: the literal spelling stays named."""
-    value, argv, lines, warning = _checkov_route_emitted(
-        tmp_path, monkeypatch, env_name=None, in_tree=True
-    )
-    assert not _in_any(value, argv), argv
-    in_tree_clause = [line for line in warning if "inside the scanned tree" in line]
-    assert in_tree_clause, lines
-    assert _in_any(value, in_tree_clause), in_tree_clause
 
 
 # ---------------------------------------------------------------------------
@@ -2204,29 +1519,6 @@ def test_a_config_override_naming_the_work_product_reaches_checkov(tmp_path):
         layout,
         config_overrides=[f"scanners.checkov.options.config_file={product}"],
     )
-    assert "--config-file" in argv, argv
-    assert argv[argv.index("--config-file") + 1] == product, argv
-
-
-def test_an_outer_config_naming_the_work_product_reaches_checkov(tmp_path):
-    """A --config file outside the scanned tree that extends the repository's
-    file is the operator's own write for the options it sets. The file sits
-    above the checkout, so the repository's file is inside the chain's root
-    and the base is written relative to it."""
-    layout = _layout(tmp_path)
-    _repo_config(layout["source"], "")
-    product = layout["product"].as_posix()
-    outer = tmp_path / "outer.yaml"
-    repo_file = (layout["source"] / ".ash" / ".ash.yaml").relative_to(tmp_path)
-    outer.write_text(
-        f"extends:\n  - {repo_file.as_posix()}\n"
-        "scanners:\n"
-        "  checkov:\n"
-        "    options:\n"
-        f"      config_file: {product}\n",
-        encoding="utf-8",
-    )
-    argv = _checkov_argv(layout, config_path=outer)
     assert "--config-file" in argv, argv
     assert argv[argv.index("--config-file") + 1] == product, argv
 
@@ -2316,28 +1608,6 @@ def test_an_operator_filter_naming_the_work_product_is_kept(tmp_path):
     )
     assert any(
         layout["product"].as_posix() in (path or "") for path in _filter_paths(settings)
-    ), settings["filters_used"]
-
-
-def test_a_filter_entry_outside_both_trees_keeps_todays_answer(tmp_path):
-    """Control: a repository-written filter naming a file outside the scanned
-    tree and the output directory is kept, as for plugins_used."""
-    layout = _layout(tmp_path)
-    elsewhere = tmp_path / "elsewhere" / "filters.py"
-    elsewhere.parent.mkdir(parents=True)
-    elsewhere.write_text("")
-    _repo_config(
-        layout["source"],
-        "scanners:\n"
-        "  detect-secrets:\n"
-        "    options:\n"
-        "      scan_settings:\n"
-        "        filters_used:\n"
-        f"          - path: file://{elsewhere.as_posix()}::keep\n",
-    )
-    settings = _scanner_settings(layout, scanner_config=None)
-    assert any(
-        elsewhere.as_posix() in (path or "") for path in _filter_paths(settings)
     ), settings["filters_used"]
 
 
@@ -2468,103 +1738,6 @@ def _detect_secrets_scanner(layout: dict):
 # Assembled at runtime so this file holds no contiguous key-shaped literal:
 # ASH scans its own repository with this scanner.
 _PLANTED_KEY = "".join(["AKIA", "IOSFODNN7", "EXAMPLE"])  # noqa: FLY002
-
-
-@pytest.mark.usefixtures("no_tool_probes")
-@pytest.mark.parametrize("written", ["literal", "env"])
-def test_a_missing_option_baseline_runs_without_a_baseline(
-    tmp_path, monkeypatch, written
-):
-    """The configured baseline does not exist. The warning says so once, with
-    the shown form in place of an environment-read value, and the scan then
-    runs without a baseline and reports the planted finding: it neither
-    promises a fallback and then dies on the same file, nor raises."""
-    layout = _layout(tmp_path)
-    (layout["source"] / "settings.py").write_text(
-        f"AWS_ACCESS_KEY_ID = '{_PLANTED_KEY}'\n"
-    )
-    absent = (tmp_path.resolve() / "gone" / "absent.baseline").as_posix()
-    if written == "env":
-        monkeypatch.setenv("ASH_STANDIN_MISSING_BASELINE", absent)
-        reference = "${ASH_STANDIN_MISSING_BASELINE}"
-    else:
-        reference = absent
-    _repo_config(
-        layout["source"],
-        "scanners:\n"
-        "  detect-secrets:\n"
-        "    options:\n"
-        f"      baseline_file: {reference}\n",
-    )
-    log_path = tmp_path / "emitted.log"
-    with _emitted_warnings(log_path):
-        scanner = _detect_secrets_scanner(layout)
-        report = scanner.scan(target=layout["source"], target_type="source")
-    lines = log_path.read_text(encoding="utf-8").splitlines()
-    warning = [line for line in lines if "does not exist" in line]
-    assert len(warning) == 1, lines
-    assert not any("Falling back" in line for line in lines), lines
-    if written == "env":
-        assert all(absent not in line for line in lines), lines
-        assert "<value>" in warning[0], warning
-    else:
-        assert absent in warning[0], warning
-    assert not any("Errno 2" in line for line in lines), lines
-    assert not scanner._baseline_in_use()
-    # The config model keeps the option as written, for every dump of it.
-    # (str() of an environment-read value prints redacted, so compare the
-    # value itself for the literal and presence for the environment form.)
-    if written == "env":
-        assert scanner.config.options.baseline_file is not None
-    else:
-        assert str(scanner.config.options.baseline_file) == absent
-    assert [r.ruleId for r in report.runs[0].results] == ["SECRET-AWS-ACCESS-KEY"]
-
-
-@pytest.mark.usefixtures("no_tool_probes")
-def test_a_baseline_lost_after_selection_is_not_named_in_the_scan_error(
-    tmp_path, monkeypatch
-):
-    """The baseline path comes from the environment and the file is present
-    when the scanner is built, then gone when the scan opens it. The scan
-    fails, and the error carries the file's failure without the environment's
-    value: not in its text, its repr, its arguments, or the text the executor
-    records for it."""
-    from automated_security_helper.core.exceptions import ScannerError
-    from automated_security_helper.utils.error_text import error_text
-
-    layout = _layout(tmp_path)
-    baseline = layout["source"] / "env-chosen.baseline"
-    baseline.write_text(_baseline_json())
-    value = baseline.resolve().as_posix()
-    monkeypatch.setenv("ASH_STANDIN_LOST_BASELINE", value)
-    _repo_config(
-        layout["source"],
-        "scanners:\n"
-        "  detect-secrets:\n"
-        "    options:\n"
-        "      baseline_file: ${ASH_STANDIN_LOST_BASELINE}\n",
-    )
-    scanner = _detect_secrets_scanner(layout)
-    assert _plugin_names(scanner.config.options) == ["StandIn"]
-    baseline.unlink()
-    values = scanner._environment_values()
-    # The control: the value is one the config recorded as environment-read,
-    # so the redaction below has it to hide.
-    assert value in values, values
-
-    with pytest.raises(ScannerError) as raised:
-        scanner.scan(target=layout["source"], target_type="source")
-
-    error = raised.value
-    assert "DetectSecretsScanner failed" in str(error)
-    surfaced = [
-        str(error),
-        repr(error),
-        *[str(arg) for arg in error.args],
-        error_text(error, values),
-    ]
-    assert all(value not in text for text in surfaced), surfaced
 
 
 def test_a_typed_object_carrying_the_resolved_sections_value_is_still_judged():

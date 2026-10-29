@@ -102,6 +102,23 @@ def _closed_in_the_mcp_surfaces_words(message: str) -> None:
     assert "ASH_PLUGIN_MODULES" not in message, message
 
 
+def _denied_first(response: Dict[str, Any]) -> str:
+    """The answer for a file the client's own rules refuse before any module is judged.
+
+    A config an MCP client delivered, or named outside the directories
+    ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` names, is resolved under the server's
+    runtime-override policy, and that policy lets a client narrow
+    ``ash_plugin_modules`` but never add to it. The denial answers first: the
+    field is named, the answer carries ``config_field_denied`` and no exit code,
+    and the plugin-module judgment is not reached for such a file.
+    """
+    assert response.get("success") is False, response
+    assert response["error_type"] == "config_field_denied", response
+    message = str(response.get("error") or "")
+    assert "ash_plugin_modules" in message, message
+    return message
+
+
 def test_a_module_outside_the_namespace_is_refused(root: Path, planted_module: Path):
     config = root / ".ash.yaml"
     config.write_text(
@@ -125,17 +142,22 @@ def test_a_module_outside_the_namespace_is_refused(root: Path, planted_module: P
 
 
 def test_a_namespace_module_no_package_provides_is_refused(root: Path):
+    """The file is named by path outside any directory the operator granted for
+    config, so it is the client's: the entry it adds is refused by the denied-field
+    policy, naming the entry as the file wrote it, before the plugin-module
+    judgment (the import-kind refusal) is reached."""
     config = root / ".ash.yaml"
     config.write_text(
         f"project_name: demo\nash_plugin_modules:\n  - {NOT_PROVIDED}\n",
         encoding="utf-8",
     )
 
-    message = _refused(_get_config(config_path=str(config)))
+    message = _denied_first(_get_config(config_path=str(config)))
 
     assert NOT_PROVIDED in message, message
-    _closed_in_the_mcp_surfaces_words(message)
-    assert "Install what the module needs" in message, message
+    assert "it is not importable from the installed environment" in message, message
+    # The plugin-module refusal's closing and remedy belong to the later judgment.
+    assert "Install what the module needs" not in message, message
 
 
 def test_a_discovered_in_tree_file_is_answered_as_a_scan_treats_it(root: Path):
@@ -278,11 +300,12 @@ def test_raw_mode_never_judges_plugin_modules(
 def test_a_client_delivered_files_dropped_entries_never_refuse(
     tmp_path: Path, root: Path
 ):
-    """A config an MCP client delivered is resolved as a scan under it runs:
-    restrict-only, with its unimportable ``ash_plugin_modules`` entries
-    DROPPED by the trust confinement rather than refused. The judgment reads
-    the resolved list, so a dropped entry never reaches it, and the client
-    gets the config the scan runs under, with the entry gone."""
+    """A config an MCP client delivered is restrict-only: it may narrow
+    ``ash_plugin_modules`` but never add an entry the installed environment
+    cannot import. The server's denied-field policy refuses that entry while the
+    file is resolved, naming it as the file wrote it, so the plugin-module
+    judgment, which reads the resolved list, is never reached for a delivered
+    file and its refusal never answers one. The answer holds no config."""
     upload = tmp_path / "mcp-workspaces" / SESSION / "upload"
     upload.mkdir(parents=True)
     config = upload / "client-config.yaml"
@@ -293,8 +316,10 @@ def test_a_client_delivered_files_dropped_entries_never_refuse(
 
     response = _get_config(config_path=str(config))
 
-    assert response.get("success") is not False, response
-    assert response.get("ash_plugin_modules") in ([], None), response
+    message = _denied_first(response)
+    assert NOT_PROVIDED in message, message
+    assert response.get("error_category") != "plugin_module_refused", response
+    assert "project_name" not in response, response
 
 
 def test_an_entry_the_file_also_names_gets_no_environment_remedy(
@@ -303,7 +328,10 @@ def test_an_entry_the_file_also_names_gets_no_environment_remedy(
     """The refusal of an entry the config file names must not offer the
     environment remedy, whether or not the server's ``ASH_PLUGIN_MODULES``
     happens to hold the same text: the variable is never part of this
-    surface's judgment, and unsetting it would fix nothing."""
+    surface's judgment, and unsetting it would fix nothing. The file is the
+    client's (named outside the operator's config directories), so the refusal
+    is the denied-field policy's, which names the file's entry and no option or
+    variable a client could use to remove it."""
     monkeypatch.setenv("ASH_PLUGIN_MODULES", NOT_PROVIDED)
     config = root / ".ash.yaml"
     config.write_text(
@@ -311,10 +339,12 @@ def test_an_entry_the_file_also_names_gets_no_environment_remedy(
         encoding="utf-8",
     )
 
-    message = _refused(_get_config(config_path=str(config)))
+    message = _denied_first(_get_config(config_path=str(config)))
 
     assert NOT_PROVIDED in message, message
-    _closed_in_the_mcp_surfaces_words(message)
+    assert "ASH_PLUGIN_MODULES" not in message, message
+    assert "--ash-plugin-modules" not in message, message
+    assert "--config-overrides" not in message, message
 
 
 def test_a_named_file_is_not_refused_for_the_operator_chains_entry(
@@ -379,7 +409,13 @@ def test_a_dropped_entry_does_not_unmask_the_one_after_it(
     """The shown list is the confined read's, and its environment markers must
     move with it: when the trust confinement drops an entry AHEAD of one read
     from the environment, a marker matched at the first read's index points
-    one entry too far, and the answer shows the environment value in clear."""
+    one entry too far, and the answer shows the environment value in clear.
+
+    The operator's chain file (the ``no-file`` routes) is the one that reads the
+    environment. A file discovered in the searched tree is not the operator's: a
+    remote caller's answer resolves no ``!ENV`` or ``${VAR}`` in it, so that
+    route is refused as ``config_env_not_resolved`` before any entry is judged or
+    dropped, and the environment value is in no key of the answer."""
     entries = "".join(f"  - {name}\n" for name in dropped)
     text = (
         "project_name: demo\n"
@@ -397,13 +433,17 @@ def test_a_dropped_entry_does_not_unmask_the_one_after_it(
 
     response = _get_config(search_dir=str(root))
 
+    import json
+
+    assert kept_module not in json.dumps(response, default=str), response
+    if route == "discovered":
+        assert response.get("success") is False, response
+        assert response["error_type"] == "config_env_not_resolved", response
+        return
     assert response.get("success") is not False, response
     assert response.get("ash_plugin_modules") == ["<from ${ASH_PLUGMOD_KEPT}>"], (
         response
     )
-    import json
-
-    assert kept_module not in json.dumps(response), response
 
 
 def test_a_dropped_entry_does_not_corrupt_the_literal_after_it(
@@ -463,8 +503,13 @@ def test_the_refusal_carries_its_own_error_type_not_a_load_failures(
     The refusal carries its own ``error_type`` a client can branch on, the
     refusal text alone as the message, and the file in the structured context
     only -- and the no-file answer carries no path at all, since its entries
-    are the operator configuration's."""
+    are the operator configuration's.
+
+    The named file is one the operator granted (``root`` is in
+    ``ASH_MCP_ALLOWED_CONFIG_ROOTS``): a path outside every granted directory is
+    the client's, and the denied-field policy refuses its entry first."""
     if route == "named-file":
+        monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(root))
         config = root / ".ash.yaml"
         config.write_text(
             f"project_name: demo\nash_plugin_modules:\n  - {NOT_PROVIDED}\n",
@@ -574,13 +619,15 @@ def test_a_named_files_refusal_masks_an_environment_read_entry(
 ):
     """The named-file refusal masks like the no-file one: the two arms build
     their messages at different call sites, so the no-file cell above cannot
-    pin this one. A file named by path that the client did not deliver is
-    resolved with its environment references (a DELIVERED file reading the
-    environment is refused before resolution, so no value exists to mask
-    there), and a refused entry the file read from ``${VAR}`` is named by its
-    masked form, never the variable's value."""
+    pin this one. A file the operator granted (``root`` is in
+    ``ASH_MCP_ALLOWED_CONFIG_ROOTS``) is resolved with its environment
+    references (a file the client delivered or named outside every granted
+    directory is refused before resolution, so no value exists to mask there:
+    the next test pins that), and a refused entry the file read from ``${VAR}``
+    is named by its masked form, never the variable's value."""
     secret_name = "ash_plugins.named_file_environment_entry"
     monkeypatch.setenv("ASH_PLUGMOD_BAD", secret_name)
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(root))
     config = root / "named-config.yaml"
     config.write_text(
         "project_name: demo\nash_plugin_modules:\n  - !ENV ${ASH_PLUGMOD_BAD}\n",
@@ -593,6 +640,35 @@ def test_a_named_files_refusal_masks_an_environment_read_entry(
     assert "'<value>'" in message, message
     assert "read from the environment" in message, message
     _closed_in_the_mcp_surfaces_words(message)
+
+
+@pytest.mark.parametrize("route", ["named-file", "discovered"])
+def test_a_file_reading_the_environment_is_refused_unless_the_operator_chose_it(
+    root: Path, monkeypatch: pytest.MonkeyPatch, route: str
+):
+    """A remote caller's answer resolves no ``!ENV`` or ``${VAR}`` in a file the
+    operator did not choose: one named outside ``ASH_MCP_ALLOWED_CONFIG_ROOTS``,
+    or discovered in the searched tree. It is refused as
+    ``config_env_not_resolved`` before any entry is judged, and the value the
+    environment holds is in no key of the answer."""
+    import json
+
+    secret_name = "ash_plugins.entry_the_environment_held_back"
+    monkeypatch.setenv("ASH_PLUGMOD_BAD", secret_name)
+    config = root / ".ash.yaml"
+    config.write_text(
+        "project_name: demo\nash_plugin_modules:\n  - !ENV ${ASH_PLUGMOD_BAD}\n",
+        encoding="utf-8",
+    )
+
+    if route == "named-file":
+        response = _get_config(config_path=str(config))
+    else:
+        response = _get_config(search_dir=str(root))
+
+    assert response.get("success") is False, response
+    assert response["error_type"] == "config_env_not_resolved", response
+    assert secret_name not in json.dumps(response, default=str), response
 
 
 def test_an_unparsable_operator_chain_answers_a_load_failure_not_defaults(
@@ -783,10 +859,15 @@ def test_the_no_file_answer_reads_each_chain_file_once(
     root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """The no-file answer resolves the operator chain twice -- the shown
-    document, then the judged splice -- over ONE set of bytes: both reads
-    come from the same caches, so a chain file that changes on disk between
-    the two steps cannot put one read's marking record beside another read's
-    judged list in one answer."""
+    document, then the judged splice -- over ONE set of bytes. The second step
+    walks the chain holding each file to the identity it vetted, so a file the
+    first step cached is read once more, and the cached read is used only if the
+    file still holds the same text (``resolve_config.load_config_file_for_run``,
+    ``read_once``). A chain file that changes on disk between the two steps is
+    therefore refused rather than shown, and cannot put one read's marking
+    record beside another read's judged list in one answer."""
+    import json
+
     operator = tmp_path / "operator-config.yaml"
     operator.write_text(
         "project_name: demo\nash_plugin_modules: []\n", encoding="utf-8"
@@ -813,19 +894,24 @@ def test_the_no_file_answer_reads_each_chain_file_once(
 
     response = _get_config(search_dir=str(root))
 
-    assert operator_reads["count"] == 1, operator_reads
-    assert response.get("success") is not False, response
-    assert response.get("ash_plugin_modules") in ([], None), response
+    # The first step reads the file from disk; the second reads it once more,
+    # held to the identity, and finds the racing writer's bytes.
+    assert operator_reads["count"] == 2, operator_reads
+    assert response.get("success") is False, response
+    # The writer's bytes are in no key of the answer.
+    assert NOT_PROVIDED not in json.dumps(response, default=str), response
 
 
 def test_a_named_files_entries_are_judged_for_the_callers_scan_target(
     root: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """With a named config and ``search_dir``, the target the caller's scan
-    will run on is known: the file's entries are judged exactly as a scan of
-    that target judges them, so an in-target entry a scan drops never
-    refuses here. Without the target, the session's stand-in tree is not the
-    scan's, and the same file keeps the refusal -- the in-cell control."""
+    """A config path the client names, outside every directory the operator
+    granted in ``ASH_MCP_ALLOWED_CONFIG_ROOTS``, is the client's. The entry it
+    adds is refused by the denied-field policy while the file is resolved
+    (``_denied_first``), so the plugin-module judgment, which is what the scan
+    target changes (an entry inside the target is dropped, not refused), is not
+    reached: a ``search_dir`` that holds the file does not turn the denial into
+    a dropped entry, and the answer is the same with and without it."""
     (root / ".git").mkdir()
     (root / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
     config_dir = root / "configs"
@@ -836,15 +922,13 @@ def test_a_named_files_entries_are_judged_for_the_callers_scan_target(
         encoding="utf-8",
     )
 
-    response = _get_config(config_path=str(config), search_dir=str(root))
+    with_target = _denied_first(
+        _get_config(config_path=str(config), search_dir=str(root))
+    )
+    without_target = _denied_first(_get_config(config_path=str(config)))
 
-    assert response.get("success") is not False, response
-    assert response.get("ash_plugin_modules") in ([], None), response
-
-    # The control: the same file without the target stand-in is refused, so
-    # the success above is the target judgment's, not a loosened check's.
-    message = _refused(_get_config(config_path=str(config)))
-    assert NOT_PROVIDED in message, message
+    assert NOT_PROVIDED in with_target, with_target
+    assert NOT_PROVIDED in without_target, without_target
 
 
 def test_a_remote_callers_search_dir_is_gated_by_the_scan_root_policy(

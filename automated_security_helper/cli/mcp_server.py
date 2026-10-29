@@ -18,6 +18,7 @@ import os
 import signal
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
 from typing import (
@@ -30,6 +31,7 @@ from typing import (
     Literal,
     NamedTuple,
     Optional,
+    Tuple,
 )
 from pathlib import Path
 
@@ -138,6 +140,7 @@ from automated_security_helper.utils.log import (
     route_library_handlers_through_command_check,
 )
 from automated_security_helper.utils.subprocess_utils import kill_running_groups
+from automated_security_helper.utils.threads import ash_thread
 
 logger = ASH_LOGGER
 
@@ -187,6 +190,58 @@ async def _run_delivery(function: Callable[..., Any], /, **kwargs: Any) -> Any:
     """Run a chunk, finalize or clear implementation on ``_DELIVERY_EXECUTOR``."""
 
     return await _run_on(_DELIVERY_EXECUTOR, function, kwargs)
+
+
+#: Whether the last shutdown of the two pools above (_wait_for_source_jobs) ended with a
+#: clone or a delivery still running. run_mcp_server reads it on the way out.
+_source_jobs_left_running = False
+
+
+def _join_source_pools(executors: Tuple[ThreadPoolExecutor, ...]) -> None:
+    """Return once every worker of ``executors`` has finished its job and exited."""
+
+    for executor in executors:
+        executor.shutdown(wait=True)
+
+
+def _begin_stopping_source_jobs() -> threading.Thread:
+    """Drop the queued clones and deliveries now; return the thread joining the rest.
+
+    A pool that is not shut down is joined by the interpreter's own exit, which
+    runs every job still queued and waits for each one that runs: a clone the
+    client no longer waits for, for as long as git takes (three commands of up to
+    ten minutes), or an extraction still writing into the workspace the server is
+    about to remove. A job already running cannot be stopped from here, so it is
+    waited for, for a bounded time, by _wait_for_source_jobs on the thread this
+    returns. Nothing new is accepted afterwards: a call that comes in then fails
+    on submitting.
+    """
+
+    executors = (_CLONE_EXECUTOR, _DELIVERY_EXECUTOR)
+    for executor in executors:
+        executor.shutdown(wait=False, cancel_futures=True)
+    joiner = ash_thread(
+        _join_source_pools,
+        args=(executors,),
+        name="ash-mcp-source-jobs-join",
+        daemon=True,
+    )
+    joiner.start()
+    return joiner
+
+
+async def _wait_for_source_jobs(joiner: threading.Thread, deadline: float) -> bool:
+    """Wait until ``deadline`` (``time.monotonic()``) for the jobs ``joiner`` joins.
+
+    Returns whether any is still running, which is also kept in
+    ``_source_jobs_left_running``. The join runs on a worker thread, so that the
+    event loop stays free: the stdio serving's signal watcher runs on it.
+    """
+
+    global _source_jobs_left_running
+    await asyncio.to_thread(joiner.join, max(0.0, deadline - time.monotonic()))
+    _source_jobs_left_running = joiner.is_alive()
+    return _source_jobs_left_running
 
 
 # Backward-compatible private-name aliases (tests import these by name).
@@ -270,17 +325,26 @@ async def _lifespan(_server: MCPServer) -> AsyncIterator[Dict[str, Any]]:
     would otherwise be flushed onto the wire at exit. Shielded, so a cancelled serving
     task still waits for the scans to stop: that is what Ctrl-C does where the
     server cannot watch for signals (_watches_signals).
+
+    The source-delivery pools are stopped in the same window
+    (_begin_stopping_source_jobs): the queued clones and deliveries are dropped
+    at once, and the ones running get what is left of
+    STDIO_SCAN_STOP_TIMEOUT_SECONDS after the scans, so that they are not still
+    writing when run_mcp_server removes the stdio session workspace.
     """
     try:
         yield {}
     finally:
         if _serving_stdio:
             with anyio.CancelScope(shield=True):
+                deadline = time.monotonic() + STDIO_SCAN_STOP_TIMEOUT_SECONDS
+                joiner = _begin_stopping_source_jobs()
                 await stop_running_scans(
                     "the stdio client closed the connection",
                     timeout=STDIO_SCAN_STOP_TIMEOUT_SECONDS,
                     promptly=True,
                 )
+                await _wait_for_source_jobs(joiner, deadline)
             # The process ends next, by the client's SIGTERM if not sooner; a tool
             # still running then would outlive it (_stop_on_signal).
             kill_running_groups()
@@ -575,8 +639,9 @@ async def run_ash_scan(
         in its output tree), or a file git tracks in `.ash/ash_output` where the
         scan writes, or cannot say whether it does (`error_type`
         committed_output_files); 5 for the request itself (an unusable session
-        header or severity_threshold, a source_dir that is missing or not a
-        directory, or no source_dir with nothing delivered); 4 for a target the
+        header, no session at all (`session_identity_required`), an unusable
+        severity_threshold, a source_dir that is missing or not a directory, or
+        no source_dir with nothing delivered); 4 for a target the
         server will not scan (outside the permitted roots, or a delivered tree
         no longer on disk); 1 for anything else, another scan of the same
         directory included.
@@ -594,7 +659,9 @@ async def run_ash_scan(
         refusal = session_identity_refusal(session_id, "run_ash_scan", ctx)
         if refusal is not None:
             await _tell_client_error(ctx, raw_controls_on_one_line(refusal["error"]))
-            return refusal
+            # A call that carries no session is the request's own fault, as an
+            # unusable session header is, so it reports the same usage code.
+            return with_exit_code(refusal, REFUSED_USAGE_EXIT_CODE)
 
         if source_dir is None:
             resolved = _resolve_omitted_source_dir(session_id)
@@ -2984,7 +3051,12 @@ MCP_HONORS_IN_TREE_OPT_IN = False
 def _flush_stdout() -> None:
     try:
         sys.stdout.flush()
-    except (OSError, ValueError):
+    except (OSError, ValueError, RuntimeError):
+        # RuntimeError: a termination signal handled while the buffered writer was
+        # already flushing, which Python refuses as "reentrant call". The late
+        # handlers are installed before _keep_stdout_off_the_wire flushes, so
+        # exit_at_once can run inside that flush; it is about to end the process,
+        # and what the interrupted flush held is not wanted.
         pass
 
 
@@ -3129,15 +3201,19 @@ async def stop_scans_at_server_exit(reason: str) -> bool:
 
     For a server about to exit that has no client to report to: the HTTP
     transports call it when their app's lifespan ends (cli/mcp), as the stdio
-    lifespan does when its client leaves. Returns whether a scan was still
-    running when the wait ended (stop_running_scans).
+    lifespan does when its client leaves. Returns whether a scan (stop_running_scans)
+    or a source clone or delivery (_begin_stopping_source_jobs) was still
+    running when the wait ended.
     """
     with anyio.CancelScope(shield=True):
+        deadline = time.monotonic() + STDIO_SCAN_STOP_TIMEOUT_SECONDS
+        joiner = _begin_stopping_source_jobs()
         still_running = await stop_running_scans(
             reason, timeout=STDIO_SCAN_STOP_TIMEOUT_SECONDS, promptly=True
         )
+        jobs_running = await _wait_for_source_jobs(joiner, deadline)
     kill_running_groups()
-    return bool(still_running)
+    return bool(still_running) or jobs_running
 
 
 #: What the transport raises when the client has gone: its end of a pipe closed
@@ -3207,7 +3283,11 @@ def run_mcp_server():
     KeyboardInterrupt is raised from here, so `ash mcp` exits 130, but only once
     the client has closed stdin: the SDK reads it on a non-daemon worker thread
     that a cancel cannot interrupt. The previous handlers of the stop signals are
-    put back on the way out.
+    put back on the way out, except while a source clone or delivery is still
+    running (_wait_for_source_jobs): the interpreter's own exit waits for that
+    thread after this returns, and a SIGTERM then, with the previous handler's
+    default action, would end the server with -15 and leave the tools' groups
+    running, so _exit_on_late_signal stays installed until the process ends.
 
     The HTTP transports are served by uvicorn instead (cli/mcp). There, Ctrl-C
     stops the server gracefully, the app's lifespan stops the scans, and
@@ -3215,7 +3295,8 @@ def run_mcp_server():
     with ignored stays ignored there too (cli/mcp._uvicorn_server_class and
     cli/mcp._ask_server_to_stop_on_sighup), so on every transport.
     """
-    global _serving_stdio
+    global _serving_stdio, _source_jobs_left_running
+    _source_jobs_left_running = False
     # The sinks that are not handlers write to sys.stderr as given: lastResort
     # for a library logger with no handler, warnings, and the thread and sys
     # excepthooks. Python's writes to sys.stderr, bytes to its buffer included,
@@ -3275,8 +3356,15 @@ def run_mcp_server():
             # Shutdown must not fail on cleanup.
             logger.warning(f"Could not remove the stdio session workspace: {e}")
         for signum, handler in previous_handlers.items():
-            if handler is not None:
-                signal.signal(signum, handler)
+            if handler is None:
+                continue
+            if (
+                _source_jobs_left_running
+                and signal.getsignal(signum) is _exit_on_late_signal
+            ):
+                # The interpreter waits for the job's thread after this returns.
+                continue
+            signal.signal(signum, handler)
 
 
 if __name__ == "__main__":

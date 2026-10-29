@@ -2605,7 +2605,9 @@ class SarifReport(RecordModel):
             return Result(**clean_result)
 
         report_results = []
-        for res in report_run.results:
+        # A run may carry no results list at all (SARIF allows omitting it, and a
+        # scanner that failed leaves it so), which merges as no results.
+        for res in report_run.results or []:
             # Curate source identity before removing an index into reordered rules.
             report_results.append(curated_copy(res, report_run))
         needs_marker = is_composed_run(report_run) or any(
@@ -2658,7 +2660,7 @@ class SarifReport(RecordModel):
                                 rule.id: rule
                                 for rule in (existing_extension.rules or [])
                             }
-                            for rule in report_tool.driver.rules:
+                            for rule in report_tool.driver.rules or []:
                                 if rule.id not in cur_rule_id_hash:
                                     existing_extension.rules.append(
                                         rule.model_copy(deep=True)

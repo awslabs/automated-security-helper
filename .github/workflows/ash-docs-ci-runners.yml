@@ -102,6 +102,13 @@ on:
       - "docs/content/how-to/ci/other-ci.md.template" # other-ci.md is generated from it
       - "docs/content/how-to/export-reports.md" # the runner census lists its CI block; an edit can change which leg runs it
       - "examples/AWSCodeBuild/README.md" # the runner census lists its buildspec; an edit can change which leg runs it
+      - "docs/content/docs/advanced-usage.md" # the runner census lists its CI blocks; an edit can change which leg runs them
+      - "docs/content/docs/advanced-usage.md.template" # advanced-usage.md is generated from it
+      - "docs/content/docs/plugins/community/ferret-scan-plugin.md" # the runner census lists its CI blocks; an edit can change which leg runs them
+      - "docs/content/docs/plugins/community/snyk-plugin.md" # the runner census lists its CI blocks; an edit can change which leg runs them
+      - "docs/content/docs/plugins/community/trivy-plugin.md" # the runner census lists its CI blocks; an edit can change which leg runs them
+      - "automated_security_helper/plugin_modules/ash_snyk_plugins/README.md" # the runner census lists its CI blocks; an edit can change which leg runs them
+      - "automated_security_helper/plugin_modules/ash_trivy_plugins/README.md" # the runner census lists its CI blocks; an edit can change which leg runs them
       - ".github/workflows/run-ash-security-scan.yml" # the reusable workflow ci.md calls, run from this checkout
       - ".github/workflows/upload-ash-sarif.yml" # the SARIF upload workflow ci.md calls, run from this checkout
       - ".github/workflows/ash-docs-ci-runners.yml" # this workflow
@@ -254,7 +261,7 @@ jobs:
 
       - name: Install uv
         if: ${{ !env.ACT && (github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) }}
-        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           enable-cache: false
 
@@ -645,7 +652,7 @@ jobs:
       # letter is a character set.
       - name: Upload the leg's logs, pipelines and reports
         if: ${{ !cancelled() && !env.ACT }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: docs-ci-runners-${{ matrix.runner }}-${{ strategy.job-index }}-attempt-${{ github.run_attempt }}
           path: |
