@@ -155,11 +155,25 @@ def rules_root() -> Path:
             ``current_bin_path`` has no directory (``ASH_BIN_PATH`` unset and no
             usable home for ``~/.ash/bin``), so there is nothing to put ``share``
             beside. The tool installs refuse for the same reason, with the same
-            text (``download_utils.NO_BIN_DIRECTORY``).
+            text (``download_utils.NO_BIN_DIRECTORY``). Or
+            ``$ASH_CFN_GUARD_RULES_DIR`` is set to a relative path: the install
+            runs in a child whose working directory is an empty temporary one,
+            cfn-guard reads the rules from the source directory, and the scan
+            checks them from ASH's own, so a relative path names a different
+            directory in each. A leading ``~`` is expanded first.
     """
     from_env = os.environ.get(RULES_DIR_ENV)
     if from_env:
-        return Path(from_env)
+        expanded = os.path.expanduser(from_env)
+        if not os.path.isabs(expanded):
+            raise RulesBundleUnavailable(
+                f"{RULES_DIR_ENV} must be an absolute path: a relative one is "
+                "read against the working directory of whichever process reads "
+                "it (the install child's temporary directory, the scanned "
+                "source directory, ASH's own), so the rules installed under it "
+                "are not the ones the scan reads."
+            )
+        return Path(expanded)
     from automated_security_helper.utils.download_utils import (
         NO_BIN_DIRECTORY,
         current_bin_path,
