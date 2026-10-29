@@ -23,9 +23,13 @@ from automated_security_helper.utils.log import (
     NO_MARKUP,
     escape_markup,
 )
-from automated_security_helper.utils.severity_ladder import result_severity
+from automated_security_helper.utils.severity_ladder import (
+    resolve_missing_levels,
+    result_severity,
+)
 from automated_security_helper.schemas.sarif_schema_model import (
     Result,
+    State,
     Suppression,
     Kind1,
 )
@@ -48,6 +52,7 @@ from automated_security_helper.utils.symbol_spans import SymbolResolver
 from automated_security_helper.utils.suppression_matcher import ignore_path_matches
 from automated_security_helper.utils.undecodable_text import (
     path_in_record_form,
+    resolve_uri_reading,
     text_of_undecodable,
     undecodable_of_text,
 )
@@ -437,6 +442,14 @@ def normalize_sarif_result_severities(sarif_report: SarifReport) -> SarifReport:
                     isinstance(current, str)
                     and current.strip().upper() in _CANONICAL_SEVERITIES
                 ):
+                    # Written back in its canonical spelling: result_severity
+                    # strips and upper-cases on its read, but the gate counters
+                    # and junitxml compare the stored value as written, so a
+                    # padded or lower-case " high " was counted HIGH in the summary
+                    # and graded by its SARIF level everywhere else.
+                    canonical = current.strip().upper()
+                    if canonical != current:
+                        setattr(result.properties, "issue_severity", canonical)  # noqa: B010
                     continue
 
             rule = None
@@ -473,6 +486,53 @@ def _resolve_result_severity(result) -> str:
     return result_severity(result).lower()
 
 
+def _result_message_text(result: Any) -> str | None:
+    """The text of *result*'s message, or None when it has none.
+
+    A SARIF message is a text, or a markdown form, or an id of a message string
+    in the rule (``Message2``: ``id`` required, ``text`` optional). An id-only
+    message gives the id, written as the rule names it, so a reader can find the
+    string; a result with no message gives None.
+    """
+    message = getattr(result, "message", None)
+    if message is None:
+        return None
+    body = getattr(message, "root", message)
+    for field in ("text", "markdown"):
+        value = getattr(body, field, None)
+        if isinstance(value, str) and value:
+            return value
+    message_id = getattr(body, "id", None)
+    if isinstance(message_id, str) and message_id:
+        return f"Message id: {message_id}"
+    return None
+
+
+#: Suppression states under which a result is NOT suppressed. SARIF 3.35.4: a
+#: suppression ``rejected`` by the reviewer, or still ``underReview``, has not
+#: taken effect; only ``accepted``, or no state at all, hides the result.
+_INACTIVE_SUPPRESSION_STATES = frozenset(
+    {State.rejected.value, State.underReview.value}
+)
+
+
+def is_result_suppressed(result: Any) -> bool:
+    """Whether *result* carries a suppression that is in effect.
+
+    One answer for every reader in this module: a suppression object whose
+    ``state`` is ``rejected`` or ``underReview`` does not count, so a
+    scanner-supplied one awaiting review neither hides the result from the
+    per-scanner counts nor stands in for a root advisory's suppression.
+    """
+    for suppression in getattr(result, "suppressions", None) or []:
+        state = getattr(suppression, "state", None)
+        if state is None:
+            return True
+        if str(getattr(state, "value", state)) not in _INACTIVE_SUPPRESSION_STATES:
+            return True
+    return False
+
+
 def get_severity_metrics_from_sarif(
     sarif_report: SarifReport,
     plugin_context: PluginContext,
@@ -484,14 +544,20 @@ def get_severity_metrics_from_sarif(
     # in the total and the threshold gate. Idempotent: a result whose
     # issue_severity is already canonical is skipped.
     normalize_sarif_result_severities(sarif_report)
+    # The aggregate gives a result that states no level its rule's default level
+    # (SARIF 3.27.10) before grading it; the same here, so the two agree.
+    resolve_missing_levels(sarif_report)
     counts = ScannerSeverityCount()
     for result in sarif_report.get_all_results():
-        if result.suppressions and len(result.suppressions) > 0:
+        if is_result_suppressed(result):
             counts.increment("suppressed")
-        elif result.level:
-            counts.increment(_resolve_result_severity(result))
         else:
-            counts.increment("info")
+            # result_severity reads issue_severity first and the level after it,
+            # and a missing level as MISSING_SARIF_LEVEL, as every gate does. A
+            # result with an explicit null level was counted "info" here while the
+            # gate graded it MEDIUM, so the per-scanner row disagreed with the exit
+            # code.
+            counts.increment(_resolve_result_severity(result))
     return counts
 
 
@@ -514,19 +580,18 @@ def mask_secrets_in_sarif(sarif_report: SarifReport) -> SarifReport:
 
         for result in run.results:
             if result.message and result.ruleId:
-                # Mask secrets in message text
-                if hasattr(result.message, "text") and result.message.text:
-                    result.message.text = mask_secret_in_text(
-                        result.message.text, result.ruleId
-                    )
-                elif (
-                    hasattr(result.message, "root")
-                    and hasattr(result.message.root, "text")
-                    and result.message.root.text
-                ):
-                    result.message.root.text = mask_secret_in_text(
-                        result.message.root.text, result.ruleId
-                    )
+                # Mask secrets in the message's text AND its markdown: a message
+                # carries both forms of one sentence, and a report that renders the
+                # markdown form showed the secret the text form had masked.
+                message = result.message
+                if hasattr(message, "root") and not hasattr(message, "text"):
+                    message = message.root
+                for field in ("text", "markdown"):
+                    value = getattr(message, field, None)
+                    if value:
+                        setattr(
+                            message, field, mask_secret_in_text(value, result.ruleId)
+                        )
 
     return sarif_report
 
@@ -553,8 +618,21 @@ def _matched_path_text(uri: str, source_dir_prefix: str) -> str:
     Any other scheme with an authority (``https://host/x``) is left as written, so
     a pattern for a file in the tree does not reach it. The URI the report records
     is not this text: ``_sanitize_uri`` writes it without the folding.
+
+    A relative URI is percent-decoded as a ``file://`` one is (the same
+    surrogateescape reading): a SARIF ``artifactLocation.uri`` is a URI, and the
+    checkov converter writes ``quote()``d paths, so ``a%20b.py`` names the file
+    ``a b.py``. Undecoded, no suppression, ignore path or inline comment applied to
+    a file whose name holds a space or parentheses.
     """
-    text = _file_uri_to_path_text(uri) if uri.startswith("file://") else uri
+    if uri.startswith("file://"):
+        text = _file_uri_to_path_text(uri)
+    elif "%" in uri and not _URI_WITH_AUTHORITY.match(uri):
+        from urllib.parse import unquote
+
+        text = unquote(uri, errors="surrogateescape")
+    else:
+        text = uri
     if not text or _URI_WITH_AUTHORITY.match(text):
         return text
     return PurePosixPath(sanitized_uri_text(text, source_dir_prefix)).as_posix()
@@ -817,7 +895,7 @@ def _suppress_transitive_of_suppressed_roots(
                 )
 
     for result in transitive:
-        if result.suppressions:
+        if is_result_suppressed(result):
             continue
         refs = extract_root_advisories(result.properties)
         described = []
@@ -832,7 +910,7 @@ def _suppress_transitive_of_suppressed_roots(
                 key = (ref["rule_id"], normalize(ref["uri"], True))
                 matches = by_uri.get(key, [])
                 where = ref["uri"]
-            if not matches or not all(m.suppressions for m in matches):
+            if not matches or not all(is_result_suppressed(m) for m in matches):
                 break
             described.append(f"{ref['rule_id']} at {where}")
         else:
@@ -960,7 +1038,7 @@ class _OutputDirExclusion:
         basename = self.source_dir.name
         if basename and not (self.source_dir / basename).exists():
             self.source_dir_basename = PurePosixPath(basename)
-        self._resolve_cache: dict[str, Path] = {}
+        self._resolve_cache: dict[str, Path | None] = {}
         # Results removed, reported by ``report``. Counted because this can remove
         # an arbitrary number of results, and before it was counted the only trace
         # was one per-finding line at VERBOSE.
@@ -1039,8 +1117,19 @@ class _OutputDirExclusion:
             # needs. A URI the prefix strip did not match is absolute and outside the
             # source tree -- a system config, a cached dependency -- and joining it
             # onto source_dir would fabricate a path inside a tree it is not in.
-            self._resolve_cache[uri] = (self.source_dir / uri).resolve()
+            #
+            # Resolved as the file the record names (undecodable_of_text reads a
+            # non-UTF-8 name's record form back), so the result compares equal to a
+            # path the filesystem lists, as committed_output_files does. A text that
+            # cannot be a file's name (an embedded NUL, a name the platform refuses)
+            # names no file: it is not in the output directory, and the
+            # ValueError that resolve() raised for it no longer aborts the
+            # suppression pass for the whole report.
+            resolved = resolve_uri_reading(uri, self.source_dir)
+            self._resolve_cache[uri] = resolved
         resolved = self._resolve_cache[uri]
+        if resolved is None:
+            return False
         return resolved.is_relative_to(self.output_dir) and not resolved.is_relative_to(
             self.work_dir
         )
@@ -1309,80 +1398,85 @@ def apply_suppressions_to_sarif(
             # --- Step 2: config suppression ---
             if suppressions and not ignore_suppressions:
                 flat_finding = None
-                if result.ruleId and result.locations and len(result.locations) > 0:
-                    location = result.locations[0]
+                # The first location that names a file, as the suppression dialog
+                # (which writes the entry's path) picks it: reading locations[0]
+                # alone left a saved entry unmatched for a result whose first
+                # location has no physicalLocation.
+                location = next(
+                    (
+                        candidate
+                        for candidate in (result.locations or [])
+                        if candidate.physicalLocation
+                        and candidate.physicalLocation.root.artifactLocation
+                    ),
+                    None,
+                )
+                if result.ruleId and location is not None:
+                    raw_uri = location.physicalLocation.root.artifactLocation.uri
+                    uri = (
+                        _normalize_sarif_uri(
+                            raw_uri or "",
+                            _source_dir_prefix,
+                            _source_dir_prefix_with_slash,
+                            _source_dir_prefix_no_drive,
+                            _source_dir_basename,
+                        )
+                        if raw_uri
+                        else (raw_uri or "")
+                    )
+                    line_start = None
+                    line_end = None
                     if (
-                        location.physicalLocation
-                        and location.physicalLocation.root.artifactLocation
+                        hasattr(location.physicalLocation.root, "region")
+                        and location.physicalLocation.root.region
                     ):
-                        raw_uri = location.physicalLocation.root.artifactLocation.uri
-                        uri = (
-                            _normalize_sarif_uri(
-                                raw_uri or "",
-                                _source_dir_prefix,
-                                _source_dir_prefix_with_slash,
-                                _source_dir_prefix_no_drive,
-                                _source_dir_basename,
-                            )
-                            if raw_uri
-                            else (raw_uri or "")
-                        )
-                        line_start = None
-                        line_end = None
-                        if (
-                            hasattr(location.physicalLocation.root, "region")
-                            and location.physicalLocation.root.region
-                        ):
-                            line_start = location.physicalLocation.root.region.startLine
-                            line_end = location.physicalLocation.root.region.endLine
+                        line_start = location.physicalLocation.root.region.startLine
+                        line_end = location.physicalLocation.root.region.endLine
 
-                        package_name, package_version, package_path = (
-                            extract_package_identity(result.properties)
+                    package_name, package_version, package_path = (
+                        extract_package_identity(result.properties)
+                    )
+                    # package_path is compared in the form a suppression
+                    # writes it: relative to the scan root. Converters emit
+                    # it that way, but SARIF from an older ASH or another
+                    # tool may carry the absolute source-dir prefix (on
+                    # Windows, drive included), which is stripped here the
+                    # same way the location URI is. The basename argument
+                    # is None: that case exists for one scanner's location
+                    # URIs and would strip a real leading directory here.
+                    if package_path:
+                        package_path = _normalize_sarif_uri(
+                            package_path,
+                            _source_dir_prefix,
+                            _source_dir_prefix_with_slash,
+                            _source_dir_prefix_no_drive,
+                            None,
                         )
-                        # package_path is compared in the form a suppression
-                        # writes it: relative to the scan root. Converters emit
-                        # it that way, but SARIF from an older ASH or another
-                        # tool may carry the absolute source-dir prefix (on
-                        # Windows, drive included), which is stripped here the
-                        # same way the location URI is. The basename argument
-                        # is None: that case exists for one scanner's location
-                        # URIs and would strip a real leading directory here.
-                        if package_path:
-                            package_path = _normalize_sarif_uri(
-                                package_path,
-                                _source_dir_prefix,
-                                _source_dir_prefix_with_slash,
-                                _source_dir_prefix_no_drive,
-                                None,
-                            )
 
-                        flat_finding = FlatVulnerability(
-                            package_name=package_name,
-                            package_version=package_version,
-                            package_path=package_path,
-                            id=get_finding_id(result.ruleId, uri, line_start, line_end),
-                            title=(
-                                result.message.root.text
-                                if result.message
-                                else "Unknown Issue"
-                            ),
-                            description=(
-                                result.message.root.text
-                                if result.message
-                                else "No description available"
-                            ),
-                            severity="MEDIUM",
-                            scanner=(
-                                run.tool.driver.name
-                                if run.tool and run.tool.driver
-                                else "unknown"
-                            ),
-                            scanner_type="SAST",
-                            rule_id=result.ruleId,
-                            file_path=uri,
-                            line_start=line_start,
-                            line_end=line_end,
-                        )
+                    # The message text, or for a message given by id alone (SARIF
+                    # admits one with no text) its id: FlatVulnerability requires
+                    # a str title, and None here raised ValidationError out of the
+                    # suppression pass for the whole scanner.
+                    message_text = _result_message_text(result)
+                    flat_finding = FlatVulnerability(
+                        package_name=package_name,
+                        package_version=package_version,
+                        package_path=package_path,
+                        id=get_finding_id(result.ruleId, uri, line_start, line_end),
+                        title=message_text or "Unknown Issue",
+                        description=message_text or "No description available",
+                        severity="MEDIUM",
+                        scanner=(
+                            run.tool.driver.name
+                            if run.tool and run.tool.driver
+                            else "unknown"
+                        ),
+                        scanner_type="SAST",
+                        rule_id=result.ruleId,
+                        file_path=uri,
+                        line_start=line_start,
+                        line_end=line_end,
+                    )
 
                 if flat_finding:
                     config_suppressed = _apply_config_suppression(

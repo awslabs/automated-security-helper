@@ -1,0 +1,184 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Readings of a SARIF result that ``sarif_utils`` got wrong at the edges.
+
+A suppression object whose ``state`` is ``rejected`` or ``underReview`` has not
+taken effect (SARIF 3.35.4), yet any suppression object counted as suppressed. A
+message's markdown form was never masked. A percent-encoded relative URI was
+matched undecoded, so no suppression applied to a file whose name holds a space.
+A URI holding a NUL made ``Path.resolve`` raise out of the suppression pass. A
+result whose first location names no file, or whose message is given by id alone,
+broke the config-suppression pass for the whole scanner.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
+
+from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
+from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.core import AshSuppression
+from automated_security_helper.schemas.sarif_schema_model import (
+    ArtifactLocation,
+    Kind1,
+    Location,
+    Message,
+    Message2,
+    PhysicalLocation2,
+    Region,
+    Result,
+    Run,
+    SarifReport,
+    State,
+    Suppression,
+    Tool,
+    ToolComponent,
+)
+from automated_security_helper.utils.sarif_utils import (
+    _matched_path_text,
+    _OutputDirExclusion,
+    _result_message_text,
+    apply_suppressions_to_sarif,
+    get_severity_metrics_from_sarif,
+    is_result_suppressed,
+    mask_secrets_in_sarif,
+)
+
+pytestmark = pytest.mark.unit
+
+AshConfig.model_rebuild()
+AshAggregatedResults.model_rebuild()
+
+
+def _result(uri: str | None = "app.py", **overrides) -> Result:
+    values = {
+        "ruleId": "RULE-1",
+        "level": "error",
+        "message": Message(text="finding"),
+    }
+    if uri is not None:
+        values["locations"] = [
+            Location(
+                physicalLocation=PhysicalLocation2(
+                    artifactLocation=ArtifactLocation(uri=uri),
+                    region=Region(startLine=3, endLine=3),
+                )
+            )
+        ]
+    values.update(overrides)
+    return Result(**values)
+
+
+def _report(*results: Result) -> SarifReport:
+    return SarifReport(
+        version="2.1.0",
+        runs=[
+            Run(
+                tool=Tool(driver=ToolComponent(name="scripted")),
+                results=list(results),
+            )
+        ],
+    )
+
+
+def _context(tmp_path: Path, config: AshConfig | None = None) -> PluginContext:
+    source = tmp_path / "src"
+    output = source / ".ash" / "ash_output"
+    (output / ASH_WORK_DIR_NAME).mkdir(parents=True)
+    return PluginContext(
+        source_dir=source,
+        output_dir=output,
+        work_dir=output / ASH_WORK_DIR_NAME,
+        config=config or AshConfig(project_name="u28"),
+    )
+
+
+class TestSuppressionState:
+    @pytest.mark.parametrize("state", [State.rejected, State.underReview])
+    def test_a_rejected_or_reviewed_suppression_is_not_in_effect(self, state):
+        result = _result(suppressions=[Suppression(kind=Kind1.inSource, state=state)])
+
+        assert is_result_suppressed(result) is False
+        counts = get_severity_metrics_from_sarif(_report(result), MagicMock())
+        assert counts.suppressed == 0
+        assert counts.critical == 1
+
+    @pytest.mark.parametrize("state", [None, State.accepted])
+    def test_an_accepted_or_stateless_suppression_counts(self, state):
+        result = _result(suppressions=[Suppression(kind=Kind1.inSource, state=state)])
+
+        assert is_result_suppressed(result) is True
+        counts = get_severity_metrics_from_sarif(_report(result), MagicMock())
+        assert counts.suppressed == 1
+        assert counts.critical == 0
+
+
+def test_the_markdown_form_of_a_message_is_masked_too():
+    text = "Possible hardcoded password: 'hunter2'"  # pragma: allowlist secret
+    result = _result(ruleId="B105", message=Message(text=text, markdown=f"**{text}**"))
+
+    mask_secrets_in_sarif(_report(result))
+
+    assert "hunter2" not in result.message.root.text
+    assert "hunter2" not in result.message.root.markdown
+    assert result.message.root.markdown.startswith("**Possible hardcoded password")
+
+
+def test_a_percent_encoded_relative_uri_names_the_decoded_file():
+    assert _matched_path_text("src/my%20app/a%28b%29.py", "/work/") == (
+        "src/my app/a(b).py"
+    )
+    # A URI with a scheme and an authority is left as written.
+    assert _matched_path_text("https://host/x%20y", "/work/") == "https://host/x%20y"
+    # A path with no escape is unchanged.
+    assert _matched_path_text("src/a.py", "/work/") == "src/a.py"
+
+
+def test_a_uri_holding_a_nul_is_not_in_the_output_directory(tmp_path):
+    exclusion = _OutputDirExclusion(_context(tmp_path))
+
+    # Raised ValueError ("embedded null byte") out of resolve() before the fix.
+    assert exclusion.holds("app\x00.py") is False
+    assert exclusion.holds(".ash/ash_output/planted.py") is True
+
+
+def test_an_id_only_message_gives_the_suppression_pass_a_title(tmp_path):
+    config = AshConfig(
+        project_name="u28",
+        global_settings={
+            "suppressions": [
+                AshSuppression(rule_id="RULE-1", path="app.py", reason="known")
+            ]
+        },
+    )
+    result = _result(message=Message(Message2(id="rule.default")))
+
+    report = apply_suppressions_to_sarif(_report(result), _context(tmp_path, config))
+
+    # Raised ValidationError (title=None) before the fix; now the entry applies.
+    assert report.runs[0].results[0].suppressions
+    assert _result_message_text(result) == "Message id: rule.default"
+
+
+def test_the_first_location_naming_a_file_is_the_one_the_suppression_reads(tmp_path):
+    config = AshConfig(
+        project_name="u28",
+        global_settings={
+            "suppressions": [
+                AshSuppression(rule_id="RULE-1", path="app.py", reason="known")
+            ]
+        },
+    )
+    result = _result()
+    # A first location with no physicalLocation, as a logical location gives.
+    result.locations = [Location(message=Message(text="in handler")), *result.locations]
+
+    report = apply_suppressions_to_sarif(_report(result), _context(tmp_path, config))
+
+    assert report.runs[0].results[0].suppressions
