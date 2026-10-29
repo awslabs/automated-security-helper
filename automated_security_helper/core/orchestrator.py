@@ -197,12 +197,25 @@ class ASHScanOrchestrator(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
 
-    source_dir: Annotated[Path, Field(description="Source directory to scan")] = (
-        Path.cwd()
-    )
-    output_dir: Annotated[Path, Field(description="Output directory for results")] = (
-        Path.cwd().joinpath(".ash", "ash_output")
-    )
+    # Defaults are computed per instance, not when this module is imported:
+    # Path.cwd() at class definition froze the importing process's directory into
+    # every orchestrator built later, and gave output_dir a cwd-derived value that
+    # left model_post_init's source-derived default (``<source_dir>/.ash/ash_output``)
+    # unreachable, so a caller naming only source_dir got an output directory
+    # under some other tree.
+    source_dir: Annotated[
+        Path, Field(default_factory=Path.cwd, description="Source directory to scan")
+    ]
+    output_dir: Annotated[
+        Path | None,
+        Field(
+            default=None,
+            description=(
+                "Output directory for results; None derives "
+                "<source_dir>/.ash/ash_output when the orchestrator is built"
+            ),
+        ),
+    ]
     work_dir: Annotated[
         Path | None, Field(description="Working directory for scan operations")
     ] = None
@@ -491,9 +504,15 @@ class ASHScanOrchestrator(BaseModel):
     # Sentinel: True after initialize() has run successfully
     _initialized: bool = False
     # The previous scan's results while this one runs; see core/previous_results.py.
-    # None when nothing is set aside: keep_previous_results is off, or this is a
-    # report-only run over existing results.
+    # None when keep_previous_results is off, or this is a report-only run over
+    # existing results. Kept when set_aside failed, so that a held set an earlier
+    # killed scan left is still dropped once this scan has its results (below).
     _previous_results: Optional[PreviousResults] = None
+    # Whether set_aside moved this scan's predecessor out of the way. False when
+    # it raised: this scan then replaced the previous results as it wrote, and a
+    # restore at its end would put back not them but whatever older set the
+    # directory held, so nothing is put back; the held set is dropped on success.
+    _previous_results_set_aside: bool = PrivateAttr(default=False)
 
     # This scan's ID. The scan set is written to the output directory under it, and
     # the plugins get it on their context (PluginContext.run_id), so they read back
@@ -675,13 +694,19 @@ class ASHScanOrchestrator(BaseModel):
         self._previous_results = PreviousResults(self.output_dir)
         try:
             self._previous_results.set_aside()
+            self._previous_results_set_aside = True
         except OSError as e:
             ASH_LOGGER.warning(
                 f"Could not set the previous results in {self.output_dir} aside "
                 f"({error_text(e)}); this scan replaces them as it writes, and they will not "
                 "come back if it fails."
             )
-            self._previous_results = None
+            # The handle stays: a held set a killed earlier scan left (which
+            # set_aside would have kept as the last complete results) is still
+            # discarded when this scan finishes. Dropping the handle here left
+            # that stale set in place, and the next MCP scan took it for the
+            # last complete results and deleted this scan's.
+            self._previous_results_set_aside = False
 
     def _remove_kept_previous_results(self) -> None:
         """Without keep_previous_results: remove what a scan that kept them left.
@@ -724,9 +749,13 @@ class ASHScanOrchestrator(BaseModel):
         """
         exec_engine_params: Dict[str, Any] = {}
         if self.existing_results_path is not None:
+            # UTF-8, as every writer of the results file writes it; the locale
+            # encoding read it as cp1252 on Windows and failed, or re-saved it as
+            # mojibake, on non-ASCII text in the findings.
             with warning_of_dropped_keys(self.existing_results_path) as context:
                 asharp_model = AshAggregatedResults.model_validate_json(
-                    Path(self.existing_results_path).read_text(), context=context
+                    Path(self.existing_results_path).read_text(encoding="utf-8"),
+                    context=context,
                 )
             # A field the record holds as an environment reference it cannot
             # hold takes this run's own value (config/recorded_config.py).
@@ -741,7 +770,12 @@ class ASHScanOrchestrator(BaseModel):
                 context=PluginContext(
                     source_dir=self.source_dir,
                     output_dir=self.output_dir,
-                    work_dir=self.output_dir.joinpath(ASH_WORK_DIR_NAME),
+                    # The caller's work_dir when one was given: it is the
+                    # directory the end-of-scan cleanup removes, and it was never
+                    # the one the plugins wrote (the context always got
+                    # output_dir/converted), so the cleanup deleted a directory
+                    # ASH never used while the converted tree stayed.
+                    work_dir=self.engine_work_dir(),
                     config=config,
                     ignore_suppressions=self.ignore_suppressions,
                     run_id=self._run_id,
@@ -774,6 +808,19 @@ class ASHScanOrchestrator(BaseModel):
                 selection_origin=self.selection_origin,
                 changed_files=self.changed_files,
             )
+
+    def engine_work_dir(self) -> Path:
+        """The directory the plugins convert into: ``work_dir`` when the caller
+        set one, else ``<output_dir>/converted``.
+
+        One answer for the engine's context and for the end-of-scan cleanup, so
+        what the cleanup removes (``work_dir``, when set) is what the plugins
+        used. With ``work_dir`` unset the default under the output directory is
+        the plugins', and the cleanup leaves it, as it always has.
+        """
+        if self.work_dir is not None:
+            return Path(self.work_dir)
+        return self.output_dir.joinpath(ASH_WORK_DIR_NAME)
 
     def restrict_to_changed_files(self, changed_files: Optional[Set[Path]]) -> None:
         """Narrow this run's results to *changed_files*, after :meth:`initialize`.
@@ -831,9 +878,24 @@ class ASHScanOrchestrator(BaseModel):
             return
         loaded = self.existing_results_path is not None
 
+        # The values this run's configuration read from the environment: a
+        # project name among them is a value, not a label, and the reports print
+        # metadata.project_name as text.
+        environment_values = set(config_environment_values(self.config))
         for key, value in self.metadata.items():
             if key == "project_name":
-                if isinstance(value, str) and value.strip():
+                if isinstance(value, str) and value.strip() in environment_values:
+                    # A workspace hands each project its resolved display label,
+                    # which can be the project_name its config read from the
+                    # environment; written here it reached the per-project HTML,
+                    # Markdown, text and flat JSON reports as text. The name the
+                    # engine recorded (the masked or reference form) stands.
+                    ASH_LOGGER.warning(
+                        "Ignoring a project_name in scan metadata that is a value "
+                        "the configuration read from the environment; keeping "
+                        f"{model.metadata.project_name!r}"
+                    )
+                elif isinstance(value, str) and value.strip():
                     model.metadata.project_name = value.strip()
                 else:
                     ASH_LOGGER.warning(
@@ -968,9 +1030,17 @@ class ASHScanOrchestrator(BaseModel):
                 if isinstance(options, dict)
                 else getattr(options, "severity_threshold", None)
             )
-            if not own:
+            if own is None:
                 continue
-            tightened = stricter_of(own, requested)
+            if isinstance(own, str) and not own.strip():
+                # An empty string is set, not unset: the executor reads it as
+                # the scanner's own threshold and grades that scanner with no
+                # gate, so the client's floor was loosened for exactly it. It
+                # takes the run's effective global threshold, which is what an
+                # unset threshold follows.
+                tightened = effective
+            else:
+                tightened = stricter_of(own, requested)
             if tightened == own:
                 continue
             ASH_LOGGER.info(
@@ -1206,6 +1276,10 @@ class ASHScanOrchestrator(BaseModel):
         """
         if self._previous_results is None:
             return
+        if restore and not self._previous_results_set_aside:
+            # Nothing of this scan's predecessor was moved, so there is nothing
+            # of it to put back; what the held set holds is an older scan's.
+            return
         try:
             if restore:
                 self._previous_results.restore()
@@ -1255,7 +1329,7 @@ class ASHScanOrchestrator(BaseModel):
                         AshAggregatedResults,
                     )
 
-                    with open(self.existing_results_path, "r") as f:
+                    with open(self.existing_results_path, "r", encoding="utf-8") as f:
                         model_data = json.load(f)
 
                     # Load the model from the existing results
@@ -1398,10 +1472,38 @@ class ASHScanOrchestrator(BaseModel):
                         }
                     )
 
+            # The results file, once, after every phase: the scan phase used to
+            # write it at its own end, before the engine's changed-files
+            # narrowing, final suppression pass, metrics rebuild and report
+            # phase, and the MCP progress tracker reads the file's existence as
+            # the scan being complete. The CLI rewrites the file after this
+            # returns; a direct caller of the orchestrator keeps this one as the
+            # final file. Not for a report over existing results, which rewrites
+            # nothing of the scan it reports on.
+            if (
+                "scan" in phases
+                and self.existing_results_path is None
+                and self.output_dir
+                and isinstance(asharp_model_results, AshAggregatedResults)
+            ):
+                ASH_LOGGER.debug(f"Saving AshAggregatedResults to {self.output_dir}")
+                asharp_model_results.save_model(self.output_dir)
+
             if not self.no_cleanup:
                 if self.work_dir and Path(self.work_dir).exists():
                     ASH_LOGGER.verbose("Cleaning up working directory...")
-                    shutil.rmtree(self.work_dir)
+                    try:
+                        shutil.rmtree(self.work_dir)
+                    except OSError as e:
+                        # Every phase has finished and the results are written;
+                        # a working directory that could not be removed is not
+                        # a failed scan. Raised, it turned a completed scan into
+                        # a failure and, with keep_previous_results, deleted the
+                        # new results and restored the old ones.
+                        ASH_LOGGER.warning(
+                            f"Could not remove the working directory "
+                            f"{Path(self.work_dir).as_posix()}: {error_text(e, values)}"
+                        )
             return asharp_model_results
 
         except ASHValidationError as e:
