@@ -30,10 +30,12 @@ def test_a_quote_stays_a_quote(escaper, quote):
 
 @pytest.mark.parametrize("escaper", [bsr_module._text, bsr_module._cell])
 def test_no_numeric_entity_or_escaped_hash_is_written_for_an_apostrophe(escaper):
+    # pragma: allowlist nextline secret
     shown = escaper("Possible hardcoded password: 'hunter2'")
 
     assert "&#" not in shown, shown
     assert "\\#" not in shown, shown
+    # pragma: allowlist nextline secret
     assert shown == "Possible hardcoded password: 'hunter2'"
 
 
