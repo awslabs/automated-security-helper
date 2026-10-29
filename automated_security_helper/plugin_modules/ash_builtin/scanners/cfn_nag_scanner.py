@@ -877,7 +877,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                     if raised:
                         # A rule that raised under --isolate-custom-rule-exceptions:
                         # cfn_nag prints the exception to stderr, exits 0 and
-                        # renders the other rules' verdicts, so the template read
+                        # renders the other rules' results, so the template read
                         # as fully evaluated. Its findings are kept; the template
                         # is a failed target the executor will not grade clean.
                         reason = (
