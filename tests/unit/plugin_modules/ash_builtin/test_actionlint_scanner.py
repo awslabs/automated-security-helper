@@ -1292,6 +1292,27 @@ def test_a_credentials_finding_does_not_copy_the_password_into_the_report():
 
 
 @pytest.mark.unit
+def test_a_credentials_finding_is_a_secret_finding_for_masking():
+    """The finding reports a password on that line, so ASH's masking has to treat
+    it as a secret finding: another scanner's snippet of the same line is then
+    masked. Decided by the tags on the result and its rule, as for trivy's."""
+    from automated_security_helper.utils.secret_masking import (
+        is_secret_finding,
+        secret_rule_ids,
+    )
+
+    report = SarifReport.model_validate(
+        build_sarif(_load("actionlint-1.7.12-default.json"), exit_code=1)
+    )
+    credentials, *others = report.runs[0].results
+
+    assert credentials.ruleId == "credentials"
+    assert is_secret_finding(credentials) is True
+    assert secret_rule_ids(report) == {"credentials"}
+    assert all(is_secret_finding(result) is False for result in others)
+
+
+@pytest.mark.unit
 def test_a_version_other_than_the_pin_is_warned_about(
     repo, monkeypatch, on_path, caplog
 ):

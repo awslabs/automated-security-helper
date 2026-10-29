@@ -131,7 +131,9 @@ With ASH's default threshold (MEDIUM) a workflow with only lint findings passes 
 with script injection fails.
 
 A ``credentials`` finding's snippet is the hard-coded password, so it is left out of
-the SARIF; the location still points at the line.
+the SARIF; the location still points at the line. The result and its rule are tagged
+``secret`` and CWE-798, so ASH's secret masking treats the finding as a secret
+finding and masks that line wherever another scanner's snippet shows it.
 
 A binary whose reported version differs from the pin (a nix or PATH install) runs,
 with a warning, since the kinds and messages the mapping keys on may differ.
@@ -256,6 +258,15 @@ _SEVERITY_TO_LEVEL: Dict[str, str] = {
     "MEDIUM": "warning",
     "LOW": "note",
 }
+
+#: Tags on a ``credentials`` result and its rule. The finding reports a password
+#: written into the workflow, so it is marked the way ASH recognizes a secret
+#: finding (``utils/secret_masking.py``: a ``secret`` tag or CWE-798), and the
+#: line it points at is masked wherever another scanner's snippet shows it.
+CREDENTIALS_TAGS: Tuple[str, ...] = (
+    "secret",
+    "CWE-798: Use of Hard-coded Credentials",
+)
 
 #: actionlint's own config names. ASH does not read them from the scanned tree
 #: (decision 3); it names them in the note it logs when one is present.
@@ -515,6 +526,8 @@ def build_sarif(payload: Any, exit_code: int) -> Dict[str, Any]:
             "issue_severity": severity,
             "actionlint_kind": kind,
         }
+        if kind == "credentials":
+            properties["tags"] = list(CREDENTIALS_TAGS)
 
         results.append(
             {
@@ -526,16 +539,18 @@ def build_sarif(payload: Any, exit_code: int) -> Dict[str, Any]:
             }
         )
 
-    rules = [
-        {
+    rules = []
+    for kind, default_severity in sorted(kinds_seen.items()):
+        rule: Dict[str, Any] = {
             "id": kind,
             "name": kind,
             "shortDescription": {"text": f"actionlint {kind} check"},
             "helpUri": ACTIONLINT_CHECKS_URL,
             "defaultConfiguration": {"level": _SEVERITY_TO_LEVEL[default_severity]},
         }
-        for kind, default_severity in sorted(kinds_seen.items())
-    ]
+        if kind == "credentials":
+            rule["properties"] = {"tags": list(CREDENTIALS_TAGS)}
+        rules.append(rule)
     version = payload.get("version")
     return {
         "version": "2.1.0",
