@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""A YAML loader that refuses an alias inside the node it names.
+"""A YAML loader that refuses an alias inside the node it names, and a document
+whose aliases expand past a bound.
 
 YAML lets an alias name any anchor already seen, including one whose node is
 still open, and PyYAML builds that as a mapping or a list that contains itself.
@@ -13,7 +14,15 @@ the base of a config loader, raises :class:`RecursiveAliasError`, a YAML
 composer error, while the document is composed, before anything is constructed
 or walked, so every caller refuses it as a file that does not parse. An alias
 of a node that is already complete is a shared value, not a cycle, and loads as
-before. Imports only yaml.
+before.
+
+A shared value can still be too much: a few hundred bytes of nested anchors,
+each level aliasing the level below several times, load as a small shared graph
+whose every walk writes out a tree exponential in the depth. The loader counts,
+while composing, how many nodes the document holds once each alias is written
+out in its place, and raises :class:`AliasExpansionError`, a composer error too,
+at the first node past :data:`MAX_EXPANDED_NODES`, so the cost of such a file
+is its read, never its product. Imports only yaml.
 """
 
 from __future__ import annotations
@@ -26,6 +35,15 @@ from yaml.composer import ComposerError
 if TYPE_CHECKING:
     from yaml.error import Mark
 
+#: The most nodes a document may hold once every alias is written out in its
+#: place: mappings, sequences and scalars alike, as the config chain's expansion
+#: budget counts them (config_sources.refuse_past_expansion_bound). A
+#: configuration a scan can use sits orders of magnitude below it.
+MAX_EXPANDED_NODES = 100_000
+
+#: The attribute the expanded node count is kept on, on each composed node.
+_SIZE_ATTR = "_ash_expanded_nodes"
+
 
 class RecursiveAliasError(ComposerError):
     """A YAML alias inside the node it names: the document never ends.
@@ -36,13 +54,25 @@ class RecursiveAliasError(ComposerError):
     """
 
 
+class AliasExpansionError(ComposerError):
+    """A document whose aliases, written out, hold more nodes than the bound.
+
+    The problem mark is the alias that took the document past the bound. As for
+    RecursiveAliasError, the class name is what a config refusal shows.
+    """
+
+
 class NoRecursiveAliasLoader(yaml.SafeLoader):
-    """``yaml.SafeLoader``, refusing a recursive alias (RecursiveAliasError)
-    while composing.
+    """``yaml.SafeLoader``, refusing a recursive alias (RecursiveAliasError) and
+    a document whose aliases expand past the bound (AliasExpansionError) while
+    composing.
 
     The anchors of the nodes being composed are the open ones; an alias to one
     of them is inside the node it names. PyYAML refuses a duplicate anchor in a
-    document, so an anchor name stands for one node.
+    document, so an anchor name stands for one node. Each composed node is given
+    its expanded size, one plus its children's, where an alias counts as the
+    whole of the node it names; the document's running total is checked as each
+    alias is taken.
     """
 
     def compose_node(self, parent: Any, index: Any) -> Any:
@@ -62,12 +92,48 @@ class NoRecursiveAliasLoader(yaml.SafeLoader):
                     "found an alias to it inside it",
                     cast("Optional[Mark]", event.start_mark),
                 )
-            return super().compose_node(parent, index)
+            node = super().compose_node(parent, index)
+            self._charge_expansion(getattr(node, _SIZE_ATTR, 1), event.start_mark)
+            return node
         anchor = event.anchor
         if anchor is None:
-            return super().compose_node(parent, index)
+            return self._sized(super().compose_node(parent, index))
         open_anchors.add(anchor)
         try:
-            return super().compose_node(parent, index)
+            return self._sized(super().compose_node(parent, index))
         finally:
             open_anchors.discard(anchor)
+
+    def _sized(self, node: Any) -> Any:
+        """*node*, with its expanded size recorded: one plus its children's."""
+        size = 1
+        if isinstance(node, yaml.SequenceNode):
+            size += sum(getattr(child, _SIZE_ATTR, 1) for child in node.value)
+        elif isinstance(node, yaml.MappingNode):
+            size += sum(
+                getattr(key, _SIZE_ATTR, 1) + getattr(value, _SIZE_ATTR, 1)
+                for key, value in node.value
+            )
+        setattr(node, _SIZE_ATTR, size)
+        self._charge_expansion(1, node.start_mark)
+        return node
+
+    def _charge_expansion(self, size: int, mark: Any) -> None:
+        """Count *size* nodes against the document's bound.
+
+        A node composed in place counts one as it is composed (its children
+        counted themselves); each alias adds the whole of the node it names, so
+        the total is the size of the document written out. The check runs as
+        each is counted, so the composer stops at the first node past the bound
+        and never builds the rest.
+        """
+        total = self.__dict__.get("_ash_expanded_total", 0) + size
+        self.__dict__["_ash_expanded_total"] = total
+        if total > MAX_EXPANDED_NODES:
+            raise AliasExpansionError(
+                "while composing the document",
+                None,
+                f"found a node that takes the document past {MAX_EXPANDED_NODES} "
+                "nodes once its aliases are written out",
+                cast("Optional[Mark]", mark),
+            )
