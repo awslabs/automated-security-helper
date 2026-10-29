@@ -662,13 +662,19 @@ class TestFindingsComeFromTheFixture:
 
 class TestTimeoutBudget:
     def test_the_default_timeout_fits_inside_the_job_budget(self):
-        """The job sets timeout-minutes: 25 (1500s).
+        """The job sets timeout-minutes: 30 (1800s).
 
         If the script's default exceeded that, GitHub would cancel the job first and
-        the operator would get no summary table, no rule evidence and no log tail.
+        the operator would get no summary table, no rule evidence and no log tail. The
+        margin between the two is what the setup before the scan (checkout, the ASH
+        install, the tool downloads, the fixture build) runs in; at 300 s a cold
+        Windows runner used it up, so it is 600 s and asserted as such.
         """
-        assert gate.JOB_TIMEOUT_BUDGET_SECONDS == 25 * 60
+        assert gate.JOB_TIMEOUT_BUDGET_SECONDS == 30 * 60
         assert gate.DEFAULT_SCAN_TIMEOUT_SECONDS < gate.JOB_TIMEOUT_BUDGET_SECONDS
+        assert (
+            gate.DEFAULT_SCAN_TIMEOUT_SECONDS + 600 <= gate.JOB_TIMEOUT_BUDGET_SECONDS
+        )
 
     def test_the_workflow_timeout_matches_the_documented_budget(self):
         """Ties the two numbers together so they cannot drift apart silently."""

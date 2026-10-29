@@ -205,11 +205,14 @@ TOLERATED_EXIT_CODES = (0, 2)
 #: missing, so a run down to one working scanner would still pass.
 GATE_SCANNERS: Tuple[str, ...] = ("bandit", "checkov")
 
-# The job that runs this script sets timeout-minutes: 25 (1500s). The default here
+# The job that runs this script sets timeout-minutes: 30 (1800s). The default here
 # must stay below that budget, or GitHub cancels the job first and the operator gets
 # no summary table, no rule evidence and no log tail -- only a cancellation notice.
+# The 600 s between the two is what the job's setup before the scan (checkout, the
+# ASH install, the tool downloads, the fixture build) runs in; at 25 minutes that
+# margin was 300 s, which a cold Windows runner's setup can use up.
 # The workflow also passes --timeout explicitly so both numbers are visible together.
-JOB_TIMEOUT_BUDGET_SECONDS = 1500.0
+JOB_TIMEOUT_BUDGET_SECONDS = 1800.0
 DEFAULT_SCAN_TIMEOUT_SECONDS = 1200.0
 
 # Log tail printed when something fails. Enough to see the scanner errors without

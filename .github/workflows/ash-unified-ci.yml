@@ -1495,10 +1495,14 @@ jobs:
     name: "external-target scan (${{ matrix.os }})"
     needs: [ensure-cache]
     runs-on: ${{ matrix.os }}
-    # Keep in step with DEFAULT_SCAN_TIMEOUT_SECONDS in the script, which must stay
-    # below this budget so the script's own diagnostics win the race against a job
-    # cancellation. A unit test ties the two numbers together.
-    timeout-minutes: 25
+    # Keep in step with JOB_TIMEOUT_BUDGET_SECONDS in the script, which a unit test ties
+    # to this number, and above DEFAULT_SCAN_TIMEOUT_SECONDS (1200 s) by enough for the
+    # setup before the scan: checkout, setup-ash with install-ash true, the tool download
+    # cache restore, the bandit and checkov installs and the fixture build. At 25 the
+    # margin was 300 s, which a cold Windows runner's setup can use up, and then GitHub
+    # cancels the job before the script's own timeout and its diagnostics fire; 30 leaves
+    # 600 s. The cost is a hung job holding a runner five minutes longer.
+    timeout-minutes: 30
     permissions:
       contents: read
     strategy:
@@ -1846,8 +1850,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     # Keep in step with JOB_TIMEOUT_BUDGET_SECONDS in the script, which a unit
     # test ties to this number. DEFAULT_SCAN_TIMEOUT_SECONDS must stay below it so
-    # the script's own diagnostics win the race against a job cancellation.
-    timeout-minutes: 25
+    # the script's own diagnostics win the race against a job cancellation; 30 leaves
+    # the scan's 1200 s a 600 s margin for the setup before it (the note on
+    # external-target-scan, which runs the same shape).
+    timeout-minutes: 30
     permissions:
       contents: read
     strategy:
