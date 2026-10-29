@@ -330,7 +330,15 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         config = getattr(self.context, "config", None)
         warnings = getattr(config, "_resolution_warnings", None)
         for ignore_file in found:
-            if config_is_client_supplied(ignore_file):
+            # The judgment resolves the path. A link loop at the name raises
+            # RuntimeError on Python 3.10 to 3.12 and OSError on 3.13, and this runs
+            # while the scanner is built, so either used to end the scanner; a
+            # file that cannot be resolved is named as the repository's.
+            try:
+                client_supplied = config_is_client_supplied(ignore_file)
+            except (OSError, RuntimeError):
+                client_supplied = False
+            if client_supplied:
                 message = (
                     f"{ignore_file.as_posix()} is client-supplied (an MCP client "
                     "delivered it) and was not honored: ASH runs semgrep and opengrep "
