@@ -1454,6 +1454,20 @@ def _marker_a_slot_would_type(
         if _admits_plain_str(annotation, str(value)):
             return None
         return value, annotation, as_item
+    if (
+        isinstance(value, (list, tuple, set, frozenset, dict))
+        and _no_arm_can_hold(annotation, value)
+        and not _type_check_decides(annotation, ())
+    ):
+        # The slot has no shape for a container at all (an int, a str, a
+        # Path, a Literal), so pydantic would refuse the container with its
+        # own error, which names no variable and echoes the downcast copy's
+        # resolved text as the input. Refuse by name instead, as the field
+        # itself is refused at the top level (_refuse_container_at_scalar);
+        # where the type check speaks for the slot, as there, it is left to it.
+        marker = first_env_scalar(value)
+        if marker is not None:
+            return marker, annotation, as_item
     # A RootModel is read through what it wraps, after the scalar check
     # above: a bare marker at the model itself keeps its standing answer.
     annotation = _root_annotation(annotation)
