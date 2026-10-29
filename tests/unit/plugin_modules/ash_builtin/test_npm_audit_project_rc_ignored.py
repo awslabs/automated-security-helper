@@ -44,7 +44,10 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
     NpmAuditScanner,
     NpmAuditScannerConfig,
 )
-from automated_security_helper.utils.package_manager_child import NO_YARNRC
+from automated_security_helper.utils.package_manager_child import (
+    NO_YARNRC_PREFIX,
+    is_no_yarnrc_name,
+)
 from automated_security_helper.utils.process_env import snapshot_environ
 from tests.utils.aws_isolation import isolate_from_aws
 from tests.utils.env_assertions import differing_names
@@ -282,7 +285,10 @@ def test_sandboxed_yarn_reads_no_settings_file(
     ignore_path = audit["env"].get("YARN_IGNORE_PATH")
     rc_value = audit["env"].get("YARN_RC_FILENAME")
     assert ignore_path == "1"
-    assert rc_value == (NO_YARNRC if rc_filename else None)
+    if rc_filename:
+        assert is_no_yarnrc_name(rc_value), rc_value
+    else:
+        assert rc_value is None
 
 
 def _probes(spawns) -> List[Dict[str, Any]]:
@@ -296,7 +302,7 @@ def _assert_probe_reads_no_settings(probe: Dict[str, Any]) -> None:
     ignore_path = probe["env"].get("YARN_IGNORE_PATH")
     rc_value = probe["env"].get("YARN_RC_FILENAME")
     assert ignore_path == "1"
-    assert rc_value == NO_YARNRC
+    assert is_no_yarnrc_name(rc_value), rc_value
 
 
 @pytest.mark.parametrize("version", ["1.22.22", "3.8.7"])
@@ -329,18 +335,18 @@ def test_sandboxed_version_probe_reads_no_settings_file(online, tmp_path, versio
 
 
 @pytest.mark.parametrize(
-    ("version", "expected_command", "rc_value"),
+    ("version", "expected_command", "rc_filename"),
     [
-        ("1.22.22", ["yarn", "--no-default-rc", "audit", "--json"], None),
+        ("1.22.22", ["yarn", "--no-default-rc", "audit", "--json"], False),
         (
             "3.8.7",
             ["yarn", "npm", "audit", "--json", "--all", "--recursive"],
-            NO_YARNRC,
+            True,
         ),
     ],
 )
 def test_yarn_runs_in_place_when_the_system_tmpdir_is_inside_the_scanned_tree(
-    online, tmp_path, version, expected_command, rc_value
+    online, tmp_path, version, expected_command, rc_filename
 ):
     """No copy can be made outside the tree, so the probe and the audit run in the
     package directory with the repository's settings files dropped."""
@@ -364,7 +370,48 @@ def test_yarn_runs_in_place_when_the_system_tmpdir_is_inside_the_scanned_tree(
     ignore_path = audit["env"].get("YARN_IGNORE_PATH")
     audit_rc = audit["env"].get("YARN_RC_FILENAME")
     assert ignore_path == "1"
-    assert audit_rc == rc_value
+    if rc_filename:
+        assert is_no_yarnrc_name(audit_rc), audit_rc
+    else:
+        assert audit_rc is None
+
+
+def test_the_settings_file_yarn_is_told_to_read_is_never_one_the_package_holds(
+    online, tmp_path
+):
+    """In-place yarn 2+ runs in the package directory and is told the settings
+    file name to look for. With a fixed, published name, a package that holds a
+    file of that name would have yarn read it as its settings, yarnPath and
+    registry included. The name is drawn fresh for every child, so no file in the
+    package (or anywhere) matches it, and the probe's and the audit's names differ."""
+    from automated_security_helper.utils import package_manager_child as child_module
+
+    online.setattr(child_module, "_sandboxed", lambda: True)
+    spawns = _record(online, yarn_version="3.8.7")
+    scanner = _scanner(tmp_path)
+    package = _repository(scanner.context.source_dir, "yarn.lock")
+    # The published prefix with every token a planted file could guess at:
+    # the former fixed name and a few shapes beside it.
+    for planted in (
+        ".ash-no-yarnrc.yml",
+        f"{NO_YARNRC_PREFIX}.yml",
+        f"{NO_YARNRC_PREFIX}{'0' * 32}.yml",
+    ):
+        (package / planted).write_text(
+            f'yarnPath: ./marker.js\nnpmRegistryServer: "{REPOSITORY_REGISTRY}"\n',
+            encoding="utf-8",
+        )
+
+    scanner.scan(target=scanner.context.source_dir, target_type="source")
+
+    (probe,) = _probes(spawns)
+    (audit,) = _audits(spawns)
+    names = [probe["env"]["YARN_RC_FILENAME"], audit["env"]["YARN_RC_FILENAME"]]
+    for name in names:
+        assert is_no_yarnrc_name(name), name
+        assert not (package / name).exists(), name
+        assert not (package / name).is_symlink(), name
+    assert names[0] != names[1], names
 
 
 @pytest.mark.parametrize("ignore_suppressions", [False, True])

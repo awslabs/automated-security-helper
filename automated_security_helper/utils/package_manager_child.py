@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import shutil
 import stat
 import tempfile
@@ -74,9 +75,32 @@ _PACKAGE_MANAGER_INPUTS: Dict[str, Tuple[str, ...]] = {
     "yarn": ("package.json", "yarn.lock"),
 }
 
-#: The settings file name yarn 2+ is told to look for under a sandbox
-#: (YARN_RC_FILENAME): no directory has one, so it reads no .yarnrc.yml.
-NO_YARNRC = ".ash-no-yarnrc.yml"
+#: The prefix of the settings file name yarn 2+ is told to look for
+#: (YARN_RC_FILENAME) when it must read no ``.yarnrc.yml``. The rest of the name
+#: is drawn fresh for every child (``no_yarnrc_name``), so no directory holds a
+#: file of that name. A fixed, published name could be written into the scanned
+#: package, which is where yarn runs in place; yarn would then read that file as
+#: its settings, ``yarnPath`` and registry included.
+NO_YARNRC_PREFIX = ".ash-no-yarnrc-"
+_NO_YARNRC_TOKEN_CHARS = 32
+
+
+def no_yarnrc_name() -> str:
+    """A settings file name no directory has, drawn for one child."""
+    return f"{NO_YARNRC_PREFIX}{secrets.token_hex(_NO_YARNRC_TOKEN_CHARS // 2)}.yml"
+
+
+def is_no_yarnrc_name(value: object) -> bool:
+    """Whether ``value`` is a name :func:`no_yarnrc_name` draws."""
+    if not isinstance(value, str) or not value.startswith(NO_YARNRC_PREFIX):
+        return False
+    if not value.endswith(".yml"):
+        return False
+    token = value[len(NO_YARNRC_PREFIX) : -len(".yml")]
+    return len(token) == _NO_YARNRC_TOKEN_CHARS and all(
+        c in "0123456789abcdef" for c in token
+    )
+
 
 #: Directories never copied for yarn: installed packages and version control.
 _SKIPPED_DIR_NAMES = frozenset({"node_modules", ".git"})
@@ -289,7 +313,8 @@ def package_manager_child(
             ``scan_root`` when not given, else the package directory.
         yarn_major: The major version when known; None for the version probe,
             which then gets ``YARN_IGNORE_PATH`` and ``YARN_RC_FILENAME`` naming
-            no file, on every path, but no ``--no-default-rc``.
+            a file no directory has (``no_yarnrc_name``, drawn per child), on
+            every path, but no ``--no-default-rc``.
         ignore_suppressions: ``--ignore-suppressions`` is in effect.
     """
     package_dir = Path(package_dir)
@@ -304,7 +329,7 @@ def package_manager_child(
         # YARN_* names as config keys), and yarn 2+ reads no settings file when
         # none has this name. ``--no-default-rc`` is left out: yarn 2+ would not
         # accept it.
-        env["YARN_RC_FILENAME"] = NO_YARNRC
+        env["YARN_RC_FILENAME"] = no_yarnrc_name()
     in_place_yarn = binary == "yarn" and (
         sandboxed or _within(Path(tempfile.gettempdir()), scan_root)
     )
@@ -313,7 +338,7 @@ def package_manager_child(
         # sandbox anyway, and outside one this is only when no copy can be made
         # outside the scanned tree.
         if yarn_major is not None and yarn_major >= 2:
-            env["YARN_RC_FILENAME"] = NO_YARNRC
+            env["YARN_RC_FILENAME"] = no_yarnrc_name()
         leading: Tuple[str, ...] = (
             ("--no-default-rc",) if yarn_major is not None and yarn_major < 2 else ()
         )
