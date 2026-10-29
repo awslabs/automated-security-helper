@@ -257,8 +257,8 @@ def test_unsandboxed_yarn_runs_from_a_copy_outside_the_scanned_tree(online, tmp_
         ("1.22.22", ["yarn", "--no-default-rc", "audit", "--json"], False),
         # yarn 3 and 4 share the >=2 handling (YARN_RC_FILENAME, no leading
         # args); their stand-in answers differ, the document against nothing.
-        ("3.8.7", ["yarn", "npm", "audit", "--json", "--recursive"], True),
-        ("4.5.0", ["yarn", "npm", "audit", "--json", "--recursive"], True),
+        ("3.8.7", ["yarn", "npm", "audit", "--json", "--all", "--recursive"], True),
+        ("4.5.0", ["yarn", "npm", "audit", "--json", "--all", "--recursive"], True),
     ],
 )
 def test_sandboxed_yarn_reads_no_settings_file(
@@ -334,7 +334,7 @@ def test_sandboxed_version_probe_reads_no_settings_file(online, tmp_path, versio
         ("1.22.22", ["yarn", "--no-default-rc", "audit", "--json"], None),
         (
             "3.8.7",
-            ["yarn", "npm", "audit", "--json", "--recursive"],
+            ["yarn", "npm", "audit", "--json", "--all", "--recursive"],
             NO_YARNRC,
         ),
     ],
@@ -448,7 +448,10 @@ def test_a_yarn_3_advisory_reaches_the_report_through_the_isolation(online, tmp_
     report = scanner.scan(target=scanner.context.source_dir, target_type="source")
 
     (audit,) = _audits(spawns)
-    assert audit["command"] == capture["command"]
+    # The capture was produced without --all, which widens the workspaces
+    # audited and changes nothing in the document's format.
+    assert [p for p in audit["command"] if p != "--all"] == capture["command"]
+    assert "--all" in audit["command"], audit["command"]
     document = json.loads(capture["stdout"])
     expected = sorted(
         {

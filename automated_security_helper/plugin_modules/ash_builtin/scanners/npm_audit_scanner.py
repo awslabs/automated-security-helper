@@ -1859,9 +1859,21 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                 )
                                 continue
                             if yarn_major >= 2:
-                                # --recursive: the whole tree, as npm audits
-                                # it. Without it yarn checks direct deps only.
-                                cmd = [binary, "npm", "audit", "--json", "--recursive"]
+                                # --all: every workspace in the project, as npm
+                                # audits a workspace from its one lockfile.
+                                # Without it yarn audits the root workspace's
+                                # dependencies only, and in a monorepo the
+                                # member workspaces' dependencies are never
+                                # checked. --recursive: the whole tree below
+                                # each; without it yarn checks direct deps only.
+                                cmd = [
+                                    binary,
+                                    "npm",
+                                    "audit",
+                                    "--json",
+                                    "--all",
+                                    "--recursive",
+                                ]
 
                         # npm and pnpm run from a private copy of the package's
                         # manifest and lockfile, yarn from the package directory

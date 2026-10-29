@@ -105,9 +105,18 @@ FAILURES = [
 
 EXPECTED_COMMAND = {
     1: ["yarn", "audit", "--json"],
-    3: ["yarn", "npm", "audit", "--json", "--recursive"],
-    4: ["yarn", "npm", "audit", "--json", "--recursive"],
+    3: ["yarn", "npm", "audit", "--json", "--all", "--recursive"],
+    4: ["yarn", "npm", "audit", "--json", "--all", "--recursive"],
 }
+
+#: The yarn 2+ captures were produced without ``--all``, which widens the set of
+#: workspaces audited and changes nothing in the output format, so a capture's
+#: command is the scanner's command without that flag.
+WIDENING_FLAGS = {"--all"}
+
+
+def _as_captured(command):
+    return [part for part in command if part not in WIDENING_FLAGS]
 
 
 @pytest.fixture
@@ -197,10 +206,35 @@ def test_yarn_reports_become_findings(plugin_context, name, expected):
     report, commands = _scan(plugin_context, capture)
 
     assert _findings(report) == expected
-    # The capture was produced by the command the scanner now runs.
+    # The capture was produced by the command the scanner now runs, less the
+    # flags that only widen what is audited.
     audit = [c for c in commands if "--version" not in c]
     major = int(capture["yarn_version"].split(".")[0])
-    assert audit == [EXPECTED_COMMAND[major]] == [capture["command"]]
+    assert audit == [EXPECTED_COMMAND[major]]
+    assert [_as_captured(c) for c in audit] == [capture["command"]]
+
+
+def test_yarn_2_and_later_audit_every_workspace(plugin_context):
+    """A yarn workspace monorepo has one lockfile at its root. ``yarn npm audit``
+    without ``--all`` audits the root workspace's dependencies only, so the member
+    workspaces' dependencies were never checked; ``--all`` audits every workspace
+    from the same lockfile, as npm does. yarn 1 has one ``yarn audit`` for the whole
+    project and takes no such flag."""
+    for_yarn_1, _ = _scan(plugin_context, _capture("classic-clean"))
+    for_yarn_4, commands = _scan(plugin_context, _capture("berry-clean"))
+
+    (audit,) = [c for c in commands if "--version" not in c]
+    assert "--all" in audit, audit
+    assert audit.index("--all") < audit.index("--recursive"), audit
+    assert for_yarn_1.runs[0].results == for_yarn_4.runs[0].results == []
+
+
+def test_yarn_1_takes_no_workspace_flag(plugin_context):
+    _, commands = _scan(plugin_context, _capture("classic-clean"))
+
+    (audit,) = [c for c in commands if "--version" not in c]
+    assert "--all" not in audit, audit
+    assert audit == ["yarn", "audit", "--json"]
 
 
 @pytest.mark.parametrize("name, reason", FAILURES, ids=[n for n, _ in FAILURES])
