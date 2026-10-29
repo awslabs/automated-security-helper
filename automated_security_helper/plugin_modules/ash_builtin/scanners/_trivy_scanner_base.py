@@ -43,6 +43,7 @@ from typing import (
     TypeVar,
 )
 
+import yaml
 from pydantic import Field, PrivateAttr, model_validator
 
 from automated_security_helper.base.scanner_plugin import (
@@ -124,6 +125,87 @@ OFFLINE_FLAGS = (
 #: The trivy misconfiguration scanner that downloads the module sources a .tf file
 #: names. See TrivyScannerBase._offline_misconfig_args.
 _TERRAFORM_MISCONFIG_SCANNER = "terraform"
+
+#: What trivy runs when nothing names its scanners: no ``--scanners`` flag, no
+#: ``TRIVY_SCANNERS`` and no ``scan.scanners`` in its config file (pkg/flag/scan_flags.go,
+#: trivy 0.75.0). See TrivyScannerBase._effective_scanners.
+_TRIVY_DEFAULT_SCANNERS = ("vuln", "secret")
+
+#: trivy's severities that ASH reports as the same name. trivy's fifth, UNKNOWN,
+#: is left to ASH's generic SARIF mapping.
+TRIVY_SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW")
+
+#: The SARIF level trivy gives a result of each severity (``toSarifErrorLevel``).
+_SARIF_LEVEL = {
+    "CRITICAL": "error",
+    "HIGH": "error",
+    "MEDIUM": "warning",
+    "LOW": "note",
+}
+
+#: Characters ``trivy --skip-dirs`` reads as glob syntax.
+_GLOB_SPECIAL = frozenset("*?[]{}\\")
+
+
+def skip_dirs_value(path: str) -> str:
+    """*path* as a ``--skip-dirs`` value trivy matches literally.
+
+    trivy reads the value as a comma-separated list (CSV, so quotes group) of
+    globs. Measured on 0.69.3: an unescaped ``a,b`` or ``x[1]`` left that directory
+    scanned. Glob characters are backslash-escaped, then the value is CSV-quoted
+    when it holds a comma, a quote or edge whitespace.
+    """
+    escaped = "".join("\\" + ch if ch in _GLOB_SPECIAL else ch for ch in path)
+    if any(ch in escaped for ch in ',"') or escaped != escaped.strip():
+        escaped = '"' + escaped.replace('"', '""') + '"'
+    return escaped
+
+
+def trivy_severity(
+    result: Any, rules: List[Any], by_id: Dict[str, Any]
+) -> Optional[str]:
+    """trivy's severity for *result*: its message's ``Severity:`` line, else its rule's tag.
+
+    The LAST ``Severity:`` line of the message, not the first. trivy writes the
+    message as fixed lines, and the scanned file's path (``Artifact:``, for a
+    misconfiguration or secret finding) and the package name (``Package:``) come
+    before its own ``Severity:`` line, so a path or name holding a line break
+    followed by that prefix would otherwise decide the finding's ASH severity. The
+    lines after trivy's severity (``Fixed Version:``, ``Message:``, ``Match:``,
+    ``Link:``) are trivy's own text and hold no file name.
+
+    A result with no severity line of its own takes its rule's single severity
+    tag, and only when the result's own SARIF level agrees with it; see the
+    builtin trivy scanner's module docstring, "Severity".
+    """
+    message = result.message.root.text if result.message else None
+    own: Optional[str] = None
+    for line in (message or "").splitlines():
+        if line.startswith("Severity: "):
+            own = line[len("Severity: ") :].strip()
+    if own is not None:
+        return own if own in TRIVY_SEVERITIES else None
+    rule = None
+    if result.ruleIndex is not None and 0 <= result.ruleIndex < len(rules):
+        rule = rules[result.ruleIndex]
+    if rule is None or (result.ruleId and rule.id != result.ruleId):
+        rule = by_id.get(result.ruleId)
+    if rule is None or rule.properties is None:
+        return None
+    tags = getattr(rule.properties, "tags", None) or []
+    found = [tag for tag in tags if tag in TRIVY_SEVERITIES]
+    # Exactly one, or no verdict: two severity tags would be a shape trivy
+    # does not write, and guessing between them could under-rate a finding.
+    if len(found) != 1:
+        return None
+    # The tag is the rating of the last result trivy wrote for the rule. A
+    # result whose own level differs is rated otherwise, and is left to the
+    # generic mapping rather than given another package's severity.
+    level = getattr(result.level, "value", result.level)
+    if level is not None and level != _SARIF_LEVEL[found[0]]:
+        return None
+    return found[0]
+
 
 _DEFAULT_MISCONFIG_SCANNERS: Dict[tuple[str, ...], Optional[List[str]]] = {}
 _DEFAULT_MISCONFIG_SCANNERS_LOCK = threading.Lock()
@@ -329,7 +411,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         # is (_trivy_input_file), not from the scanned directory. The value is
         # quoted as set.
         variable = os.environ.get("TRIVY_CONFIG")
-        from_env = anchored_environment_path(variable, Path.cwd())
+        from_env = self._environment_path(variable, "TRIVY_CONFIG")
         if from_env:
             path = honored_path(
                 from_env,
@@ -343,6 +425,109 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             if path is not None:
                 return "TRIVY_CONFIG", variable, path
         return None
+
+    def _environment_path(self, value: Any, env: str) -> Any:
+        """``value``, the operator's environment variable ``env``, as a path.
+
+        A relative value is joined to the working directory ASH runs in
+        (``config/operator_paths.anchored_environment_path``). The working
+        directory is read only then: a value that is unset, absolute or starts
+        with ``~`` needs no anchor, so a working directory that was deleted does
+        not fail the scan's configuration for it. When the anchor is needed and
+        the working directory cannot be read, the variable is ignored with a
+        warning that names it (never its value, which the environment chose),
+        and the caller's fallback stands.
+        """
+        if (
+            not isinstance(value, str)
+            or not value.strip()
+            or value.startswith("~")
+            or os.path.isabs(value)
+        ):
+            return anchored_environment_path(value, Path("."))
+        try:
+            cwd = Path.cwd()
+        except OSError:
+            refusal = f"{env}=relative:no-cwd"
+            if refusal not in self._warned_inputs:
+                self._warned_inputs.add(refusal)
+                self._plugin_log(
+                    f"Ignoring {env}: it names a relative path, and the working "
+                    "directory ASH runs in cannot be read (it may have been "
+                    "deleted), so the path cannot be resolved from it. Set the "
+                    "variable to an absolute path.",
+                    level=logging.WARNING,
+                )
+            return None
+        return anchored_environment_path(value, cwd)
+
+    def _effective_scanners(self, final_args: Optional[List[str]] = None) -> List[str]:
+        """The trivy scanners this run turns on, as trivy will read them.
+
+        ``options.scanners`` when it names any: ASH passes it as ``--scanners``, which
+        trivy puts above every other source. With an empty list ASH passes no flag
+        and trivy decides for itself, in its order: ``TRIVY_SCANNERS`` in its
+        environment (the scan's, ``extra_env`` included), then ``scan.scanners`` in
+        the config file the run passes as ``--config`` (read from ``final_args``
+        when given, else the file this scanner chose), then trivy's own default,
+        ``vuln`` and ``secret``. The offline Terraform-check removal and the
+        checks-bundle update read this rather than the option alone, so a trivy
+        setting that turns ``misconfig`` on gets the same handling as the option.
+        A config file that cannot be read or parsed counts as setting nothing.
+        """
+        options: Any = self.config.options  # type: ignore[union-attr]
+        chosen = [name for name in (options.scanners or []) if name]
+        if chosen:
+            return chosen
+        environment = {**snapshot_environ(), **self.extra_env}
+        from_env = environment.get("TRIVY_SCANNERS")
+        if from_env and from_env.strip():
+            return [name.strip() for name in from_env.split(",") if name.strip()]
+        config_file: Optional[str] = None
+        for argument in final_args or []:
+            if argument.startswith("--config="):
+                config_file = argument[len("--config=") :]
+        if config_file is None:
+            config_file = self._scan_config_file
+        if config_file:
+            try:
+                with open(config_file, "r", encoding="utf-8") as handle:
+                    document = yaml.safe_load(handle)
+            except (OSError, yaml.YAMLError):
+                document = None
+            scan = document.get("scan") if isinstance(document, dict) else None
+            listed = scan.get("scanners") if isinstance(scan, dict) else None
+            if isinstance(listed, str):
+                listed = listed.split(",")
+            if isinstance(listed, list):
+                names = [str(name).strip() for name in listed if str(name).strip()]
+                if names:
+                    return names
+        return list(_TRIVY_DEFAULT_SCANNERS)
+
+    def _attach_trivy_severity(self, sarif_report: SarifReport) -> SarifReport:
+        """Give each result trivy's own severity as its ASH severity.
+
+        trivy rates each result itself (CRITICAL, HIGH, MEDIUM, LOW), per result:
+        one CVE can be rated differently for two packages in one scan, and the
+        rule's tag and ``security-severity`` carry the last result's. Without
+        this ASH buckets the rule's CVSS score, so a finding trivy rates HIGH
+        with a 6.5 score reads MEDIUM. See the builtin trivy scanner's module
+        docstring, "Severity", and ``trivy_severity``.
+        """
+        for run in sarif_report.runs or []:
+            rules = (
+                (run.tool.driver.rules or []) if run.tool and run.tool.driver else []
+            )
+            by_id = {rule.id: rule for rule in rules}
+            for result in run.results or []:
+                severity = trivy_severity(result, rules, by_id)
+                if severity is None:
+                    continue
+                if result.properties is None:
+                    result.properties = PropertyBag()
+                setattr(result.properties, "issue_severity", severity)  # noqa: B010
+        return sarif_report
 
     def _ignore_file(self) -> str:
         """The file trivy reads finding IDs to ignore from (``--ignorefile``)."""
@@ -391,6 +576,41 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             ),
         ]
 
+    def _output_dir_skip_args(
+        self, target: Path | str, target_type: Optional[str] = None
+    ) -> List[str]:
+        """``--skip-dirs`` for ASH's own output directories inside ``target``.
+
+        The directories ``ScannerPluginBase._ash_output_dirs_inside`` names: this
+        run's output directory and the default ``.ash/ash_output`` an earlier run
+        can have left in the tree, each as its own value so a file the repository
+        committed under one is still scanned. Without them trivy reads the
+        converted copies of archives and notebooks (which the converted target
+        scans already, so their findings come twice) and an earlier run's reports
+        and scanner results as source. When the helper names nothing although this
+        run's output directory sits inside the target (it answers [] when naming
+        them raises), the output directory is skipped whole, with a warning, as the
+        builtin trivy scanner does.
+        """
+        skipped = self._ash_output_dirs_inside(Path(target))
+        if not skipped:
+            whole = self._output_dir_inside(Path(target))
+            if whole is not None:
+                inside = Path(target).as_posix()
+                self._plugin_log(
+                    f"ASH named no output directory to skip inside {inside} although "
+                    f"its output directory {whole.as_posix()} is there, so trivy is "
+                    f"told to skip {whole.as_posix()} whole. A file the repository "
+                    "committed to it is not scanned by trivy in this run.",
+                    level=logging.WARNING,
+                    target_type=target_type,
+                )
+                skipped = [whole]
+        return [
+            f"--skip-dirs={skip_dirs_value(relative.as_posix())}"
+            for relative in skipped
+        ]
+
     def _trivy_input_file(
         self,
         *,
@@ -435,7 +655,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         # The variable is the operator's, set where ASH runs, so a relative path
         # in it names a file there, as written, not one at the root of the
         # scanned tree.
-        from_env = anchored_environment_path(os.environ.get(env), Path.cwd())
+        from_env = self._environment_path(os.environ.get(env), env)
         if from_env:
             path = honored_path(
                 from_env,
@@ -533,8 +753,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             return []
         if self.context is None:
             raise ScannerError(f"{self.__class__.__name__} has no plugin context")
-        options: Any = self.config.options  # type: ignore[union-attr]
-        wants_checks = "misconfig" in (options.scanners or [])
+        wants_checks = "misconfig" in self._effective_scanners(command)
         cache = self._trivy_cache_dir()
         # The operator's trivy.yaml (options.config_file or TRIVY_CONFIG), under the
         # rule the scan's --config follows (_trivy_config_file), so a database
@@ -690,8 +909,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         Shared by ``trivy-repo``, which runs ``misconfig`` by default, and ``trivy``,
         which runs it when the operator adds it to ``scanners``.
         """
-        options: Any = self.config.options  # type: ignore[union-attr]
-        if "misconfig" not in (options.scanners or []):
+        if "misconfig" not in self._effective_scanners(final_args):
             return final_args
         command = self.command or "trivy"
         binary = find_executable(command) or command

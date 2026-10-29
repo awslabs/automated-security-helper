@@ -363,6 +363,10 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                 # Each link leaving the target (trivy follows no link), and each
                 # path the global ignore paths ignore.
                 *self._link_skip_args(target, global_ignore_paths),
+                # ASH's own output directories inside the target, as the builtin
+                # trivy scanner skips them: the converted copies the converted
+                # target scans already, and an earlier run's reports and results.
+                *self._output_dir_skip_args(target, target_type),
             ]
             if self._offline():
                 final_args = self._offline_misconfig_args(final_args)
@@ -418,6 +422,10 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                         scanner_results
                     )
                     sarif_report = self._attach_package_identity(sarif_report, target)
+                    # trivy's own per-result severity, as the builtin trivy scanner
+                    # reports it: without it ASH buckets the CVE rule's last CVSS
+                    # score, which is another package's rating for the same CVE.
+                    sarif_report = self._attach_trivy_severity(sarif_report)
 
                     # Attach scanner details for proper identification
                     sarif_report = attach_scanner_details(

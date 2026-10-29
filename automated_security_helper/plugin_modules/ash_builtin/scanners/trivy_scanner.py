@@ -182,8 +182,11 @@ from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.config.tool_config_trust import empty_tool_directory
-from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (  # noqa: F401 -- TRIVY_SEVERITIES and _SARIF_LEVEL are kept importable from here
+    _SARIF_LEVEL,
+    TRIVY_SEVERITIES,
     TrivyScannerBase,
+    skip_dirs_value,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.utils.config_trust import (
@@ -192,25 +195,7 @@ from automated_security_helper.utils.config_trust import (
     set_by_operator,
 )
 from automated_security_helper.utils.process_env import snapshot_environ
-from automated_security_helper.schemas.sarif_schema_model import (
-    PropertyBag,
-    SarifReport,
-)
-
-#: trivy's severities that ASH reports as the same name. trivy's fifth, UNKNOWN,
-#: is left to ASH's generic SARIF mapping.
-TRIVY_SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW")
-
-#: The SARIF level trivy gives a result of each severity (``toSarifErrorLevel``).
-_SARIF_LEVEL = {
-    "CRITICAL": "error",
-    "HIGH": "error",
-    "MEDIUM": "warning",
-    "LOW": "note",
-}
-
-#: Characters ``trivy --skip-dirs`` reads as glob syntax.
-_GLOB_SPECIAL = frozenset("*?[]{}\\")
+from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
 #: ``trivy --timeout`` when ASH's ``scan_timeout`` is null (unbounded). trivy has no
 #: value that means "no deadline": measured with 0.75.0, ``trivy --timeout=0s`` is a deadline
@@ -229,20 +214,6 @@ def trivy_timeout(seconds: Optional[float]) -> str:
     if seconds is None:
         return UNBOUNDED_TRIVY_TIMEOUT
     return f"{max(1, math.ceil(seconds))}s"
-
-
-def skip_dirs_value(path: str) -> str:
-    """*path* as a ``--skip-dirs`` value trivy matches literally.
-
-    trivy reads the value as a comma-separated list (CSV, so quotes group) of
-    globs. Measured on 0.69.3: an unescaped ``a,b`` or ``x[1]`` left that directory
-    scanned. Glob characters are backslash-escaped, then the value is CSV-quoted
-    when it holds a comma, a quote or edge whitespace.
-    """
-    escaped = "".join("\\" + ch if ch in _GLOB_SPECIAL else ch for ch in path)
-    if any(ch in escaped for ch in ',"') or escaped != escaped.strip():
-        escaped = '"' + escaped.replace('"', '""') + '"'
-    return escaped
 
 
 class TrivyScannerConfigOptions(ScannerOptionsBase):
@@ -605,52 +576,10 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         final_args: List[str],
         target: Path,
     ) -> SarifReport:
-        """Tie each dependency result to one package copy and set trivy's severity."""
-        sarif_report = self._attach_package_identity(sarif_report, target)
-        for run in sarif_report.runs or []:
-            rules = (
-                (run.tool.driver.rules or []) if run.tool and run.tool.driver else []
-            )
-            by_id = {rule.id: rule for rule in rules}
-            for result in run.results or []:
-                severity = self._trivy_severity(result, rules, by_id)
-                if severity is None:
-                    continue
-                if result.properties is None:
-                    result.properties = PropertyBag()
-                setattr(result.properties, "issue_severity", severity)  # noqa: B010
-        return sarif_report
+        """Tie each dependency result to one package copy and set trivy's severity.
 
-    @staticmethod
-    def _trivy_severity(
-        result: Any, rules: List[Any], by_id: Dict[str, Any]
-    ) -> Optional[str]:
-        """trivy's severity for *result*; see "Severity" above.
-
-        The ``Severity:`` line of its message when it has one, else its rule's tag.
+        The severity step is ``TrivyScannerBase._attach_trivy_severity``, shared
+        with trivy-repo; see "Severity" above for the rule.
         """
-        message = result.message.root.text if result.message else None
-        for line in (message or "").splitlines():
-            if line.startswith("Severity: "):
-                own = line[len("Severity: ") :].strip()
-                return own if own in TRIVY_SEVERITIES else None
-        rule = None
-        if result.ruleIndex is not None and 0 <= result.ruleIndex < len(rules):
-            rule = rules[result.ruleIndex]
-        if rule is None or (result.ruleId and rule.id != result.ruleId):
-            rule = by_id.get(result.ruleId)
-        if rule is None or rule.properties is None:
-            return None
-        tags = getattr(rule.properties, "tags", None) or []
-        found = [tag for tag in tags if tag in TRIVY_SEVERITIES]
-        # Exactly one, or no verdict: two severity tags would be a shape trivy
-        # does not write, and guessing between them could under-rate a finding.
-        if len(found) != 1:
-            return None
-        # The tag is the rating of the last result trivy wrote for the rule. A
-        # result whose own level differs is rated otherwise, and is left to the
-        # generic mapping rather than given another package's severity.
-        level = getattr(result.level, "value", result.level)
-        if level is not None and level != _SARIF_LEVEL[found[0]]:
-            return None
-        return found[0]
+        sarif_report = self._attach_package_identity(sarif_report, target)
+        return self._attach_trivy_severity(sarif_report)
