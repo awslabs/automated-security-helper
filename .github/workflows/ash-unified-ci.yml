@@ -31,7 +31,7 @@ on:
   # WHAT THIS COSTS, AND WHAT WAS REJECTED
   #
   # Sized off a count rather than a guess: this workflow expands to 291 jobs on a push
-  # to main, 289 on a merge-queue run, where warm-image-layers does not run, and 137 on a
+  # to main, 289 on a merge-queue run, where warm-image-layers does not run, and 136 on a
   # pull request, where the matrices run the pull-request cover (the note on ensure-cache),
   # and ash-iac-drift.yml to 6, so a queued merge that also pushes to main is
   # ~592 runner jobs instead of ~295. The duplicate result on a queued merge is the
@@ -407,20 +407,36 @@ jobs:
         # labels (ubuntu-latest median 2605 s over 56 jobs in that run, macos-latest 5022 s
         # over 7, macos-14 1982 s over 14; arm64 786 s over 42 and Windows 29 s over 36). A
         # pull request now runs ensure-cache on the two labels with headroom and starts its
-        # tier legs within a minute; the macOS legs it keeps (macos-latest) read the uv cache
+        # tier legs within a minute; the macOS legs it keeps (macos-14) read the uv cache
         # main's pushes write, since a pull request falls back to its base branch's entries
         # (see the note on `lint`), and fetch from the index only when the pull request
         # changed the lock file.
         #
+        # Which macOS image a pull request keeps: macos-14, the pinned image, not the
+        # macos-latest alias. Both are Apple silicon (the notes under unit-test-macos), so the
+        # cover loses no architecture; the alias is the label every repository's default
+        # macOS job asks for, and on the first pull-request run of the cover (2026-10-29) the
+        # seven jobs still queued after 66 minutes were all macos-latest legs, while macos-14
+        # had read a median queue of 1982 s against macos-latest's 5022 s in run 40939758029.
+        # The cost is one gate: unit-coverage's axis names macos-latest and no pinned image,
+        # so a pull request runs no macOS coverage gate; the merge_group entry and the push
+        # to main run it. GitHub retires pinned images, and when macos-14 goes the five
+        # `exclude` entries below that name macos-latest (the three macOS tier jobs,
+        # unit-coverage and install-validation) flip back to it, one value each;
+        # tests/unit/test_unified_ci_job_counts.py pins which image the cover keeps, so the
+        # flip is one list there too.
+        #
         # What a pull request stops running, and where it still runs: the ubuntu-latest (x86_64)
-        # legs of the unit, integration and e2e tiers and of the install bundle, the macos-14
+        # legs of the unit, integration and e2e tiers and of the install bundle, the macos-latest
         # legs, and Python 3.11 and 3.13 everywhere (3.12 stays because unit-coverage gates it
         # and the pre-commit hooks run on it). All of it runs on the merge_group entry that
         # gates main and on the push to main, so nothing merges without the full matrix; a
         # pull request shows one Linux (arm64), one macOS and one Windows leg per tier on the
-        # lowest, the gated and the highest Python. The container-runtime legs (docker, podman,
-        # finch, nerdctl) and the sandbox legs are x86_64-only or runtime-specific and are not
-        # thinned.
+        # lowest, the gated and the highest Python. It runs no x86_64 Linux leg of any tier,
+        # no Linux or macOS pre-commit hook run (the bundle's hook step keys on ubuntu-latest
+        # and macos-latest) and no x86_64 Linux or macOS unit-coverage gate; those are the
+        # merge-queue entry's and the push's. The container-runtime legs (docker, podman, finch, nerdctl)
+        # and the sandbox legs are x86_64-only or runtime-specific and are not thinned.
         #
         # If GitHub ever stopped evaluating expressions inside `exclude`, the literal string
         # would match no combination and the full matrix would run: the failure direction is a slower
@@ -785,10 +801,10 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         # Four shards, as on unit-test-linux.
         shard: [1of4, 2of4, 3of4, 4of4]
-        # The pull-request cover (the note on ensure-cache): macos-14 and Python 3.11 and
+        # The pull-request cover (the note on ensure-cache): macos-latest and Python 3.11 and
         # 3.13 drop out on a pull_request event only.
         exclude:
-          - os: ${{ github.event_name == 'pull_request' && 'macos-14' || '' }}
+          - os: ${{ github.event_name == 'pull_request' && 'macos-latest' || '' }}
           - python-version: ${{ github.event_name == 'pull_request' && '3.11' || '' }}
           - python-version: ${{ github.event_name == 'pull_request' && '3.13' || '' }}
         # No static exclusions; the notes under the unit-test-linux matrix apply here too.
@@ -897,10 +913,13 @@ jobs:
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
         # The pull-request cover (the note on ensure-cache): the unit tier runs no
-        # ubuntu-latest leg on a pull request, so there is no x86_64 Linux coverage data to
-        # combine there; the leg drops out on a pull_request event only.
+        # ubuntu-latest and no macos-latest leg on a pull request (its macOS legs run on
+        # macos-14, which this axis does not name), so there is no x86_64 Linux and no
+        # macOS coverage data to combine there; both legs drop out on a pull_request event
+        # only, and the merge_group entry and the push to main run all four.
         exclude:
           - os: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || '' }}
+          - os: ${{ github.event_name == 'pull_request' && 'macos-latest' || '' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1032,7 +1051,7 @@ jobs:
         # The pull-request cover (the note on ensure-cache); the same entries as the unit
         # job of this pool.
         exclude:
-          - os: ${{ github.event_name == 'pull_request' && 'macos-14' || '' }}
+          - os: ${{ github.event_name == 'pull_request' && 'macos-latest' || '' }}
           - python-version: ${{ github.event_name == 'pull_request' && '3.11' || '' }}
           - python-version: ${{ github.event_name == 'pull_request' && '3.13' || '' }}
         # No static exclusions; the notes under the unit-test-linux matrix apply here too.
@@ -1145,10 +1164,10 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-latest, macos-14]
-        # The pull-request cover (the note on ensure-cache): macos-14 drops out on a
+        # The pull-request cover (the note on ensure-cache): macos-latest drops out on a
         # pull_request event only.
         exclude:
-          - os: ${{ github.event_name == 'pull_request' && 'macos-14' || '' }}
+          - os: ${{ github.event_name == 'pull_request' && 'macos-latest' || '' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -2428,16 +2447,17 @@ jobs:
         exclude:
           # The pull-request cover (the note on ensure-cache). On a pull_request event the
           # bundle and homebrew legs leave the ubuntu-latest image, every leg leaves
-          # macos-14, and Python 3.11 and 3.13 leave the bundle (the other methods already
-          # run on 3.12 only). The podman, finch and nerdctl legs are container runtimes
-          # pinned to x86_64 images and keep their ubuntu-latest legs on every event.
-          # Homebrew on macOS stays covered by the homebrew-macos job. On every other event
+          # macos-latest (the bundle and the Homebrew formula run on macos-14 there), and
+          # Python 3.11 and 3.13 leave the bundle (the other methods already run on 3.12
+          # only). The podman, finch and nerdctl legs are container runtimes pinned to
+          # x86_64 images and keep their ubuntu-latest legs on every event. Homebrew on
+          # macOS stays covered by the homebrew-macos job as well. On every other event
           # these five entries evaluate to '' and match no combination.
           - os: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || '' }}
             method: bundle
           - os: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || '' }}
             method: homebrew
-          - os: ${{ github.event_name == 'pull_request' && 'macos-14' || '' }}
+          - os: ${{ github.event_name == 'pull_request' && 'macos-latest' || '' }}
           - python-version: ${{ github.event_name == 'pull_request' && '3.11' || '' }}
           - python-version: ${{ github.event_name == 'pull_request' && '3.13' || '' }}
           # Homebrew not on Windows
@@ -2611,6 +2631,9 @@ jobs:
           # OS, because each run installs ASH with the cdk extra into a fresh hook
           # environment and then bandit and checkov from PyPI. Same expression as
           # ash-install-methods.yml (tests/unit/test_pre_commit_hooks_manifest.py).
+          # A pull request runs no ubuntu-latest and no macos-latest bundle leg (the
+          # pull-request cover, the note on ensure-cache), so the hooks run on Windows
+          # there; the Linux and macOS hook runs are the merge-queue entry's and the push's.
           pre-commit-run-hooks: ${{ matrix.python-version == '3.12' && contains(fromJSON('["ubuntu-latest", "macos-latest", "windows-latest"]'), matrix.os) }}
 
       - name: uvx
@@ -2721,7 +2744,7 @@ jobs:
   # One check name that can actually be required
   # ---------------------------------------------------------------------------
   #
-  # Most jobs above name themselves from their matrix, so this workflow contributes 212 check
+  # Most jobs above name themselves from their matrix, so this workflow contributes 211 check
   # runs to a pull request (494 to a merge-queue run, which runs the full matrices) and few of
   # their names are stable. A ruleset's
   # required_status_checks list holds literal context strings with no wildcard, so requiring
@@ -2738,7 +2761,7 @@ jobs:
   #   gh api repos/<owner>/<repo>/actions/runs/<run>/jobs --paginate --jq '.jobs[].name'
   #   gh api repos/<owner>/<repo>/commits/<sha>/check-runs --paginate --jq '.check_runs[].name'
   #
-  # 212 is this workflow's own contribution to a pull request: the 137 jobs that run there,
+  # 211 is this workflow's own contribution to a pull request: the 136 jobs that run there,
   # plus the 75 `PyTest - ...` check runs that mikepenz/action-junit-report publishes from
   # inside the unit, integration and e2e legs -- one per leg. A merge-queue run, which runs
   # the full matrices, is 494: the 289 jobs that run there plus 205 check runs.
@@ -2773,7 +2796,9 @@ jobs:
   # ran the merge-queue shape; with the pull-request cover (the note on ensure-cache) it
   # ran 110, derived by the same test from the overlay rather than counted. Then the unit
   # tier was cut into four shards (25 legs to 100, +75): 291 on a push, 289 on a merge-queue
-  # run and 137 on a pull request.
+  # run, and a pull request ran 137. Then the cover's macOS image moved from macos-latest to
+  # macos-14, and unit-coverage, whose axis names no pinned image, lost its macOS leg on a
+  # pull request (-1): 136 there, the push and merge-queue figures unchanged.
   # tests/unit/test_unified_ci_job_counts.py recounts the list below from the matrices, so
   # these figures can drift from GitHub's census but not from this file. The 205 `PyTest - ...`
   # runs are derived from the leg count of the unit, integration and e2e jobs by the
@@ -2789,9 +2814,9 @@ jobs:
   # integration-test 1, build-docs 1, converter-integration 2, install-validation 32, homebrew-macos 1,
   # required-checks 1.
   #
-  # Where 137 comes from, per job, on a pull request (the pull-request cover, the note on
+  # Where 136 comes from, per job, on a pull request (the pull-request cover, the note on
   # ensure-cache): lint 1, ensure-cache 2, actionlint 1, snapshot-trailers 1, unit-test 36,
-  # unit-coverage 3, integration-test-linux 12, integration-test-macos 12,
+  # unit-coverage 2, integration-test-linux 12, integration-test-macos 12,
   # integration-test-windows 12, e2e-test-linux 1, e2e-test-macos 1, e2e-test-windows 1,
   # scan-validation 24, non-root-image-permissions 1, external-target-scan 2, sandbox 2,
   # sandbox-scanner-parity 2, multi-project-attribution 2, deploy-aws-helpers 1,
@@ -2842,7 +2867,7 @@ jobs:
   # job for integration-test, 80 fewer for the install-validation collapse, one more for
   # snapshot-trailers and one more for homebrew-macos, so a comparable CI-plumbing commit would
   # see 139 rather than 186. That 139 predates the unit-test shards and the jobs added after
-  # it; the 494 above is the current merge-queue figure and 212 the pull-request one. That
+  # it; the 494 above is the current merge-queue figure and 211 the pull-request one. That
   # is arithmetic on a measured baseline,
   # not a count anyone has taken, and it is why the 186 keeps its own commit's name.
   #

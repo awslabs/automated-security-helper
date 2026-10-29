@@ -253,11 +253,16 @@ class TestTheExpansion:
         ]
 
 
-#: What a pull request keeps of each pool: the arm64 Linux image, the newer macOS
+#: What a pull request keeps of each pool: the arm64 Linux image, the pinned macOS
 #: image, the one Windows image, and the lowest, the coverage-gated and the highest
-#: Python. The saturated hosted labels (ubuntu-latest, macos-14) and Python 3.11 and
-#: 3.13 run on the merge-queue entry and on the push to main instead.
-PR_COVER_IMAGES = {"ubuntu-24.04-arm", "macos-latest", "windows-latest"}
+#: Python. The saturated hosted labels (ubuntu-latest, macos-latest) and Python 3.11 and
+#: 3.13 run on the merge-queue entry and on the push to main instead. When GitHub retires
+#: macos-14, the workflow's five entries and this set move to macos-latest together.
+PR_COVER_IMAGES = {"ubuntu-24.04-arm", "macos-14", "windows-latest"}
+#: The pull-request image unit-coverage cannot gate: its axis names macos-latest and no
+#: pinned macOS image, so a pull request runs no macOS coverage gate (the note on
+#: ensure-cache in the workflow; the merge-queue entry and the push run it).
+PR_IMAGES_WITHOUT_A_COVERAGE_GATE = {"macos-14"}
 PR_COVER_PYTHONS = {"3.10", "3.12", "3.14"}
 TIER_JOB_IDS = [*UNIT_TEST_JOB_IDS, *INTEGRATION_TEST_JOB_IDS, *E2E_TEST_JOB_IDS]
 
@@ -334,20 +339,29 @@ class TestThePullRequestCover:
         images = {c["os"] for c in _cells(JOBS["ensure-cache"], "pull_request")}
         assert images == {"ubuntu-24.04-arm", "windows-latest"}
         # Every pull-request leg of a tier still runs on an image the job covers, or on
-        # macos-latest, which reads main's cache instead (the note on ensure-cache).
+        # macos-14, which reads main's cache instead (the note on ensure-cache).
         tier_images = {
             c["os"] for j in TIER_JOB_IDS for c in _cells(JOBS[j], "pull_request")
         }
-        assert tier_images - images == {"macos-latest"}, tier_images
+        assert tier_images - images == {"macos-14"}, tier_images
 
-    def test_unit_coverage_gates_only_the_images_the_unit_tier_runs_on_a_pull_request(
-        self,
-    ):
+    def test_unit_coverage_gates_the_pull_request_images_its_axis_names(self):
+        """The gate runs where it has shards to combine; macos-14 is the one image it lacks.
+
+        A unit-coverage leg on an image the unit tier did not run there would find no
+        artifacts and fail; a unit-tier image the gate's axis does not name goes ungated
+        on a pull request, which is the recorded cost of the macos-14 cover.
+        """
         gated = {c["os"] for c in _cells(JOBS["unit-coverage"], "pull_request")}
         tested = {
             c["os"] for j in UNIT_TEST_JOB_IDS for c in _cells(JOBS[j], "pull_request")
         }
-        assert gated == tested, (gated, tested)
+        assert gated <= tested, (gated, tested)
+        assert tested - gated == PR_IMAGES_WITHOUT_A_COVERAGE_GATE, (gated, tested)
+        axis = set(JOBS["unit-coverage"]["strategy"]["matrix"]["os"])
+        assert not (PR_IMAGES_WITHOUT_A_COVERAGE_GATE & axis), (
+            "the gate's axis names the image, so the gate could run there"
+        )
         # 3.12 stays in every pool's cover because this job combines its data.
         for job_id in UNIT_TEST_JOB_IDS:
             pythons = {
@@ -367,8 +381,8 @@ class TestThePullRequestCover:
         assert {c["os"] for c in bundle} == PR_COVER_IMAGES
         assert {str(c["python-version"]) for c in bundle} == PR_COVER_PYTHONS
         assert len(bundle) == 9
-        # Homebrew on macOS still runs here on macos-latest (and in homebrew-macos).
-        assert [c["os"] for c in cells if c["method"] == "homebrew"] == ["macos-latest"]
+        # Homebrew on macOS still runs here on macos-14 (and in homebrew-macos).
+        assert [c["os"] for c in cells if c["method"] == "homebrew"] == ["macos-14"]
         assert PR_LEGS["install-validation"] == 14
 
     def test_the_pull_request_total_is_smaller_than_the_merge_queue_total(self):
@@ -498,6 +512,10 @@ class TestTheCommentsMatchTheWorkflow:
             "expands to 216 jobs",
             "contributes 158 check",
             "158 is this",
+            # Before the cover's macOS image moved to macos-14 (unit-coverage -1).
+            "137 on a pull request",
+            "contributes 212 check",
+            "212 is this",
         ):
             assert stale not in COMMENTS
 
