@@ -27,6 +27,7 @@ The subprocess is replaced in these tests; the real binary runs in
 
 from __future__ import annotations
 
+import codecs
 import copy
 import json
 import logging
@@ -2024,6 +2025,32 @@ def test_a_workflow_whose_local_reference_leaves_the_tree_is_not_linted(
     ]
     assert "Not linting .github/workflows/refs.yml" in caplog.text
     assert "outside the scanned tree" in caplog.text
+
+
+@pytest.mark.parametrize("encoding", ["utf-16", "utf-16-be", "utf-8-sig"])
+@pytest.mark.unit
+def test_a_workflow_with_a_byte_order_mark_is_read_as_actionlint_reads_it(
+    repo, tmp_path, monkeypatch, on_path, caplog, encoding
+):
+    """actionlint's YAML parser decodes a UTF-16 file by its byte-order mark and
+    follows the local reference it holds; read as UTF-8 the file held no
+    reference at all and was linted unchecked."""
+    _local_reference_layout(repo, tmp_path / "outside", "dot-dot-action")
+    refs = repo / ".github" / "workflows" / "refs.yml"
+    body = refs.read_text()
+    # "utf-16" and "utf-8-sig" write their mark; "utf-16-be" does not.
+    mark = codecs.BOM_UTF16_BE if encoding == "utf-16-be" else b""
+    refs.write_bytes(mark + body.encode(encoding))
+    assert module.decode_workflow(refs.read_bytes()) == body
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, _EMPTY_RUN, 0)
+
+    with caplog.at_level(logging.WARNING):
+        scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    assert ".github/workflows/refs.yml" not in argv
+    assert "Not linting .github/workflows/refs.yml" in caplog.text
 
 
 @pytest.mark.parametrize(

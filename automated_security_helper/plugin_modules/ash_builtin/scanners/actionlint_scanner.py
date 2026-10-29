@@ -156,6 +156,7 @@ function/class symbols.
 
 from __future__ import annotations
 
+import codecs
 import json
 import logging
 import os
@@ -327,6 +328,29 @@ _LOCAL_USES_LINE = re.compile(
     r"""(?:"((?:[^"\\]|\\.)*)"|'((?:[^']|'')*)'|(\./[^\s"',}\]#]*))""",
     re.MULTILINE | re.IGNORECASE,
 )
+
+
+#: Byte-order marks go-yaml, actionlint's parser, decodes a workflow by. UTF-8
+#: without a mark is its default, as here.
+_BYTE_ORDER_MARKS: Tuple[Tuple[bytes, str], ...] = (
+    (codecs.BOM_UTF16_LE, "utf-16-le"),
+    (codecs.BOM_UTF16_BE, "utf-16-be"),
+    (codecs.BOM_UTF8, "utf-8"),
+)
+
+
+def decode_workflow(data: bytes) -> str:
+    """*data* as text, decoded as actionlint's YAML parser decodes it.
+
+    go-yaml reads a UTF-16 workflow by its byte-order mark, so one written that
+    way is parsed, and its local references followed, like any other. Decoding it
+    as UTF-8 found no reference in it and let it be linted unchecked. Bytes that
+    do not decode are replaced; a replaced character is part of no path.
+    """
+    for mark, encoding in _BYTE_ORDER_MARKS:
+        if data.startswith(mark):
+            return data[len(mark) :].decode(encoding, errors="replace")
+    return data.decode("utf-8", errors="replace")
 
 
 def _uses_value_of(match: "re.Match[str]") -> str:
@@ -951,7 +975,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         reports it.
         """
         try:
-            text = workflow.read_text(encoding="utf-8", errors="replace")
+            text = decode_workflow(workflow.read_bytes())
         except OSError:
             return None
         specs = sorted(local_uses_references(text))
