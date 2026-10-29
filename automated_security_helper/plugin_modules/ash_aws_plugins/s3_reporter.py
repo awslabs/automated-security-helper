@@ -223,12 +223,14 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             sts_client = session.client("sts")
             caller_id = sts_client.get_caller_identity()
 
-            # Check if S3 bucket exists and is accessible. HeadBucket needs
+            # Check that the S3 bucket can be reached. HeadBucket needs
             # s3:ListBucket, which the documented write-only policy
-            # (s3:PutObject alone) does not grant: S3 then answers 403 for a
-            # bucket that exists, and 404 for one that does not. A 403 proves
-            # the bucket exists, so the upload is still tried; only a missing
-            # bucket, or any other failure, leaves the dependency unsatisfied.
+            # (s3:PutObject alone) does not grant: without it S3 answers 403
+            # whether or not the bucket exists, so a 403 says only that the
+            # check could not be made. The upload is still tried, and a bucket
+            # that turns out to be missing fails there (report() then returns
+            # None). A 404, which S3 gives a principal that may list, and any
+            # other failure leave the dependency unsatisfied here.
             s3_client = session.client("s3")
             try:
                 s3_client.head_bucket(Bucket=self.config.options.bucket_name)
@@ -239,8 +241,9 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
                     raise
                 ASH_LOGGER.debug(
                     "HeadBucket on the bucket the bucket_name option names was "
-                    "refused (s3:ListBucket is not granted); the bucket exists, "
-                    "so the upload is tried with s3:PutObject alone"
+                    "refused (s3:ListBucket is not granted), so whether the "
+                    "bucket exists was not checked; the upload is tried with "
+                    "s3:PutObject alone and reports its own failure"
                 )
 
             self.dependencies_satisfied = "Account" in caller_id

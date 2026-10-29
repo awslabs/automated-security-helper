@@ -505,7 +505,7 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
             try:
                 securityhub_client.describe_hub()
             except ClientError as e:
-                if e.response["Error"]["Code"] != "AccessDeniedException":
+                if e.response["Error"]["Code"] not in _ACCESS_DENIED_ERRORS:
                     raise
                 ASH_LOGGER.warning(
                     "securityhub:DescribeHub was refused for the configured "
