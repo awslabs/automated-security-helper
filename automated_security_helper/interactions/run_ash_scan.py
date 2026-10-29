@@ -2246,6 +2246,31 @@ def _severity_filters_finding(result, min_sev_rank: int) -> bool:
     return _SEVERITY_RANK.get(_resolve_result_severity(result), 1) >= min_sev_rank
 
 
+def _actionable_under_its_scanner_threshold(result, results) -> bool:
+    """Whether *result* fails the gate of the scanner that reported it.
+
+    The threshold is the one ``_compute_exit_code`` counts actionable findings
+    by: the scanner's own ``options.severity_threshold`` when it has one, else
+    ``global_settings.severity_threshold``
+    (``ScannerStatisticsCalculator.get_scanner_threshold_info``). A result the
+    scanner's threshold made non-actionable was not counted, so the
+    ``--min-severity`` filter must not read it as the finding that keeps the
+    count standing. A result with no scanner name is judged by the global
+    threshold, as the count judges it.
+    """
+    props = getattr(result, "properties", None)
+    scanner_name = None
+    if props is not None:
+        scanner_name = (
+            props.get("scanner_name")
+            if isinstance(props, dict)
+            else getattr(props, "scanner_name", None)
+        )
+    key = scanner_name if isinstance(scanner_name, str) else ""
+    threshold = ScannerStatisticsCalculator.get_scanner_threshold_info(results, key)[0]
+    return severity_fails_threshold(_resolve_result_severity(result), threshold)
+
+
 # ---------------------------------------------------------------------------
 # Helper: resolve final AshLogLevel
 # ---------------------------------------------------------------------------
@@ -4739,7 +4764,10 @@ def _refuse_a_container_config_that_does_not_parse(opts: ScanOptions) -> None:
         return
     try:
         if is_json_file(path):
-            json.loads(path.read_text(encoding="utf-8"))
+            # utf-8-sig, as the scan's own JSON reader decodes the file: a
+            # leading byte order mark is dropped, which json.loads rejects, so
+            # a marked file the scan loads is not refused here.
+            json.loads(path.read_text(encoding="utf-8-sig"))
         elif is_toml_file(path):
             # The text the scan's own reader hands the parser: _read_toml_text
             # drops a leading UTF-8 byte order mark, which tomllib rejects, so
@@ -4944,7 +4972,10 @@ def _run_container_mode(
         try:
             check_operator_config(opts.config, opts.workspace_plan.workspace_root)
         except ASHConfigValidationError as exc:
-            print(f"[bold red]ERROR (3) Invalid configuration: {exc}[/bold red]")
+            # The shared printer escapes the error's text, which names a path:
+            # printed raw, a bracket sequence in it raised MarkupError out of
+            # this handler instead of exiting 3.
+            _print_invalid_config(exc)
             sys.exit(int(WorkspaceExitCode.INVALID_PROJECT_CONFIG))
     effective_fail_on_findings = (
         opts.fail_on_findings
@@ -5260,13 +5291,21 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
     def value_of(member: Any) -> str:
         return str(member.value if hasattr(member, "value") else member)
 
-    argv: List[str] = [
-        "scan",
-        "--source-dir",
-        str(opts.source_dir),
-        "--output-dir",
-        str(opts.output_dir),
-    ]
+    argv: List[str] = ["scan"]
+    plan = opts.workspace_plan
+    if plan is not None:
+        # The workspace scan runs inside the shell, as it runs inside the
+        # container: the definition and the policy the plan applied are named to
+        # it, on this same filesystem. --source-dir is mutually exclusive with
+        # --workspace; the workspace root is the plan's.
+        argv.extend(["--workspace", str(plan.workspace_file)])
+        if plan.workspace_config_source is not None:
+            argv.extend(["--workspace-config", str(plan.workspace_config_source)])
+        if opts.allow_missing_projects:
+            argv.append("--allow-missing-projects")
+    else:
+        argv.extend(["--source-dir", str(opts.source_dir)])
+    argv.extend(["--output-dir", str(opts.output_dir)])
     if opts.config:
         argv.extend(["--config", str(opts.config)])
     for override in opts.config_overrides or []:
@@ -6074,7 +6113,10 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
     try:
         settings = build_project_scan_settings(opts)
     except ASHConfigValidationError as exc:
-        print(f"[bold red]ERROR (3) Invalid configuration: {exc}[/bold red]")
+        # The shared printer escapes the error's text, which names a path:
+        # printed raw, a bracket sequence in it raised MarkupError out of this
+        # handler instead of exiting 3.
+        _print_invalid_config(exc)
         sys.exit(int(WorkspaceExitCode.INVALID_PROJECT_CONFIG))
 
     # Held and released through utils/process_env.py; see _run_local_mode.
@@ -6806,7 +6848,14 @@ def _compute_exit_code(
                 has_qualifying = True
             for run in getattr(sarif, "runs", []) if not has_qualifying else []:
                 for result in getattr(run, "results", []):
-                    if _severity_filters_finding(result, min_sev_rank):
+                    # A qualifying result is an ACTIONABLE one at or above the
+                    # minimum: one its own scanner's threshold made
+                    # non-actionable is not counted above, so it cannot be the
+                    # reason the count stands, and reading it as qualifying kept
+                    # exit 2 for actionable findings below --min-severity.
+                    if _severity_filters_finding(
+                        result, min_sev_rank
+                    ) and _actionable_under_its_scanner_threshold(result, results):
                         has_qualifying = True
                         break
                 if has_qualifying:
@@ -7233,11 +7282,17 @@ def _run_with_options(
     logger = _setup_logger(opts)
     _ignore_output_dir_in_git(opts)
 
-    if opts.workspace_plan is not None and opts.mode != RunMode.container:
+    if opts.workspace_plan is not None and opts.mode not in (
+        RunMode.container,
+        RunMode.nix,
+    ):
         # Workspace mode owns its own verdict and its own summary. It does not go
         # through _compute_exit_code, which answers for one directory against one
         # threshold and has no way to express "project A failed, project B did
-        # not".
+        # not". Container mode and Nix mode re-execute the workspace scan inside
+        # their own environment and read its payload back below: a plan here
+        # with --mode nix ran the workspace scan on the host, never entering
+        # the shell, so every scanner the flake supplies was MISSING.
         workspace_result = _run_workspace_mode(opts, logger)
         if opts.show_summary:
             _print_workspace_summary(workspace_result, opts, scan_start_time)
