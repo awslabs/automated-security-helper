@@ -358,6 +358,39 @@ def test_child_env_passes_pythonpath_through_unchanged(tmp_path):
     assert env["PYTHONPATH"] == "/x"
 
 
+@pytest.mark.unit
+def test_child_env_changes_exactly_path_and_the_uv_variables(tmp_path):
+    """The contract the structural check of the child-scan tests trusts: child_env
+    adds the stand-ins to PATH's front and sets uv's three variables, and every
+    other variable, known to it or not, reaches the child as given. The mapping
+    it is given is read, never written."""
+    started = ChildToolStarts(tmp_path)
+    given = {"PATH": "/usr/bin:/bin", "PYTHONPATH": "p", "X": "y"}
+    before = dict(given)
+
+    env = started.child_env(given)
+
+    changed = {name for name in env if env[name] != given.get(name)}
+    assert changed == {"PATH", "UV_CACHE_DIR", "UV_TOOL_DIR", "UV_OFFLINE"}, changed
+    assert set(given) <= set(env), "a variable given was dropped"
+    assert env["PATH"] == f"{started.directory}{os.pathsep}/usr/bin:/bin"
+    assert env["PYTHONPATH"] == "p"
+    assert env["X"] == "y"
+    assert given == before, "the caller's mapping was written to"
+
+
+@pytest.mark.unit
+def test_child_env_puts_the_stand_ins_first_even_with_no_path_given(tmp_path):
+    """A caller that sets no PATH still gets the stand-ins first: the prelude's
+    check would otherwise end the child for a PATH that finds no stand-in."""
+    started = ChildToolStarts(tmp_path)
+
+    env = started.child_env({"HOME": "/h"})
+
+    assert env["PATH"].split(os.pathsep)[0] == str(started.directory)
+    assert env["HOME"] == "/h"
+
+
 @pytest.mark.integration
 def test_an_entry_a_uv_left_in_its_directories_is_recorded(tmp_path):
     """The second record: a start no audit hook saw, shown by what it left."""
