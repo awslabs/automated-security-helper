@@ -31,7 +31,12 @@ What it asserts, and why each one is here
    disclosure that appears unconditionally is noise and gets ignored.
 4. **A workspace suppression is pushed into one project and not another.**
    Checked on the resolved plan, because the suppression list is per project
-   there; see the limitation below for why it is not yet checked on findings.
+   there, and on the findings: the lax project holds two files that trip the
+   same bandit rule, the policy suppresses one of them, and the ceiling run has
+   to report one fewer unsuppressed finding for lax. The suppressed file is
+   deliberately not the one assertion 1 depends on -- suppressing the lax
+   project's only finding would make the ceiling look decorative on a correct
+   implementation, because there would be nothing left for it to tighten.
 5. **An unrewritable pattern refuses with exit 4** and names the pattern, as
    does a project config passed as the policy file.
 
@@ -50,13 +55,15 @@ findings, "the ceiling could not reach them" and "there was nothing to reach"
 are indistinguishable. So the disclosure checks are skipped with a printed note
 when checkov reports nothing, rather than passing on an empty set.
 
+A failed control stops the run
+------------------------------
+When a fixture control fails the script reports the fixture as broken and exits 3
+without printing policy verdicts. A policy verdict read over a broken fixture is
+not a measurement, and printing one invites a reader to act on it.
+
 Known limitations
 -----------------
-* Assertion 4 stops at the plan. ``workspace.suppressions`` do not yet reach the
-  scanners -- see "Where policy enters" in ``workspace/execution.py`` for the
-  orchestrator constraint -- so a findings-level check would fail for a reason
-  that is not about the push-down.
-* ``additional_scanners`` is not exercised end to end for the same reason.
+* ``additional_scanners`` is not exercised end to end.
 * Two scanners are used, and which one is deliberate. bandit is the ASH-shipped
   scanner that emits ``properties.issue_severity``, so it measures the ceiling
   working; checkov emits none, so it measures the ceiling's limit. Building every
@@ -80,7 +87,7 @@ import subprocess  # nosec B404 - runs ash itself, argv-only, no shell
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 # A finding bandit rates MEDIUM severity, so it is actionable at MEDIUM and below
 # but not at HIGH or CRITICAL. That gap is what the ceiling is measured against.
@@ -94,6 +101,13 @@ def run(target):
     # B602: shell=True with a non-literal argument. Bandit rates this MEDIUM.
     return subprocess.call("echo " + target, shell=True)
 """
+
+#: The lax project's second source file, the one the workspace policy suppresses.
+#: Its path relative to the workspace root is what the policy names, and the
+#: project-relative path is what the resolved plan must carry.
+LAX_SUPPRESSED_FILE = "legacy.py"
+LAX_SUPPRESSED_WORKSPACE_PATH = f"lax/src/{LAX_SUPPRESSED_FILE}"
+LAX_SUPPRESSED_PROJECT_PATH = f"src/{LAX_SUPPRESSED_FILE}"
 
 STRICT_SOURCE = """\
 import subprocess
@@ -161,6 +175,10 @@ def build_fixture(root: Path) -> Path:
     the disclosure has to report.
     """
     _write(root / "lax" / "src" / "runner.py", LAX_SOURCE)
+    # A second copy of the same finding. The policy suppresses this one, so the
+    # suppression's reach is measurable on the findings while runner.py keeps
+    # the finding the ceiling assertions are built on.
+    _write(root / "lax" / "src" / LAX_SUPPRESSED_FILE, LAX_SOURCE)
     _write(root / "lax" / ".ash" / "ash.yaml", _project_config("CRITICAL"))
 
     _write(root / "strict" / "src" / "runner.py", STRICT_SOURCE)
@@ -180,12 +198,42 @@ def build_fixture(root: Path) -> Path:
     return workspace
 
 
+#: Seconds one scan may take before the gate gives up on it. One hung scanner
+#: child used to hang the whole gate: subprocess.run had no timeout, so a CI job
+#: ran until the runner's own limit cancelled it with no output from this script.
+DEFAULT_SCAN_TIMEOUT_SECONDS = 1200.0
+
+
+def child_environment(base: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The environment the scan child runs under.
+
+    Every ``ASH_*`` variable is dropped. The product reads its options from the
+    environment too (``ASH_WORKSPACE_CONFIG``, ``ASH_CONFIG``,
+    ``ASH_EXCLUDED_SCANNERS``, ``ASH_SCANNERS``, ``ASH_PROJECT_NAME``, ...), so an
+    operator's shell would otherwise change which run this script judges without
+    any trace in its output. The gate's inputs are its command line and nothing
+    else. ``PYTHONPATH`` is set after the scrub, so the child imports the working
+    tree, and output is forced to UTF-8 both ways.
+    """
+    source = os.environ if base is None else base
+    env = {key: value for key, value in source.items() if not key.startswith("ASH_")}
+    env["PYTHONIOENCODING"] = "utf-8"
+    env.setdefault("PYTHONUTF8", "1")
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent)
+    return env
+
+
 def run_ash(
     workspace: Path,
     output_dir: Path,
     policy: Path | None = None,
+    timeout: float = DEFAULT_SCAN_TIMEOUT_SECONDS,
 ) -> tuple[int, dict[str, Any], str]:
-    """Run a real workspace scan; return (exit code, workspace payload, output)."""
+    """Run a real workspace scan; return (exit code, workspace payload, output).
+
+    Raises ``subprocess.TimeoutExpired`` when the scan outlives *timeout*; the
+    caller reports that as a broken run rather than hanging the gate.
+    """
     argv = [
         sys.executable,
         "-m",
@@ -207,17 +255,18 @@ def run_ash(
     # cwd is the repository root and is passed to the child rather than set with
     # os.chdir, matching verify_multi_project_attribution.py: this project
     # deliberately removed process-wide cwd dependence.
-    env = dict(os.environ)
-    env["PYTHONIOENCODING"] = "utf-8"
-    env.setdefault("PYTHONUTF8", "1")
-    env["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent)
-
     completed = subprocess.run(  # nosec B603 - argv list, no shell, argv[0] is sys.executable
         argv,
         capture_output=True,
-        text=True,
+        # The child is told to write UTF-8 (child_environment), so it is decoded
+        # as UTF-8 here too. text=True alone decodes with the locale codec, and
+        # a cp1252 console turned a box-drawing character in the child's table
+        # into a UnicodeDecodeError in this process.
+        encoding="utf-8",
+        errors="replace",
         cwd=str(Path(__file__).resolve().parent.parent),
-        env=env,
+        env=child_environment(),
+        timeout=timeout,
         # Explicitly not check=True. A non-zero exit is the expected result for
         # most runs here: 2 when a project has actionable findings, 4 when the
         # policy is deliberately malformed. Raising on it would turn the
@@ -237,14 +286,40 @@ def _by_project(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {entry["project"]: entry for entry in payload.get("projects", [])}
 
 
-def main() -> int:
+def same_file(recorded: str | None, expected: Path) -> bool:
+    """Whether the path the plan recorded names the same file as *expected*.
+
+    Both sides are resolved before comparing. The plan records the policy path
+    as it was given; comparing that text to ``expected.resolve()`` failed on
+    every host whose temporary directory is reached through a symlink or a short
+    name (macOS ``/var`` -> ``/private/var``, Windows ``8.3`` names), which is a
+    property of the host and not of the plan.
+    """
+    if not recorded:
+        return False
+    try:
+        return Path(recorded).resolve() == expected.resolve()
+    except OSError:
+        return False
+
+
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--keep",
         action="store_true",
         help="keep the scratch directory for inspection",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=DEFAULT_SCAN_TIMEOUT_SECONDS,
+        help=(
+            "seconds to allow each scan before the gate gives up on it "
+            f"(default: {DEFAULT_SCAN_TIMEOUT_SECONDS:g})"
+        ),
+    )
+    args = parser.parse_args(argv)
 
     scratch = Path(tempfile.mkdtemp(prefix="ash-policy-verify-"))
     failures = []
@@ -263,7 +338,9 @@ def main() -> int:
         workspace = build_fixture(scratch)
 
         # ---- Run A: no policy -------------------------------------------------
-        code_a, payload_a, out_a = run_ash(workspace, scratch / "out-a")
+        code_a, payload_a, out_a = run_ash(
+            workspace, scratch / "out-a", timeout=args.timeout
+        )
         projects_a = _by_project(payload_a)
 
         if not projects_a:
@@ -291,17 +368,29 @@ def main() -> int:
             (strict_a.get("actionable_finding_count") or 0) > 0,
             f"actionable={strict_a.get('actionable_finding_count')}",
         )
+        if failures:
+            # A policy verdict over a broken fixture is not a measurement, and
+            # the documented contract is to say so rather than print one.
+            print("FIXTURE BROKEN: a positive control failed; no policy verdict")
+            for label in failures:
+                print(f"  - {label}")
+            return 3
 
         # ---- Run B: MEDIUM ceiling -------------------------------------------
+        # The suppressed file is the lax project's SECOND copy of its finding,
+        # never runner.py: suppressing the only finding the ceiling could
+        # tighten would make assertion 1 fail on a correct implementation.
         policy = _write(
             scratch / ".ash" / "ash-workspace.yaml",
             "workspace:\n"
             "  max_severity_threshold: MEDIUM\n"
             "  suppressions:\n"
-            "    - path: lax/src/runner.py\n"
+            f"    - path: {LAX_SUPPRESSED_WORKSPACE_PATH}\n"
             "      reason: verification fixture\n",
         )
-        code_b, payload_b, out_b = run_ash(workspace, scratch / "out-b", policy=policy)
+        code_b, payload_b, out_b = run_ash(
+            workspace, scratch / "out-b", policy=policy, timeout=args.timeout
+        )
         projects_b = _by_project(payload_b)
 
         if not projects_b:
@@ -383,7 +472,22 @@ def main() -> int:
                 "lax carries severity, so there is nothing to qualify",
             )
 
-        # 3. Suppression scoping, on the resolved plan.
+        # 3. Suppression scoping, on the findings and on the resolved plan.
+        # finding_count is the unsuppressed count, so the suppressed copy of the
+        # lax finding drops out of it in run B and nothing else changes.
+        check(
+            "workspace suppression reaches the scan: lax loses one finding",
+            (lax_a.get("finding_count") or 0) - (lax_b.get("finding_count") or 0) == 1,
+            f"lax finding_count {lax_a.get('finding_count')} -> "
+            f"{lax_b.get('finding_count')}",
+        )
+        check(
+            "workspace suppression does NOT reach the other project's findings",
+            strict_a.get("finding_count") == strict_b.get("finding_count"),
+            f"strict finding_count {strict_a.get('finding_count')} -> "
+            f"{strict_b.get('finding_count')}",
+        )
+
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
         from automated_security_helper.workspace.resolver import resolve_workspace
 
@@ -391,7 +495,8 @@ def main() -> int:
         by_key = {p.key: p for p in plan.projects}
         check(
             "workspace suppression is pushed into the project it names",
-            [s.path for s in by_key["lax"].policy_suppressions] == ["src/runner.py"],
+            [s.path for s in by_key["lax"].policy_suppressions]
+            == [LAX_SUPPRESSED_PROJECT_PATH],
             f"lax={[s.path for s in by_key['lax'].policy_suppressions]}",
         )
         check(
@@ -401,7 +506,7 @@ def main() -> int:
         )
         check(
             "the plan records which policy file was applied",
-            plan.workspace_config_source == policy.resolve().as_posix(),
+            same_file(plan.workspace_config_source, policy),
             f"source={plan.workspace_config_source}",
         )
 
@@ -413,7 +518,9 @@ def main() -> int:
             "    - path: '*/sub/*.py'\n"
             "      reason: no sound rewrite\n",
         )
-        code_c, _, out_c = run_ash(workspace, scratch / "out-c", policy=bad_policy)
+        code_c, _, out_c = run_ash(
+            workspace, scratch / "out-c", policy=bad_policy, timeout=args.timeout
+        )
         check(
             "an unrewritable policy pattern exits 4",
             code_c == 4,
@@ -430,6 +537,7 @@ def main() -> int:
             workspace,
             scratch / "out-d",
             policy=scratch / "lax" / ".ash" / "ash.yaml",
+            timeout=args.timeout,
         )
         check(
             "naming a project config as the policy file exits 4",
@@ -450,6 +558,19 @@ def main() -> int:
             return 1
         print("\nWorkspace policy verified end to end on a real scan.")
         return 0
+    except subprocess.TimeoutExpired as expired:
+        # One hung scanner used to hang the whole gate. Report it as a broken
+        # run, with what the child had written, rather than as a policy verdict.
+        print(f"FIXTURE BROKEN: a scan did not finish within {args.timeout:g} seconds")
+        for stream in (expired.stdout, expired.stderr):
+            if stream:
+                text = (
+                    stream.decode("utf-8", "replace")
+                    if isinstance(stream, bytes)
+                    else str(stream)
+                )
+                print(text[-3000:])
+        return 3
     finally:
         if args.keep:
             print(f"\nScratch kept at {scratch}")
