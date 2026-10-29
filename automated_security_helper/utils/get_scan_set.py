@@ -1273,6 +1273,10 @@ def _confine_base_path(candidate: Path, root_base_path: Path, marker: str) -> Pa
     ``is_relative_to`` rather than ``os.path.commonpath`` because it is total --
     ``commonpath`` raises on two Windows paths that share no drive, which is
     exactly one of the cases that has to be answered "not contained".
+
+    The caller passes an absolute *root_base_path* and a *candidate* joined onto
+    it, so the ``expanduser`` here (and igittigitt's) has nothing to expand: a
+    directory named ``~`` in the tree is a directory, not a home.
     """
     root_absolute = Path(os.path.abspath(os.path.expanduser(str(root_base_path))))
     candidate_absolute = Path(os.path.abspath(os.path.expanduser(str(candidate))))
@@ -1401,7 +1405,16 @@ def get_ash_ignorespec_with_attribution(
     # Windows drive, which a rootless "/" cannot: abspath binds it to the drive
     # of the current working directory, so an interpreter on D: compiled rules
     # that could not match a tree on C:.
-    root_base_path = Path(source_dir)
+    #
+    # Made absolute here, before any directory name is joined onto it. igittigitt
+    # runs every base through os.path.expanduser before abspath, and so does
+    # _confine_base_path, and expanduser rewrites a path that STARTS with "~":
+    # under a scan root given as ".", a top-level directory named "~" (or
+    # "~user") gave the ignore file inside it the base "~/", which both turned
+    # into a home directory, outside the root, so its rules were re-anchored at
+    # the scan root and applied to the whole tree. "<absolute root>/~" starts
+    # with no tilde and is left alone.
+    root_base_path = Path(os.path.abspath(source_dir))
 
     # Track the current base directory from section markers.
     # Lines like "######### START CONTENTS: ${SOURCE_DIR}/.ruff_cache/.gitignore #########"

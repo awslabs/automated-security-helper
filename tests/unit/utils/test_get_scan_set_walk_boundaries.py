@@ -240,3 +240,30 @@ class TestWhatThePrunedWalkKeeps:
         )
 
         assert {"app.py", "vendor/keep.js"} <= found
+
+
+class TestADirectoryNamedTildeIsNotAHome:
+    """Under a scan root given as ``.``, an ignore file in a top-level directory
+    named ``~`` got the base ``~/``, which ``os.path.expanduser`` (igittigitt's and
+    ``_confine_base_path``'s) turned into the home directory, outside the root, so
+    its rules were re-anchored at the scan root and applied to the whole tree."""
+
+    @pytest.mark.parametrize("name", ["~", "~someone"])
+    def test_the_rules_stay_in_the_directory_that_holds_them(
+        self, tmp_path, monkeypatch, name
+    ):
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        root = tmp_path / "tree"
+        _write(root, f"{name}/.gitignore", "*.py\n")
+        _write(root, f"{name}/inside.py")
+        _write(root, "outside.py")
+        monkeypatch.chdir(root)
+
+        found = {Path(f).as_posix().removeprefix("./") for f in scan_set(source=".")}
+
+        assert "outside.py" in found, found
+        assert f"{name}/inside.py" not in found, found
+        assert f"{name}/.gitignore" in found, found
