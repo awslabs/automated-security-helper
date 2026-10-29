@@ -31,8 +31,9 @@ the defaults, resolves. A ``patch`` op is refused whatever it writes.
 ``/sandbox`` and ``/ash_plugin_modules`` are not checked here. For a
 client-delivered file both are already restrict-only: ``sandbox_grants`` keeps
 its grants out and lets its mode only turn the sandbox on, and
-``plugin_module_trust`` keeps only installed modules outside the tree (and no
-package that sends findings or source off the host). Refusing them as well would
+``plugin_module_trust`` keeps only installed modules outside the scanned tree and
+outside every git checkout (a virtualenv inside a checkout counts as inside), and
+no package that sends findings or source off the host. Refusing them as well would
 refuse a file that tightens the sandbox.
 
 The rules are a ``ClientConfigRules``: the policy and the trusted config it came
@@ -803,9 +804,13 @@ def _with_own_patch(document: Any, base: AshConfig) -> Any:
     So the restrict-only check sees a sandbox setting or plugin module a ``patch``
     op asks for, as well as one written out. Applied over ``base`` because an op
     may write into a list or section the document itself does not hold, and
-    ``base``'s own values ask for nothing beyond it. A patch that does not apply
-    there is left to resolution, which applies it over the real chain, and to the
-    confinement that drops whatever it widens.
+    ``base``'s own values ask for nothing beyond it. When the ops do not apply
+    there as a whole, each op is applied on its own and the ones that apply are
+    kept: an op that writes a sandbox grant or a plugin module still reaches the
+    walk when a sibling op fails, instead of the whole patch falling back to the
+    unpatched document. An op that applies in neither form is left to
+    resolution, which applies it over the real chain, and to the confinement
+    that drops whatever it widens.
     """
     from automated_security_helper.config.config_sources import (
         EXTENDS_KEY,
@@ -819,13 +824,23 @@ def _with_own_patch(document: Any, base: AshConfig) -> Any:
         return document
     own = {k: v for k, v in document.items() if k not in (PATCH_KEY, EXTENDS_KEY)}
     start = deep_merge(base.model_dump(mode="json", by_alias=True), own)
+    ops = document[PATCH_KEY]
+    where = Path("delivered config")
     try:
-        patched = _apply_patch(start, document[PATCH_KEY], Path("delivered config"))
+        # ``_apply_patch`` answers a ``_Patched``; the restrict-only walk reads
+        # the patched document it holds, as resolution does.
+        return _apply_patch(start, ops, where).document
     except ASHConfigSourceError:
+        pass
+    if not isinstance(ops, list):
         return document
-    # ``_apply_patch`` answers a ``_Patched``; the restrict-only walk reads the
-    # patched document it holds, as resolution does.
-    return patched.document
+    current: Any = start
+    for op in ops:
+        try:
+            current = _apply_patch(current, [op], where).document
+        except ASHConfigSourceError:
+            continue
+    return current
 
 
 def _writes_a_tightening(document: Any, denial: Any) -> bool:
@@ -1381,27 +1396,28 @@ def trusted_default_config(
     although the load itself ignores that value.
     """
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
-    from automated_security_helper.config.config_sources import by_every_name
-    from automated_security_helper.config.default_config import (
-        default_config_document,
-        get_default_config,
-    )
+    from automated_security_helper.config.default_config import get_default_config
     from automated_security_helper.utils.log import ASH_LOGGER
 
-    document = default_config_document()
-    chain = list(document.chain) if document is not None else []
-    delivered = by_every_name(
-        config_is_client_supplied, document.names if document is not None else None
-    )
-    if any(delivered(path) for path in chain):
-        ASH_LOGGER.warning(
-            "ASH_CONFIG names a file under the MCP workspace root, which an MCP "
-            "client delivered, so ASH's built-in defaults are the trusted config "
-            "instead. Keep the server's config outside the MCP workspace root."
-        )
-        return AshConfig()
+    # One read: the chain is judged from the files the load itself read
+    # (``views``, the carry get_default_config fills from the same read), not
+    # from a second resolution of ASH_CONFIG that a file changed in between
+    # could make disagree with the configuration returned.
+    views: List[Tuple[List[Path], List[Path], FrozenSet[Path]]] = []
     if repository is None:
-        return get_default_config()
-    return get_default_config(
-        repository.confine, repository_file=repository.is_repository_file
-    )
+        config = get_default_config(views=views)
+    else:
+        config = get_default_config(
+            repository.confine,
+            views=views,
+            repository_file=repository.is_repository_file,
+        )
+    for chain, named, _environment_paths in views:
+        if any(config_is_client_supplied(path) for path in (*chain, *named)):
+            ASH_LOGGER.warning(
+                "ASH_CONFIG names a file under the MCP workspace root, which an MCP "
+                "client delivered, so ASH's built-in defaults are the trusted config "
+                "instead. Keep the server's config outside the MCP workspace root."
+            )
+            return AshConfig()
+    return config
