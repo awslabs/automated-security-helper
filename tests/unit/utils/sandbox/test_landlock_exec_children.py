@@ -298,3 +298,54 @@ def test_a_refused_parent_death_signal_is_noted_and_the_child_goes_on(
     noted = capsys.readouterr().err
     assert "prctl(PR_SET_PDEATHSIG)" in noted
     assert noted.startswith("ash-landlock: ")
+
+
+def test_the_socket_filter_route_restores_the_dispositions_before_its_exec(
+    monkeypatch,
+):
+    """The bwrap and firejail route execs in place, with no fork; it resets
+    SIGPIPE and SIGXFSZ too, last before the exec."""
+    calls: List[Tuple[str, tuple]] = []
+    monkeypatch.setattr(landlock_exec, "os", _Recording(os, {"execvp"}, calls))
+    monkeypatch.setattr(landlock_exec, "signal", _Recording(signal, {"signal"}, calls))
+    monkeypatch.setattr(landlock_exec, "libc", _Recording(None, {"prctl"}, calls))
+    monkeypatch.setattr(
+        landlock_exec,
+        "apply_socket_seccomp",
+        lambda allow_ip: calls.append(("apply_socket_seccomp", (allow_ip,))),
+    )
+
+    landlock_exec.exec_with_socket_filter(True, ["/bin/true"])
+
+    names = [name for name, _ in calls]
+    assert names[-1] == "execvp"
+    assert names[-3:-1] == ["signal", "signal"]
+    assert {args for name, args in calls if name == "signal"} == {
+        (signal.SIGPIPE, signal.SIG_DFL),
+        (signal.SIGXFSZ, signal.SIG_DFL),
+    }
+    assert names.index("apply_socket_seccomp") < names.index("signal")
+
+
+def test_a_late_pass_without_children_files_still_reads_the_direct_children(
+    procfs, monkeypatch
+):
+    """The deadline is already behind when the walk starts and the kernel has no
+    children files: the one listing of /proc still happens, so the scanner's own
+    children are found and killed; only the deeper levels are left."""
+    procfs(
+        {
+            _task("self"): ["7"],
+            f"{_task('self')}/7": [],
+            "/proc": ["1", str(ME), "101", "201", "self"],
+            "/proc/1/stat": _stat(1, 0),
+            f"/proc/{ME}/stat": _stat(ME, 1),
+            "/proc/101/stat": _stat(101, ME),
+            "/proc/201/stat": _stat(201, 101),
+        }
+    )
+    monkeypatch.setattr(
+        landlock_exec, "time", types.SimpleNamespace(monotonic=lambda: 10.0)
+    )
+
+    assert landlock_exec._descendants(until=5.0) == [101]

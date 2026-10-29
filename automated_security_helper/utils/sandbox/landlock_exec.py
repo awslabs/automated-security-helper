@@ -398,10 +398,23 @@ def exec_with_socket_filter(allow_ip: bool, command: List[str]) -> NoReturn:
     if libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
         fail(f"prctl(PR_SET_NO_NEW_PRIVS): {os.strerror(ctypes.get_errno())}")
     apply_socket_seccomp(allow_ip)
+    _restore_dispositions()
     try:
         os.execvp(command[0], command)
     except OSError as e:
         fail(f"exec {command[0]}: {e}")
+
+
+def _restore_dispositions() -> None:
+    """Put SIGPIPE and SIGXFSZ back to their defaults before an exec.
+
+    The interpreter ignores both at startup and an exec keeps an ignored
+    disposition, so without this the scanner would run with them ignored, unlike
+    the same scanner started unwrapped (subprocess restores them in every child
+    it starts). Both exec routes of this program call it last before the exec.
+    """
+    for restored in (signal.SIGPIPE, signal.SIGXFSZ):
+        signal.signal(restored, signal.SIG_DFL)
 
 
 def _children_files(pid: int = 0) -> Optional[List[int]]:
@@ -483,14 +496,16 @@ def _descendants(until: Optional[float] = None) -> List[int]:
     ``until`` is a time.monotonic() deadline: past it the walk returns what it
     has found by then, so one reap pass ends inside STOP_REAP_DEADLINE_SECONDS
     however deep the tree or slow /proc, and that pass kills that much. The
-    direct children are always read. On a kernel without children files /proc is
-    listed once for the whole walk (``_parent_map``), not once per descendant.
+    direct children are always read, on either path: the listing that finds them
+    is bounded by PROC_SCAN_LIMIT alone, so a late pass still kills what the
+    scanner itself started. On a kernel without children files /proc is listed
+    once for the whole walk (``_parent_map``), not once per descendant.
     """
     found: List[int] = []
     parents: Optional[Dict[int, List[int]]] = None
     frontier = _children_files()
     if frontier is None:
-        parents = _parent_map(until)
+        parents = _parent_map()
         frontier = parents.get(os.getpid(), [])
     while frontier:
         found += frontier
@@ -539,12 +554,7 @@ def _child_setup(restrict: Callable[[], None]) -> None:
             )
             + "\n"
         )
-    # The interpreter ignores these at startup and an exec keeps an ignored
-    # disposition, so without this the scanner would run with SIGPIPE and SIGXFSZ
-    # ignored, unlike the same scanner started unwrapped (subprocess restores
-    # them in every child it starts).
-    for restored in (signal.SIGPIPE, signal.SIGXFSZ):
-        signal.signal(restored, signal.SIG_DFL)
+    _restore_dispositions()
     restrict()
 
 
