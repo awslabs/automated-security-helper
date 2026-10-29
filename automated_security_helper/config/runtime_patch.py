@@ -938,6 +938,14 @@ def config_document_denials(
         if config is not None
         else None
     )
+    # The leaves the trusted config read from the environment: never exempt by
+    # equality, since a document that repeats such a value would learn, from
+    # the absence of a refusal, that the value was right.
+    environment_pointers = (
+        _environment_read_pointers(config, dump)
+        if config is not None and dump is not None
+        else []
+    )
     # A client-patched copy is the trusted profile written whole, so a leaf it
     # repeats can differ from ``dump`` only in how it is written: a defaulted key
     # the writer left out, a spelling the model normalizes. Such a leaf is also
@@ -1002,17 +1010,58 @@ def config_document_denials(
             continue
         if kind != "patch" and config is not None and dump is not None:
             present, value = _trusted_value(config, dump, path, plugin_keys)
-            if present and (
-                (kind == "key" and repeats_trusted)
-                or (kind != "key" and value == _as_json(op["value"]))
+            # A leaf whose trusted value came from the environment gets no
+            # exemption in either comparison: an equal value there is the one
+            # oracle a denied field must not answer.
+            environment_read = kind != "key" and _covered(
+                environment_pointers, path, plugin_keys
+            )
+            if (
+                present
+                and not environment_read
+                and (
+                    (kind == "key" and repeats_trusted)
+                    or (kind != "key" and value == _as_json(op["value"]))
+                )
             ):
                 continue
-            if present and kind != "key" and repeats_trusted:
+            if present and not environment_read and kind != "key" and repeats_trusted:
                 read_present, read_value = as_read(path)
                 if read_present and value == read_value:
                     continue
         denials.append(DocumentDenial(key, path, reason, kind == "patch"))
     return denials
+
+
+def _environment_read_pointers(config: AshConfig, dump: Dict[str, Any]) -> List[str]:
+    """The JSON pointers, in ``dump``'s keys, of the values ``config``'s files read
+    from the environment: the leaves ``config_document_denials``' repeat
+    exemption never applies to.
+
+    From the record's value rewrites (``_written_references``) and the
+    references the load kept (``_environment_references``), each placed in the
+    dump as a runtime patch's pointers name it (config_validator.dumped_path). A
+    reference with no place in the dump names no leaf.
+    """
+    from automated_security_helper.config.config_validator import dumped_path
+
+    paths: List[Tuple[Any, ...]] = []
+    for rewrite in getattr(config, "_written_references", None) or []:
+        if getattr(rewrite, "kind", None) == "value":
+            paths.append(tuple(rewrite.path))
+    for reference in getattr(config, "_environment_references", None) or ():
+        if not getattr(reference, "key", False):
+            paths.append(tuple(getattr(reference, "path", ()) or ()))
+    pointers: List[str] = []
+    for path in paths:
+        if not path:
+            continue
+        at = dumped_path(config, dump, path)
+        if at:
+            pointers.append(
+                "/" + "/".join(_escape_pointer_segment(str(segment)) for segment in at)
+            )
+    return list(dict.fromkeys(pointers))
 
 
 def _built_in_reporter_names() -> frozenset:
@@ -1303,6 +1352,7 @@ def apply_runtime_patch(
             # compares one character: the refusal is the same whatever the op's
             # value, and no op is applied.
             raise RuntimePatchDeniedError(op, INTO_TEXT_REFUSAL)
+        references.refuse_a_write_over(op)
         references.follow(op, patched)
         followed.follow(op, patched)
         failure = None
@@ -1496,6 +1546,11 @@ class _ReferencesThroughPatch:
         self._shadow: Any = copy.deepcopy(dumped) if rewrites else None
         self._tokens: Dict[str, int] = {}
         self._holders: Dict[int, Any] = {}
+        #: The dump paths of the values read from the environment that a model
+        #: typed (a number, a true/false value): no string token can stand in
+        #: for one, so an op that writes over one is refused instead
+        #: (refuse_a_write_over).
+        self._typed: List[Tuple[str, ...]] = []
         self._lost = False
         for ident, (rewrite, at) in enumerate(zip(rewrites, self._where)):
             if at is None:
@@ -1507,10 +1562,44 @@ class _ReferencesThroughPatch:
                     token = f"ash-reference-{secrets.token_hex(16)}"
                     container[at[-1]] = token
                     self._tokens[token] = ident
+                elif _holds_a_typed_value(container, at[-1]):
+                    self._typed.append(tuple(str(part) for part in at))
             elif rewrite.kind == "key":
                 holder = _node_at(self._shadow, at)
                 if isinstance(holder, dict):
                     self._holders[ident] = holder
+
+    def refuse_a_write_over(self, op: Dict[str, Any]) -> None:
+        """Refuse ``op`` when it writes over a value the base read from the
+        environment that a model typed (a number, a true/false value), or
+        removes or replaces what holds one.
+
+        Such a value carries no token: the tokens are strings, and a number is
+        not one. Followed through the patch, its rewrite was kept whatever an
+        op wrote at its place, so the session copy wrote the profile's reference
+        where the client's own number stood, and a test op against the written
+        form answered for the client's value. An op whose path is the leaf, or
+        a place above it (a mapping or list entry that holds it, replaced or
+        removed whole), is refused outright; a move's source is such a path too.
+        Only the strict tracker refuses: the lenient one follows the
+        configuration's own references, which the strict one already guards.
+        """
+        if not self._strict or not self._typed:
+            return
+        if op.get("op") not in ("add", "replace", "remove", "move", "copy"):
+            return
+        pointers = [op.get("path", "")]
+        if op.get("op") == "move":
+            pointers.append(op.get("from", ""))
+        for pointer in pointers:
+            if not isinstance(pointer, str):
+                continue
+            segments = _path_segments(pointer)
+            for at in self._typed:
+                if list(at[: len(segments)]) == segments:
+                    raise RuntimePatchDeniedError(
+                        op, TYPED_VALUE_READ_FROM_THE_ENVIRONMENT_REFUSAL
+                    )
 
     def track(self, op: Dict[str, Any]) -> None:
         """Apply ``op``, which applied to the configuration, to the copy with
@@ -1661,6 +1750,24 @@ KEY_READ_FROM_THE_ENVIRONMENT_REFUSAL = (
     "there"
 )
 
+#: The refusal of an op that writes over a value the profile read from the
+#: environment and a model typed (a number, a true/false value), or replaces or
+#: removes what holds one. It names no value or location.
+TYPED_VALUE_READ_FROM_THE_ENVIRONMENT_REFUSAL = (
+    "the path writes over a value the profile read from the environment that is "
+    "not text, or replaces what holds it; such a value cannot be followed "
+    "through a patch, so nothing at or above it can be patched"
+)
+
+#: The refusal of an op that adds or removes a list entry above a mapping that
+#: holds a key the profile read from the environment, which would move the
+#: mapping to another index. It names no value or location.
+LIST_SHIFT_ABOVE_A_KEY_READ_FROM_THE_ENVIRONMENT_REFUSAL = (
+    "the path adds or removes an entry of a list that holds a mapping with a "
+    "key the profile read from the environment, which would move that mapping "
+    "to another index; such a list cannot be patched at an index"
+)
+
 #: The refusal of every op on a profile that reads a key from the environment
 #: where the configuration has built-in keys. One text, naming no key or value:
 #: the profile's keys are answered the same whatever the variable holds.
@@ -1789,6 +1896,30 @@ def _refuse_a_key_read_from_the_environment(
         known[mapping] = known.get(mapping, set()) | named
     for op in patch_ops:
         segments = _path_segments(op.get("path", ""))
+        # An add or remove at an index of a list that holds such a mapping
+        # moves the mapping to another index, and every later op's path is
+        # then matched against the index the mapping no longer has: refused
+        # outright, whatever the index, rather than tracked (a move's source
+        # is a remove). An append (the "-" index) moves nothing.
+        shifting = [segments] if op.get("op") in ("add", "remove", "copy") else []
+        if op.get("op") == "move":
+            source = op.get("from", "")
+            shifting = [segments] + (
+                [_path_segments(source)] if isinstance(source, str) else []
+            )
+        for shifted in shifting:
+            if not shifted or not _LIST_INDEX.fullmatch(shifted[-1]):
+                continue
+            depth = len(shifted) - 1
+            for mapping in known:
+                if (
+                    depth < len(mapping)
+                    and _LIST_INDEX.fullmatch(mapping[depth])
+                    and tuple(shifted[:depth]) == mapping[:depth]
+                ):
+                    raise RuntimePatchDeniedError(
+                        None, LIST_SHIFT_ABOVE_A_KEY_READ_FROM_THE_ENVIRONMENT_REFUSAL
+                    )
         for mapping in list(known):
             depth = len(mapping)
             if len(segments) <= depth:
@@ -1834,6 +1965,18 @@ def _node_at(document: Any, path: Tuple[Any, ...]) -> Any:
         else:
             return None
     return node
+
+
+def _holds_a_typed_value(container: Any, segment: Any) -> bool:
+    """Whether ``container[segment]`` is a value a model typed from text: a
+    number or a true/false value (never a string, None or a container)."""
+    if isinstance(container, dict):
+        held = container.get(segment)
+    elif isinstance(container, list) and isinstance(segment, int):
+        held = container[segment] if 0 <= segment < len(container) else None
+    else:
+        return False
+    return isinstance(held, (bool, int, float)) and not isinstance(held, str)
 
 
 def _holds_text(container: Any, segment: Any) -> bool:
