@@ -446,14 +446,20 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         from automated_security_helper.config.path_trust import (
             derived_roots,
             refused_derived_product,
+            resolved_path,
         )
 
         context_config = getattr(self.context, "config", None)
         for index, conf_path in enumerate(possible_config_paths):
             configured = index == 0 and self.config.options.config_file is not None
-            candidate = Path(conf_path)
-            if not candidate.is_absolute():
-                candidate = source_dir / candidate
+            # As grype will read it: "~" expanded, a relative path taken from the
+            # source directory, symlinks resolved (path_trust.resolved_path, the
+            # resolution refused_derived_product checks). Joining the value as
+            # written under the source directory read a "~/..." path as a file
+            # below the scanned tree: the operator's home config was judged
+            # missing and an empty one passed, or a same-named file the
+            # repository planted at <source>/~/... was handed to grype.
+            candidate = resolved_path(conf_path, source_dir)
             if candidate.exists():
                 if refused_derived_product(
                     candidate,
@@ -503,8 +509,8 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                         level=logging.WARNING,
                     )
                 self._warn_if_config_moves_the_database(candidate)
-                resolved_config = candidate.resolve()
-                configured_config = candidate
+                resolved_config = candidate
+                configured_config = Path(conf_path)
                 self.args.extra_args.append(
                     ToolExtraArg(
                         key="--config",
@@ -594,7 +600,14 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         global_ignore_paths: List[IgnorePathWithReason],
     ):
         """Resolve final argv, results path, and subprocess env for Grype."""
-        target_results_dir = self.results_dir.joinpath(target_type)
+        # Absolute, as the syft scanner does: grype runs with the scanned source
+        # as its working directory (PluginBase._run_subprocess), so a relative
+        # output directory (``ash --output-dir out``) would put results_sarif.sarif
+        # under the scanned tree, where the scan reads it as source and the
+        # results file ASH then opens does not exist.
+        target_results_dir = Path(os.path.abspath(self.results_dir)).joinpath(
+            target_type
+        )
         results_file = target_results_dir.joinpath("results_sarif.sarif")
         results_file.parent.mkdir(exist_ok=True, parents=True)
         # Each link leaving the target, and each path the global ignore paths

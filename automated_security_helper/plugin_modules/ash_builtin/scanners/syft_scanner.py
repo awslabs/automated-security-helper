@@ -30,6 +30,7 @@ from automated_security_helper.utils.download_utils import (
 from automated_security_helper.config.path_trust import (
     cwd_outside_scanned_tree,
     honored_path,
+    resolved_path,
 )
 from automated_security_helper.utils.link_exclusions import syft_excludes
 from automated_security_helper.utils.error_text import text_without_values
@@ -203,9 +204,13 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         context_config = getattr(self.context, "config", None)
         for index, conf_path in enumerate(possible_config_paths):
             configured = index == 0 and self.config.options.config_file is not None
-            candidate = Path(conf_path)
-            if not candidate.is_absolute():
-                candidate = source_dir / candidate
+            # As syft will read it: "~" expanded, a relative path taken from the
+            # source directory (path_trust.resolved_path, the resolution
+            # honored_path checks). Joining the value as written under the
+            # source directory read a "~/..." path as a file below the scanned
+            # tree, so the operator's home config was judged missing and an
+            # empty one passed in its place.
+            candidate = resolved_path(conf_path, source_dir)
             if candidate.exists():
                 honored = honored_path(
                     conf_path,
@@ -226,13 +231,16 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 )
                 if honored is None:
                     if configured:
+                        # honored_path has logged why (inside the scanned tree,
+                        # delivered by an MCP client, or a work product derived
+                        # from the repository); this line says what runs instead.
                         self._use_empty_config()
                         ASH_LOGGER.warning(
-                            "Configured syft config file was not used because "
-                            "it is a work product derived from the scanned "
-                            "repository. Syft will run with an empty config "
-                            "file that ASH writes; no config file is "
-                            "discovered from the scanned tree in its place."
+                            "Configured syft config file was not used; the "
+                            "warning above names the file and the reason. Syft "
+                            "will run with an empty config file that ASH writes; "
+                            "no config file is discovered from the scanned tree "
+                            "in its place."
                         )
                         break
                     continue
