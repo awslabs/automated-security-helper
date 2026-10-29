@@ -3446,6 +3446,42 @@ def _group_survives(pgid: int) -> bool:
     return _group_exists(pgid)
 
 
+#: How often _wait_for_group_before_cleanup reads the group again.
+_GROUP_WAIT_POLL_SECONDS = 0.05
+
+
+def _wait_for_group_before_cleanup(process: Any) -> None:
+    """Wait, bounded, for the child's process group to end before a plan's cleanup.
+
+    A sandbox plan's cleanup starts with ``sweep_writable``, which removes what a
+    scanner left under its writable roots. A wrapper that execs the tool with no
+    reaper (the sandbox-exec setsid wrapper) can leave a grandchild running after
+    the child itself has exited, and the sweep then runs while that grandchild
+    still writes. When the child was started as the leader of its own group, the
+    group is read with the file's own :func:`_group_survives` every
+    ``_GROUP_WAIT_POLL_SECONDS`` until it is gone or
+    ``_KILLED_GROUP_SETTLE_SECONDS`` has passed. Nothing is signalled: a group
+    still there at the bound is logged at DEBUG and the cleanup runs as before.
+    A child that was not a group leader has no group under its pid, so the first
+    read returns False and nothing waits; ``None`` (no child started) and
+    Windows, where there are no process groups, return at once.
+    """
+    if process is None or os.name == "nt":
+        return
+    pid = getattr(process, "pid", None)
+    if not isinstance(pid, int) or pid <= 0:
+        return
+    deadline = time.monotonic() + _KILLED_GROUP_SETTLE_SECONDS
+    while _group_survives(pid):
+        if time.monotonic() >= deadline:
+            ASH_LOGGER.debug(
+                f"Process group {pid} still has a member after "
+                f"{_KILLED_GROUP_SETTLE_SECONDS}s; the sandbox cleanup runs now"
+            )
+            return
+        time.sleep(_GROUP_WAIT_POLL_SECONDS)
+
+
 def _kill(
     process: subprocess.Popen,
     grace: Optional[float] = None,
@@ -3897,6 +3933,7 @@ def spawn_run(args: List[str], **kwargs: Any) -> subprocess.CompletedProcess:
                 _runner(sandboxed=True), plan.argv, kwargs, started
             )
         finally:
+            _wait_for_group_before_cleanup(started.process)
             plan.run_cleanup()
     except BaseException as error:
         try:
@@ -4684,6 +4721,7 @@ def run_command_with_output_handling(
         # registered root is the second defense (see _write_stream_logs).
         # The plan's private directories go in the same cleanup.
         if sandbox_plan is not None:
+            _wait_for_group_before_cleanup(started.process)
             sandbox_plan.run_cleanup()
 
         # Use the actual returncode from the result
@@ -5010,6 +5048,9 @@ def run_command_stream_output(
         encoding = "utf-8"
 
     sandbox_plan = None
+    # Bound before the spawn: the finally below reads it, and a plan prepared
+    # before a Popen that raised leaves no child to wait for.
+    process: Optional[subprocess.Popen] = None
     try:
         try:
             # Inside the spawn's own try, as in run_command_with_output_handling: a
@@ -5100,6 +5141,7 @@ def run_command_stream_output(
         return code
     finally:
         if sandbox_plan is not None:
+            _wait_for_group_before_cleanup(process)
             sandbox_plan.run_cleanup()
 
 
