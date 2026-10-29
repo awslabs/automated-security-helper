@@ -12,7 +12,7 @@ import os
 # its console checks each line it writes off a terminal, so none reads as a CI command.
 from automated_security_helper.utils.console import echo
 from automated_security_helper.utils.console import print  # noqa: A004
-from typing import Annotated, List, NoReturn, Optional
+from typing import Annotated, Callable, List, NoReturn, Optional
 import typer
 from pathlib import Path
 
@@ -446,8 +446,15 @@ def _handle_workspace_mode(
     scanners: tuple[str, ...] = (),
     exclude_scanners: tuple[str, ...] = (),
     ash_plugin_modules: tuple[str, ...] = (),
+    before_dry_run_exit: Callable[[str], object] | None = None,
 ) -> "WorkspacePlan":
     """Resolve a workspace and return the plan, or exit.
+
+    ``before_dry_run_exit`` is called with the workspace root right before a dry
+    run prints its plan and exits 0: the caller puts there the checks the real run
+    makes after workspace resolution (the output directory, ``--use-existing``), so
+    a dry run refuses what the run refuses instead of exiting 0 for a command line
+    the run then rejects.
 
     Every failure path is an exit, because a workspace that will not resolve has
     nothing to scan: 4 for a workspace definition or policy problem, 3 for a
@@ -588,6 +595,8 @@ def _handle_workspace_mode(
                 ),
                 code=WorkspaceExitCode.INTERNAL_ERROR,
             )
+        if before_dry_run_exit is not None:
+            before_dry_run_exit(plan.workspace_root)
         # Line by line: a line can quote a path, whose newline is shown as
         # \x0a so the path stays on its line of the plan.
         for line in plan.render_lines():
@@ -1371,6 +1380,23 @@ def run_ash_scan_cli_command(
             f"honor_ignore_files={'true' if honor_ignore_files else 'false'}"
         )
 
+    # Parsed above the workspace block, so a workspace dry run refuses a format the
+    # real run refuses instead of exiting 0 for it. Comma-separated.
+    if output_formats is None:
+        output_formats = []
+    parsed_output_formats = []
+    for item in output_formats:
+        for fmt in item.split(","):
+            fmt = fmt.strip()
+            if fmt:
+                try:
+                    parsed_output_formats.append(ExportFormat(fmt))
+                except ValueError:
+                    valid_formats = [f.value for f in ExportFormat]
+                    raise typer.BadParameter(
+                        f"'{fmt}' is not a valid format. Valid formats are: {', '.join(valid_formats)}"
+                    )
+
     workspace_plan: WorkspacePlan | None = None
     if workspace is not None:
         workspace_plan = _handle_workspace_mode(
@@ -1384,6 +1410,12 @@ def run_ash_scan_cli_command(
             scanners=tuple(scanners or ()),
             exclude_scanners=tuple(exclude_scanners or ()),
             ash_plugin_modules=tuple(ash_plugin_modules or ()),
+            # The output directory and --use-existing are settled below for the
+            # real run, after this block; the dry run makes the same checks
+            # before it prints its plan.
+            before_dry_run_exit=lambda root: _settle_output_dir(
+                root, output_dir, use_existing
+            ),
         )
         # The workspace root is the scan root: it is what container mode mounts at
         # /src, and what every workspace-relative finding path is relative to.
@@ -1406,10 +1438,8 @@ def run_ash_scan_cli_command(
     )
 
     ash_plugin_modules = split_plugin_modules(ash_plugin_modules)
-    # config_overrides is normalised above the workspace block; see the comment
-    # there for why it cannot happen here.
-    if output_formats is None:
-        output_formats = []
+    # config_overrides and output_formats are normalised above the workspace
+    # block; see the comments there for why neither can happen here.
     if phases is None:
         phases = [ExecutionPhase.CONVERT, ExecutionPhase.SCAN, ExecutionPhase.REPORT]
     if custom_build_arg is None:
@@ -1457,19 +1487,8 @@ def run_ash_scan_cli_command(
     # block, so that workspace resolution sees it. Appending here as well would
     # apply it twice.
 
-    # Parse comma-separated output formats
-    parsed_output_formats = []
-    for item in output_formats:
-        for fmt in item.split(","):
-            fmt = fmt.strip()
-            if fmt:
-                try:
-                    parsed_output_formats.append(ExportFormat(fmt))
-                except ValueError:
-                    valid_formats = [f.value for f in ExportFormat]
-                    raise typer.BadParameter(
-                        f"'{fmt}' is not a valid format. Valid formats are: {', '.join(valid_formats)}"
-                    )
+    # The output formats were parsed above the workspace block
+    # (parsed_output_formats).
 
     # Call run_ash_scan with all parameters, as a scan the entry point's SIGTERM
     # handler cancels (core/cancellation.py, "SIGTERM on the CLI"). The scope is
