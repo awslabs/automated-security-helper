@@ -225,17 +225,41 @@ def test_trivy_takes_the_operators_config_when_given_one(recorder, tmp_path):
 
 
 @pytest.mark.unit
-def test_grype_takes_no_config_file(recorder, tmp_path):
-    with pytest.raises(ValueError):
-        refresh.prepare_content_db(
-            "grype",
-            tmp_path,
-            offline=False,
-            **_where(tmp_path),
-            executable="grype",
-            config_file=tmp_path / "x.yaml",
-        )
-    assert recorder.calls == []
+def test_grype_takes_the_operators_config_when_given_one(recorder, tmp_path):
+    """A database mirror in the operator's grype config applies to the update too.
+
+    The caller establishes that the file is the operator's and outside the scanned
+    tree (the grype scanner passes one only then); given one, the update runs with
+    it, and given none, with the empty config, never with a file from the tree.
+    """
+    operator = tmp_path / "operator" / "grype.yaml"
+    operator.parent.mkdir()
+    operator.write_text("db:\n  update-url: https://mirror.example/grype-db\n")
+    refresh.prepare_content_db(
+        "grype",
+        tmp_path / "grype",
+        offline=False,
+        **_where(tmp_path),
+        executable="grype",
+        config_file=operator,
+    )
+    (call,) = recorder.calls
+    assert Path(call.argv[call.argv.index("-c") + 1]) == operator.absolute()
+    assert "mirror.example" in call.config_text
+    assert call.cwd != operator.parent
+    assert operator.is_file()
+    refresh.forget_prepared()
+    recorder.calls.clear()
+    refresh.prepare_content_db(
+        "grype",
+        tmp_path / "grype",
+        offline=False,
+        **_where(tmp_path),
+        executable="grype",
+    )
+    (call,) = recorder.calls
+    assert Path(call.argv[call.argv.index("-c") + 1]) != operator.absolute()
+    assert call.config_text == ""
 
 
 @pytest.mark.unit
