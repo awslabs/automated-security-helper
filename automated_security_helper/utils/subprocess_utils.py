@@ -3134,12 +3134,14 @@ def _forget_exited_groups() -> None:
     leader whose group still has members is kept: a sandbox wrapper exits while
     the tool it started runs on, and the group id is the only handle a later
     kill has on those processes. The kernel keeps a group id in use while any
-    member holds it, so the entry goes when the group does.
+    member holds it, so the entry goes when the group does. A group this process
+    may no longer signal (EPERM: a member now runs as another user) still exists,
+    so its entry is kept rather than letting the probe raise out of a spawn.
     """
     for pid, process in list(_RUNNING_GROUPS.items()):
         if process.poll() is None:
             continue
-        if os.name != "nt" and _signal_group(pid, 0):
+        if os.name != "nt" and _group_exists(pid):
             continue
         del _RUNNING_GROUPS[pid]
         discard_tool_group(pid)

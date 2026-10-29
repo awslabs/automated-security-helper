@@ -15,7 +15,9 @@ The kernel keeps a group id in use while any member holds it, so killpg with
 signal 0 tells an emptied group from one that still runs. The tests drive the
 reap path with a reaped fake leader and the group calls recorded: the entry is
 kept while the group answers, dropped once it is gone, and kill_running_groups
-still SIGKILLs the group of a leader that was reaped before it ran.
+still SIGKILLs the group of a leader that was reaped before it ran. A group the
+kernel refuses to probe (EPERM: a member now runs as another user) exists, so
+the entry is kept and nothing is raised out of the spawn that ran the reap.
 """
 
 from __future__ import annotations
@@ -63,11 +65,14 @@ class _GroupCalls:
     def __init__(self) -> None:
         self.calls: List[Tuple[int, int]] = []
         self.alive = True
+        self.refused = False
 
     def killpg(self, pgid: int, signum: int) -> None:
         self.calls.append((pgid, signum))
         if pgid != _FAKE_PGID or not self.alive:
             raise ProcessLookupError(f"group {pgid} is gone")
+        if self.refused:
+            raise PermissionError(f"group {pgid} holds another user's process")
         if signum == signal.SIGKILL:
             # The kernel ends the group; its id is released from here on.
             self.alive = False
@@ -122,6 +127,21 @@ def test_a_reaped_leader_whose_group_is_gone_is_forgotten(group, registered_lead
         subprocess_utils._forget_exited_groups()
     assert _FAKE_PGID not in subprocess_utils._RUNNING_GROUPS
     assert _FAKE_PGID not in cancellation._TOOL_GROUPS
+
+
+def test_a_group_the_kernel_refuses_to_probe_is_kept_and_raises_nothing(
+    group, registered_leader
+):
+    """EPERM on the probe means a member exists as another user: the group is
+    kept, and the refusal never escapes the spawn that ran the reap."""
+    group.refused = True
+    with subprocess_utils._RUNNING_GROUPS_LOCK:
+        subprocess_utils._forget_exited_groups()
+    assert subprocess_utils._RUNNING_GROUPS.get(_FAKE_PGID) is registered_leader, (
+        "a group this process may not signal still exists; forgetting it "
+        "leaves its members with no entry"
+    )
+    assert _FAKE_PGID in cancellation._TOOL_GROUPS
 
 
 def test_kill_running_groups_signals_the_group_of_a_reaped_leader(
