@@ -20,6 +20,7 @@ The server scans on the machine it runs on, always in local mode, with the scann
 
 Call `run_ash_scan` with the absolute path to the project. The call returns immediately with a `scan_id`.
 
+<!-- doctest: illustrative reason="calls the MCP tools, which need a client connected to ash mcp" -->
 ```python
 run_ash_scan(
     source_dir="/absolute/path/to/project",
@@ -71,6 +72,7 @@ For progress display, use `finished_scanners / total_scanners` (`completed_scann
 | "Audit Bandit only" | `scanners="bandit"` + `filter_level="full"` |
 | "Generate exec summary" | Use `get_scan_result_paths`, then read `ash.summary.md` |
 
+<!-- doctest: illustrative reason="calls the MCP tools, which need a client connected to ash mcp" -->
 ```python
 get_scan_results(
     output_dir="/absolute/path/to/project/.ash/ash_output",
