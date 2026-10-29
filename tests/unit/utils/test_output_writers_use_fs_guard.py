@@ -347,10 +347,6 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         1,
         "the JSON schemas in the source checkout, a development step",
     ),
-    (f"{_ASH}/utils/version_management.py", "update_version_in_pyproject", "open"): (
-        1,
-        "pyproject.toml in the source checkout, a release step",
-    ),
     (f"{_ASH}/utils/atomic_write.py", "_replace", "os.replace"): (1, _ATOMIC),
     (f"{_ASH}/utils/sandbox/fs_guard.py", "open_for_atomic_write", "os.fdopen"): (
         1,

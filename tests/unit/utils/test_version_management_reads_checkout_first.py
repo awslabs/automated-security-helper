@@ -32,6 +32,7 @@ failed write leaves the file as it was.
 from __future__ import annotations
 
 import importlib.metadata
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -150,7 +151,9 @@ class TestUpdateVersionInPyproject:
         def refuse(*args, **kwargs):
             raise OSError("disk full")
 
-        monkeypatch.setattr(version_management.os, "replace", refuse)
+        # The rename is the shared atomic-write helper's, so the refusal is
+        # planted on the os module it calls, not on this module's own name.
+        monkeypatch.setattr(os, "replace", refuse)
         assert update_version_in_pyproject("2.0.0", project_root=tmp_path) is False
         assert tmp_path.joinpath("pyproject.toml").read_text(encoding="utf-8") == before
         assert [p.name for p in tmp_path.iterdir()] == ["pyproject.toml"]

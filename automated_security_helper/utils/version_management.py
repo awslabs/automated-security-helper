@@ -5,10 +5,8 @@ This module provides utilities to manage version information dynamically
 from pyproject.toml, ensuring a single source of truth.
 """
 
-import os
 import re
 import sys
-import tempfile
 from pathlib import Path
 from typing import Optional, Tuple
 import importlib.metadata
@@ -230,19 +228,15 @@ def update_version_in_pyproject(
 
 
 def _replace_file_text(path: Path, text: str) -> None:
-    """Write ``text`` to a sibling temporary file and rename it over ``path``."""
-    handle = tempfile.NamedTemporaryFile(
-        "w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False
-    )
-    try:
-        with handle:
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(handle.name, path)
-    except BaseException:
-        try:
-            os.unlink(handle.name)
-        except OSError:
-            pass
-        raise
+    """Write ``text`` to a staging file beside ``path`` and rename it over ``path``.
+
+    Through the project's own atomic-write helper, the one every other writer in
+    the package uses and the fs_guard inventory test admits: a staging file created
+    exclusively in the target's directory with the mode a plain open gives, renamed
+    over the target when the write completes and removed when it does not.
+    """
+    # Not at the top: atomic_write reaches fs_guard, which imports the sandbox
+    # package, and this module is imported by the package __init__.
+    from automated_security_helper.utils.atomic_write import write_text_atomically
+
+    write_text_atomically(path, text)
