@@ -48,12 +48,16 @@ import sys
 from pathlib import Path
 from typing import Dict, List
 
+import pytest
+
 from tests.utils.isolated_tool_env import (
     install_refusing_installers,
     isolated_tool_env,
     without_inherited_aws,
 )
 from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
+
+pytestmark = pytest.mark.integration
 
 SNYK_MODULE = "automated_security_helper.plugin_modules.ash_snyk_plugins"
 

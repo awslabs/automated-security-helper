@@ -25,6 +25,8 @@ import yaml
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-patched-4d1e-0123456789"
 VALUE = "${ASH_PROBE_PATCHED}"
 SHORT = "Q"

@@ -31,6 +31,8 @@ from automated_security_helper.models.scanner_validation import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 AshAggregatedResults.model_rebuild()
 
 CANARY = "/nonexistent/ENVCANARY-ph77/settings.yaml"

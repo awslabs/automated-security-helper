@@ -77,6 +77,7 @@ def bound(tmp_path, monkeypatch):
         profile_registry.clear_all_session_state()
 
 
+@pytest.mark.unit
 def test_the_materialized_file_keeps_each_reference(bound):
     text = bound.read_text(encoding="utf-8")
     shown = _shows_the_value(text)
@@ -85,6 +86,7 @@ def test_the_materialized_file_keeps_each_reference(bound):
     assert f"!ENV {REFERENCE}" in text or f"!ENV '{REFERENCE}'" in text
 
 
+@pytest.mark.unit
 def test_a_patched_profile_keeps_the_references_it_did_not_patch(tmp_path, monkeypatch):
     """Inherit-and-patch: the client's ops are written as the client wrote
     them, and every other reference as the profile wrote it."""
@@ -134,6 +136,7 @@ def test_a_patched_profile_keeps_the_references_it_did_not_patch(tmp_path, monke
     assert text.count(REFERENCE) == 2, "an unpatched reference was not kept"
 
 
+@pytest.mark.unit
 def test_the_materialized_file_reads_the_value(bound):
     """The control: a scan handed the file reads each reference through."""
     from automated_security_helper.config.resolve_config import resolve_config
@@ -149,6 +152,7 @@ def test_the_materialized_file_reads_the_value(bound):
 
 
 @POSIX_ONLY
+@pytest.mark.e2e
 def test_a_scan_under_the_bound_profile_shows_no_value(bound, tmp_path):
     """The scan the client starts next, as a child process: what it prints and
     logs holds no value, while the debug line showing the reporter's section
@@ -232,6 +236,7 @@ def test_a_scan_under_the_bound_profile_shows_no_value(bound, tmp_path):
     assert logged == [], logged
 
 
+@pytest.mark.integration
 def test_a_canary_a_child_prints_never_reaches_the_failure_text():
     """A child that crashes while printing the probe value must not put the
     value into the assertion message built from its output: the diagnosis is

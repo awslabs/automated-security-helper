@@ -41,6 +41,8 @@ from automated_security_helper.utils.redacted_model import (
     first_env_scalar,
 )
 
+pytestmark = pytest.mark.unit
+
 CANARY = "424242-the-resolved-text"
 VARIABLE = "ASH_CONTAINER_CANARY"
 

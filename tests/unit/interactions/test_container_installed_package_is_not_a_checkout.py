@@ -65,6 +65,7 @@ Path(report).write_text(json.dumps(
         pytest.param("lib", True, id="dist-info-only"),
     ],
 )
+@pytest.mark.integration
 def test_markers_beside_an_installed_package_do_not_make_it_a_clone(
     site_name, dist_info, tmp_path
 ):
@@ -113,6 +114,7 @@ def test_markers_beside_an_installed_package_do_not_make_it_a_clone(
             assert Path(cmd[-1]).resolve() != site.resolve()
 
 
+@pytest.mark.unit
 def test_the_clone_this_suite_runs_from_is_still_one():
     """Control: the developer flow keeps building the checkout."""
     assert rac._is_checkout(rac._checkout_root())

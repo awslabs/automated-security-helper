@@ -30,6 +30,8 @@ import pytest
 
 from automated_security_helper.utils.log import get_logger
 
+pytestmark = pytest.mark.unit
+
 #: The surrogate a surrogateescape decode of a latin-1 0xE9 byte produces.
 #: Built, not spelled, so this source file stays valid UTF-8.
 _SURROGATE = chr(0xDCE9)

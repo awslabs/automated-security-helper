@@ -214,6 +214,7 @@ def _findings_step_drops(context: PluginContext, uri: str) -> bool:
 
 
 class TestTheSourceTarget:
+    @pytest.mark.unit
     def test_a_source_target_holding_an_ignored_file_never_starts_snyk(
         self, tmp_path, record
     ):
@@ -232,6 +233,7 @@ class TestTheSourceTarget:
         assert "snyk code test was not started" in errors
         assert CANARY not in errors
 
+    @pytest.mark.integration
     def test_without_an_ignored_file_snyk_runs_and_receives_every_file(
         self, tmp_path, record
     ):
@@ -258,6 +260,7 @@ class TestTheSourceTarget:
         assert _canary_in(received) == ["thirdparty/zz-canary.js"]
 
     @pytest.mark.parametrize("gitignored", [True, False])
+    @pytest.mark.unit
     def test_a_source_target_holding_the_output_dir_is_refused(
         self, tmp_path, record, gitignored
     ):
@@ -288,6 +291,7 @@ class TestTheSourceTarget:
             pytest.param("sub/../.ash/ash_output", True, id="dotdot-staying-inside"),
         ],
     )
+    @pytest.mark.integration
     def test_an_output_dir_spelled_with_dotdot_is_judged_by_where_it_points(
         self, tmp_path, record, spelled, refused
     ):
@@ -322,6 +326,7 @@ class TestTheSourceTarget:
         sys.platform == "win32",
         reason="Windows file names cannot hold a newline or an escape character",
     )
+    @pytest.mark.unit
     def test_the_first_path_is_shown_with_its_controls_escaped(self, tmp_path, record):
         context = _context(tmp_path, ["thirdparty/**"])
         name = "a\nb\x1b[31m.js"
@@ -338,6 +343,7 @@ class TestTheSourceTarget:
 
 
 class TestTheConvertedTarget:
+    @pytest.mark.unit
     def test_an_ignored_member_of_a_work_dir_outside_the_source_is_refused(
         self, tmp_path, record
     ):
@@ -357,6 +363,7 @@ class TestTheConvertedTarget:
         assert "1 file there is in global_settings.ignore_paths" in errors
         assert "so it would upload it." in errors
 
+    @pytest.mark.integration
     def test_a_work_dir_with_nothing_ignored_runs(self, tmp_path, record):
         """The control: the stand-in receives the member when nothing ignores it."""
         context = _context(tmp_path, ["docs/**"])
@@ -378,6 +385,7 @@ class TestTheConvertedTarget:
             ("vendor/**", False, False),
         ],
     )
+    @pytest.mark.integration
     def test_refused_exactly_when_the_findings_step_drops_the_finding(
         self, tmp_path, record, pattern, output_inside, dropped
     ):
@@ -408,6 +416,7 @@ class TestTheConvertedTarget:
         (".", None),
     ],
 )
+@pytest.mark.unit
 def test_the_output_dir_inside_the_target_is_read_through_dotdot(
     tmp_path, spelled, inside
 ):
@@ -428,6 +437,7 @@ def test_the_output_dir_inside_the_target_is_read_through_dotdot(
     assert scanner._output_dir_inside(source) == inside
 
 
+@pytest.mark.unit
 def test_an_exact_source_path_is_kept_from_snyk_by_the_converter_skip(
     test_plugin_context,
 ):
@@ -451,6 +461,7 @@ def test_an_exact_source_path_is_kept_from_snyk_by_the_converter_skip(
     assert converter._skipped(str(source / "vendor" / "b.zip")) is False
 
 
+@pytest.mark.unit
 def test_snyk_code_has_no_exclusion_option_the_refusal_does_not_check():
     """A tripwire. The refusal checks the operator's ignore paths only, because
     snyk-code has no exclusion option of its own. If it gains one, an entry in

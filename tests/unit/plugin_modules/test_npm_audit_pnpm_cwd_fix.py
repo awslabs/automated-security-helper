@@ -31,6 +31,9 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
 from tests.utils.npm_audit_reports import NPM_CLEAN, PNPM_CLEAN
 
 
+pytestmark = pytest.mark.unit
+
+
 def _yarn_1_clean(command):
     """yarn 1 answering `--version`, then a clean `yarn audit --json`."""
     if "--version" in command:

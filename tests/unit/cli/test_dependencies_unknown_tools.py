@@ -45,6 +45,8 @@ from automated_security_helper.cli.dependencies import (
     dependencies_app,
 )
 
+pytestmark = pytest.mark.unit
+
 runner = CliRunner()
 SETTING = "ASH_DEPENDENCIES_UNKNOWN_TOOLS"
 

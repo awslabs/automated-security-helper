@@ -44,6 +44,8 @@ from automated_security_helper.config.ash_config import (
 from automated_security_helper.config.path_trust import operator_reason
 from automated_security_helper.config.sandbox_grants import in_any_checkout
 
+pytestmark = pytest.mark.unit
+
 SESSION = "empty-patch"
 OP = {"op": "replace", "path": "/project_name", "value": "client"}
 

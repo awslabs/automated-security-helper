@@ -17,6 +17,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import app
 from automated_security_helper.models.workspace import WorkspaceExitCode
 
+pytestmark = pytest.mark.unit
+
 runner = CliRunner()
 
 

@@ -22,6 +22,8 @@ from automated_security_helper.config.ash_config import (
     plugin_section_peers,
 )
 
+pytestmark = pytest.mark.unit
+
 ACME = ["acme-sink", "acme-sink-reporter", "Acme_Sink"]
 
 

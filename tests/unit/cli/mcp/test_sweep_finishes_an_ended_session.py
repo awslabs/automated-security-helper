@@ -21,6 +21,8 @@ import pytest
 from automated_security_helper.cli.mcp import sessions
 from automated_security_helper.cli.mcp.session_paths import mark_session_workspace
 
+pytestmark = pytest.mark.unit
+
 SESSION_ID = "ended-while-swept"
 
 

@@ -39,6 +39,8 @@ from automated_security_helper.utils.log import (
 )
 from tests.utils.windows_console import windows_logging_kept_in_the_test
 
+pytestmark = pytest.mark.unit
+
 CI_INDICATORS = [
     "CI",
     "GITHUB_ACTIONS",

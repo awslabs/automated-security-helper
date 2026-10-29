@@ -69,6 +69,8 @@ import pytest
 from automated_security_helper.cli.mcp import source_delivery as sd
 from tests.utils import source_delivery_doubles as doubles
 
+pytestmark = pytest.mark.unit
+
 #: The shared fixtures, bound to this module's namespace so pytest finds them here.
 read_only_files = doubles.read_only_files
 windows_semantics = doubles.windows_semantics

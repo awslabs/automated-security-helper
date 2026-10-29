@@ -21,6 +21,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from rich.console import Console
 
 from automated_security_helper.base.plugin_context import PluginContext
@@ -54,6 +55,8 @@ from automated_security_helper.utils.converter_refusals import (
     converter_refusals,
     refusal_invocations,
 )
+
+pytestmark = pytest.mark.unit
 
 _MODULE = "automated_security_helper.interactions.run_ash_scan"
 

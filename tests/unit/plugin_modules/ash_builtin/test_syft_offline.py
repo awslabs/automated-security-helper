@@ -9,6 +9,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner 
     SyftScannerConfigOptions,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def syft_scanner_offline(test_plugin_context):

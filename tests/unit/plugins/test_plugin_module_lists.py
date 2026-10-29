@@ -193,6 +193,7 @@ def _scan(packages: Path, tmp_path: Path, plugin_args, extra_env=None):
     return completed, rows
 
 
+@pytest.mark.integration
 def test_a_comma_list_in_the_flag_loads_each_module(plugin_packages, tmp_path):
     completed, rows = _scan(
         plugin_packages,
@@ -213,6 +214,7 @@ def test_a_comma_list_in_the_flag_loads_each_module(plugin_packages, tmp_path):
 @pytest.mark.skipif(
     sys.platform == "win32", reason="the stand-in uv is a POSIX shell script"
 )
+@pytest.mark.integration
 def test_the_stand_in_uv_records_a_probe_under_the_scan_environment(tmp_path):
     """Control: a probing scanner, in the scan's environment, lands in the log.
 
@@ -225,6 +227,7 @@ def test_the_stand_in_uv_records_a_probe_under_the_scan_environment(tmp_path):
     assert calls_naming(calls, ["bandit"]), calls
 
 
+@pytest.mark.integration
 def test_a_comma_list_in_the_environment_loads_each_module(plugin_packages, tmp_path):
     completed, rows = _scan(
         plugin_packages,
@@ -238,6 +241,7 @@ def test_a_comma_list_in_the_environment_loads_each_module(plugin_packages, tmp_
     assert rows["beta-scanner"]["status"] == "PASSED", rows.get("beta-scanner")
 
 
+@pytest.mark.integration
 def test_a_comma_list_in_the_flag_loads_each_module_in_a_workspace_scan(
     plugin_packages, tmp_path
 ):
@@ -283,6 +287,7 @@ def test_a_comma_list_in_the_flag_loads_each_module_in_a_workspace_scan(
     assert rows["beta-scanner"]["status"] == "PASSED", rows.get("beta-scanner")
 
 
+@pytest.mark.integration
 def test_a_module_outside_the_namespace_refuses_a_workspace_scan(
     plugin_packages, tmp_path
 ):
@@ -324,6 +329,7 @@ def test_a_module_outside_the_namespace_refuses_a_workspace_scan(
     ]
 
 
+@pytest.mark.unit
 def test_the_engine_splits_and_strips_names_from_both_sources(monkeypatch, tmp_path):
     """In-process, for the Python API: CLI names first, then the config's, once each."""
     from automated_security_helper.core import execution_engine
@@ -430,6 +436,7 @@ def _load_plugins(plugin_packages, tmp_path, entry, direct=""):
     return json.loads(completed.stdout.strip().splitlines()[-1])
 
 
+@pytest.mark.integration
 def test_load_plugins_imports_each_module_of_a_comma_list_in_order(
     plugin_packages, tmp_path
 ):
@@ -446,6 +453,7 @@ def test_load_plugins_imports_each_module_of_a_comma_list_in_order(
     assert loaded["imported"] == ["beta_ash_plugins", "alpha_ash_plugins"], loaded
 
 
+@pytest.mark.integration
 def test_load_plugins_drops_the_empty_names_of_a_doubled_or_trailing_comma(
     plugin_packages, tmp_path
 ):
@@ -458,6 +466,7 @@ def test_load_plugins_drops_the_empty_names_of_a_doubled_or_trailing_comma(
     assert loaded["warnings"] == [], loaded["warnings"]
 
 
+@pytest.mark.integration
 def test_the_warnings_recorder_sees_a_failed_import(plugin_packages, tmp_path):
     """Control: the empty warnings list above is the loader's, not a deaf recorder.
 
@@ -474,6 +483,7 @@ def test_the_warnings_recorder_sees_a_failed_import(plugin_packages, tmp_path):
     assert any("ghost_ash_plugins" in message for message in loaded["warnings"]), loaded
 
 
+@pytest.mark.unit
 def test_split_plugin_modules_drops_empty_and_repeated_names():
     from automated_security_helper.config.plugin_module_trust import (
         split_plugin_modules,
@@ -484,6 +494,7 @@ def test_split_plugin_modules_drops_empty_and_repeated_names():
     ) == ["beta_ash_plugins", "alpha_ash_plugins"]
 
 
+@pytest.mark.integration
 def test_plugin_list_shows_what_is_registered(plugin_packages, tmp_path):
     completed = _ash(
         plugin_packages,

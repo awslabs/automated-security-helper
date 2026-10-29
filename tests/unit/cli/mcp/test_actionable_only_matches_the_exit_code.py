@@ -38,6 +38,8 @@ from mcp.server.mcpserver import Context
 from automated_security_helper.cli.mcp.scan_target import ASH_MCP_ALLOWED_ROOTS_ENV
 from automated_security_helper.cli.mcp_server import get_scan_results
 
+pytestmark = pytest.mark.unit
+
 #: The config the scans below were judged by: HIGH globally, bandit at its own
 #: CRITICAL, semgrep at its own LOW. detect-secrets sets none, so HIGH applies.
 GLOBAL = "HIGH"

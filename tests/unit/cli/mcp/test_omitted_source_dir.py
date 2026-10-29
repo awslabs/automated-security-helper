@@ -33,6 +33,8 @@ from automated_security_helper.cli.mcp import source_delivery as sd
 from automated_security_helper.cli.mcp.profile_registry import DEFAULT_SESSION_ID
 from automated_security_helper.cli.mcp_server import _resolve_omitted_source_dir
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _clean_session_registry():

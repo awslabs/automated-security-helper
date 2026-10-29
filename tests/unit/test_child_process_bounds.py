@@ -24,6 +24,8 @@ import pytest
 from automated_security_helper.cli import dependencies as dependencies_module
 from tests.utils.helpers import KillAfter, bound_run_command
 
+pytestmark = pytest.mark.integration
+
 BOUND = 1.0
 #: Generous on purpose: the child is a python start-up on a loaded runner. The test
 #: only has to end near the bound rather than when the sleeper's minute is up.

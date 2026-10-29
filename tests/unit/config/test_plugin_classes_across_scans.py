@@ -35,6 +35,8 @@ from typing import Any, Dict, List
 import pytest
 import yaml
 
+pytestmark = pytest.mark.integration
+
 CARRY = "carry_ash_plugins"
 KEPT = "kept_ash_plugins"
 TRIVY = "automated_security_helper.plugin_modules.ash_trivy_plugins"

@@ -36,6 +36,9 @@ from automated_security_helper.utils.offline_tool_env import (
 from automated_security_helper.utils.sandbox.scope import plugin_probe_scope
 
 
+pytestmark = pytest.mark.unit
+
+
 @pytest.fixture
 def context(tmp_path: Path, monkeypatch) -> PluginContext:
     monkeypatch.delenv("ASH_OFFLINE", raising=False)

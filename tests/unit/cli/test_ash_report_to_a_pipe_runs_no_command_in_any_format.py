@@ -53,6 +53,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Result,
 )
 
+pytestmark = pytest.mark.unit
+
 #: A scanned file's name with a line feed and a workflow command after it.
 NAME = "notes\n::add-mask::x.txt"
 #: The same, the command indented.

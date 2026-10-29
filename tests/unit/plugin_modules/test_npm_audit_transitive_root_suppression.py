@@ -37,6 +37,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
 )
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
 
+pytestmark = pytest.mark.unit
+
 BRACES = "GHSA-vfj7-8cjw-p6xm"
 PICOMATCH = "GHSA-0000-pico-0000"
 

@@ -24,6 +24,8 @@ from automated_security_helper.config.resolve_config import (
     load_config_file_for_run,
 )
 
+pytestmark = pytest.mark.unit
+
 OVERRIDE_SPELLINGS = ["cdk-nag", "cdk_nag", "CdkNag", "CDK_NAG", "cdknag"]
 
 

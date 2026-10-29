@@ -54,6 +54,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils import undecodable_text
 from automated_security_helper.utils.undecodable_text import text_of_undecodable
 
+pytestmark = pytest.mark.unit
+
 #: A latin-1 file name as Python lists it, and as a record holds it. Decoded with
 #: surrogateescape on every platform: os.fsdecode gives that on POSIX, but on
 #: Windows the filesystem encoding is UTF-8 with surrogatepass (PEP 529), so the

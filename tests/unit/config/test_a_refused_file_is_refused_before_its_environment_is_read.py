@@ -46,6 +46,8 @@ from automated_security_helper.core.exceptions import (
     ASHConfigSourceError,
 )
 
+pytestmark = pytest.mark.unit
+
 PROBE = "ASH_REFUSED_FILE_PROBE"
 VALUE = "value-from-the-servers-environment"
 

@@ -20,6 +20,8 @@ from __future__ import annotations
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from automated_security_helper.cli.merge import (
     merge_shard_results,
     stamp_shard_assignment,
@@ -30,6 +32,8 @@ from automated_security_helper.models.scanner_validation import ScannerValidatio
 from tests.unit.cli import test_merge
 from tests.unit.cli.test_merge import SCANNERS, as_loaded, build_shard
 from tests.unit.core.phases.test_scan_phase_sharding import _make_scanner_class
+
+pytestmark = pytest.mark.unit
 
 # The fixture itself, so this file and test_merge.py capture warnings the same way.
 capture = test_merge.capture

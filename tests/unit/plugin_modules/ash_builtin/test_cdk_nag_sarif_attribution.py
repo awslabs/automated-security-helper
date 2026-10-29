@@ -42,6 +42,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Result,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _result(
     rule_id: str,

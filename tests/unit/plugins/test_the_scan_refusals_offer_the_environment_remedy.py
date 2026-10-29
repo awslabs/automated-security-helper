@@ -21,6 +21,8 @@ import pytest
 
 from automated_security_helper.plugins.loader import PluginModuleImportError
 
+pytestmark = pytest.mark.unit
+
 BROKEN = "envremedy_ash_plugins"
 REMEDY = "or unset it in ASH_PLUGIN_MODULES."
 

@@ -17,6 +17,8 @@ from automated_security_helper.models.scan_results_container import (
     ScanResultsContainer,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def pinned_home(monkeypatch, tmp_path):

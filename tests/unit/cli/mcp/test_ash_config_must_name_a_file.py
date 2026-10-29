@@ -66,6 +66,7 @@ def _start(transport: str) -> None:
 
 @pytest.mark.parametrize("transport", ["stdio", "streamable-http", "sse"])
 @pytest.mark.parametrize("kind", ["missing", "directory"])
+@pytest.mark.unit
 def test_a_path_that_is_no_config_file_refuses_startup(
     tmp_path, monkeypatch, stderr, started, transport, kind
 ) -> None:
@@ -100,6 +101,7 @@ def restore_modes():
 
 @_NO_POSIX_MODES
 @pytest.mark.parametrize("transport", ["stdio", "streamable-http", "sse"])
+@pytest.mark.unit
 def test_a_config_file_the_server_cannot_read_refuses_startup(
     tmp_path, monkeypatch, stderr, started, restore_modes, transport
 ) -> None:
@@ -119,6 +121,7 @@ def test_a_config_file_the_server_cannot_read_refuses_startup(
 
 
 @_NO_POSIX_MODES
+@pytest.mark.unit
 def test_a_config_file_in_a_directory_the_server_cannot_search_refuses_startup(
     tmp_path, monkeypatch, stderr, started, restore_modes
 ) -> None:
@@ -150,6 +153,7 @@ def test_a_config_file_in_a_directory_the_server_cannot_search_refuses_startup(
     ],
 )
 @pytest.mark.parametrize("transport", ["stdio", "streamable-http"])
+@pytest.mark.unit
 def test_a_config_file_that_does_not_load_refuses_startup(
     tmp_path, monkeypatch, stderr, started, transport, content
 ) -> None:
@@ -166,6 +170,7 @@ def test_a_config_file_that_does_not_load_refuses_startup(
     assert f"ASH_CONFIG={config}" in message, message
 
 
+@pytest.mark.unit
 def test_an_existing_config_file_starts(tmp_path, monkeypatch, started) -> None:
     config = tmp_path / "ash-config.yaml"
     config.write_text("project_name: operator-policy\n", encoding="utf-8")
@@ -177,6 +182,7 @@ def test_an_existing_config_file_starts(tmp_path, monkeypatch, started) -> None:
 
 
 @pytest.mark.parametrize("value", [None, ""])
+@pytest.mark.unit
 def test_no_ash_config_keeps_the_built_in_default(monkeypatch, started, value) -> None:
     if value is None:
         monkeypatch.delenv("ASH_CONFIG", raising=False)
@@ -188,6 +194,7 @@ def test_no_ash_config_keeps_the_built_in_default(monkeypatch, started, value) -
     assert started.get("server") == "stdio"
 
 
+@pytest.mark.unit
 def test_the_ash_command_line_refuses_too(tmp_path, monkeypatch, started) -> None:
     from typer.testing import CliRunner
 
@@ -210,6 +217,7 @@ def test_the_ash_command_line_refuses_too(tmp_path, monkeypatch, started) -> Non
         pytest.param("unreadable", marks=_NO_POSIX_MODES),
     ],
 )
+@pytest.mark.integration
 def test_running_the_server_module_makes_the_same_startup_checks(
     tmp_path, restore_modes, kind
 ) -> None:
@@ -243,6 +251,7 @@ def test_running_the_server_module_makes_the_same_startup_checks(
     assert "ASH_CONFIG" in result.stderr, result.stderr[-2000:]
 
 
+@pytest.mark.unit
 def test_the_message_names_the_variable_and_the_path(
     tmp_path, monkeypatch, stderr, started
 ) -> None:

@@ -15,7 +15,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.utils.subprocess_utils import shown_arguments
+
+pytestmark = pytest.mark.unit
 
 
 def test_an_argument_that_is_not_a_string_is_kept_as_it_is():

@@ -19,6 +19,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import app
 from automated_security_helper.interactions import run_ash_nix
 
+pytestmark = pytest.mark.unit
+
 USAGE_ERROR_EXIT = 1
 
 SCAN = [

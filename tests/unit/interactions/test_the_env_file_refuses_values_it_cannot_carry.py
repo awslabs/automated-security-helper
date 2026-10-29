@@ -23,6 +23,8 @@ from automated_security_helper.interactions.run_ash_container import (
     ContainerInputError,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _dirs(tmp_path: Path):
     source = tmp_path / "src"

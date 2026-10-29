@@ -19,12 +19,16 @@ import errno
 import json
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.cli import mcp_tools
 from automated_security_helper.config import config_sources
 from automated_security_helper.core.exceptions import ASHConfigSourceError
 from automated_security_helper.core.resource_management.error_handling import (
     ErrorCategory,
 )
+
+pytestmark = pytest.mark.unit
 
 CHANGED = "changed after it was checked"
 

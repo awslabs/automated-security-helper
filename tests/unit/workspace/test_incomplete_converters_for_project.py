@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.interactions.run_ash_scan import incomplete_converters
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
@@ -29,6 +31,8 @@ from automated_security_helper.models.workspace import (
 from automated_security_helper.workspace.aggregation import (
     incomplete_converters_for_project,
 )
+
+pytestmark = pytest.mark.unit
 
 OVER_LIMIT_REASON = (
     "refused 1 input over an extraction limit: vendor/big.zip (max_total_bytes)"

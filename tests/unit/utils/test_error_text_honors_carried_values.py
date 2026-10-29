@@ -26,6 +26,8 @@ from automated_security_helper.utils.error_text import (
     traceback_text,
 )
 
+pytestmark = pytest.mark.unit
+
 #: A value the run read from the environment, long enough to be redacted
 #: anywhere in a text.
 CARRIED = "zzcarried-secret-4471"

@@ -44,6 +44,8 @@ from automated_security_helper.utils.config_trust import (
 )
 from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _no_operator_config(monkeypatch: pytest.MonkeyPatch) -> None:

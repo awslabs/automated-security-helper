@@ -75,6 +75,8 @@ from automated_security_helper.utils.sarif_utils import (
 )
 from automated_security_helper.utils.tool_config_dir import TOOL_CONFIG_DIR_PREFIX
 
+pytestmark = pytest.mark.unit
+
 PluginContext.model_rebuild()
 
 

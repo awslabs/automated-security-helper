@@ -39,6 +39,7 @@ CONTEXT = ga.base_context(
 )
 
 
+@pytest.mark.unit
 class TestExpressions:
     @pytest.mark.parametrize(
         "expression,expected",
@@ -100,6 +101,7 @@ class TestExpressions:
             ga.evaluate("hashFiles('uv.lock')", CONTEXT)
 
 
+@pytest.mark.unit
 class TestFilterPatterns:
     @pytest.mark.parametrize(
         "patterns,name,expected",
@@ -147,6 +149,7 @@ class TestFilterPatterns:
         assert ga.triggers(workflow, self._push("refs/tags/v1"))
 
 
+@pytest.mark.unit
 class TestTheModelReadsTheRealWorkflows:
     """Controls that the model reaches the files the other tests evaluate."""
 
@@ -171,6 +174,7 @@ class TestTheModelReadsTheRealWorkflows:
 class TestGithubEnvLayering:
     """GITHUB_ENV overrides workflow and job env and yields to the step's own env."""
 
+    @pytest.mark.unit
     def test_both_file_command_forms_are_read(self, tmp_path):
         sandbox = ga.StepSandbox(tmp_path)
         files = sandbox.runner_temp / "_runner_file_commands"
@@ -184,6 +188,7 @@ class TestGithubEnvLayering:
             "C": "x=y",
         }
 
+    @pytest.mark.integration
     def test_the_precedence_is_workflow_job_file_step(self, tmp_path):
         sandbox = ga.StepSandbox(tmp_path)
         workflow = ga.Workflow(
@@ -210,6 +215,7 @@ class TestGithubEnvLayering:
         assert rendered["F2"] == "file"
 
 
+@pytest.mark.integration
 class TestTheOneLineHelperIsSharedWithinAJob:
     """A step that loads the helper sees what its job's definer wrote, and only that."""
 

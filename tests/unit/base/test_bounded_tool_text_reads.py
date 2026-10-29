@@ -57,7 +57,11 @@ import ast
 import re
 from pathlib import Path
 
+import pytest
+
 import automated_security_helper
+
+pytestmark = pytest.mark.unit
 
 _PACKAGE_DIR = Path(automated_security_helper.__file__).parent
 

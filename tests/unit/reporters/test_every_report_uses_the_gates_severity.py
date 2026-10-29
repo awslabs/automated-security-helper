@@ -38,6 +38,8 @@ from automated_security_helper.core.unified_metrics import (
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
+pytestmark = pytest.mark.unit
+
 #: (rule id, level, declared issue_severity or None, the gate's severity)
 FINDINGS = [
     ("R-ERROR", "error", None, "CRITICAL"),

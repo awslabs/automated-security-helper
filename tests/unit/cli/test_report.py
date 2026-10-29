@@ -9,6 +9,8 @@ import typer
 from automated_security_helper.cli.report import report_command
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 def _squeezed(text: str) -> str:
     """*text* without its whitespace: rich folds a long line at the console width, so

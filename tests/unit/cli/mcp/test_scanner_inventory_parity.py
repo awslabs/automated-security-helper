@@ -35,6 +35,8 @@ from automated_security_helper.cli import mcp_tools
 from automated_security_helper.core import scanner_inventory
 from tests.utils.tool_guard import stub_tool_probes
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _no_tool_probe(monkeypatch):

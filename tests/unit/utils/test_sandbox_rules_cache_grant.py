@@ -38,6 +38,8 @@ from automated_security_helper.utils.sandbox import policy as policy_module
 from automated_security_helper.utils.sandbox import scope as scope_module
 from automated_security_helper.utils.sandbox.backends import SpawnPlan
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 RULE = """\

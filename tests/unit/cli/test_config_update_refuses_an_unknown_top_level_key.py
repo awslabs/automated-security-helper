@@ -36,6 +36,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.config import config_app
 from automated_security_helper.config.ash_config import AshConfig
 
+pytestmark = pytest.mark.unit
+
 # The CLI's exit code for an invalid configuration.
 INVALID_CONFIG_EXIT_CODE = 3
 

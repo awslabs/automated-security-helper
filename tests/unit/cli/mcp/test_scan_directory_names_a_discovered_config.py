@@ -28,6 +28,8 @@ from automated_security_helper.cli.mcp.sandbox import (
     ASH_MCP_TRANSPORT_ENV,
 )
 
+pytestmark = pytest.mark.unit
+
 CANARY = "CANARY-VALUE-5e2b"
 
 #: (file name under the target, content). A defect of each kind discovery can

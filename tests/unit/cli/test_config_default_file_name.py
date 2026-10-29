@@ -25,6 +25,8 @@ from automated_security_helper.core.constants import (
     ASH_RC_FILE_NAMES,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch) -> Path:

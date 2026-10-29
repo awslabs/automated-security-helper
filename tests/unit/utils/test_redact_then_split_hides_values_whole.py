@@ -14,10 +14,14 @@ leak's shape.
 
 from __future__ import annotations
 
+import pytest
+
 from automated_security_helper.utils.error_text import (
     redact_then_split,
     text_without_values,
 )
+
+pytestmark = pytest.mark.unit
 
 #: Each fragment is distinctive on its own, so an assert that it is absent
 #: can only pass by redaction, never by luck; the whole value holds the

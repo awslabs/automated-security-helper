@@ -29,6 +29,8 @@ from automated_security_helper.cli.mcp import source_delivery as sd
 from automated_security_helper.cli.mcp_tools import mcp_set_source_git
 from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
+pytestmark = pytest.mark.integration
+
 _RECORDER = """\
 import json
 import sys

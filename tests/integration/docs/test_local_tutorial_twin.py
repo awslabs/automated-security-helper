@@ -35,6 +35,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]
 PAGE = Path("docs/content/getting-started/local.md")

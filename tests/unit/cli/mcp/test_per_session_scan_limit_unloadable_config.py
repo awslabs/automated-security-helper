@@ -18,6 +18,8 @@ import pytest
 
 from automated_security_helper.cli.mcp import sessions
 
+pytestmark = pytest.mark.unit
+
 REMOTE_SESSION = "issued-session-1"
 
 

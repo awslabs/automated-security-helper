@@ -72,16 +72,19 @@ EXPECTED_OFFLINE_ENVIRONMENT = {
 }
 
 
+@pytest.mark.unit
 def test_offline_adds_every_variable(offline):
     assert offline_tool_environment() == EXPECTED_OFFLINE_ENVIRONMENT
 
 
+@pytest.mark.unit
 def test_online_adds_nothing(online):
     assert offline_tool_environment() == {}
     assert with_offline_tool_environment(None) is None
     assert with_offline_tool_environment({"A": "1"}) == {"A": "1"}
 
 
+@pytest.mark.unit
 def test_offline_overrides_a_value_the_environment_sets(offline):
     """Offline wins over a variable that turns a check back on."""
     env = with_offline_tool_environment({"SEMGREP_ENABLE_VERSION_CHECK": "1"})
@@ -97,6 +100,7 @@ def _print_variables(names):
     )
 
 
+@pytest.mark.integration
 def test_every_spawn_gets_them_offline(offline, tmp_path):
     """A real child started through run_command_with_output_handling, the helper
     behind scanner commands, version probes and the detect-secrets worker."""
@@ -122,6 +126,7 @@ def test_every_spawn_gets_them_offline(offline, tmp_path):
     assert seen == EXPECTED_OFFLINE_ENVIRONMENT
 
 
+@pytest.mark.integration
 def test_spawn_run_gets_them_offline(offline, tmp_path):
     names = sorted(EXPECTED_OFFLINE_ENVIRONMENT)
     result = subprocess_utils.spawn_run(
@@ -139,6 +144,7 @@ def test_spawn_run_gets_them_offline(offline, tmp_path):
     assert json.loads(result.stdout) == EXPECTED_OFFLINE_ENVIRONMENT
 
 
+@pytest.mark.integration
 def test_spawns_are_unchanged_online(online, tmp_path):
     result = subprocess_utils.spawn_run(
         [
@@ -181,6 +187,7 @@ def _syft(tmp_path, **options):
     )
 
 
+@pytest.mark.unit
 def test_a_scanner_forced_offline_by_its_own_option_gets_them(
     online, tmp_path, monkeypatch
 ):
@@ -191,6 +198,7 @@ def test_a_scanner_forced_offline_by_its_own_option_gets_them(
         assert env.get(name) == value, name
 
 
+@pytest.mark.unit
 def test_an_online_scanner_gets_none_of_them(online, tmp_path, monkeypatch):
     env = _recorded_scanner_env(_syft(tmp_path), monkeypatch)
 

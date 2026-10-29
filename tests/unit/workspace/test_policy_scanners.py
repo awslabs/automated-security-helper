@@ -61,6 +61,8 @@ from automated_security_helper.workspace.execution import (
 )
 from automated_security_helper.workspace.resolver import resolve_workspace
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 # The scanner used throughout. Pure Python, ships with ASH, needs no external

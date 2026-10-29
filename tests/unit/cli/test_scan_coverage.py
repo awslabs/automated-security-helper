@@ -13,6 +13,8 @@ from automated_security_helper.core.enums import (
     ExecutionPhase,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def cli_runner():

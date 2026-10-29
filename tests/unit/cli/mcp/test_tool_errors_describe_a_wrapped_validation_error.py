@@ -31,6 +31,8 @@ from automated_security_helper.models.asharp_model import (
     ReportMetadata,
 )
 
+pytestmark = pytest.mark.unit
+
 TOKEN = "tok-0123456789abcdef"
 
 

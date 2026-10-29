@@ -41,6 +41,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanne
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.config_trust import record_provenance
 
+pytestmark = pytest.mark.unit
+
 FIXTURE_ROOT = Path(__file__).parents[3] / "test_data" / "scanners" / "zizmor"
 CAPTURED_SARIF = FIXTURE_ROOT / "zizmor-1.30.1.sarif"
 

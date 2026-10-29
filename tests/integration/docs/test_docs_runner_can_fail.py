@@ -31,6 +31,10 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.integration
+
 HERE = Path(__file__).resolve().parent
 
 

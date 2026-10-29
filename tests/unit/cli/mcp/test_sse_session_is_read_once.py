@@ -27,6 +27,8 @@ from tests.utils.mcp_transport_harness import (
     LOOPBACK_PORT,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def workspace(tmp_path, monkeypatch) -> Path:

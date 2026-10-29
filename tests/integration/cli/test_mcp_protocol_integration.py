@@ -63,6 +63,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 # The tool surface as of this commit. Not derived from the server -- a set compared
 # against itself proves nothing -- and deliberately spelled out so that adding or
 # removing a tool is a decision someone makes in a diff rather than something that

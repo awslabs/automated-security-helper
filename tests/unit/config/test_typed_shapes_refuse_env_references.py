@@ -72,6 +72,8 @@ from automated_security_helper.utils.redacted_model import (
     first_env_scalar,
 )
 
+pytestmark = pytest.mark.unit
+
 CANARY = "424242"
 VARIABLE = "ASH_SHAPE_CANARY"
 

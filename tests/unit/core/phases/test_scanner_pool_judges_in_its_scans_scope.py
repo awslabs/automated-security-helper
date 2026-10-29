@@ -36,6 +36,8 @@ from automated_security_helper.config.path_trust import (
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 
+pytestmark = pytest.mark.unit
+
 SCANNERS_PER_SCAN = 3
 
 

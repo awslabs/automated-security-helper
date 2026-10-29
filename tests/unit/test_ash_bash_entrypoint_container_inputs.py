@@ -39,6 +39,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 ASH_SCRIPT = REPO_ROOT / "ash"
 
 pytestmark = [
+    pytest.mark.integration,
     # The same three guards as test_ash_bash_entrypoint_build_failure.py. Each one
     # states its own reason, so a skipped run says why in the report.
     pytest.mark.skipif(

@@ -44,6 +44,8 @@ from automated_security_helper.utils.tool_downloads import (
 )
 from automated_security_helper.core.exceptions import ToolNotProvisionableError
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DOCKERFILE = REPO_ROOT / "Dockerfile"
 

@@ -93,6 +93,7 @@ def _set_once_the_child_started(event: CancelEvent, marker: Path) -> None:
 
 
 class TestContainerRuntimeWait:
+    @pytest.mark.unit
     def test_a_cancel_during_the_wait_stops_the_child_and_raises(self):
         started = time.monotonic()
         with cancel_scope(_cancelled_event()):
@@ -100,6 +101,7 @@ class TestContainerRuntimeWait:
                 run_cmd_direct(_SLEEPING_CHILD, check=False)
         assert time.monotonic() - started < _STOPPED_WITHIN_SECONDS
 
+    @pytest.mark.integration
     def test_a_cancel_set_after_the_child_started_stops_it_mid_wait(
         self, tmp_path, monkeypatch
     ):
@@ -153,17 +155,20 @@ class TestContainerRuntimeWait:
         assert code_after_the_raise != 0
         assert time.monotonic() - started < _STOPPED_WITHIN_SECONDS
 
+    @pytest.mark.integration
     def test_with_no_cancel_asked_for_the_wait_returns_the_childs_result(self):
         with cancel_scope(CancelEvent()):
             result = run_cmd_direct(_QUICK_CHILD, check=False)
         assert result.returncode == 0
 
+    @pytest.mark.integration
     def test_outside_any_scope_the_wait_returns_the_childs_result(self):
         result = run_cmd_direct(_QUICK_CHILD, check=False)
         assert result.returncode == 0
 
 
 class TestNixShellWait:
+    @pytest.mark.unit
     def test_a_cancel_during_the_wait_stops_the_shell_and_raises(self):
         started = time.monotonic()
         with cancel_scope(_cancelled_event()):
@@ -171,6 +176,7 @@ class TestNixShellWait:
                 _enter_shell(list(_SLEEPING_CHILD), env={})
         assert time.monotonic() - started < _STOPPED_WITHIN_SECONDS
 
+    @pytest.mark.integration
     def test_a_cancel_set_after_the_shell_started_stops_it_mid_wait(
         self, tmp_path, monkeypatch
     ):
@@ -221,16 +227,19 @@ class TestNixShellWait:
         assert code_after_the_raise != 0
         assert time.monotonic() - started < _STOPPED_WITHIN_SECONDS
 
+    @pytest.mark.integration
     def test_with_no_cancel_asked_for_the_wait_returns_the_shells_result(self):
         with cancel_scope(CancelEvent()):
             result = _enter_shell(list(_QUICK_CHILD), env={})
         assert result.returncode == 0
 
+    @pytest.mark.integration
     def test_outside_any_scope_the_wait_returns_the_shells_result(self):
         result = _enter_shell(list(_QUICK_CHILD), env={})
         assert result.returncode == 0
 
 
+@pytest.mark.unit
 class TestACancelledScanSpawnsNoChild:
     """The launchers refuse to start a child into a cancel already asked for.
 
@@ -273,6 +282,7 @@ class TestACancelledScanSpawnsNoChild:
         assert spawned == []
 
 
+@pytest.mark.integration
 class TestTheCancelArmAlwaysSignalsTheChild:
     def test_false_sends_the_interrupt_even_when_the_terminal_claims_delivery(
         self, monkeypatch
@@ -323,6 +333,7 @@ class TestTheCancelArmAlwaysSignalsTheChild:
         assert time.monotonic() - started < 2.0
 
 
+@pytest.mark.unit
 class TestTheCancelArmSaysTheChildHasNoInterrupt:
     """Each launcher's cancel arm passes exactly ``child_got_the_interrupt=False``.
 
@@ -438,6 +449,7 @@ class TestTheCancelArmSaysTheChildHasNoInterrupt:
         assert kwargs == {"child_got_the_interrupt": False}
 
 
+@pytest.mark.integration
 class TestTheLaunchersRecordTheirChildForTheDieNowKill:
     """Each launcher records its child's pid for the die-now kill while the
     child runs, and the record does not outlive the wait.

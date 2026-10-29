@@ -36,6 +36,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 #: Names that trigger the heuristic in ``tests/integration/cli/conftest.py``.
@@ -103,11 +105,34 @@ def test_an_integration_test_is_still_marked_slow(modify_items, config, name):
     Without this, removing the heuristic entirely would satisfy the test above --
     and the integration suite would lose the ``--run-slow`` gate that keeps a
     default run fast.
+
+    The tier marker lives on each test file under the contract in
+    tests/NAMING_CONVENTIONS.md, so the hook adds ``slow`` (and ``mcp``) by path and
+    never a tier. A hook that added a tier by directory would give the e2e-marked
+    files there two tiers.
     """
     item = _FakeItem(REPO_ROOT / "tests" / "integration" / "cli" / "test_x.py", name)
     modify_items(config, [item])
     assert "slow" in item.applied
-    assert "integration" in item.applied
+    assert "integration" not in item.applied
+
+
+@pytest.mark.parametrize("name", TRIGGERING_NAMES)
+def test_a_file_level_tier_marker_survives_the_integration_conftest(
+    modify_items, config, name
+):
+    """The positive control for the previous test's negation.
+
+    The item starts with the tier a test file carries under the contract (the
+    stand-in for a module-level ``pytestmark = pytest.mark.integration``). The hook
+    must add ``slow`` and leave exactly that one tier, so the ``not in`` above
+    cannot pass on a hook that did nothing.
+    """
+    item = _FakeItem(REPO_ROOT / "tests" / "integration" / "cli" / "test_x.py", name)
+    item.applied.append("integration")
+    modify_items(config, [item])
+    assert item.applied.count("integration") == 1
+    assert "slow" in item.applied
 
 
 def test_a_unit_test_named_after_mcp_is_not_marked_mcp(modify_items, config):

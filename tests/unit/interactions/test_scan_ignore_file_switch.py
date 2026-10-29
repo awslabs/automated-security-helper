@@ -75,6 +75,8 @@ import pytest
 from tests.utils.helpers import importing_this_checkout
 from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
 
+pytestmark = pytest.mark.integration
+
 # Proposed names; see the module docstring.
 SWITCH_OFF_FLAG = "--no-honor-ignore-files"
 CONFIG_KEY = "honor_ignore_files"

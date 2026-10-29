@@ -41,6 +41,8 @@ from automated_security_helper.cli.mcp.profile_registry import (
     clear_all_session_state,
 )
 
+pytestmark = pytest.mark.unit
+
 REMOTE = "client-1"
 #: A name of the shape ``call_profile_filename`` writes: 16 lowercase hex digits.
 PER_CALL = "call-profile-0123456789abcdef.yaml"

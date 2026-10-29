@@ -35,6 +35,8 @@ from automated_security_helper.core.exceptions import (
 )
 from tests.utils.open_audit import record_opens
 
+pytestmark = pytest.mark.unit
+
 needs_fifo = pytest.mark.skipif(
     not hasattr(os, "mkfifo"), reason="FIFOs are a POSIX file type"
 )

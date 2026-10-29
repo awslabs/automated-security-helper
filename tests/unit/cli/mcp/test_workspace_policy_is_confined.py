@@ -38,6 +38,8 @@ import pytest
 # Importing it installs its audit hook, which records the opens of watched paths.
 from tests.unit.cli.mcp import test_mcp_config_confinement as confinement
 
+pytestmark = pytest.mark.unit
+
 SESSION = "client-one"
 MARKER = "OUTSIDE-POLICY-MARKER"
 # A ceiling stricter than the project's MEDIUM, so a policy that applies shows.

@@ -68,6 +68,8 @@ from tests.unit.converters.nbconvert_stand_in import (
     run_like_nbconvert,
 )
 
+pytestmark = pytest.mark.unit
+
 PROBE_EXPORTER = "ashprobe_exporter.ProbeExporter"
 NBCONVERT = "jupyter-nbconvert"
 WINDOWS = sys.platform == "win32"

@@ -30,6 +30,8 @@ import pytest
 
 from automated_security_helper.cli.mcp import source_delivery as sd
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def a_german_server(monkeypatch) -> None:

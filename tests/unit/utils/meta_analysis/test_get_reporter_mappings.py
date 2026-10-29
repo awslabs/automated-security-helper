@@ -1,6 +1,10 @@
+import pytest
+
 from automated_security_helper.utils.meta_analysis.reporting import (
     get_reporter_mappings,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_get_reporter_mappings():

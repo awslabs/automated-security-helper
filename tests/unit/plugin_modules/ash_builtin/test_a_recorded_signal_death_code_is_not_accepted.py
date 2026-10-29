@@ -28,6 +28,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
     NpmAuditScannerConfig,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def plugin_context(tmp_path):

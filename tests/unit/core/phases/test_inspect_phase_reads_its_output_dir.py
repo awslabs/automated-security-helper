@@ -26,6 +26,8 @@ AshAggregatedResults.model_rebuild()
 
 from automated_security_helper.core.phases.inspect_phase import InspectPhase
 
+pytestmark = pytest.mark.unit
+
 
 def _write_sarif(output_dir: Path, marker: str) -> None:
     """A SARIF file whose one result carries the top-level field *marker*."""

@@ -32,6 +32,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.utils.log import added_by_ash, get_logger
 
+pytestmark = pytest.mark.unit
+
 
 class _HostHandler(logging.Handler):
     """A handler an application that embeds ASH puts on a logger."""

@@ -24,6 +24,8 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
 from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.error_text import error_text
 
+pytestmark = pytest.mark.unit
+
 PluginContext.model_rebuild()
 
 CANARY = "zz-canary-9f3a71"

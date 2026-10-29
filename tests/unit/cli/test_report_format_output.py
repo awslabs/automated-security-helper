@@ -44,6 +44,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 
+pytestmark = pytest.mark.unit
+
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 # Reporters that need AWS credentials to produce anything; their routing is

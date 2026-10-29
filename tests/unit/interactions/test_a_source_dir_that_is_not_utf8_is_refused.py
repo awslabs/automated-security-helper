@@ -109,6 +109,7 @@ def no_nix_shell(monkeypatch):
 
 
 @pytest.mark.parametrize("mode", [RunMode.local, RunMode.precommit, RunMode.nix])
+@pytest.mark.unit
 def test_a_scan_here_of_a_directory_that_is_not_utf8_is_refused_before_it_writes(
     tmp_path, monkeypatch, console, no_nix_shell, mode
 ):
@@ -141,6 +142,7 @@ def test_a_scan_here_of_a_directory_that_is_not_utf8_is_refused_before_it_writes
     assert "--mode container" not in text, ascii(text)
 
 
+@pytest.mark.unit
 def test_the_directory_is_shown_not_obeyed(tmp_path, monkeypatch, console):
     """The name is the operator's directory's: its controls, markup and CI commands
     are written out, not obeyed."""
@@ -168,6 +170,7 @@ def test_the_directory_is_shown_not_obeyed(tmp_path, monkeypatch, console):
     assert not _has_a_surrogate(text), ascii(text)
 
 
+@pytest.mark.integration
 def test_ash_scan_refuses_it_with_the_message_on_a_strict_stdout(tmp_path):
     """Through the CLI, in a child process whose stdout cannot encode a surrogate:
     the message is printed whole, and nothing is written."""
@@ -235,6 +238,7 @@ def no_container_run(monkeypatch):
     [("source", False), ("output", False), ("source", True), ("output", True)],
     ids=["source", "output", "source-existing", "output-existing"],
 )
+@pytest.mark.unit
 def test_container_mode_refuses_a_mount_whose_path_is_not_utf8(
     tmp_path, monkeypatch, console, no_container_run, odd, existing
 ):
@@ -276,6 +280,7 @@ def test_container_mode_refuses_a_mount_whose_path_is_not_utf8(
     assert not _has_a_surrogate(text), ascii(text)
 
 
+@pytest.mark.unit
 def test_container_mode_names_the_directory_to_scan_first(
     tmp_path, monkeypatch, console, no_container_run
 ):
@@ -297,6 +302,7 @@ def test_container_mode_names_the_directory_to_scan_first(
     assert "The output directory" not in text, ascii(text)
 
 
+@pytest.mark.unit
 def test_container_mode_with_no_run_is_not_refused(
     tmp_path, monkeypatch, console, no_container_run
 ):
@@ -326,6 +332,7 @@ _GUARD = '#!/bin/sh\necho "$(basename "$0") $*" >> "{log}"\nexit 97\n'
 
 
 @pytest.mark.parametrize("odd", ["source", "output"])
+@pytest.mark.integration
 def test_ash_scan_container_mode_refuses_it_before_any_runtime_call(tmp_path, odd):
     """Through the CLI, on a stdout that cannot encode a surrogate, with a runtime
     stand-in that records any call and guards that fail on a real runtime's name."""
@@ -408,6 +415,7 @@ def test_ash_scan_container_mode_refuses_it_before_any_runtime_call(tmp_path, od
     }
 
 
+@pytest.mark.unit
 def test_a_report_over_existing_results_is_not_refused(tmp_path, monkeypatch, console):
     """It writes its reports from the stored results, not from the directory's path."""
     root = _not_utf8_dir(tmp_path)

@@ -25,6 +25,8 @@ from automated_security_helper.utils.subprocess_utils import (
     scanning_tree,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _serving_with(serve):
     """``mcp.run_stdio_async`` replaced: the serving is ``serve``, run once."""

@@ -3,10 +3,13 @@
 import json
 from unittest.mock import patch, mock_open
 
+import pytest
 
 from automated_security_helper.utils.meta_analysis.sarif_analysis import (
     analyze_sarif_file,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_analyze_sarif_file():

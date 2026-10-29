@@ -45,6 +45,8 @@ from automated_security_helper.core.progress import LiveProgressDisplay
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 import automated_security_helper.plugin_modules.ash_builtin as builtin_plugins
 
+pytestmark = pytest.mark.unit
+
 
 def _write_config(directory: Path, body: str) -> Path:
     config_path = directory / ".ash" / ".ash.yaml"

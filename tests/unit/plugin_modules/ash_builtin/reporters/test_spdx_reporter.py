@@ -26,6 +26,8 @@ from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import (
     CycloneDXReport,
 )
 
+pytestmark = pytest.mark.unit
+
 SPDX_ID = re.compile(r"^SPDXRef-[A-Za-z0-9.-]+$")
 CREATED = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 

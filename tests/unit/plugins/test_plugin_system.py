@@ -10,6 +10,8 @@ from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.events import AshEventType
 from automated_security_helper.base.plugin_context import PluginContext
 
+pytestmark = pytest.mark.unit
+
 # Ensure models are rebuilt after all imports
 PluginContext.model_rebuild()
 

@@ -29,6 +29,8 @@ from automated_security_helper.utils.undecodable_text import (
     resolve_uri_reading,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _located(*uris: str) -> SimpleNamespace:
     """A result object with one location per uri, in the SARIF attribute shape."""

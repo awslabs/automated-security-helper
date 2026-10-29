@@ -29,6 +29,8 @@ from automated_security_helper.config.sandbox_grants import (
 )
 from tests.utils.helpers import link_walk_cannot_examine
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _fresh_warnings() -> None:

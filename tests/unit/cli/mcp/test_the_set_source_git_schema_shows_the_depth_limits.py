@@ -44,6 +44,8 @@ from automated_security_helper.cli.mcp.source_delivery import MAX_CLONE_DEPTH
 from automated_security_helper.cli.mcp_server import mcp
 from tests.utils.mcp_transport_harness import local_in_memory_client
 
+pytestmark = pytest.mark.unit
+
 
 def _properties(tool_name: str) -> Dict[str, Any]:
     tools = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}

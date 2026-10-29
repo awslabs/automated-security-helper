@@ -25,6 +25,8 @@ from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 from automated_security_helper.utils.version_management import _load_toml
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 

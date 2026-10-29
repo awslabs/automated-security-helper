@@ -21,6 +21,8 @@ import pytest
 from tests.snapshot.support.cli import run_cli
 from tests.snapshot.support.normalize import REPO_ROOT
 
+pytestmark = pytest.mark.unit
+
 FIXTURE = REPO_ROOT / "tests" / "test_data" / "snapshot" / "sarif_fields"
 SARIF_DIR = "sarif-input"
 OUTPUT_DIR = "inspect-out"

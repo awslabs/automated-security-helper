@@ -16,6 +16,7 @@ from __future__ import annotations
 from pathlib import Path, PurePosixPath
 from typing import List
 
+import pytest
 
 from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -37,6 +38,8 @@ from automated_security_helper.utils.sarif_utils import (
     _normalize_sarif_uri,
     apply_suppressions_to_sarif,
 )
+
+pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------

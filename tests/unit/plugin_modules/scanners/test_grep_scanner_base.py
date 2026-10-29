@@ -33,6 +33,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scan
     OpengrepScannerConfigOptions,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def no_tool_starts(tmp_path_factory, monkeypatch):

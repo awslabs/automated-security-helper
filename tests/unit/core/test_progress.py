@@ -31,6 +31,8 @@ import pytest
 from automated_security_helper.core.progress import LiveProgressDisplay
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 # ``utils.log`` registers VERBOSE at 15 via ``addLoggingLevel("VERBOSE", 15)``.
 # Spelled as a literal here for the same reason ``progress.py`` uses one: the
 # module-level ``VERBOSE_LEVEL`` reads back whatever is registered under that

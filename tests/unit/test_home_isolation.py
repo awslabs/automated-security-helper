@@ -157,6 +157,7 @@ def _run_with_sentinel_home(
     return result, created
 
 
+@pytest.mark.integration
 def test_the_installer_tests_leave_the_developer_home_untouched(tmp_path):
     """test_pinned_tool_downloads.py wrote 9 install receipts into the home per run."""
     result, created = _run_with_sentinel_home(
@@ -171,6 +172,7 @@ def test_the_installer_tests_leave_the_developer_home_untouched(tmp_path):
     )
 
 
+@pytest.mark.integration
 def test_a_write_to_the_starting_home_shows_in_the_sentinel(tmp_path):
     """Positive control for the check above, and the ``real_home`` contract.
 
@@ -202,6 +204,7 @@ def test_a_write_to_the_starting_home_shows_in_the_sentinel(tmp_path):
     assert left == [], left
 
 
+@pytest.mark.integration
 def test_a_test_that_writes_into_the_developers_ash_is_refused_and_fails(tmp_path):
     """A write the moved HOME cannot redirect is refused, and fails the test that made it.
 
@@ -229,6 +232,7 @@ def test_a_test_that_writes_into_the_developers_ash_is_refused_and_fails(tmp_pat
     assert "refused by the test guard" in output, output[-4000:]
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("workers", ["2", "0"], ids=["xdist worker", "one process"])
 def test_a_write_after_the_last_teardown_fails_the_run(tmp_path, workers):
     """Nothing charges it to a test, so the session's end does, in a worker too.
@@ -260,6 +264,7 @@ def test_a_write_after_the_last_teardown_fails_the_run(tmp_path, workers):
         assert re.search(r"gw\d+: ", output), output[-4000:]
 
 
+@pytest.mark.integration
 def test_the_guard_lets_the_run_use_temp_dirs_inside_the_home(tmp_path):
     """On Windows %TEMP% is under %USERPROFILE%, so every tmp_path is in the home.
 
@@ -289,6 +294,7 @@ def test_the_guard_lets_the_run_use_temp_dirs_inside_the_home(tmp_path):
     assert " passed" in output and "failed" not in output, output[-4000:]
 
 
+@pytest.mark.integration
 def test_a_temp_dir_that_holds_the_home_does_not_excuse_it(tmp_path):
     """HOME under the temp directory, as in CI images whose HOME is in /tmp.
 
@@ -313,6 +319,7 @@ def test_a_temp_dir_that_holds_the_home_does_not_excuse_it(tmp_path):
     assert " passed" in output and "failed" not in output, output[-4000:]
 
 
+@pytest.mark.integration
 def test_the_guards_tests_pass_with_ash_bin_path_exported_in_the_home(tmp_path):
     """Many developers export ASH_BIN_PATH=~/.ash/bin, and so did this branch's docs.
 
@@ -347,6 +354,7 @@ MIRROR_VARIABLES = (
 )
 
 
+@pytest.mark.integration
 def test_the_package_mirror_variables_reach_every_test(tmp_path):
     """The run's home and each test's leave the mirror variables as they were."""
     expected = {
@@ -365,6 +373,7 @@ def test_the_package_mirror_variables_reach_every_test(tmp_path):
     assert not created, created
 
 
+@pytest.mark.integration
 def test_a_refusal_the_test_swallows_still_fails_it(tmp_path):
     """The HOME guard fails a test at teardown even when the test ate the refusal.
 
@@ -390,6 +399,7 @@ def test_a_refusal_the_test_swallows_still_fails_it(tmp_path):
 TRIVY_PROBE = "tests/unit/plugin_modules/ash_trivy_plugins/home_isolation_probe.py"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "inherited",
     [
@@ -434,6 +444,7 @@ def test_ash_computes_its_import_time_paths_inside_the_runs_own_home(
     assert not created, created
 
 
+@pytest.mark.integration
 def test_a_jsii_cache_named_from_the_home_is_the_developers(tmp_path):
     """``ASH_JSII_CACHE_DIR=~/...`` is configured when the run starts, after HOME moved.
 
@@ -452,6 +463,7 @@ def test_a_jsii_cache_named_from_the_home_is_the_developers(tmp_path):
     assert not created, created
 
 
+@pytest.mark.integration
 def test_a_jsii_cache_inside_the_developers_ash_is_refused_at_the_start(tmp_path):
     """``ASH_JSII_CACHE_DIR=~/.ash/...`` would put the cache's lock where the guard refuses.
 
@@ -470,6 +482,7 @@ def test_a_jsii_cache_inside_the_developers_ash_is_refused_at_the_start(tmp_path
     assert not [path for path in created if path.startswith("home/.ash")], created
 
 
+@pytest.mark.integration
 def test_uvs_own_directory_variables_do_not_reach_past_the_tests_home(tmp_path):
     """With UV_TOOL_DIR set, two CLI test modules wrote uv's .gitignore and .lock into it."""
     sentinel = tmp_path / "sentinel"
@@ -489,6 +502,7 @@ def test_uvs_own_directory_variables_do_not_reach_past_the_tests_home(tmp_path):
     )
 
 
+@pytest.mark.integration
 def test_none_of_uvs_directory_variables_reaches_a_test(tmp_path):
     """All five are set in the child's env, and a probe test sees none of those values.
 
@@ -516,6 +530,7 @@ def test_none_of_uvs_directory_variables_reaches_a_test(tmp_path):
     assert not created, created
 
 
+@pytest.mark.unit
 def test_a_module_imported_by_pytest_sees_the_runs_own_home(developer_home):
     """The run's own home, set before collection, is what import-time code reads.
 
@@ -552,6 +567,7 @@ def _launcher(directory: Path) -> str:
     return str(launcher)
 
 
+@pytest.mark.integration
 def test_an_xdist_worker_whose_parent_is_a_launcher_uses_the_runs_home(tmp_path):
     """Each worker of a pytest run from a Windows venv is a grandchild of its controller.
 
@@ -576,6 +592,7 @@ def test_an_xdist_worker_whose_parent_is_a_launcher_uses_the_runs_home(tmp_path)
     assert not created, created
 
 
+@pytest.mark.unit
 def test_importing_the_conftest_again_changes_nothing():
     """``from tests.conftest import X`` executes tests/conftest.py a second time.
 
@@ -607,6 +624,7 @@ def test_importing_the_conftest_again_changes_nothing():
     assert atexit._ncallbacks() == atexit_before
 
 
+@pytest.mark.unit
 class TestEachTestHasItsOwnHome:
     def test_the_home_is_a_temporary_directory(self, developer_home, tmp_path_factory):
         home = Path.home()
@@ -656,6 +674,7 @@ class TestEachTestHasItsOwnHome:
             assert environ_value(variable) == starting, variable
 
 
+@pytest.mark.unit
 def test_uv_keeps_the_developers_cache(developer_environment):
     """A child uv under a fresh home would start with an empty cache and go online.
 

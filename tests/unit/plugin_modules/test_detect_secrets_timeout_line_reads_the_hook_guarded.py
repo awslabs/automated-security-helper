@@ -22,6 +22,9 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
 from automated_security_helper.utils import subprocess_utils
 
 
+pytestmark = pytest.mark.unit
+
+
 def _raising(_self):
     raise RuntimeError("the hook broke")
 

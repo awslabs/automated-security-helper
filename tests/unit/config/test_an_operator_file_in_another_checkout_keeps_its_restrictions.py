@@ -26,6 +26,8 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.resolve_config import resolve_config
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 #: The operator's file: a grant, a lowered limit, a restriction on usage data and
 #: a network list. The grant is the one setting that must not survive.
 OPERATOR = """\

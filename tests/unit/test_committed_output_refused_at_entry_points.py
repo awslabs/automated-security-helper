@@ -45,6 +45,8 @@ from tests.unit.test_committed_results_paths_are_never_deleted import (
 )
 from tests.unit.workspace.test_execution import _git
 
+pytestmark = pytest.mark.integration
+
 
 def _isolate_git(monkeypatch, tmp_path: Path) -> None:
     """Keep the developer's git config, and any checkout above tmp_path, out."""

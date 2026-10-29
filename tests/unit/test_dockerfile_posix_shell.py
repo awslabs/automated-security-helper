@@ -72,6 +72,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Every Dockerfile whose RUN lines this contract covers. The generated

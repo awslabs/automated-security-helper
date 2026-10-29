@@ -142,6 +142,7 @@ def ash_warnings():
 
 
 class TestInstalledToolsAreFound:
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "layout",
         [
@@ -167,6 +168,7 @@ class TestInstalledToolsAreFound:
         assert find_executable_for_scan("tool", repo) == str(tool)
         assert ash_warnings == []
 
+    @pytest.mark.unit
     @needs_symlinks
     @pytest.mark.parametrize(
         "entry, target",
@@ -190,6 +192,7 @@ class TestInstalledToolsAreFound:
         assert find_executable_for_scan("tool", repo) == str(link)
         assert ash_warnings == []
 
+    @pytest.mark.unit
     def test_a_tool_in_ashs_bin_directory(self, repo, installs, monkeypatch):
         ash_bin = installs / "home/user/.ash/bin"
         tool = fake_tool(ash_bin)
@@ -204,6 +207,7 @@ class TestInstalledToolsAreFound:
         assert find_executable("tool") == tool.as_posix()
         assert find_executable_for_scan("tool", repo) == tool.as_posix()
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "layout",
         [
@@ -225,6 +229,7 @@ class TestInstalledToolsAreFound:
         assert find_executable("semgrep") == str(tool)
         assert find_executable_for_scan("semgrep", repo) == str(tool)
 
+    @pytest.mark.integration
     @posix_only
     def test_run_command_starts_an_installed_tool(self, repo, installs, monkeypatch):
         ran = installs / "ran"
@@ -237,6 +242,7 @@ class TestInstalledToolsAreFound:
         assert ran.exists()
 
 
+@pytest.mark.unit
 class TestNothingIsFoundThroughTheWorkingDirectory:
     @pytest.mark.parametrize("entry", ["", ".", "bin"])
     def test_a_relative_path_entry_is_not_searched(self, entry, repo, monkeypatch):
@@ -366,6 +372,7 @@ class TestNothingIsFoundThroughTheWorkingDirectory:
         assert plain_runs == [["tool", "--version"]]
 
 
+@pytest.mark.unit
 class TestToolsInsideTheScannedTree:
     """Refused by default, by every lookup and spawn; the operator's opt-in allows them."""
 
@@ -530,6 +537,7 @@ class TestSpawnsRefuseInTreePrograms:
     def opt_in_off(self, monkeypatch):
         monkeypatch.delenv(ALLOW_IN_TREE_TOOLS_ENV, raising=False)
 
+    @pytest.mark.unit
     @posix_only
     @pytest.mark.parametrize("spelling", ["bare", "absolute"])
     def test_run_command_does_not_start_a_refused_program(
@@ -548,6 +556,7 @@ class TestSpawnsRefuseInTreePrograms:
         assert str(in_tree) in result.stderr
         assert not ran.exists()
 
+    @pytest.mark.integration
     @posix_only
     def test_the_opt_in_lets_it_start(self, repo, installs, monkeypatch):
         monkeypatch.setenv(ALLOW_IN_TREE_TOOLS_ENV, "1")
@@ -562,6 +571,7 @@ class TestSpawnsRefuseInTreePrograms:
         assert result.returncode == 0
         assert ran.exists()
 
+    @pytest.mark.unit
     def test_children_are_started_without_the_trees_path_entries(
         self, repo, installs, monkeypatch
     ):
@@ -579,6 +589,7 @@ class TestSpawnsRefuseInTreePrograms:
         assert env["PATH"] == str(kept)
         assert ALLOW_IN_TREE_TOOLS_ENV not in env
 
+    @pytest.mark.unit
     def test_with_the_opt_in_children_keep_path_and_inherit_the_decision(
         self, repo, monkeypatch
     ):
@@ -599,6 +610,7 @@ class TestSpawnsRefuseInTreePrograms:
         assert env["PATH"] == path
         assert env[ALLOW_IN_TREE_TOOLS_ENV] == "1"
 
+    @pytest.mark.unit
     def test_a_process_that_does_not_honor_the_opt_in_tells_its_children_so(
         self, repo, monkeypatch
     ):
@@ -610,6 +622,7 @@ class TestSpawnsRefuseInTreePrograms:
 
         assert ALLOW_IN_TREE_TOOLS_ENV not in env
 
+    @pytest.mark.unit
     def test_windows_does_not_hand_an_unresolved_name_to_createprocess(
         self, repo, installs, monkeypatch, plain_runs
     ):
@@ -624,6 +637,7 @@ class TestSpawnsRefuseInTreePrograms:
         assert result.returncode == 127
 
 
+@pytest.mark.unit
 class TestTheSandboxsOwnPrograms:
     """bwrap, firejail, readlink, true: the opt-in covers them too (its own decision point)."""
 
@@ -673,6 +687,7 @@ class TestTheSandboxsOwnPrograms:
         assert backends._sandbox_program("bwrap") is None
 
 
+@pytest.mark.unit
 class TestIsInsideTree:
     def test_as_written_and_as_resolved(self, tmp_path):
         tree = tmp_path / "repo"
@@ -703,6 +718,7 @@ class TestIsInsideTree:
         assert is_inside_tree(tmp_path / "linked" / "x", tree)
 
 
+@pytest.mark.unit
 class TestEverySpellingOfTheTree:
     @needs_symlinks
     def test_a_link_whose_directory_is_in_the_tree_is_inside(self, tmp_path):
@@ -793,6 +809,7 @@ class TestEverySpellingOfTheTree:
         assert scanned_tree.is_inside_tree(tree / "out" / "tool", tree)
 
 
+@pytest.mark.unit
 class TestRelativeProgramPaths:
     @posix_only
     def test_a_program_named_by_a_relative_path_is_not_started(
@@ -809,6 +826,7 @@ class TestRelativeProgramPaths:
         assert find_executable("./bin/tool") is None
 
 
+@pytest.mark.unit
 @posix_only
 class TestTheSandboxProbes:
     """The backends find their programs through find_trusted_executable."""

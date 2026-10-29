@@ -41,6 +41,8 @@ from automated_security_helper.utils.severity_ladder import (
     normalize_threshold,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestTheEnvironmentValueIsNormalized:
     """``ASH_DEFAULT_SEVERITY_LEVEL`` is validated before it becomes a default."""

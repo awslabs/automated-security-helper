@@ -23,6 +23,8 @@ import sys
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 RENDER_HELP = (
     "from automated_security_helper.cli.main import app; "
     "app(['dependencies', 'install', '--help'], prog_name='ash')"

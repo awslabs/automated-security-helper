@@ -71,6 +71,7 @@ def _image_builds() -> dict[str, list[str]]:
     return found
 
 
+@pytest.mark.unit
 def test_the_reader_finds_the_image_builds():
     """Positive control: every committed stack builds its image from the ASH repository."""
     templates = {name.split(" #")[0] for name in _image_builds()}
@@ -125,6 +126,7 @@ def _checkout_commands(commands: list[str]) -> list[str]:
     "ref, expected",
     [("v9.9.9", "tagged"), ("feat/fixture", "base"), ("<sha of unnamed>", "unnamed")],
 )
+@pytest.mark.integration
 def test_the_image_build_checks_out_any_ref(
     template, ref, expected, upstream, tmp_path
 ):
@@ -158,6 +160,7 @@ def test_the_image_build_checks_out_any_ref(
 
 
 @pytest.mark.parametrize("template", sorted(_image_builds()))
+@pytest.mark.unit
 def test_docker_builds_the_tree_that_was_checked_out(template):
     """Every build of ASH's own Dockerfile, the one at the root of ash-src.
 
@@ -187,6 +190,7 @@ def test_docker_builds_the_tree_that_was_checked_out(template):
 
 @posix_only
 @pytest.mark.parametrize("template", sorted(_image_builds()))
+@pytest.mark.integration
 def test_an_ash_version_starting_with_a_dash_is_not_a_git_option(
     template, upstream, tmp_path
 ):

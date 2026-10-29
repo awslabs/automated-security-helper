@@ -52,6 +52,10 @@ import re
 from pathlib import Path
 from typing import Dict, List, Set
 
+import pytest
+
+pytestmark = pytest.mark.integration
+
 HERE = Path(__file__).resolve().parent
 CONFTEST = HERE / "conftest.py"
 

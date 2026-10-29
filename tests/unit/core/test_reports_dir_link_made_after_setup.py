@@ -26,9 +26,12 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.report_path_links import ReportPathLinkRefused
 from tests.utils.helpers import results_of_a_scan
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    ),
+]
 
 
 def _link_reports(output: Path, to: Path) -> Path:

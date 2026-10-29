@@ -25,6 +25,7 @@ from automated_security_helper.interactions.run_ash_nix import (
 )
 
 
+@pytest.mark.unit
 class TestRunModeEnum:
     def test_nix_is_a_run_mode(self):
         assert RunMode.nix.value == "nix"
@@ -35,6 +36,7 @@ class TestRunModeEnum:
         assert RunMode("nix") is RunMode.nix
 
 
+@pytest.mark.unit
 class TestRewriteModeArgs:
     def test_two_token_form_becomes_local(self):
         assert rewrite_mode_args(["scan", "--mode", "nix"]) == [
@@ -87,6 +89,7 @@ class TestRewriteModeArgs:
         assert "nix" not in rewrite_mode_args(["scan", "--mode", "nix", "--quiet"])
 
 
+@pytest.mark.unit
 class TestResolveFlakeRef:
     def test_explicit_argument_wins_over_environment(self, monkeypatch):
         monkeypatch.setenv(ASH_NIX_FLAKE_REF_ENV_VAR, "github:someone/else")
@@ -146,6 +149,7 @@ class TestResolveFlakeRef:
 
 
 class TestBuildNixCommand:
+    @pytest.mark.unit
     def test_enables_experimental_features_before_the_subcommand(self):
         cmd = build_nix_command("path:/repo", ["scan"], "/usr/bin/nix")
         assert cmd[0] == "/usr/bin/nix"
@@ -155,6 +159,7 @@ class TestBuildNixCommand:
         # makes every first run fail with "experimental Nix feature ... is disabled".
         assert cmd.index("--extra-experimental-features") < cmd.index("develop")
 
+    @pytest.mark.unit
     def test_runs_this_ash_inside_the_shell_with_the_forwarded_args(self):
         """The inner scan is the interpreter running now, started by absolute path."""
         cmd = build_nix_command("path:/repo", ["scan", "--mode", "local"], "nix")
@@ -167,6 +172,7 @@ class TestBuildNixCommand:
         assert "automated_security_helper.cli.entrypoint" in inner[code + 1]
         assert inner[code + 2 :] == ["scan", "--mode", "local"]
 
+    @pytest.mark.integration
     def test_the_inner_command_runs_this_ash_and_not_one_in_the_scanned_tree(
         self, tmp_path
     ):
@@ -238,12 +244,14 @@ class TestTheInnerScanImportsNothingFromTheScanDirectory:
     has it.
     """
 
+    @pytest.mark.integration
     def test_control_the_old_inner_command_imports_the_planted_package(self, tmp_path):
         marker = tmp_path / "IMPORTED"
         _plant_ash(tmp_path / "repo", marker)
         _run_in(_OLD_INNER_COMMAND, tmp_path / "repo")
         assert marker.read_text(encoding="utf-8") == "planted\n"
 
+    @pytest.mark.integration
     def test_the_inner_command_runs_the_installed_ash(self, tmp_path):
         from automated_security_helper.interactions.run_ash_nix import _this_ash
 
@@ -253,6 +261,7 @@ class TestTheInnerScanImportsNothingFromTheScanDirectory:
         assert not marker.exists(), marker.read_text(encoding="utf-8")
         assert result.returncode == 0, result.stderr
 
+    @pytest.mark.integration
     def test_without_p_the_code_alone_drops_the_entry(self, tmp_path):
         """Python 3.10 has no -P, so the -c source has to be enough on its own."""
         from automated_security_helper.interactions.run_ash_nix import _this_ash
@@ -264,6 +273,7 @@ class TestTheInnerScanImportsNothingFromTheScanDirectory:
         assert not marker.exists(), marker.read_text(encoding="utf-8")
         assert result.returncode == 0, result.stderr
 
+    @pytest.mark.unit
     def test_flake_ref_is_passed_to_develop(self):
         cmd = build_nix_command("github:owner/repo/v1", ["scan"], "nix")
         assert cmd[cmd.index("develop") + 1] == "github:owner/repo/v1"
@@ -305,6 +315,7 @@ def entered_shell(monkeypatch) -> _EnteredShell:
     return shell
 
 
+@pytest.mark.unit
 class TestRunAshNix:
     def test_missing_nix_raises_and_does_not_fall_back(self, monkeypatch):
         monkeypatch.setattr(
@@ -460,6 +471,7 @@ class TestRunAshNix:
         assert entered_shell.env[ASH_IN_NIX_ENV_VAR] == "1"
 
 
+@pytest.mark.integration
 class TestEnterShell:
     def test_the_shell_gets_an_empty_standard_input(self, monkeypatch):
         """Neither ``nix`` nor the scanners it starts read this process's input.
@@ -493,6 +505,7 @@ class TestEnterShell:
         assert given.get("stdin") is subprocess.DEVNULL
 
 
+@pytest.mark.unit
 class TestRepoFlakeDir:
     def test_finds_the_flake_in_this_checkout(self):
         # These tests run from a source checkout, which is the case the path: branch

@@ -25,6 +25,8 @@ from automated_security_helper.interactions import run_ash_container as rac
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 
+pytestmark = pytest.mark.unit
+
 SWITCH_OFF_FLAG = "--no-honor-ignore-files"
 CONFIG_KEY = "honor_ignore_files"
 

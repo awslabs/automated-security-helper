@@ -50,6 +50,8 @@ from automated_security_helper.utils import ash_install
 #: The top-level package the resolver asks about. Derived the same way the
 #: resolver derives it, so a package rename cannot make these tests stale while
 #: still looking green.
+pytestmark = pytest.mark.unit
+
 ROOT = cdk_nag_scanner.__name__.split(".", 1)[0]
 
 # The version bounds below are deliberately NOT the ones in

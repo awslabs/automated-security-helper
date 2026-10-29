@@ -89,6 +89,7 @@ def _assert_ran_the_diff(mock_run: MagicMock, base_ref: str) -> None:
     assert differing_names(env, os.environ) == []
 
 
+@pytest.mark.unit
 class TestGetChangedFiles:
     """Unit tests for the get_changed_files helper."""
 
@@ -183,6 +184,7 @@ def _git(cwd: Path, *args: str) -> None:
     run_git(*args, cwd=cwd, check=True, timeout=30)
 
 
+@pytest.mark.integration
 class TestNamesFromARealRepository:
     """What a real ``git diff`` prints for names it would quote."""
 
@@ -305,6 +307,7 @@ def ash_warnings(caplog):
         ASH_LOGGER.disabled = saved_disabled
 
 
+@pytest.mark.unit
 class TestFilterResultsToChangedFiles:
     """Unit tests for filter_results_to_changed_files."""
 

@@ -32,6 +32,8 @@ from automated_security_helper.config.runtime_patch import (
     PROFILE_KEY_CAN_NAME_A_BUILT_IN_REFUSAL,
 )
 
+pytestmark = pytest.mark.unit
+
 #: Each section's built-in name, and a near miss that names no built-in.
 NAMES = {"reporters": ("markdown", "markdowm"), "scanners": ("bandit", "banditt")}
 

@@ -26,6 +26,8 @@ from typing import Any, Dict, List
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SELF_SCAN = REPO_ROOT / ".ash" / ".ash_community_plugins.yaml"
 DEFAULT = REPO_ROOT / ".ash" / ".ash.yaml"

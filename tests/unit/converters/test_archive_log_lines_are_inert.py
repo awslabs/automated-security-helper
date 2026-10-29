@@ -28,6 +28,8 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.archive_con
 )
 from tests.utils.host_file_names import skip_unless_the_host_can_name
 
+pytestmark = pytest.mark.unit
+
 ARCHIVE_MODULE = (
     "automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter"
 )

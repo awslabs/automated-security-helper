@@ -39,6 +39,8 @@ from automated_security_helper.cli.mcp import (
 from automated_security_helper.core.exceptions import ASHValidationError
 from tests.utils.mcp_transport_harness import LOOPBACK_PORT
 
+pytestmark = pytest.mark.unit
+
 HEADER = "X-Ash-Token"
 #: Two characters outside latin-1, named by code point.
 OUTSIDE_LATIN_1 = chr(0x4E2D) + chr(0x6587)

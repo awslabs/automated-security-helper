@@ -22,6 +22,8 @@ from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
 )
 
+pytestmark = pytest.mark.unit
+
 BUILTIN_VAR = "ASH_SHOWN_BI_CANARY"
 GLOBAL_VAR = "ASH_SHOWN_GL_CANARY"
 

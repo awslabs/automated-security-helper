@@ -144,9 +144,11 @@ def pytest_collection_modifyitems(config, items):
     named ``..._integration.py``, had all fourteen of its tests skipped in a full
     run while passing when the file was run on its own. Fixing one instance of a
     pattern and documenting it is not the same as removing the pattern, so the
-    ``integration`` marker now hangs off the same path scoping as everything
-    else. Detected by diffing the skipped-test IDs against a baseline, which is
-    the only signal this failure emits.
+    ``integration`` marker was moved onto the same path scoping as everything
+    else, and then off this hook altogether: each test file in this tree now
+    declares its own tier (see tests/NAMING_CONVENTIONS.md). Detected by diffing
+    the skipped-test IDs against a baseline, which is the only signal this
+    failure emits.
 
     A NOTE FOR ANYONE ADDING A TEST TO THIS DIRECTORY
     -------------------------------------------------
@@ -168,15 +170,13 @@ def pytest_collection_modifyitems(config, items):
         if not Path(item.fspath).resolve().is_relative_to(integration_root):
             continue
 
-        # What makes a test an integration test is living in this tree, not
-        # having "integration" in its path. The previous version tested the
-        # substring and so marked -- and therefore skipped -- any test anywhere
-        # in the repository whose path happened to contain the word. That is the
-        # same defect this hook's docstring describes for the slow marker, left
-        # in place when that one was fixed; a unit test named
-        # test_workspace_policy_integration.py hit it and its fourteen tests
-        # were silently skipped in the full suite while passing in isolation.
-        item.add_marker(pytest.mark.integration)
+        # No tier marker is added here. The tier (integration or e2e) is declared
+        # on each test file under the contract in tests/NAMING_CONVENTIONS.md, and
+        # adding "integration" by directory would give an e2e test a second tier.
+        # An earlier version added it by testing the substring "integration" in the
+        # path, which marked -- and therefore skipped -- a unit test named
+        # test_workspace_policy_integration.py in the full suite while it passed in
+        # isolation; a directory rule has the same shape of defect.
 
         # Add slow marker to tests that might take longer
         if any(

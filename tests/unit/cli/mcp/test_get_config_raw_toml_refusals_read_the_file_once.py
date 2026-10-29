@@ -43,6 +43,8 @@ from automated_security_helper.cli.mcp_tools import _config_as_written
 from automated_security_helper.config import config_sources
 from automated_security_helper.core.exceptions import ASHConfigSourceError
 
+pytestmark = pytest.mark.unit
+
 PROBE_VAR = "ASH_RAW_TOML_PROBE"
 PROBE_VALUE = "a-value-the-servers-environment-holds"
 

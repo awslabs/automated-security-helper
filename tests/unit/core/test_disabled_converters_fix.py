@@ -3,10 +3,13 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
 
 from automated_security_helper.core.phases.convert_phase import ConvertPhase
 from automated_security_helper.core.phases.report_phase import ReportPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+pytestmark = pytest.mark.unit
 
 
 def _make_plugin_context(tmp_path: Path):

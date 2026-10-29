@@ -231,6 +231,7 @@ def _has_planted(python: Path) -> bool:
 
 @needs_uv
 @pytest.mark.parametrize("kind", ALL_KINDS)
+@pytest.mark.integration
 def test_dependencies_install_does_not_take_packages_from_a_uv_config(
     kind, isolated_uv, monkeypatch
 ):
@@ -261,6 +262,7 @@ def test_dependencies_install_does_not_take_packages_from_a_uv_config(
 
 @needs_uv
 @pytest.mark.parametrize("kind", ALL_KINDS)
+@pytest.mark.integration
 def test_a_plugins_own_uv_command_does_not_read_a_uv_config(
     kind, isolated_uv, monkeypatch
 ):
@@ -288,6 +290,7 @@ def test_a_plugins_own_uv_command_does_not_read_a_uv_config(
         pytest.param([sys.executable, "-Im", "uv"], id="python-Im-uv"),
     ],
 )
+@pytest.mark.integration
 def test_a_declared_uv_venv_does_not_read_the_repositorys_config(
     program, isolated_uv, monkeypatch
 ):
@@ -315,6 +318,7 @@ def test_a_declared_uv_venv_does_not_read_the_repositorys_config(
 
 @needs_uv
 @pytest.mark.parametrize("kind", REPOSITORY_KINDS)
+@pytest.mark.integration
 def test_uv_tool_commands_ignore_the_repositorys_config(kind, isolated_uv, monkeypatch):
     """uv itself ignores project files for uv tool commands; ASH relies on that."""
     sub = _plant(isolated_uv, kind)
@@ -343,6 +347,7 @@ def test_uv_tool_commands_ignore_the_repositorys_config(kind, isolated_uv, monke
 
 @needs_uv
 @pytest.mark.parametrize("name", ["FORCE_COLOR", "CLICOLOR_FORCE"])
+@pytest.mark.integration
 def test_the_cache_directory_is_read_without_the_callers_color(
     name, isolated_uv, monkeypatch
 ):
@@ -359,6 +364,7 @@ def test_the_cache_directory_is_read_without_the_callers_color(
 
 @needs_uv
 @pytest.mark.parametrize("kind", OPERATOR_KINDS)
+@pytest.mark.integration
 def test_uv_tool_commands_honor_the_operators_uv_toml(kind, isolated_uv, monkeypatch):
     """The user's and the system uv.toml, where an index mirror lives, apply."""
     sub = _plant(isolated_uv, kind)
@@ -374,6 +380,7 @@ def test_uv_tool_commands_honor_the_operators_uv_toml(kind, isolated_uv, monkeyp
 
 
 @needs_uv
+@pytest.mark.integration
 def test_a_plugins_own_uv_tool_command_honors_the_users_uv_toml(
     isolated_uv, monkeypatch
 ):
@@ -387,6 +394,7 @@ def test_a_plugins_own_uv_tool_command_honors_the_users_uv_toml(
 
 
 @needs_uv
+@pytest.mark.integration
 def test_uv_cache_commands_do_not_read_the_repositorys_config(isolated_uv, monkeypatch):
     """A repository's cache-dir must not decide which cache uv cache dir names."""
     sub = _plant(isolated_uv, "uv.toml")
@@ -413,6 +421,7 @@ def test_uv_cache_commands_do_not_read_the_repositorys_config(isolated_uv, monke
 
 @needs_uv
 @pytest.mark.parametrize("level", ["tempdir", "parent"])
+@pytest.mark.integration
 def test_uv_cache_ignores_a_uv_toml_in_the_temporary_directory(
     level, isolated_uv, monkeypatch
 ):
@@ -453,6 +462,7 @@ def test_uv_cache_ignores_a_uv_toml_in_the_temporary_directory(
 
 @needs_uv
 @pytest.mark.parametrize("variable", ["UV_PROJECT", "UV_WORKING_DIR"])
+@pytest.mark.integration
 def test_uv_cache_ignores_a_project_the_environment_names(
     variable, isolated_uv, monkeypatch
 ):
@@ -488,6 +498,7 @@ def test_uv_cache_ignores_a_project_the_environment_names(
 
 @needs_uv
 @pytest.mark.parametrize("kind", OPERATOR_KINDS)
+@pytest.mark.integration
 def test_uv_cache_commands_follow_the_operators_cache_dir(
     kind, isolated_uv, monkeypatch
 ):
@@ -516,6 +527,7 @@ def test_uv_cache_commands_follow_the_operators_cache_dir(
 
 @needs_uv
 @pytest.mark.parametrize("kind", REPOSITORY_KINDS)
+@pytest.mark.integration
 def test_the_pre_installed_tool_check_does_not_read_the_repositorys_config(
     kind, isolated_uv, monkeypatch
 ):
@@ -649,6 +661,7 @@ def recorded(monkeypatch):
         ),
     ],
 )
+@pytest.mark.unit
 def test_no_runner_command_carries_no_config(call, recorded):
     """uv tool and uv cache keep the operator's uv.toml; see the cwd test below."""
     call(UVToolRunner(uv_executable="/opt/uv"))
@@ -658,6 +671,7 @@ def test_no_runner_command_carries_no_config(call, recorded):
         assert UV_NO_CONFIG not in _uv_options(argv), argv
 
 
+@pytest.mark.unit
 def test_uv_cache_runs_from_the_filesystem_root(recorded, tmp_path, monkeypatch):
     """Only an administrator can put a uv.toml or pyproject.toml there."""
     monkeypatch.chdir(tmp_path)
@@ -685,6 +699,7 @@ def test_uv_cache_runs_from_the_filesystem_root(recorded, tmp_path, monkeypatch)
         ),
     ],
 )
+@pytest.mark.unit
 def test_on_windows_uv_cache_runs_from_the_system_drive(
     environment, expected, monkeypatch
 ):
@@ -703,6 +718,7 @@ def test_on_windows_uv_cache_runs_from_the_system_drive(
     assert uv_tool_runner._uv_cache_cwd() == expected
 
 
+@pytest.mark.unit
 def test_the_uncalled_clean_cache_is_gone():
     assert not hasattr(UVToolRunner, "clean_cache")
 
@@ -712,6 +728,7 @@ POWERSHELL_UNSET = "Remove-Item Env:UV_PROJECT, Env:UV_WORKING_DIR -ErrorAction 
 POWERSHELL_ROOT = 'Push-Location "$env:SystemDrive\\"'
 
 
+@pytest.mark.unit
 def test_every_documented_uv_cache_command_runs_from_the_root():
     """The docs' recipes act on the cache ASH's tools use, as get_cache_info does.
 
@@ -750,6 +767,7 @@ def test_every_documented_uv_cache_command_runs_from_the_root():
     assert seen["powershell"], "no PowerShell uv cache recipe in the docs"
 
 
+@pytest.mark.unit
 def test_declared_install_commands(monkeypatch):
     """uv pip gets the flag; the uv tool install commands plugins declare do not."""
     from automated_security_helper.base.plugin_base import (
@@ -976,6 +994,7 @@ def test_declared_install_commands(monkeypatch):
         "project-value-named-tool",
     ],
 )
+@pytest.mark.unit
 def test_run_command_sets_uv_no_config_unless_the_command_is_uv_tool(
     declared, ran, no_config, monkeypatch
 ):

@@ -38,7 +38,10 @@ from automated_security_helper.utils import subprocess_utils, uv_tool_runner
 from automated_security_helper.utils.sandbox import scope as sandbox_scope
 from automated_security_helper.utils.sandbox.backends import SpawnPlan
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX stand-ins")
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(sys.platform == "win32", reason="POSIX stand-ins"),
+]
 
 
 class _Attempts:

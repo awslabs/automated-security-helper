@@ -36,6 +36,8 @@ from automated_security_helper.config.config_writer import (
 )
 from automated_security_helper.core.constants import ASH_DEFAULT_CONFIG_FILE_NAME
 
+pytestmark = pytest.mark.unit
+
 #: Values a config can hold, each with a line that is a CI command unless the
 #: writer writes it on one line.
 VALUES = {

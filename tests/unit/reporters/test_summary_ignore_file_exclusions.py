@@ -86,6 +86,7 @@ def markdown_reporter(test_plugin_context):
     return MarkdownReporter(context=test_plugin_context)
 
 
+@pytest.mark.unit
 class TestTheSummaryLine:
     def test_text_prints_the_total(self, text_reporter):
         lines = _lines(text_reporter.report(_model(HONORED)))
@@ -168,6 +169,7 @@ def _outcome(key: str, relative_path: str, record=None, **kwargs):
     )
 
 
+@pytest.mark.unit
 class TestTheWorkspaceAggregate:
     def test_counts_are_summed_and_keyed_from_the_workspace_root(self):
         aggregate = workspace_ignore_file_exclusions(
@@ -359,6 +361,7 @@ class TestTheWorkspaceAggregate:
 INCONSISTENT = "recorded inconsistently"
 
 
+@pytest.mark.unit
 class TestTheRecordsScanCounts:
     def test_a_record_of_one_scan_serializes_as_before(self):
         """The counts are written only for merged scans that disagreed."""
@@ -525,6 +528,7 @@ def workspace_run(tmp_path_factory):
     return output
 
 
+@pytest.mark.integration
 class TestAWorkspaceScan:
     def test_each_project_records_its_own(self, workspace_run):
         results = json.loads(
@@ -562,6 +566,7 @@ class TestAWorkspaceScan:
         assert len(lines) == 1 and re.search(r"\b7 files\b", lines[0]), lines
 
 
+@pytest.mark.unit
 class TestTheMcpSummary:
     @pytest.mark.asyncio
     async def test_get_scan_summary_returns_the_record(self, tmp_path, monkeypatch):

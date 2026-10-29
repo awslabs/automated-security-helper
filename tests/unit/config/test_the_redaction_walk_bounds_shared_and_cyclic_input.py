@@ -12,8 +12,11 @@ the once-only visit is hardening there, not a reachable contract.
 
 from __future__ import annotations
 
+import pytest
 
 from automated_security_helper.config.config_validator import _string_leaves
+
+pytestmark = pytest.mark.unit
 
 
 def test_leaves_keep_the_documents_own_order():

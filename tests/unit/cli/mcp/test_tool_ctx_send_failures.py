@@ -37,6 +37,8 @@ from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
 
+pytestmark = pytest.mark.unit
+
 SESSION = "ctx-send-session"
 NOT_A_SESSION_ID = "a/b"
 REFUSAL = {

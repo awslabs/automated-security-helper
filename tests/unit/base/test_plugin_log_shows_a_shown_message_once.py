@@ -90,12 +90,14 @@ def _logged(records, *parts) -> list[str]:
         ),
     ],
 )
+@pytest.mark.unit
 def test_a_part_shown_already_is_shown_once(ash_records, parts):
     for shown in _logged(ash_records, *parts):
         assert "'secr\\udce9t/x.js'" in shown, ascii(shown)
         assert "secr\\\\udce9t" not in shown, ascii(shown)
 
 
+@pytest.mark.unit
 def test_a_raw_part_is_shown_at_the_sink(ash_records):
     raw = f"its member '{NAME}' is held back\n::add-mask::x\x1b[2J"
     for shown in _logged(ash_records, raw):
@@ -116,6 +118,7 @@ def test_a_raw_part_is_shown_at_the_sink(ash_records):
         )
 
 
+@pytest.mark.unit
 def test_a_shown_part_and_a_raw_part_are_each_shown_once(ash_records):
     parts = [shown_on_one_line(f"first '{NAME}'"), f"second '{NAME}'"]
     for shown in _logged(ash_records, *parts):
@@ -153,6 +156,7 @@ def test_a_shown_name():
 """
 
 
+@pytest.mark.integration
 def test_a_name_with_a_surrogate_logged_under_xdist_reaches_the_report(tmp_path):
     (tmp_path / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
     (tmp_path / "test_logged_names.py").write_text(

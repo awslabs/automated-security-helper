@@ -88,6 +88,7 @@ def fake_git(workspace: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_a_clone_within_the_entry_cap_succeeds(fake_git, monkeypatch) -> None:
     """Positive control: the cap does not refuse a clone that stays under it."""
 
@@ -99,6 +100,7 @@ def test_a_clone_within_the_entry_cap_succeeds(fake_git, monkeypatch) -> None:
     assert result.get("success") is True, result
 
 
+@pytest.mark.integration
 def test_a_clone_past_the_entry_cap_is_refused(
     fake_git, workspace, monkeypatch
 ) -> None:
@@ -117,6 +119,7 @@ def test_a_clone_past_the_entry_cap_is_refused(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_an_unreadable_tree_is_refused_not_measured_as_zero(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -136,6 +139,7 @@ def test_an_unreadable_tree_is_refused_not_measured_as_zero(
         sd._refuse_oversized(tree)
 
 
+@pytest.mark.unit
 def test_an_unreadable_entry_is_refused_not_counted_as_zero(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -155,6 +159,7 @@ def test_an_unreadable_entry_is_refused_not_counted_as_zero(
         sd._refuse_oversized(tree)
 
 
+@pytest.mark.unit
 def test_an_unreadable_tree_is_not_reported_as_too_large(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -178,6 +183,7 @@ def test_an_unreadable_tree_is_not_reported_as_too_large(
     assert sd.CLONE_TREE_UNREADABLE != sd.CLONE_TOO_LARGE
 
 
+@pytest.mark.integration
 def test_an_unreadable_tree_is_reported_by_its_own_error_type(
     fake_git, workspace, monkeypatch
 ) -> None:
@@ -209,6 +215,7 @@ def test_an_unreadable_tree_is_reported_by_its_own_error_type(
         (sd.CloneTreeUnreadableError, sd.CLONE_TREE_UNREADABLE),
     ],
 )
+@pytest.mark.unit
 def test_every_clone_refusal_is_a_clone_refused_error_with_its_error_type(
     refusal: type, error_type: str
 ) -> None:
@@ -217,6 +224,7 @@ def test_every_clone_refusal_is_a_clone_refused_error_with_its_error_type(
     assert refusal.error_type == error_type
 
 
+@pytest.mark.unit
 def test_a_new_clone_refusal_type_is_cleaned_up_and_mapped_by_subclassing_alone(
     workspace, monkeypatch
 ) -> None:
@@ -238,6 +246,7 @@ def test_a_new_clone_refusal_type_is_cleaned_up_and_mapped_by_subclassing_alone(
     assert not (workspace / SESSION / "source").exists()
 
 
+@pytest.mark.unit
 def test_a_path_that_changes_kind_during_a_poll_is_not_an_error(
     tmp_path: Path,
 ) -> None:
@@ -268,6 +277,7 @@ def test_a_path_that_changes_kind_during_a_poll_is_not_an_error(
     assert size >= 16 and entries >= 2
 
 
+@pytest.mark.integration
 def test_a_directory_that_becomes_a_file_under_a_live_poll_does_not_stop_the_command(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -306,6 +316,7 @@ def test_a_directory_that_becomes_a_file_under_a_live_poll_does_not_stop_the_com
     assert result.returncode == 0
 
 
+@pytest.mark.integration
 def test_a_checkout_that_turns_a_directory_into_a_file_is_not_refused(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -362,6 +373,7 @@ def test_a_checkout_that_turns_a_directory_into_a_file_is_not_refused(
     assert (repo / "a").is_file()
 
 
+@pytest.mark.unit
 def test_an_entry_that_vanishes_mid_walk_is_still_measured(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -384,6 +396,7 @@ def test_an_entry_that_vanishes_mid_walk_is_still_measured(
     sd._refuse_oversized(tree)
 
 
+@pytest.mark.unit
 def test_an_entry_that_vanishes_during_a_live_poll_is_still_measured(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -415,6 +428,7 @@ def test_an_entry_that_vanishes_during_a_live_poll_is_still_measured(
         (errno.EMFILE, "Too many open files"),
     ],
 )
+@pytest.mark.unit
 def test_a_subtree_the_live_poll_cannot_walk_is_refused_not_left_uncounted(
     tmp_path: Path, monkeypatch, code: int, name: str
 ) -> None:
@@ -441,6 +455,7 @@ def test_a_subtree_the_live_poll_cannot_walk_is_refused_not_left_uncounted(
         sd._refuse_oversized(tree, running=True)
 
 
+@pytest.mark.unit
 def test_an_entry_the_live_poll_cannot_stat_is_refused_not_counted_as_zero(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -460,6 +475,7 @@ def test_an_entry_the_live_poll_cannot_stat_is_refused_not_counted_as_zero(
         sd._refuse_oversized(tree, running=True)
 
 
+@pytest.mark.integration
 def test_a_subtree_the_live_poll_cannot_read_stops_the_command(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -528,6 +544,7 @@ def test_a_subtree_the_live_poll_cannot_read_stops_the_command(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_a_command_that_exited_oversized_is_not_said_to_be_stopped(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -560,6 +577,7 @@ def _chunk(upload: str, sequence: int, data: bytes, last: bool = False) -> dict:
     )
 
 
+@pytest.mark.unit
 def test_a_clear_is_refused_while_a_chunk_is_being_appended(
     workspace, monkeypatch
 ) -> None:
@@ -593,6 +611,7 @@ def test_a_clear_is_refused_while_a_chunk_is_being_appended(
     assert part.read_bytes() == b"abc"
 
 
+@pytest.mark.unit
 def test_a_chunk_is_refused_while_a_change_holds_the_session(workspace) -> None:
     with sd._no_scan_running(SESSION):
         with pytest.raises(sessions.SessionWorkspaceBusyError):
@@ -613,6 +632,7 @@ def _chunk_through_the_tool(sequence: int = 0) -> Dict[str, Any]:
     )
 
 
+@pytest.mark.unit
 def test_try_begin_write_says_why_it_refused(workspace) -> None:
     session = sessions.get_default_registry().session_for(SESSION)
 
@@ -632,6 +652,7 @@ def test_try_begin_write_says_why_it_refused(workspace) -> None:
         session.end_sweep()
 
 
+@pytest.mark.unit
 def test_a_chunk_refused_by_a_change_gets_the_one_type_and_retry_rule(
     workspace,
 ) -> None:
@@ -656,6 +677,7 @@ def test_a_chunk_refused_by_a_change_gets_the_one_type_and_retry_rule(
     assert _chunk("u1", 0, b"abc")["next_sequence"] == 1
 
 
+@pytest.mark.unit
 def test_a_chunk_refused_by_the_sweep_gets_the_same_type_and_retry_rule(
     workspace,
 ) -> None:
@@ -688,6 +710,7 @@ def _zip_bytes() -> bytes:
     return buffer.getvalue()
 
 
+@pytest.mark.unit
 def test_a_chunk_is_accepted_while_a_clone_runs_and_both_land(
     workspace, fake_git, monkeypatch
 ) -> None:
@@ -720,6 +743,7 @@ def test_a_chunk_is_accepted_while_a_clone_runs_and_both_land(
     assert (workspace / SESSION / "incoming" / "u1.zip.part").read_bytes() == b"abc"
 
 
+@pytest.mark.unit
 def test_a_chunk_of_another_upload_is_accepted_while_a_finalize_runs(
     workspace, monkeypatch
 ) -> None:
@@ -768,6 +792,7 @@ def _zip_with(name: str) -> bytes:
     return buffer.getvalue()
 
 
+@pytest.mark.unit
 def test_a_finalize_extracts_the_bytes_it_hashed_when_the_path_is_renamed_over(
     workspace, tmp_path: Path, monkeypatch
 ) -> None:
@@ -810,6 +835,7 @@ def test_a_finalize_extracts_the_bytes_it_hashed_when_the_path_is_renamed_over(
     )
 
 
+@pytest.mark.unit
 def test_a_finalize_releases_its_uploads_lock_while_it_extracts(
     workspace, monkeypatch
 ) -> None:
@@ -839,6 +865,7 @@ def test_a_finalize_releases_its_uploads_lock_while_it_extracts(
     assert seen.get("held") is False, "finalize extracted under the upload's lock"
 
 
+@pytest.mark.unit
 def test_a_profile_selection_and_a_clone_do_not_refuse_each_other(workspace) -> None:
     """``select_profile`` writes through ``writing_session_state``, as a chunk does."""
 
@@ -851,6 +878,7 @@ def test_a_profile_selection_and_a_clone_do_not_refuse_each_other(workspace) -> 
             pass
 
 
+@pytest.mark.unit
 def test_a_clear_and_a_write_still_refuse_each_other(workspace) -> None:
     with sd._no_scan_running(SESSION):
         with pytest.raises(sessions.SessionChangeInProgressError):
@@ -863,6 +891,7 @@ def test_a_clear_and_a_write_still_refuse_each_other(workspace) -> None:
                 pass
 
 
+@pytest.mark.unit
 def test_a_write_that_ends_between_the_refused_change_and_the_pending_mark(
     workspace, monkeypatch
 ) -> None:
@@ -901,6 +930,7 @@ def test_a_write_that_ends_between_the_refused_change_and_the_pending_mark(
     assert SESSION not in sessions._ended_while_scanning
 
 
+@pytest.mark.unit
 def test_a_session_ended_during_a_write_is_removed_when_the_write_ends(
     workspace,
 ) -> None:
@@ -919,6 +949,7 @@ def test_a_session_ended_during_a_write_is_removed_when_the_write_ends(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_two_chunks_with_one_sequence_number_accept_exactly_one(
     workspace, monkeypatch
 ) -> None:
@@ -959,6 +990,7 @@ def test_two_chunks_with_one_sequence_number_accept_exactly_one(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_delivery_handlers_use_their_own_bounded_executor(
     workspace, monkeypatch
 ) -> None:
@@ -991,6 +1023,7 @@ def test_delivery_handlers_use_their_own_bounded_executor(
     assert sd.DELIVERY_MAX_WORKERS == 8
 
 
+@pytest.mark.unit
 def test_a_chunk_append_completes_while_the_clone_pool_is_saturated(
     workspace,
 ) -> None:
@@ -1039,6 +1072,7 @@ def test_a_chunk_append_completes_while_the_clone_pool_is_saturated(
     assert (workspace / SESSION / "incoming" / "u1.zip.part").read_bytes() == b"abc"
 
 
+@pytest.mark.unit
 def test_the_clone_tool_runs_on_the_clone_pool(workspace, monkeypatch) -> None:
     from unittest.mock import MagicMock
 

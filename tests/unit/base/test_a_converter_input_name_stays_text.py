@@ -27,6 +27,8 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.archive_con
 from automated_security_helper.utils.log import ConsoleHandler
 from automated_security_helper.utils.scanned_tree import TreeInputRefused
 
+pytestmark = pytest.mark.unit
+
 NAMES = ["[/x].ipynb", "[bold]y[/bold].ipynb"]
 
 

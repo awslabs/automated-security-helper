@@ -25,6 +25,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 BAD_YAML = "project_name: [unclosed\n"
 
 #: The IDs the outer run handed the stand-in runner, newest last. The host reads a

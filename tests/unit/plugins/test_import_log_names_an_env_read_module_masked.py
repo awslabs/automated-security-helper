@@ -27,6 +27,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import app
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 #: The variable's value: an importable namespace module whose name nothing
 #: else in these runs would log, so finding it in a record is the leak.
 CANARY = "logcanary_ash_plugins"

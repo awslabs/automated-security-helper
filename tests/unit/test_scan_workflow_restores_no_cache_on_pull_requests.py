@@ -49,6 +49,8 @@ import pytest
 
 from tests.utils import github_actions as ga
 
+pytestmark = pytest.mark.unit
+
 SCAN_WORKFLOW = ga.WORKFLOWS_DIR / "run-ash-security-scan.yml"
 REPO = "awslabs/automated-security-helper"
 FORK = "contributor/automated-security-helper"

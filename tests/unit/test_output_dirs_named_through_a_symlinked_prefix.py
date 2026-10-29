@@ -69,6 +69,7 @@ def _relative(files, source_dir: Path) -> list[str]:
     return sorted(Path(os.path.relpath(f, root)).as_posix() for f in files)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("spelled_through_link", SPELLINGS)
 def test_the_output_dir_is_named_under_the_source_as_given(
     tmp_path, spelled_through_link
@@ -80,6 +81,7 @@ def test_the_output_dir_is_named_under_the_source_as_given(
     assert named == [Path(os.path.abspath(source_dir)) / ".ash" / "out"], named
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("spelled_through_link", SPELLINGS)
 def test_the_scan_set_leaves_out_ash_output_reached_through_a_symlinked_prefix(
     tmp_path, monkeypatch, spelled_through_link
@@ -92,6 +94,7 @@ def test_the_scan_set_leaves_out_ash_output_reached_through_a_symlinked_prefix(
     assert _relative(files, source_dir) == ["app.py"], files
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("spelled_through_link", SPELLINGS)
 def test_scanners_are_told_to_skip_it(tmp_path, spelled_through_link):
     source_dir, output_dir = _layout(tmp_path, spelled_through_link)
@@ -117,6 +120,7 @@ def _output_link_to_src(tmp_path: Path) -> tuple[Path, Path, Path]:
     return source, alias, src
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "output_spelling", ["as the tree", "through the alias", "elsewhere"]
 )
@@ -139,6 +143,7 @@ def test_an_output_dir_committed_as_a_link_into_the_tree_names_nothing(
     assert "src/app.py" in _relative(files, source), files
 
 
+@pytest.mark.integration
 def test_a_scan_into_an_output_dir_committed_as_a_link_into_the_tree_refuses(
     tmp_path, monkeypatch, capsys
 ):

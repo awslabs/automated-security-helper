@@ -30,8 +30,12 @@ import subprocess  # nosec B404 - fixed argv, the checkout's own entry point
 import sys
 from pathlib import Path
 
+import pytest
+
 from tests.utils.child_tool_starts import POSIX_ONLY, ChildToolStarts
 from tests.utils.helpers import checkout_env
+
+pytestmark = pytest.mark.e2e
 
 VARIABLE = "ASH_UNDECLARED_SECTION_CANARY"
 CANARY = "ash-canary-6d1f-8842907"

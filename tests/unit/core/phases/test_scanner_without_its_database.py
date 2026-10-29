@@ -110,6 +110,7 @@ def _row(context, monkeypatch):
 
 
 @pytest.mark.parametrize("policy", ["warn", "fail"])
+@pytest.mark.integration
 def test_a_database_the_tool_reports_missing_makes_the_scanner_an_error(
     layout, monkeypatch, policy
 ):
@@ -136,6 +137,7 @@ def test_a_database_the_tool_reports_missing_makes_the_scanner_an_error(
     )
 
 
+@pytest.mark.integration
 def test_a_current_database_is_graded_on_findings(layout, monkeypatch):
     """Control: the same stand-in, reporting a database built an hour ago."""
     tmp_path, bin_dir, cache = layout
@@ -171,6 +173,7 @@ def test_a_current_database_is_graded_on_findings(layout, monkeypatch):
     ],
     ids=["default", "with-vuln", "without-vuln", "empty-list"],
 )
+@pytest.mark.unit
 def test_trivy_repo_holds_its_database_unless_its_scanners_leave_out_vuln(
     layout, scanners, expected
 ):
@@ -191,6 +194,7 @@ def test_trivy_repo_holds_its_database_unless_its_scanners_leave_out_vuln(
     assert [entry.name for entry in scanner.content_databases_in_use()] == expected
 
 
+@pytest.mark.integration
 class TestTheGrypeStandInCanBeStartedOnWindows:
     """The grype stand-in is a file the host can start.
 

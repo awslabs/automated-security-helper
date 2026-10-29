@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 VAR = "ASH_ENVX_SERVER"
 VALUE = "server-side-value-envx"
 SESSION = "envx-session"

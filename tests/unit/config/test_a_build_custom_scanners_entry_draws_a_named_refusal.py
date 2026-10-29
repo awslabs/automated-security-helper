@@ -30,6 +30,8 @@ from pydantic import ValidationError
 
 from automated_security_helper.utils.redacted_model import env_resolved_scalar
 
+pytestmark = pytest.mark.unit
+
 ENTRY_CANARY = "zz-custom-scanner-entry-canary-77143"
 VARIABLE = "ASH_ZZ_CUSTOM_SCANNER_ENTRY"
 

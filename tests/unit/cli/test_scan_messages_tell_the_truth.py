@@ -35,6 +35,8 @@ import typer.main
 
 from automated_security_helper.cli.main import app
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")

@@ -300,6 +300,7 @@ def _assert_key_still_reported(results: dict) -> None:
 
 
 class TestOfflineScanSendsNoVerificationRequest:
+    @pytest.mark.integration
     def test_repository_baseline_enabling_verification(
         self, recorder, repo, tmp_path, elsewhere
     ):
@@ -313,6 +314,7 @@ class TestOfflineScanSendsNoVerificationRequest:
         )
         _assert_key_still_reported(results)
 
+    @pytest.mark.integration
     def test_operator_config_enabling_verification(
         self, recorder, repo, tmp_path, elsewhere
     ):
@@ -326,6 +328,7 @@ class TestOfflineScanSendsNoVerificationRequest:
         )
         _assert_key_still_reported(results)
 
+    @pytest.mark.integration
     def test_operator_config_naming_the_filter_by_file_path(
         self, recorder, repo, tmp_path, elsewhere
     ):
@@ -341,6 +344,7 @@ class TestOfflineScanSendsNoVerificationRequest:
         )
         _assert_key_still_reported(results)
 
+    @pytest.mark.unit
     def test_mcp_client_config_enabling_verification(
         self, recorder, repo, tmp_path, elsewhere
     ):
@@ -351,6 +355,7 @@ class TestOfflineScanSendsNoVerificationRequest:
         assert code == 3
         assert _issuer_requests(recorder) == [], recorder.requests
 
+    @pytest.mark.integration
     def test_workspace_project_config_enabling_verification(
         self, recorder, repo, tmp_path, elsewhere
     ):
@@ -364,6 +369,7 @@ class TestOfflineScanSendsNoVerificationRequest:
         assert _issuer_requests(recorder) == [], recorder.requests
         _assert_key_still_reported(results)
 
+    @pytest.mark.integration
     def test_control_offline_scan_still_reports_the_key(
         self, recorder, repo, tmp_path, elsewhere
     ):
@@ -384,6 +390,7 @@ class TestOfflineScanSendsNoVerificationRequest:
 
 
 class TestOnlyTheOperatorEnablesVerification:
+    @pytest.mark.integration
     def test_repository_baseline_cannot_enable_verification(
         self, recorder, repo, tmp_path, elsewhere
     ):
@@ -397,6 +404,7 @@ class TestOnlyTheOperatorEnablesVerification:
         )
         _assert_key_still_reported(results)
 
+    @pytest.mark.integration
     def test_repository_baseline_under_ash_dir_cannot_enable_verification(
         self, recorder, repo, tmp_path, elsewhere
     ):
@@ -407,6 +415,7 @@ class TestOnlyTheOperatorEnablesVerification:
         assert _issuer_requests(recorder) == [], recorder.requests
         _assert_key_still_reported(results)
 
+    @pytest.mark.integration
     def test_repository_ash_config_cannot_enable_verification(
         self, recorder, repo, tmp_path, elsewhere
     ):
@@ -420,6 +429,7 @@ class TestOnlyTheOperatorEnablesVerification:
         )
         _assert_key_still_reported(results)
 
+    @pytest.mark.integration
     def test_repository_ash_config_naming_the_filter_by_file_path(
         self, recorder, repo, tmp_path, elsewhere
     ):
@@ -432,6 +442,7 @@ class TestOnlyTheOperatorEnablesVerification:
         assert _issuer_requests(recorder) == [], recorder.requests
         _assert_key_still_reported(results)
 
+    @pytest.mark.integration
     def test_repository_ash_config_naming_a_baseline_outside_the_tree(
         self, recorder, repo, tmp_path, elsewhere
     ):
@@ -457,6 +468,7 @@ class TestOnlyTheOperatorEnablesVerification:
         assert _issuer_requests(recorder) == [], recorder.requests
         _assert_key_still_reported(results)
 
+    @pytest.mark.unit
     def test_mcp_client_config_cannot_enable_verification(
         self, recorder, repo, tmp_path, elsewhere
     ):
@@ -469,6 +481,7 @@ class TestOnlyTheOperatorEnablesVerification:
             f"an MCP client's config enabled secret verification: {recorder.requests}"
         )
 
+    @pytest.mark.integration
     def test_workspace_project_config_cannot_enable_verification(
         self, recorder, repo, tmp_path, elsewhere
     ):
@@ -484,6 +497,7 @@ class TestOnlyTheOperatorEnablesVerification:
         )
         _assert_key_still_reported(results)
 
+    @pytest.mark.integration
     def test_control_operator_config_enables_verification_online(
         self, recorder, repo, tmp_path, elsewhere
     ):

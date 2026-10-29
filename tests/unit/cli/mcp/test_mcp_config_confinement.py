@@ -45,6 +45,8 @@ from automated_security_helper.cli.mcp.sandbox import (
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core import exceptions as _exceptions
 
+pytestmark = pytest.mark.unit
+
 _SESSION = "client-one"
 _OUTSIDE_MARKER = "OUTSIDE-THE-GRANT-MARKER"
 _CONFIG_REFUSED = "config_input_not_permitted"

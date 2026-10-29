@@ -118,6 +118,8 @@ if sys.version_info >= (3, 11):  # pragma: no cover - depends on the interpreter
 else:  # pragma: no cover - Python 3.10
     import tomli as tomllib
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TESTS = REPO_ROOT / "tests"
 ASH = "automated_security_helper"

@@ -14,7 +14,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
 pytest_plugins = ["pytester"]
+
+pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 

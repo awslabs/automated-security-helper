@@ -28,6 +28,8 @@ from automated_security_helper.utils.redacted_model import (
     without_env_scalars,
 )
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-cyc7"
 VARIABLE = "ASH_CYCLE_CANARY"
 

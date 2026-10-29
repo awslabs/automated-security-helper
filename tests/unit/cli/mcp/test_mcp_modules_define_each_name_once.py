@@ -29,6 +29,8 @@ import pytest
 from automated_security_helper.cli import mcp_server, mcp_tools
 from automated_security_helper.core.exceptions import ASHConfigEnvNotResolvedError
 
+pytestmark = pytest.mark.unit
+
 _DEFINITIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 
 #: (name, line, kind) with kind one of def, annotated, assign.

@@ -32,6 +32,8 @@ from automated_security_helper.interactions.run_ash_scan import (
     run_ash_scan,
 )
 
+pytestmark = pytest.mark.unit
+
 PRIOR = "reports/ash.sarif"
 
 _NEEDS_PERMISSION_BITS = pytest.mark.skipif(

@@ -40,6 +40,8 @@ from automated_security_helper.interactions.run_ash_scan import (
 )
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 
+pytestmark = pytest.mark.unit
+
 STALE = "results an earlier scan left, held while a later one ran"
 
 _ENGINE = (

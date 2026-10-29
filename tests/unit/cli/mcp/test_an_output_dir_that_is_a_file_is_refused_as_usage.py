@@ -20,6 +20,8 @@ from typing import Any, Dict, List
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 SESSION = "client-one"
 CONTENT = "not a directory\n"
 

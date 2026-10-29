@@ -2,9 +2,13 @@
 
 from unittest.mock import patch
 
+import pytest
+
 from automated_security_helper.cli.inspect.compare_result_fields import (
     compare_result_fields,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestCompareResultFields:

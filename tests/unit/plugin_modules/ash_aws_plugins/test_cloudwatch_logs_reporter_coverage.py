@@ -3,6 +3,7 @@
 from pathlib import Path
 from unittest.mock import ANY, patch, MagicMock
 
+import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
@@ -12,6 +13,8 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.cloudwatch_logs_re
     CloudWatchLogsReporterConfigOptions,
 )
 from automated_security_helper.config.ash_config import AshConfig
+
+pytestmark = pytest.mark.unit
 
 # Rebuild models to resolve forward references
 AshConfig.model_rebuild()

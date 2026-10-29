@@ -19,6 +19,8 @@ import pytest
 
 from automated_security_helper.plugins.loader import load_additional_plugin_modules
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def raising_module(tmp_path, monkeypatch):

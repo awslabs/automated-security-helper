@@ -23,6 +23,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scann
     CdkNagScanner,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def scanner(tmp_path):

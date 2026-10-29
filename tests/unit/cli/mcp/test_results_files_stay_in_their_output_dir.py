@@ -33,6 +33,8 @@ import pytest
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 SESSION = "client-one"
 MARKER = "OTHER-TREE-MARKER"
 RESULTS = "ash_aggregated_results.json"

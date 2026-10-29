@@ -28,6 +28,8 @@ from automated_security_helper.plugin_modules.ash_builtin.converters import (
     archive_converter,
 )
 
+pytestmark = pytest.mark.unit
+
 #: A member name with a control character, as an archive author may write it.
 NAME = "pkg/app\x1b[2J.py"
 

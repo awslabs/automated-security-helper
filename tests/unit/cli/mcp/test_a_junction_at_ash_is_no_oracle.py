@@ -32,6 +32,8 @@ from typing import Any, Callable, Dict
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 SESSION = "client-one"
 OUTSIDE_CONFIG = "project_name: outside\n"
 OUTSIDE_POLICY = "workspace:\n  max_severity_threshold: LOW\n"

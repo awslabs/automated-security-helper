@@ -49,6 +49,8 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import
 )
 
 #: Each reporter that declares the retry options, with its own config model.
+pytestmark = pytest.mark.unit
+
 _REPORTERS = [
     (S3Reporter, S3ReporterConfig),
     (CloudWatchLogsReporter, CloudWatchLogsReporterConfig),

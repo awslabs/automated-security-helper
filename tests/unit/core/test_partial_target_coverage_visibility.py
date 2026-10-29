@@ -64,6 +64,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 def _model(reports: dict):
     """An AshAggregatedResults stand-in carrying the serialized per-target reports.

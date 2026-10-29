@@ -3,9 +3,10 @@
 
 """Run one shard of the suite: ignore the test modules another shard owns.
 
-CI splits the unit-test job into shards (``ASH_TEST_SHARD=3of8``) because the whole suite
-does not finish inside one job. The split is made here, in ``pytest_ignore_collect``,
-rather than by handing pytest a list of files:
+CI splits the integration-test jobs into shards (``ASH_TEST_SHARD=3of8``) because the
+tests that start real tools do not finish inside one job; the unit tier is not sharded.
+The split is made here, in ``pytest_ignore_collect``, rather than by handing pytest a
+list of files:
 
 * A file named on the command line skips pytest's ignore machinery, so ``norecursedirs``,
   ``--ignore``, ``collect_ignore`` and the ``python_files`` match would stop applying to
@@ -21,8 +22,26 @@ shard agree without sharing a list, and each module lands in exactly one shard o
 count. Only paths that match the ``python_files`` patterns pytest was configured with are
 filtered; everything else is left to pytest.
 
-An empty shard makes pytest exit 5 (no tests collected), so a count larger than the suite
-fails the job instead of passing it. A malformed ``ASH_TEST_SHARD`` is a usage error.
+A shard that collects nothing makes pytest exit 5 (no tests collected). A malformed
+``ASH_TEST_SHARD`` is a usage error.
+
+One case is admitted: a shard that owns modules and holds no test of the tier. A shard
+owns modules, not tiers, so with ``-m integration`` a shard whose modules hold only unit
+tests collects every item and then deselects every one, and exit 5 there would read as a
+failure of a leg that has nothing to run. The tier's other shards carry the rest.
+``admit_empty_shard`` turns ``NO_TESTS_COLLECTED`` into ``OK`` only when this run has a
+shard configured, was given a ``-m`` expression, and deselected at least one item; it
+prints one line naming the shard and the expression. A shard that collected nothing at
+all (it owns no module, or the shard count is larger than the suite) deselected nothing
+and keeps exit 5, and so does an empty shard of a run with no ``-m`` expression. A tier
+that is empty as a whole is not caught here: every leg of it would be admitted.
+
+The deselected items are counted by a ``pytest_deselected`` hook on a plugin object that
+``configure`` registers. Under xdist the controller never collects, so each worker counts
+its own and hands the number back in ``workeroutput`` when it finishes; the controller
+adds them up in ``pytest_testnodedown``. The plugin is an object, and not a module-level
+``pytest_sessionfinish`` imported by tests/conftest.py, because that conftest already
+defines its own ``pytest_sessionfinish``. The owner rule is unchanged.
 
 The setting belongs to the run it was given to. ``configure`` reads ASH_TEST_SHARD once,
 at ``pytest_configure``, and removes it from ``os.environ``: a variable left there would
@@ -135,6 +154,83 @@ def configure(config: pytest.Config) -> None:
         raise pytest.UsageError(f"{ENV_VAR}: {error}") from None
     config.stash[_SHARD_KEY] = shard
     config.stash[_TEXT_KEY] = text
+    # A stand-in config without a plugin manager (the unit tests of this module use one)
+    # registers nothing. The early return above is what keeps this to once per config.
+    plugins = getattr(config, "pluginmanager", None)
+    if shard is not None and plugins is not None:
+        plugins.register(_AdmitAnEmptyShard(), _EMPTY_SHARD_PLUGIN)
+
+
+def admit_empty_shard(session: Any, exitstatus: Any, deselected: int) -> bool:
+    """Turn "no tests collected" into success for a shard whose tests ``-m`` deselected.
+
+    True when it changed the exit status. It acts only when all four hold: the run has a
+    shard configured, it was given a ``-m`` expression, pytest is about to exit with
+    ``NO_TESTS_COLLECTED``, and ``deselected`` (the items the run deselected, counted by
+    the plugin) is above zero. Why: a shard owns modules, not tiers, so with
+    ``-m integration`` a shard can hold only unit tests, and exit 5 would fail a leg that
+    has nothing to run while the tier's other shards carry the rest. A shard that
+    collected nothing at all deselected nothing and keeps exit 5, which is what tells a
+    shard count larger than the suite from a pass.
+    """
+    config = session.config
+    text = config.stash.get(_TEXT_KEY, "")
+    expression = config.getoption("markexpr", default="")
+    if not text or not expression:
+        return False
+    if exitstatus != pytest.ExitCode.NO_TESTS_COLLECTED:
+        return False
+    if deselected <= 0:
+        return False
+    session.exitstatus = pytest.ExitCode.OK
+    line = (
+        f"shard {text} holds no test selected by -m {expression!r} ({deselected} "
+        "deselected); admitted, the other shards of the run carry the rest"
+    )
+    reporter = config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is not None:
+        reporter.write_line(line)
+    else:
+        print(line)
+    return True
+
+
+#: The ``workeroutput`` key a worker hands its deselected count back under.
+WORKEROUTPUT_KEY = "ash_shard_deselected"
+
+
+class _AdmitAnEmptyShard:
+    """The plugin object ``configure`` registers for a run that has a shard.
+
+    A class because tests/conftest.py already defines the module-level
+    ``pytest_sessionfinish`` that a hook imported by name would have to share, and
+    because it holds the count of items the run deselected.
+    """
+
+    def __init__(self) -> None:
+        self.deselected = 0
+
+    def pytest_deselected(self, items: Sequence[Any]) -> None:
+        self.deselected += len(items)
+
+    @pytest.hookimpl(optionalhook=True)
+    def pytest_testnodedown(self, node: Any, error: Any) -> None:
+        """Controller side of xdist: add up what a finished worker counted."""
+        output = getattr(node, "workeroutput", None) or {}
+        self.deselected += int(output.get(WORKEROUTPUT_KEY, 0))
+
+    def pytest_sessionfinish(self, session: Any, exitstatus: Any) -> None:
+        workeroutput = getattr(session.config, "workeroutput", None)
+        if workeroutput is not None:
+            # An xdist worker reports its count and leaves the run's exit status to the
+            # controller. xdist sends `workeroutput` after every sessionfinish hook ran.
+            workeroutput[WORKEROUTPUT_KEY] = self.deselected
+            return
+        admit_empty_shard(session, exitstatus, self.deselected)
+
+
+#: The name the plugin object is registered under, once per config.
+_EMPTY_SHARD_PLUGIN = "ash-shard-empty-admitted"
 
 
 def pytest_configure(config: pytest.Config) -> None:

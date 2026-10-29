@@ -278,6 +278,7 @@ def _assert_serves_and_keeps_the_value_to_itself(process, port):
     assert SECRET_VALUE.encode() not in printed
 
 
+@pytest.mark.integration
 class TestTheExecdCommandsEnvironment:
     def test_the_value_is_handed_over_outside_the_environment(
         self, child_env, secret_arn, tmp_path
@@ -374,6 +375,7 @@ with open(os.environ["STAND_IN_RECORD"], "w", encoding="utf-8") as out:
 """
 
 
+@pytest.mark.integration
 class TestTheHandOverToAshMcp:
     """What ash-mcp-serve passes ``ash mcp``, with a stand-in ``ash`` on PATH."""
 
@@ -428,6 +430,7 @@ class TestTheHandOverToAshMcp:
         assert SECRET_VALUE not in printed
 
 
+@pytest.mark.e2e
 class TestTheServer:
     def test_it_authenticates_with_the_secret_and_keeps_it_out_of_its_environment(
         self, served, secret_arn

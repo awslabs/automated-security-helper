@@ -26,6 +26,8 @@ import pytest
 from automated_security_helper.workspace.execution import execute_workspace
 from tests.unit.workspace.test_execution import _make_workspace, _sarif, _settings
 
+pytestmark = pytest.mark.unit
+
 REASON = "ASH is running offline, and npm audit asks the registry"
 
 

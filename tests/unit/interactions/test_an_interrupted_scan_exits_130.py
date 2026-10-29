@@ -140,6 +140,7 @@ _SAYS_IF_SIGINT_IS_IGNORED = (
 
 @pytest.mark.skipif(os.name == "nt", reason="an ignored SIGINT is inherited on POSIX")
 @pytest.mark.parametrize("held", [True, False], ids=["at-its-default", "control"])
+@pytest.mark.integration
 def test_a_host_starts_with_sigint_at_its_default_when_this_run_ignores_it(held):
     """What _interrupt's host starts with, under a test run started as ``cmd &``.
 
@@ -283,6 +284,7 @@ def _assert_interrupted(output: str, out_dir: Path) -> None:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="a terminal's Ctrl-C is SIGINT on POSIX")
+@pytest.mark.integration
 def test_container_mode_passes_ctrl_c_to_the_runtime_and_exits_130(tmp_path, isolated):
     """SIGINT to the process group, as a terminal's Ctrl-C sends it."""
     runtime = _executable(
@@ -316,6 +318,7 @@ def test_container_mode_passes_ctrl_c_to_the_runtime_and_exits_130(tmp_path, iso
     _assert_interrupted(stdout + stderr, tmp_path / "out")
 
 
+@pytest.mark.unit
 def test_local_mode_says_it_was_interrupted_and_prints_no_results(
     tmp_path, isolated, monkeypatch
 ):
@@ -346,6 +349,7 @@ def test_local_mode_says_it_was_interrupted_and_prints_no_results(
     _assert_interrupted(result.output, tmp_path / "out")
 
 
+@pytest.mark.unit
 def test_nix_mode_says_it_was_interrupted_and_exits_130(
     tmp_path, isolated, monkeypatch
 ):
@@ -381,6 +385,7 @@ def _slow_child(tmp_path: Path, env: dict, wait_on: str) -> tuple[Path, dict]:
     "to_the_group",
     [pytest.param(True, id="terminal-ctrl-c"), pytest.param(False, id="kill-int")],
 )
+@pytest.mark.integration
 def test_nix_mode_passes_ctrl_c_to_the_shell_and_gives_it_the_grace(
     tmp_path, isolated, to_the_group
 ):
@@ -412,6 +417,7 @@ def test_nix_mode_passes_ctrl_c_to_the_shell_and_gives_it_the_grace(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="a terminal's Ctrl-C is SIGINT on POSIX")
+@pytest.mark.integration
 def test_build_image_says_it_was_interrupted_and_exits_130(tmp_path, isolated):
     """It exited 130 through typer's own handler, and said nothing."""
     runtime, env = _slow_child(tmp_path, isolated["env"], "build")
@@ -441,6 +447,7 @@ def test_build_image_says_it_was_interrupted_and_exits_130(tmp_path, isolated):
         pytest.param(False, id="ash-started-with-sigint-default"),
     ],
 )
+@pytest.mark.integration
 def test_the_runtime_keeps_the_sigint_disposition_ash_was_started_with(
     tmp_path, isolated, ignored
 ):
@@ -546,6 +553,7 @@ class _InterruptedRuntime:
         ),
     ],
 )
+@pytest.mark.unit
 def test_on_windows_with_a_console_the_runtime_gets_its_grace(
     tmp_path, isolated, monkeypatch, command
 ):
@@ -627,6 +635,7 @@ class _StartedRuntime:
         pytest.param(("start", 2), id="starting-the-second-reader"),
     ],
 )
+@pytest.mark.unit
 def test_a_ctrl_c_while_the_readers_start_stops_the_runtime(
     monkeypatch, interrupted_at
 ):
@@ -703,6 +712,7 @@ def _sigint_to_myself() -> None:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="a SIGINT sent to a process is POSIX")
+@pytest.mark.unit
 def test_a_ctrl_c_while_the_runtime_is_started_stops_it(monkeypatch, default_sigint):
     """Ctrl-C after Popen made the runtime and before it was handed back.
 
@@ -732,6 +742,7 @@ def test_a_ctrl_c_while_the_runtime_is_started_stops_it(monkeypatch, default_sig
 
 
 @pytest.mark.skipif(os.name == "nt", reason="a SIGINT sent to a process is POSIX")
+@pytest.mark.unit
 def test_a_ctrl_c_while_the_nix_shell_is_started_stops_it(monkeypatch, default_sigint):
     """The Nix shell is started the same way, and had the same gap."""
     from automated_security_helper.interactions import run_ash_nix
@@ -786,6 +797,7 @@ def _a_ctrl_c_inside_popen() -> None:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="SIGINT handling under test is POSIX")
+@pytest.mark.unit
 def test_a_ctrl_c_held_at_the_launch_is_raised_with_the_child_recorded(monkeypatch):
     """The held Ctrl-C goes off only once the child is in the spawn records.
 
@@ -829,6 +841,7 @@ def test_a_ctrl_c_held_at_the_launch_is_raised_with_the_child_recorded(monkeypat
 
 
 @pytest.mark.skipif(os.name == "nt", reason="SIGINT handling under test is POSIX")
+@pytest.mark.unit
 def test_the_handler_is_put_back_even_when_the_first_restore_fails(
     monkeypatch, default_sigint
 ):
@@ -885,6 +898,7 @@ class _StoppableChild(_ExitedChild):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="SIGINT handling under test is POSIX")
+@pytest.mark.unit
 def test_a_ctrl_c_while_a_sandboxed_spawn_starts_stops_the_child(
     monkeypatch, default_sigint
 ):
@@ -914,6 +928,7 @@ def test_a_ctrl_c_while_a_sandboxed_spawn_starts_stops_the_child(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="SIGINT handling under test is POSIX")
+@pytest.mark.unit
 def test_a_popen_failure_after_a_held_ctrl_c_raises_the_interrupt(
     monkeypatch, default_sigint
 ):
@@ -947,6 +962,7 @@ def test_a_popen_failure_after_a_held_ctrl_c_raises_the_interrupt(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="a SIGINT sent to a process is POSIX")
+@pytest.mark.unit
 def test_a_ctrl_c_at_the_pre_spawn_check_starts_no_runtime(monkeypatch, default_sigint):
     """A Ctrl-C arriving at the pre-spawn cancel check starts nothing.
 
@@ -982,6 +998,7 @@ def test_a_ctrl_c_at_the_pre_spawn_check_starts_no_runtime(monkeypatch, default_
 
 
 @pytest.mark.skipif(os.name == "nt", reason="a SIGINT sent to a process is POSIX")
+@pytest.mark.unit
 def test_a_ctrl_c_at_the_shells_pre_spawn_check_starts_no_shell(
     monkeypatch, default_sigint
 ):
@@ -1013,6 +1030,7 @@ def test_a_ctrl_c_at_the_shells_pre_spawn_check_starts_no_shell(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="a SIGINT sent to a process is POSIX")
+@pytest.mark.unit
 def test_a_runtime_that_fails_to_start_during_a_ctrl_c_reports_the_ctrl_c(
     monkeypatch, default_sigint
 ):
@@ -1046,6 +1064,7 @@ def test_a_runtime_that_fails_to_start_during_a_ctrl_c_reports_the_ctrl_c(
         pytest.param(signal.SIG_DFL, id="default"),
     ],
 )
+@pytest.mark.integration
 def test_a_sigint_disposition_that_raises_nothing_is_left_alone(disposition):
     """Only a Python handler raises KeyboardInterrupt, so only one is held.
 
@@ -1082,6 +1101,7 @@ def test_a_sigint_disposition_that_raises_nothing_is_left_alone(disposition):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="a SIGINT sent to a process is POSIX")
+@pytest.mark.unit
 def test_a_handler_that_failed_to_go_back_is_put_back_on_leaving(
     default_sigint, monkeypatch
 ):
@@ -1111,6 +1131,7 @@ def test_a_handler_that_failed_to_go_back_is_put_back_on_leaving(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="a SIGINT sent to a process is POSIX")
+@pytest.mark.unit
 def test_a_ctrl_c_after_the_block_whose_handler_did_not_go_back_is_not_lost(
     default_sigint, monkeypatch
 ):
@@ -1147,6 +1168,7 @@ def test_a_ctrl_c_after_the_block_whose_handler_did_not_go_back_is_not_lost(
         pytest.param("failure", id="the-child-failed-to-start"),
     ],
 )
+@pytest.mark.unit
 def test_a_held_ctrl_c_goes_to_a_handler_that_raises_nothing(leaves_by):
     """A Python handler is held whatever it does with a Ctrl-C, and the held one
     was raised as KeyboardInterrupt, so a handler that only records it was skipped
@@ -1182,6 +1204,7 @@ def test_a_held_ctrl_c_goes_to_a_handler_that_raises_nothing(leaves_by):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="a SIGINT sent to a process is POSIX")
+@pytest.mark.unit
 def test_each_held_ctrl_c_reaches_the_handler_as_python_delivers_it():
     """Python calls a handler once per SIGINT, with its number as an int and the
     frame it arrived in. The hold handed two Ctrl-Cs over as one, and passed
@@ -1211,6 +1234,7 @@ def test_each_held_ctrl_c_reaches_the_handler_as_python_delivers_it():
     assert seen == [(int, int(signal.SIGINT), _sigint_to_myself.__name__)] * 2
 
 
+@pytest.mark.unit
 def test_the_runtime_is_started_off_the_main_thread(monkeypatch):
     """Only the main thread can set a signal handler, so off it nothing is held."""
     from automated_security_helper.interactions import run_ash_container
@@ -1254,6 +1278,7 @@ def test_the_runtime_is_started_off_the_main_thread(monkeypatch):
         ),
     ],
 )
+@pytest.mark.unit
 def test_build_image_names_a_verdict_only_when_it_would_have_scanned(
     isolated, monkeypatch, args, says
 ):

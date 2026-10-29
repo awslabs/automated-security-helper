@@ -36,6 +36,8 @@ from mcp.server.mcpserver import Context
 from automated_security_helper.cli.mcp.scan_target import ASH_MCP_ALLOWED_ROOTS_ENV
 from automated_security_helper.cli.mcp_server import get_scan_results
 
+pytestmark = pytest.mark.unit
+
 FINDINGS = [
     {
         "scanner": "bandit",

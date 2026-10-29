@@ -47,6 +47,7 @@ from tests.utils.planted_uv import (
 )
 
 pytestmark = [
+    pytest.mark.integration,
     pytest.mark.skipif(
         sys.platform == "win32", reason="the planted .venv python is a shell script"
     ),

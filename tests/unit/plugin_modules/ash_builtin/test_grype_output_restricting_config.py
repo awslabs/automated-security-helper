@@ -44,6 +44,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner
     GrypeScannerConfigOptions,
 )
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
 

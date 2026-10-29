@@ -19,6 +19,8 @@ from automated_security_helper.utils.path_stat import (
     stat_named_path,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _stat_failing_with(error, path):
     """``stat_named_path(path)`` with ``os.stat`` raising ``error``, and the

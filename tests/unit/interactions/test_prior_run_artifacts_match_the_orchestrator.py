@@ -17,6 +17,8 @@ import logging
 import os
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.interactions.run_ash_scan import (
     ScanOptions,
     _discard_prior_run_artifacts,
@@ -26,6 +28,8 @@ from tests.unit.test_committed_results_paths_are_never_deleted import (
     _initialize,
     _orchestrator,
 )
+
+pytestmark = pytest.mark.unit
 
 #: A previous run's output, the previous results an MCP scan set aside with the
 #: marker a restore leaves, and two files no scan removes.

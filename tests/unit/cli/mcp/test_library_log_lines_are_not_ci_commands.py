@@ -204,6 +204,7 @@ STDIO_ENTRIES = {
 
 
 @pytest.mark.parametrize("entry", list(STDIO_ENTRIES))
+@pytest.mark.e2e
 def test_the_sdks_line_on_stdio_is_written_with_its_commands_broken(entry, tmp_path):
     lines, replies, stderr = _over_stdio(STDIO_ENTRIES[entry], tmp_path)
 
@@ -298,6 +299,7 @@ def _call_the_tool(url: str):
 
 
 @pytest.mark.parametrize("entry", list(ENTRY_POINTS))
+@pytest.mark.e2e
 def test_the_sdks_line_over_http_is_written_with_its_commands_broken(entry, tmp_path):
     with _HttpServer(ENTRY_POINTS[entry], tmp_path) as server:
         result = _call_the_tool(server.url)
@@ -323,6 +325,7 @@ _UVICORN_STAND_IN = (
 ) + _ASH_SCRIPT
 
 
+@pytest.mark.integration
 def test_uvicorns_own_handler_writes_with_its_commands_broken(tmp_path):
     argv = [
         "-c",
@@ -352,6 +355,7 @@ def test_uvicorns_own_handler_writes_with_its_commands_broken(tmp_path):
     _assert_no_command(stderr)
 
 
+@pytest.mark.e2e
 def test_a_request_path_holding_commands_is_not_written_as_one(tmp_path):
     """A guard for a later change, not a red cell: it passes without the routing
     too, because _run_uvicorn passes access_log=False and uvicorn then logs no

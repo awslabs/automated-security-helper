@@ -65,6 +65,9 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 def _arg_keys(scanner) -> list:
     return [a.key for a in scanner.args.extra_args]
 

@@ -138,6 +138,7 @@ class TestStdoutIsTheReport:
         ],
         ids=["json-route", "markdown-route", "plain-route"],
     )
+    @pytest.mark.unit
     def test_the_report_is_written_byte_for_byte(self, results_dir, fmt, reporter):
         target = (
             "automated_security_helper.plugin_modules.ash_builtin.reporters."
@@ -149,6 +150,7 @@ class TestStdoutIsTheReport:
         assert result.exit_code == 0, result.output
         assert result.stdout == TRICKY
 
+    @pytest.mark.unit
     def test_the_log_goes_to_stderr(self, results_dir):
         result = _report(results_dir, "sarif", "--log-level", "INFO")
 
@@ -157,6 +159,7 @@ class TestStdoutIsTheReport:
         assert "Found reporter plugin" in result.stderr
         assert "Found reporter plugin" not in result.stdout
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("extra", [[], ["--no-color"]], ids=["default", "no-color"])
     @pytest.mark.parametrize(
         "fmt", ["sarif", "flat-json", "csv", "junitxml", "markdown", "text", "html"]
@@ -167,17 +170,20 @@ class TestStdoutIsTheReport:
         assert result.exit_code == 0, result.output
         assert "\x1b" not in result.stdout
 
+    @pytest.mark.unit
     def test_the_csv_has_one_row_per_finding(self, results_dir):
         result = _report(results_dir, "csv")
 
         rows = list(csv.reader(io.StringIO(result.stdout)))
         assert len(rows) == 1 + 3, rows[:5]
 
+    @pytest.mark.unit
     def test_the_junit_xml_is_well_formed(self, results_dir):
         result = _report(results_dir, "junitxml")
 
         ET.fromstring(result.stdout)
 
+    @pytest.mark.unit
     def test_stdout_is_the_reporters_output_for_the_saved_results(self, results_dir):
         """What SarifReporter.report returns for the reloaded results, unchanged."""
         from automated_security_helper.base.plugin_context import PluginContext
@@ -196,6 +202,7 @@ class TestStdoutIsTheReport:
 
 
 class TestPrettyOnlyOnATerminal:
+    @pytest.mark.unit
     def test_json_is_indented_on_a_terminal(self):
         from automated_security_helper.cli.report import _write_report
 
@@ -207,6 +214,7 @@ class TestPrettyOnlyOnATerminal:
         assert printed != '{"a": [1, 2]}'
         assert json.loads(printed) == {"a": [1, 2]}
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("pretty", [True, False], ids=["color", "no-color"])
     @pytest.mark.parametrize(
         "fmt, content",
@@ -257,6 +265,7 @@ class TestNothingFromTheReportControlsTheTerminal:
             return json.dumps({"message": HOSTILE}, ensure_ascii=False)
         return HOSTILE
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("pretty", [True, False], ids=["pretty", "plain"])
     @pytest.mark.parametrize("fmt", ["csv", "text", "markdown", "sarif"])
     def test_no_control_sequence_reaches_a_terminal(self, fmt, pretty):
@@ -285,6 +294,7 @@ class TestNothingFromTheReportControlsTheTerminal:
             # Text formats show a control as \xNN, not in JSON's \u00NN form.
             assert "\\x9b31m" in written
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("fmt", sorted(MARKDOWN_STDOUT_FORMATS))
     def test_rendered_markdown_plants_no_hyperlink(self, fmt, monkeypatch):
         """A link in a finding's text is shown with its target, not made live.
@@ -316,6 +326,7 @@ class TestNothingFromTheReportControlsTheTerminal:
         assert "the docs (https://example.invalid/planted)" in visible
         assert "https://example.invalid/auto" in visible
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("fmt", sorted(MARKDOWN_STDOUT_FORMATS))
     def test_markdown_holding_an_escape_is_shown_unrendered(self, fmt, monkeypatch):
         """An ESC and the text of its escape never print alike, by default either.
@@ -348,6 +359,7 @@ class TestNothingFromTheReportControlsTheTerminal:
         # Rendered: the heading's markup is gone and rich styled it.
         assert "#" not in _SGR.sub("", plain) and "\x1b[" in plain
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("fmt", sorted(JSON_STDOUT_FORMATS))
     def test_plain_json_on_a_terminal_is_still_the_same_document(self, fmt):
         """``--no-color`` on a terminal (``docker run -t``) still gives valid JSON.
@@ -385,6 +397,7 @@ class TestNothingFromTheReportControlsTheTerminal:
         ]
     }
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("pretty", [True, False], ids=["pretty", "plain"])
     @pytest.mark.parametrize("fmt", sorted(JSON_STDOUT_FORMATS))
     def test_json_on_a_terminal_is_the_same_document(self, fmt, pretty):
@@ -414,6 +427,7 @@ class TestNothingFromTheReportControlsTheTerminal:
     #: text holding them displays in an order other than the one it holds.
     BIDI = "".join(chr(c) for c in [*range(0x202A, 0x202F), *range(0x2066, 0x206A)])
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("pretty", [True, False], ids=["pretty", "plain"])
     @pytest.mark.parametrize("fmt", ["csv", "text", "markdown", "sarif"])
     def test_bidi_controls_are_shown_on_a_terminal(self, fmt, pretty):
@@ -433,6 +447,7 @@ class TestNothingFromTheReportControlsTheTerminal:
             shown = re.sub(r"\x1b\[[0-9;]*m", "", written)
             assert json.loads(shown) == json.loads(content)
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("fmt", ["text", "sarif"])
     def test_bidi_controls_off_a_terminal_are_left_alone(self, fmt):
         from automated_security_helper.cli.report import _write_report
@@ -464,6 +479,7 @@ class TestNothingFromTheReportControlsTheTerminal:
         "\\" + "u001b",
     ]
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("fmt", ["csv", "text"])
     def test_an_escape_never_reads_as_text_the_report_holds(self, fmt):
         """Text that looks like an escape is shown so that it does not read as one.
@@ -484,6 +500,7 @@ class TestNothingFromTheReportControlsTheTerminal:
         assert "\x1b" not in "".join(shown)
         assert self.RLO not in "".join(shown)
 
+    @pytest.mark.unit
     def test_pretty_json_tells_an_escape_from_the_same_text(self):
         from automated_security_helper.cli.report import _write_report
 
@@ -494,6 +511,7 @@ class TestNothingFromTheReportControlsTheTerminal:
         printed = json.loads(re.sub(r"\x1b\[[0-9;]*m", "", stream.getvalue()))
         assert len(set(printed.values())) == len(self.LOOKALIKES), printed
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "path",
         [
@@ -518,6 +536,7 @@ class TestNothingFromTheReportControlsTheTerminal:
 
         assert stream.getvalue() == path
 
+    @pytest.mark.integration
     def test_a_long_run_of_backslashes_is_shown_in_linear_time(self):
         """200,000 backslashes in a finding are shown in seconds.
 
@@ -541,6 +560,7 @@ class TestNothingFromTheReportControlsTheTerminal:
             timeout=60,
         )
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("pretty", [True, False], ids=["pretty", "plain"])
     @pytest.mark.parametrize("fmt", ["csv", "text", "sarif"])
     def test_a_bidirectional_control_is_shown_on_a_terminal(self, fmt, pretty):
@@ -563,6 +583,7 @@ class TestNothingFromTheReportControlsTheTerminal:
         assert "\N{LEFT-TO-RIGHT MARK}" not in written, repr(written)
         assert "\\u202e" in written and "\\u200e" in written, repr(written)
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("pretty", [True, False], ids=["pretty", "plain"])
     @pytest.mark.parametrize("fmt", ["csv", "text", "sarif"])
     def test_a_separator_or_a_format_character_is_shown_on_a_terminal(
@@ -595,6 +616,7 @@ class TestNothingFromTheReportControlsTheTerminal:
         else:
             assert "\\U000e0041" in written, repr(written)
 
+    @pytest.mark.unit
     def test_the_report_shows_the_controls_the_console_shows(self):
         """One set: ash report's terminal escape is built on utils/terminal_text.py's
         set, so a character added there reaches the report too. report.py keeps
@@ -623,6 +645,7 @@ class TestNothingFromTheReportControlsTheTerminal:
             "C:\\\\x1b\\out ::error::x ##[add-mask]y\r\n\tz"
         )
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("fmt", ["csv", "markdown", "sarif"])
     def test_off_a_terminal_the_bytes_are_unchanged(self, fmt):
         from automated_security_helper.cli.report import _write_report
@@ -682,6 +705,7 @@ class TestErrorsShowWhatTheyQuoteAsText:
             report_command(**kwargs)
         return exit_info.value.exit_code
 
+    @pytest.mark.unit
     def test_markup_in_the_format_is_shown(self, terminal_stderr, tmp_path):
         planted = "x[/y] [link=https://example.invalid/planted]pdf[/link]"
 
@@ -694,6 +718,7 @@ class TestErrorsShowWhatTheyQuoteAsText:
         assert "\x1b]8;" not in written
         assert planted in _SGR.sub("", written)
 
+    @pytest.mark.unit
     def test_controls_in_the_format_are_shown(self, terminal_stderr, tmp_path):
         planted = "pdf\x1b]52;c;cGF5bG9hZA==\x07\x9b31m" + chr(0x202E)
 
@@ -704,6 +729,7 @@ class TestErrorsShowWhatTheyQuoteAsText:
         assert [c for c in ("\x1b", "\x07", "\x9b", chr(0x202E)) if c in shown] == []
         assert "52;c;cGF5bG9hZA==" in shown
 
+    @pytest.mark.unit
     def test_an_exception_and_its_traceback_are_shown(
         self, terminal_stderr, results_dir
     ):
@@ -730,6 +756,7 @@ class TestErrorsShowWhatTheyQuoteAsText:
 
 class TestMissingResults:
     @pytest.mark.parametrize("name", ["nowhere", "d" * 90], ids=["short", "long"])
+    @pytest.mark.unit
     def test_a_missing_results_file_is_a_clear_error(self, tmp_path, monkeypatch, name):
         """The message names every path whole, however long.
 
@@ -753,6 +780,7 @@ class TestMissingResults:
             assert searched in result.stderr, result.stderr
         assert result.stdout == ""
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "planted",
         [None, (".ash", "ash_output"), ("ash_output",)],
@@ -786,6 +814,7 @@ class TestMissingResults:
         assert "ash_output/ash_output" not in result.stderr, result.stderr
         assert result.stdout == ""
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "where",
         [(".ash", "ash_output"), ("ash_output",), ()],
@@ -804,6 +833,7 @@ class TestMissingResults:
         assert result.exit_code == 0, result.output
         assert json.loads(result.stdout)["version"] == "2.1.0"
 
+    @pytest.mark.unit
     def test_a_failed_command_creates_nothing(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv("ASH_OUTPUT_DIR", raising=False)
@@ -813,6 +843,7 @@ class TestMissingResults:
 
         assert list(tmp_path.iterdir()) == []
 
+    @pytest.mark.unit
     def test_an_unreadable_results_file_is_a_clear_error(self, tmp_path):
         output = tmp_path / "out"
         output.mkdir()
@@ -829,6 +860,7 @@ class TestMissingResults:
             "ash_aggregated_results.json"
         ]
 
+    @pytest.mark.unit
     def test_a_results_file_it_cannot_open_is_named_once(self, tmp_path, monkeypatch):
         """The refusal names the file; an OSError's own text names it again,
         quoted, with a Windows path's backslashes doubled. Only the error's
@@ -851,6 +883,7 @@ class TestMissingResults:
         assert refusal.endswith(": Permission denied"), refusal
         assert "elsewhere" not in refusal, refusal
 
+    @pytest.mark.unit
     def test_an_unknown_format_is_an_error_on_stderr(self, results_dir):
         result = _report(results_dir, "no-such-reporter")
 
@@ -859,6 +892,7 @@ class TestMissingResults:
         assert "not found" in result.stderr
         assert result.stdout == ""
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("results", ["missing", "unreadable"])
     def test_an_unknown_format_is_refused_before_the_results_are_read(
         self, tmp_path, monkeypatch, results

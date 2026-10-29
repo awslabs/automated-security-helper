@@ -46,6 +46,8 @@ from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import (
     CycloneDXReport,
 )
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 REQUESTS = {"name": "requests", "version": "2.19.1", "purl": "pkg:pypi/requests@2.19.1"}

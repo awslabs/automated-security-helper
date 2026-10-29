@@ -44,6 +44,8 @@ from automated_security_helper.config.config_validator import (
     redact_values,
 )
 
+pytestmark = pytest.mark.unit
+
 #: Values read from the environment, eight characters each: replaced anywhere.
 VALUE = "qzab1234"
 OTHER = "1234cd56"

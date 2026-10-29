@@ -372,6 +372,7 @@ def _run(
     return Result(proc, calls, git_calls)
 
 
+@pytest.mark.integration
 class TestTheFloatingTagMatchesTheReleasedMajor:
     """The invariant, one case per release shape so a failure names the version."""
 
@@ -435,6 +436,7 @@ class TestTheFloatingTagMatchesTheReleasedMajor:
         )
 
 
+@pytest.mark.integration
 class TestTheAbsentTagPath:
     """A floating major tag that does not exist yet is created, not skipped.
 
@@ -463,6 +465,7 @@ class TestTheAbsentTagPath:
         )
 
 
+@pytest.mark.integration
 class TestAMalformedVersionWritesNothing:
     """A version the step cannot parse must fail loudly and touch no ref.
 
@@ -532,6 +535,7 @@ def _version_guard_suffix() -> str:
     return pattern[len(_CORE_PART) : -1]
 
 
+@pytest.mark.unit
 class TestTheVersionGuardSplitsACoreUnambiguously:
     """CORE must be the whole X.Y.Z on every regex engine, so the suffix class is
     asserted on the pattern itself.
@@ -580,6 +584,7 @@ class TestTheHarnessCanFail:
     control that is skipped wherever it might have fired is worse than no control.
     """
 
+    @pytest.mark.unit
     def test_exactly_one_step_writes_a_tag_ref(self):
         """The locator must find the step. Finding none makes everything above vacuous."""
         steps = _tag_writing_steps()
@@ -592,6 +597,7 @@ class TestTheHarnessCanFail:
         )
         assert "refs/tags" in steps[0]["run"]
 
+    @pytest.mark.integration
     @_requires_bash
     def test_the_stub_records_calls_at_all(self, tmp_path: Path):
         """If the gh stub logged nothing, `refs_written == []` would pass everywhere."""
@@ -602,6 +608,7 @@ class TestTheHarnessCanFail:
             f"would hold no matter what the step did\n{result.describe()}"
         )
 
+    @pytest.mark.integration
     @_requires_bash
     @pytest.mark.parametrize(
         ("version", "wrong_ref"),
@@ -624,6 +631,7 @@ class TestTheHarnessCanFail:
             "this no longer reproduces, the harness is not measuring what it claims."
         )
 
+    @pytest.mark.integration
     @_requires_bash
     def test_the_pre_fix_script_is_indifferent_to_a_malformed_version(
         self, tmp_path: Path
@@ -638,6 +646,7 @@ class TestTheHarnessCanFail:
         )
 
 
+@pytest.mark.integration
 class TestTheFloatingTagFollowsTheReleaseTag:
     """The floating tag points at the release tag's commit, never at the checkout's HEAD.
 
@@ -665,6 +674,7 @@ class TestTheFloatingTagFollowsTheReleaseTag:
         )
 
 
+@pytest.mark.integration
 class TestTheReleaseTagIsFetchedBeforeItIsResolved:
     """The fetch line is what makes the release tag visible locally.
 
@@ -696,6 +706,7 @@ class TestTheReleaseTagIsFetchedBeforeItIsResolved:
         assert "before any fetch" in result.proc.stderr
 
 
+@pytest.mark.integration
 class TestTheFloatingTagNeverMovesBackward:
     """A re-run of an old release run, or two runs finishing out of order, must not
     point the floating tag at an older release than one that already exists."""
@@ -803,6 +814,7 @@ class TestTheFloatingTagNeverMovesBackward:
         )
 
 
+@pytest.mark.integration
 class TestTheRemoteTagListMustBeUsable:
     """The guard compares against the remote's tags, so a list it cannot trust stops the
     step. Without this an unreachable remote reads as "no newer release" and the floating
@@ -950,6 +962,7 @@ class TestTheRemoteTagListMustBeUsable:
         )
 
 
+@pytest.mark.unit
 class TestReleaseRunsAreSerialized:
     """Two release runs finishing together must not interleave their tag writes."""
 
@@ -1079,6 +1092,7 @@ class TestTheReleaseTargetsTheMergeCommit:
 
     pytestmark = _REQUIRES_BASH
 
+    @pytest.mark.integration
     def test_release_create_targets_the_merge_commit(self, tmp_path: Path):
         result = _run_release_step(_release_step_script(), tmp_path)
 
@@ -1090,6 +1104,7 @@ class TestTheReleaseTargetsTheMergeCommit:
         )
         assert "--target main" not in created[0], result.describe()
 
+    @pytest.mark.unit
     def test_the_version_is_read_from_the_merge_commit(self):
         """The checkout the version and changelog are read from is the merge commit.
 
@@ -1110,6 +1125,7 @@ class TestTheReleaseTargetsTheMergeCommit:
             == "${{ github.event.pull_request.merge_commit_sha }}"
         )
 
+    @pytest.mark.unit
     def test_the_merge_commit_comes_from_the_event_payload(self):
         doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
         step = next(
@@ -1123,6 +1139,7 @@ class TestTheReleaseTargetsTheMergeCommit:
         )
 
 
+@pytest.mark.integration
 class TestAnExistingReleaseTagMustSitAtTheMergeCommit:
     """`gh release create --target` is ignored when the tag already exists, so a tag at
     another commit would publish the release there. The step reads the tag on the remote
@@ -1172,6 +1189,7 @@ class TestAnExistingReleaseTagMustSitAtTheMergeCommit:
         assert len(self._created(result)) == 1, result.describe()
 
 
+@pytest.mark.integration
 class TestTheCuratedNotesFailureNamesTheRecovery:
     """The failure's advice must be an action that can change the outcome.
 
@@ -1224,6 +1242,7 @@ class TestTheCuratedNotesFailureNamesTheRecovery:
         assert len(created) == 1, result.describe()
 
 
+@pytest.mark.unit
 class TestEveryLocalWorkflowCallIsCallable:
     """A job that ``uses`` a workflow of this repository makes GitHub read that
     workflow when it loads the caller. If the callee declares no ``workflow_call``
@@ -1280,9 +1299,11 @@ REAL_TAGS = (
 class TestTheComparisonReadsTheRepositorysRealTags:
     pytestmark = _REQUIRES_BASH
 
+    @pytest.mark.unit
     def test_the_real_tag_list_is_63_tags(self):
         assert len(REAL_TAGS.split()) == 63
 
+    @pytest.mark.integration
     def test_a_new_release_moves_the_tag_over_the_real_history(self, tmp_path: Path):
         result = _run(
             _floating_tag_script(),
@@ -1293,6 +1314,7 @@ class TestTheComparisonReadsTheRepositorysRealTags:
         assert result.ok, result.describe()
         assert result.mutations == [("PATCH", "v3")], result.describe()
 
+    @pytest.mark.integration
     def test_an_old_beta_rerun_over_the_real_history_moves_nothing(
         self, tmp_path: Path
     ):

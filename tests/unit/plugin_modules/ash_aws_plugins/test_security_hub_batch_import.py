@@ -399,6 +399,7 @@ def _report_with(reporter, model, clients: dict, *, caller: str | None = ACCOUNT
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.unit
 def test_zero_findings_makes_no_call_and_says_so(tmp_path):
     """BatchImportFindings needs at least one finding, so nothing is called.
 
@@ -418,6 +419,7 @@ def test_zero_findings_makes_no_call_and_says_so(tmp_path):
     assert document["requests"] == 0
 
 
+@pytest.mark.unit
 def test_one_finding_is_imported_in_one_request(tmp_path):
     securityhub, stub = _stubbed_client("securityhub")
     capture = _Capture(securityhub)
@@ -438,6 +440,7 @@ def test_one_finding_is_imported_in_one_request(tmp_path):
     assert document["findings"] == capture.findings
 
 
+@pytest.mark.unit
 def test_more_than_one_hundred_findings_are_split_into_batches(tmp_path):
     """250 findings go out as 100 + 100 + 50: the documented per-request maximum."""
     securityhub, stub = _stubbed_client("securityhub")
@@ -458,6 +461,7 @@ def test_more_than_one_hundred_findings_are_split_into_batches(tmp_path):
     assert document["requests"] == 3
 
 
+@pytest.mark.unit
 def test_partial_failure_raises_and_names_the_rejected_findings(tmp_path, caplog):
     """A 200 response can still reject findings; that must not read as success."""
     securityhub, stub = _stubbed_client("securityhub")
@@ -490,6 +494,7 @@ def test_partial_failure_raises_and_names_the_rejected_findings(tmp_path, caplog
     assert len(capture.findings) == 3
 
 
+@pytest.mark.unit
 def test_every_finding_rejected_with_invalid_access_points_at_enabling_the_hub(
     tmp_path,
 ):
@@ -532,6 +537,7 @@ def test_every_finding_rejected_with_invalid_access_points_at_enabling_the_hub(
         ("InvalidInputException", 400, "InvalidInputException"),
     ],
 )
+@pytest.mark.unit
 def test_client_error_raises_an_actionable_error(tmp_path, code, status, expected):
     securityhub, stub = _stubbed_client("securityhub")
     stub.add_client_error(
@@ -550,6 +556,7 @@ def test_client_error_raises_an_actionable_error(tmp_path, code, status, expecte
     assert code in str(raised.value)
 
 
+@pytest.mark.unit
 def test_a_failed_request_stops_the_import_and_counts_what_was_not_sent(tmp_path):
     securityhub, stub = _stubbed_client("securityhub")
     stub.add_response("batch_import_findings", _ok(100))
@@ -572,6 +579,7 @@ def test_a_failed_request_stops_the_import_and_counts_what_was_not_sent(tmp_path
     assert "150" in message
 
 
+@pytest.mark.unit
 def test_throttling_is_retried_and_then_succeeds(tmp_path, no_retry_sleep):
     """LimitExceededException is the API's 429; the reporter backs off and retries."""
     securityhub, stub = _stubbed_client("securityhub")
@@ -596,6 +604,7 @@ def test_throttling_is_retried_and_then_succeeds(tmp_path, no_retry_sleep):
     assert len(no_retry_sleep) == 1
 
 
+@pytest.mark.unit
 def test_throttling_that_outlasts_the_retries_is_reported_as_throttling(tmp_path):
     securityhub, stub = _stubbed_client("securityhub")
     for _ in range(3):  # the first attempt and max_retries=2 retries
@@ -628,6 +637,7 @@ def _unconfigured_client(service_name: str, monkeypatch):
     return client
 
 
+@pytest.mark.unit
 def test_no_credentials_raises_an_actionable_error(tmp_path, monkeypatch):
     securityhub = _unconfigured_client("securityhub", monkeypatch)
 
@@ -642,6 +652,7 @@ def test_no_credentials_raises_an_actionable_error(tmp_path, monkeypatch):
     assert "aws_profile" in str(raised.value)
 
 
+@pytest.mark.unit
 def test_no_credentials_while_looking_up_the_account_is_actionable(
     tmp_path, monkeypatch
 ):
@@ -660,6 +671,7 @@ def test_no_credentials_while_looking_up_the_account_is_actionable(
     assert "aws_profile" in str(raised.value)
 
 
+@pytest.mark.unit
 def test_a_profile_that_does_not_exist_is_an_actionable_error(tmp_path, monkeypatch):
     """The real boto3.Session, so the error is the one an operator would see."""
     import botocore.endpoint
@@ -677,6 +689,7 @@ def test_a_profile_that_does_not_exist_is_an_actionable_error(tmp_path, monkeypa
     assert "profile-this-machine-does-not-have" in str(raised.value)
 
 
+@pytest.mark.unit
 def test_the_account_is_looked_up_when_not_configured(tmp_path):
     sts, sts_stub = _stubbed_client("sts")
     sts_stub.add_response(
@@ -704,6 +717,7 @@ def test_the_account_is_looked_up_when_not_configured(tmp_path):
     )
 
 
+@pytest.mark.unit
 def test_a_missing_region_is_an_actionable_error(tmp_path):
     with pytest.raises(SecurityHubImportError) as raised:
         _report_with(_reporter(tmp_path, region=None), _model(_many(1)), {})
@@ -766,6 +780,7 @@ def _securityhub_validator_shape():
     return model.operation_model("BatchImportFindings").input_shape
 
 
+@pytest.mark.unit
 def test_every_finding_sent_carries_every_required_field_within_its_limits(tmp_path):
     """Validates each finding against the documented required fields and limits."""
     findings = _reporter(tmp_path).build_asff_findings(
@@ -822,6 +837,7 @@ def test_every_finding_sent_carries_every_required_field_within_its_limits(tmp_p
         assert len(json.dumps(finding).encode("utf-8")) < FINDING_SIZE_LIMIT_BYTES
 
 
+@pytest.mark.unit
 def test_the_stubbed_service_accepts_the_request(tmp_path):
     """The same findings, sent through a real client, pass request validation."""
     securityhub, stub = _stubbed_client("securityhub")
@@ -834,6 +850,7 @@ def test_the_stubbed_service_accepts_the_request(tmp_path):
     stub.assert_no_pending_responses()
 
 
+@pytest.mark.unit
 def test_no_code_snippet_or_secret_leaves_the_machine(tmp_path):
     results = _varied_results()
     results[0].locations[0].physicalLocation.root.region.snippet = ArtifactContent(
@@ -864,6 +881,7 @@ def test_no_code_snippet_or_secret_leaves_the_machine(tmp_path):
         ("none", None, "INFORMATIONAL"),
     ],
 )
+@pytest.mark.unit
 def test_ash_severity_maps_to_the_asff_label(tmp_path, level, issue_severity, label):
     [finding] = _reporter(tmp_path).build_asff_findings(
         _model([_result(level=level, issue_severity=issue_severity)]),
@@ -874,6 +892,7 @@ def test_ash_severity_maps_to_the_asff_label(tmp_path, level, issue_severity, la
     assert finding["FindingProviderFields"]["Severity"]["Label"] == label
 
 
+@pytest.mark.unit
 def test_a_suppressed_finding_is_sent_archived_and_an_open_one_active(tmp_path):
     """Archived, not dropped: a finding imported before it was suppressed must close.
 
@@ -905,6 +924,7 @@ def _ids(reporter, results, **model_kwargs) -> list[str]:
     ]
 
 
+@pytest.mark.unit
 def test_a_rescan_produces_the_same_ids_so_security_hub_updates_not_duplicates(
     tmp_path,
 ):
@@ -944,11 +964,13 @@ def test_a_rescan_produces_the_same_ids_so_security_hub_updates_not_duplicates(
         {"workspace_project": "web"},
     ],
 )
+@pytest.mark.unit
 def test_a_different_finding_gets_a_different_id(tmp_path, changed):
     reporter = _reporter(tmp_path)
     assert _ids(reporter, [_result()]) != _ids(reporter, [_result(**changed)])
 
 
+@pytest.mark.unit
 def test_the_same_finding_in_another_findings_scope_gets_another_id(tmp_path):
     """Two repositories importing into one account must not overwrite each other."""
     first = _ids(_reporter(tmp_path, findings_scope="repo-one"), [_result()])
@@ -956,6 +978,7 @@ def test_the_same_finding_in_another_findings_scope_gets_another_id(tmp_path):
     assert first != second
 
 
+@pytest.mark.unit
 def test_project_name_does_not_change_the_id(tmp_path):
     """A repository's own config can set project_name, so it must not pick Ids."""
     base = _ids(_reporter(tmp_path, project_name="repo-one"), [_result()])
@@ -967,6 +990,7 @@ def test_project_name_does_not_change_the_id(tmp_path):
     assert renamed == base
 
 
+@pytest.mark.unit
 def test_the_message_and_severity_do_not_change_the_id(tmp_path):
     """A rewording or a re-rating is an update to the same finding, not a new one."""
     reporter = _reporter(tmp_path)
@@ -975,6 +999,7 @@ def test_the_message_and_severity_do_not_change_the_id(tmp_path):
     )
 
 
+@pytest.mark.unit
 def test_an_absolute_path_inside_the_scan_root_gets_the_relative_path_id(tmp_path):
     """The checkout path differs between machines; the Id must not depend on it."""
     reporter = _reporter(tmp_path)
@@ -994,6 +1019,7 @@ def _converted(output_dir: Path, message: str = "secret") -> Result:
     )
 
 
+@pytest.mark.unit
 def test_a_converted_files_findings_keep_their_ids_wherever_the_output_dir_is(
     tmp_path,
 ):
@@ -1021,6 +1047,7 @@ def test_a_converted_files_findings_keep_their_ids_wherever_the_output_dir_is(
     )
 
 
+@pytest.mark.unit
 def test_a_converted_files_finding_names_the_file_it_is_in(tmp_path):
     """The Id aside, ash/file and the resource say where it is."""
     reporter = _reporter(tmp_path)
@@ -1033,6 +1060,7 @@ def test_a_converted_files_finding_names_the_file_it_is_in(tmp_path):
     assert finding["Resources"][0]["Id"] == f"fixture-project/{written}"
 
 
+@pytest.mark.unit
 def test_the_project_a_results_file_was_written_for_keys_its_findings(tmp_path):
     """A workspace project's own results record the project in their metadata, and
     its findings may name none. They are keyed by it as a finding that names the
@@ -1049,6 +1077,7 @@ def test_the_project_a_results_file_was_written_for_keys_its_findings(tmp_path):
     assert from_metadata != _ids(reporter, [_result()])
 
 
+@pytest.mark.unit
 def test_a_dot_segment_in_the_path_does_not_change_the_id(tmp_path):
     reporter = _reporter(tmp_path)
     assert _ids(reporter, [_result(uri="./app/app.py")]) == _ids(
@@ -1068,6 +1097,7 @@ def _located(start_column: int | None = None, **properties: Any) -> Result:
     return result
 
 
+@pytest.mark.unit
 def test_the_column_and_the_package_version_do_not_change_the_id(tmp_path):
     """A scanner that starts reporting columns, or an upgrade that is still
     vulnerable, updates the finding instead of opening a second one."""
@@ -1083,6 +1113,7 @@ def test_the_column_and_the_package_version_do_not_change_the_id(tmp_path):
     assert before == after
 
 
+@pytest.mark.unit
 def test_a_different_package_or_package_path_gets_a_different_id(tmp_path):
     reporter = _reporter(tmp_path)
     base = _ids(reporter, [_located(package_name="requests", package_path="a")])
@@ -1090,6 +1121,7 @@ def test_a_different_package_or_package_path_gets_a_different_id(tmp_path):
     assert base != _ids(reporter, [_located(package_name="requests", package_path="b")])
 
 
+@pytest.mark.unit
 def test_exact_duplicates_get_an_ordinal_and_are_all_sent(tmp_path):
     """Identity contract v2: same key, column and message is the only case ranked
     by order: the first has no ordinal, the next 1, then 2."""
@@ -1109,6 +1141,7 @@ def test_exact_duplicates_get_an_ordinal_and_are_all_sent(tmp_path):
     assert document["duplicates_skipped"] == 0
 
 
+@pytest.mark.unit
 def test_one_fingerprint_reported_twice_at_one_place_is_sent_once(tmp_path, caplog):
     """Security Hub processes only the first of several findings sharing an Id.
 
@@ -1158,6 +1191,7 @@ def _validate_with(reporter, clients: dict) -> bool:
         return reporter.validate_plugin_dependencies()
 
 
+@pytest.mark.unit
 def test_validation_passes_against_an_enabled_hub(tmp_path):
     """As on main: DescribeHub only, because account_id is configured."""
     securityhub, stub = _stubbed_client("securityhub")
@@ -1170,6 +1204,7 @@ def test_validation_passes_against_an_enabled_hub(tmp_path):
     stub.assert_no_pending_responses()
 
 
+@pytest.mark.unit
 def test_validation_looks_the_account_up_when_it_is_not_configured(tmp_path):
     securityhub, stub = _stubbed_client("securityhub")
     stub.add_response(
@@ -1185,6 +1220,7 @@ def test_validation_looks_the_account_up_when_it_is_not_configured(tmp_path):
     assert reporter.config.options.account_id == "210987654321"
 
 
+@pytest.mark.unit
 def test_the_send_path_refuses_an_account_id_that_is_not_the_callers(tmp_path):
     """With the default product ARN, only the finding's own account may import it.
 
@@ -1210,6 +1246,7 @@ def test_the_send_path_refuses_an_account_id_that_is_not_the_callers(tmp_path):
     stub.assert_no_pending_responses()
 
 
+@pytest.mark.unit
 def test_the_send_path_asks_sts_even_when_account_id_is_set(tmp_path):
     securityhub, stub = _stubbed_client("securityhub")
     stub.add_response("batch_import_findings", _ok(1))
@@ -1224,6 +1261,7 @@ def test_the_send_path_asks_sts_even_when_account_id_is_set(tmp_path):
     stub.assert_no_pending_responses()
 
 
+@pytest.mark.unit
 def test_validation_fails_when_the_hub_is_not_enabled(tmp_path, caplog):
     """main's check and message. What to run to enable it is in the send path's
     error (test_client_error_raises_an_actionable_error, InvalidAccessException)."""
@@ -1271,6 +1309,7 @@ def _reporter_from(config: AshConfig, tmp_path: Path) -> SecurityHubReporter:
     )
 
 
+@pytest.mark.unit
 def test_the_reporter_is_off_by_default():
     assert SecurityHubReporterConfig().enabled is False
 
@@ -1285,6 +1324,7 @@ def test_the_reporter_is_off_by_default():
     ],
     ids=["no-section", "region-only"],
 )
+@pytest.mark.unit
 def test_loading_the_aws_plugins_without_enabling_it_never_contacts_aws(
     tmp_path, reporters
 ):
@@ -1309,6 +1349,7 @@ def test_loading_the_aws_plugins_without_enabling_it_never_contacts_aws(
     session.assert_not_called()
 
 
+@pytest.mark.unit
 def test_an_override_turns_it_off_whatever_the_repositorys_config_says(tmp_path):
     """The CI examples pass enabled=false on the jobs that must not import: a
     pull request can edit .ash/.ash.yaml, and its enabled: true must lose."""
@@ -1350,6 +1391,7 @@ def test_an_override_turns_it_off_whatever_the_repositorys_config_says(tmp_path)
     session.assert_not_called()
 
 
+@pytest.mark.unit
 def test_enabled_true_in_the_config_turns_it_on(tmp_path):
     config = AshConfig.model_validate(
         {
@@ -1474,6 +1516,7 @@ def _scope_of(findings: list[dict]) -> str:
 _OPERATOR_SENDS = (*_OPERATOR_ENABLES, _OPERATOR_SCOPE)
 
 
+@pytest.mark.unit
 def test_ash_report_sends_with_the_operators_scope_not_the_repositorys(
     tmp_path, monkeypatch
 ):
@@ -1496,6 +1539,7 @@ def test_ash_report_sends_with_the_operators_scope_not_the_repositorys(
     assert _scope_of(sent) == "operator-scope"
 
 
+@pytest.mark.unit
 def test_ash_report_archives_when_the_operators_overrides_ask(tmp_path, monkeypatch):
     """The positive half of
     test_the_operators_overrides_set_both_whatever_the_repository_says."""
@@ -1521,6 +1565,7 @@ def test_ash_report_archives_when_the_operators_overrides_ask(tmp_path, monkeypa
     assert _scope_of(sent) == "operator-scope"
 
 
+@pytest.mark.unit
 def test_ash_report_takes_an_underscore_override_of_the_only_section(
     tmp_path, monkeypatch
 ):
@@ -1546,6 +1591,7 @@ def test_ash_report_takes_an_underscore_override_of_the_only_section(
     assert _scope_of(sent) == "op"
 
 
+@pytest.mark.unit
 def test_ash_report_sends_to_the_overrides_section_beside_a_decoy(
     tmp_path, monkeypatch
 ):
@@ -1572,6 +1618,7 @@ def test_ash_report_sends_to_the_overrides_section_beside_a_decoy(
     assert _scope_of(sent) == "operator-scope"
 
 
+@pytest.mark.unit
 def test_ash_report_sends_with_the_operators_scope_past_a_linked_config(
     tmp_path, monkeypatch
 ):
@@ -1589,6 +1636,7 @@ def test_ash_report_sends_with_the_operators_scope_past_a_linked_config(
     assert _scope_of(sent) == "operator-scope"
 
 
+@pytest.mark.unit
 def test_ash_report_sends_with_the_overrides_beside_a_config_outside_the_tree(
     tmp_path, monkeypatch
 ):
@@ -1614,6 +1662,7 @@ def test_ash_report_sends_with_the_overrides_beside_a_config_outside_the_tree(
     assert _scope_of(sent) == "operator-scope"
 
 
+@pytest.mark.unit
 def test_the_scans_report_phase_sends_with_the_operators_scope(tmp_path):
     """The positive send through a scan's own report phase, from the config the
     scan discovers in the checkout. The repository's .ash/.ash.yaml asks for
@@ -1682,6 +1731,7 @@ def test_the_scans_report_phase_sends_with_the_operators_scope(tmp_path):
     assert _scope_of(imports.findings) == "operator-scope"
 
 
+@pytest.mark.unit
 def test_a_repository_config_cannot_turn_archiving_on(tmp_path, caplog):
     from automated_security_helper.config.resolve_config import resolve_config
 
@@ -1727,6 +1777,7 @@ def test_a_repository_config_cannot_turn_archiving_on(tmp_path, caplog):
     assert document["archived"] == 0
 
 
+@pytest.mark.unit
 def test_a_repository_findings_scope_leaves_it_unset_and_refused(tmp_path, caplog):
     from automated_security_helper.config.resolve_config import resolve_config
 
@@ -1755,6 +1806,7 @@ def test_a_repository_findings_scope_leaves_it_unset_and_refused(tmp_path, caplo
 
 
 @pytest.mark.parametrize("archive", [True, False])
+@pytest.mark.unit
 def test_the_operators_overrides_set_both_whatever_the_repository_says(
     tmp_path, caplog, archive
 ):
@@ -1787,6 +1839,7 @@ def test_the_operators_overrides_set_both_whatever_the_repository_says(
     assert _operator_only_warnings(caplog) == []
 
 
+@pytest.mark.unit
 def test_a_config_file_outside_the_tree_sets_both(tmp_path, caplog):
     from automated_security_helper.config.resolve_config import resolve_config
 
@@ -1828,6 +1881,7 @@ def test_a_config_file_outside_the_tree_sets_both(tmp_path, caplog):
     ],
     ids=["replace", "remove", "test", "below-it"],
 )
+@pytest.mark.unit
 def test_a_repository_patch_at_a_scope_left_out_of_its_base_still_loads(
     tmp_path, caplog, op, below, value
 ):
@@ -1867,6 +1921,7 @@ def test_a_repository_patch_at_a_scope_left_out_of_its_base_still_loads(
 
 
 @pytest.mark.parametrize("repository", ["leaves-them-alone", "sets-them"])
+@pytest.mark.unit
 def test_an_operator_file_keeps_both_over_a_repository_base(
     tmp_path, caplog, repository
 ):
@@ -1908,6 +1963,7 @@ def test_an_operator_file_keeps_both_over_a_repository_base(
     assert _operator_only_warnings(caplog) == []
 
 
+@pytest.mark.unit
 def test_the_reporter_runs_with_the_operator_s_config_that_extends_the_repository_s(
     tmp_path, caplog
 ):
@@ -1947,6 +2003,7 @@ def test_the_reporter_runs_with_the_operator_s_config_that_extends_the_repositor
     assert _security_hub_warnings(caplog) == []
 
 
+@pytest.mark.unit
 def test_what_the_repository_s_base_wrote_inside_the_section_does_not_run(
     tmp_path, caplog
 ):
@@ -1989,6 +2046,7 @@ def test_what_the_repository_s_base_wrote_inside_the_section_does_not_run(
     assert "operator.yaml" not in warning, warning
 
 
+@pytest.mark.unit
 def test_an_override_sets_the_section_past_the_operator_s_own_file(tmp_path, caplog):
     """--config-overrides is the operator's strongest surface: with the same
     extends chain, an override of the scope beats the operator file's own
@@ -2057,6 +2115,7 @@ def _base_the_repository_chose(tmp_path: Path, where: str) -> Path:
 
 
 @pytest.mark.parametrize("where", ["outside", "another-checkout"])
+@pytest.mark.unit
 def test_a_base_the_repository_s_file_reaches_is_the_repository_s(
     tmp_path, caplog, where
 ):
@@ -2122,6 +2181,7 @@ def test_a_base_the_repository_s_file_reaches_is_the_repository_s(
 
 
 @pytest.mark.parametrize("spelling", ["aws_security_hub", "AWS-Security-Hub"])
+@pytest.mark.unit
 def test_the_operator_s_file_folds_onto_the_trusted_base_s_spelling(
     tmp_path, monkeypatch, caplog, spelling
 ):
@@ -2167,6 +2227,7 @@ def test_the_operator_s_file_folds_onto_the_trusted_base_s_spelling(
     assert _security_hub_warnings(caplog) == []
 
 
+@pytest.mark.unit
 def test_a_spelling_that_names_another_plugin_does_not_fold(tmp_path, monkeypatch):
     """The fold onto the trusted base's spelling takes only a section the
     reporter would read as its own. `bedrock-summary-repo_rter` folds to the
@@ -2202,6 +2263,7 @@ def test_a_spelling_that_names_another_plugin_does_not_fold(tmp_path, monkeypatc
     assert (section or {}).get("enabled") is True, section
 
 
+@pytest.mark.unit
 def test_the_operator_s_root_wins_over_the_operator_s_own_base(tmp_path, caplog):
     """The operator's --config extends an operator base outside the tree,
     which extends the repository's file. Both operator files set the scope:
@@ -2245,6 +2307,7 @@ def test_the_operator_s_root_wins_over_the_operator_s_own_base(tmp_path, caplog)
     assert _security_hub_warnings(caplog) == []
 
 
+@pytest.mark.unit
 def test_two_trusted_spellings_keep_a_third_spelling_s_write_its_own(
     tmp_path, monkeypatch, caplog
 ):
@@ -2292,6 +2355,7 @@ def test_two_trusted_spellings_keep_a_third_spelling_s_write_its_own(
     assert "eu-west-1" not in json.dumps(section or {}), section
 
 
+@pytest.mark.unit
 def test_a_shared_base_the_operator_reaches_through_its_own_base_runs(tmp_path, caplog):
     """The operator's --config extends two bases in one ``extends`` list: an
     operator base outside the tree, then the repository's file. Both extend
@@ -2344,6 +2408,7 @@ def test_a_shared_base_the_operator_reaches_through_its_own_base_runs(tmp_path, 
     assert options.get("aws_region") == REGION, options
 
 
+@pytest.mark.unit
 def test_a_repository_file_that_names_its_base_twice_still_confines_it(
     tmp_path, caplog
 ):
@@ -2416,6 +2481,7 @@ def test_a_repository_file_that_names_its_base_twice_still_confines_it(
         ),
     ],
 )
+@pytest.mark.unit
 def test_an_operator_patch_with_an_array_pointer_applies_only_to_a_held_list(
     tmp_path, caplog, op_line, expected_tags
 ):
@@ -2466,6 +2532,7 @@ def test_an_operator_patch_with_an_array_pointer_applies_only_to_a_held_list(
         assert "appended" not in json.dumps(options), options
 
 
+@pytest.mark.unit
 def test_an_operator_patch_stepping_through_a_held_list_applies(tmp_path, caplog):
     """A patch op whose pointer steps through a list the operator's own file
     wrote (an index mid-path, a key after it) applies to the view as it
@@ -2503,6 +2570,7 @@ def test_an_operator_patch_stepping_through_a_held_list_applies(tmp_path, caplog
     assert options.get("tags") == [{"name": "changed"}], options
 
 
+@pytest.mark.unit
 def test_an_operator_patch_removing_a_held_list_element_removes_it(tmp_path, caplog):
     """A ``remove`` with an index into a list the operator's own file wrote
     takes the element out of the view, as it did out of the full document:
@@ -2539,6 +2607,7 @@ def test_an_operator_patch_removing_a_held_list_element_removes_it(tmp_path, cap
     assert "extra" not in json.dumps(options), options
 
 
+@pytest.mark.unit
 def test_a_middle_index_into_a_list_only_the_repository_wrote_is_dropped(
     tmp_path, caplog
 ):
@@ -2584,6 +2653,7 @@ def test_a_middle_index_into_a_list_only_the_repository_wrote_is_dropped(
     assert "changed" not in json.dumps(options), options
 
 
+@pytest.mark.unit
 def test_a_whole_reporters_patch_value_folds_onto_the_trusted_spelling(
     tmp_path, monkeypatch, caplog
 ):
@@ -2628,6 +2698,7 @@ def test_a_whole_reporters_patch_value_folds_onto_the_trusted_spelling(
     assert (section or {}).get("enabled") is False, section
 
 
+@pytest.mark.unit
 def test_a_patch_created_section_anchors_the_fold_for_later_files(tmp_path, caplog):
     """The deepest owned base creates the section with a patch op; the root
     file writes it under another spelling. The patch's spelling anchors the
@@ -2668,6 +2739,7 @@ def test_a_patch_created_section_anchors_the_fold_for_later_files(tmp_path, capl
     assert (section or {}).get("enabled") is False, section
 
 
+@pytest.mark.unit
 def test_a_digit_mapping_key_in_a_patch_lands_on_a_held_mapping(tmp_path, caplog):
     """A pointer segment of digits names a mapping key where the view holds a
     mapping there ("404" under a dict the operator's own file wrote): the op
@@ -2712,6 +2784,7 @@ def test_a_digit_mapping_key_in_a_patch_lands_on_a_held_mapping(tmp_path, caplog
         pytest.param("tags: !!binary YWJj", id="bytes-from-a-binary-tag"),
     ],
 )
+@pytest.mark.unit
 def test_a_remove_at_an_index_the_view_holds_a_string_at_is_dropped(
     tmp_path, caplog, written
 ):
@@ -2754,6 +2827,7 @@ def test_a_remove_at_an_index_the_view_holds_a_string_at_is_dropped(
     assert ((resolved or {}).get("options") or {}).get("tags") == ["y"], resolved
 
 
+@pytest.mark.unit
 def test_an_operator_s_own_array_op_is_not_blamed_on_the_repository(tmp_path, caplog):
     """The operator appends to its own list through a patch; the repository
     wrote nothing for the section, so the view applies the op and no warning
@@ -2794,6 +2868,7 @@ def test_an_operator_s_own_array_op_is_not_blamed_on_the_repository(tmp_path, ca
     assert not blamed, blamed
 
 
+@pytest.mark.unit
 def test_a_mid_path_dash_step_lands_on_the_written_mapping(tmp_path, caplog):
     """A patch pointer whose dash-spelled step sits in the MIDDLE (a key
     under it follows): the fold applies at every dict step, so a replace at
@@ -2828,6 +2903,7 @@ def test_a_mid_path_dash_step_lands_on_the_written_mapping(tmp_path, caplog):
     assert "code-map" not in options, options
 
 
+@pytest.mark.unit
 def test_a_dash_spelled_step_before_an_index_lands_on_the_written_list(tmp_path):
     """A patch pointer that holds an index also matches its DICT steps against
     the view's own spelling: a remove at options/some-list/1 where the
@@ -2889,6 +2965,7 @@ def _dash_spelled_option_patch(tmp_path):
     return checkout, operator
 
 
+@pytest.mark.unit
 def test_an_option_segment_spelled_with_a_dash_lands_on_the_written_option(
     tmp_path, caplog
 ):
@@ -2917,6 +2994,7 @@ def test_an_option_segment_spelled_with_a_dash_lands_on_the_written_option(
     assert "findings-scope" not in options, options
 
 
+@pytest.mark.unit
 def test_the_reporter_model_builds_from_the_view_with_the_patched_scope(
     tmp_path, caplog
 ):
@@ -2939,6 +3017,7 @@ def test_the_reporter_model_builds_from_the_view_with_the_patched_scope(
     assert built.options.findings_scope == "scope-b", built
 
 
+@pytest.mark.unit
 def test_an_operator_patch_pointer_unescapes_tilde_sequences(tmp_path, caplog):
     """A patch pointer's ``~1`` and ``~0`` are JSON-Pointer escapes for ``/``
     and ``~``: the operator view lands the op at the literal key, the same
@@ -2972,6 +3051,7 @@ def test_an_operator_patch_pointer_unescapes_tilde_sequences(tmp_path, caplog):
     assert options.get("a/b~c") == "slashed", options
 
 
+@pytest.mark.unit
 def test_an_operator_patch_remove_takes_only_what_the_view_holds(tmp_path, caplog):
     """A ``remove`` of a place the operator's own files wrote takes it out of
     the view. One aimed at a place only the repository's file wrote exists on
@@ -3017,6 +3097,7 @@ def test_an_operator_patch_remove_takes_only_what_the_view_holds(tmp_path, caplo
     assert "repository-wrote-this" not in json.dumps(options), options
 
 
+@pytest.mark.unit
 def test_colliding_spellings_fold_in_chain_order_not_first_appearance(
     tmp_path, monkeypatch, caplog
 ):
@@ -3071,6 +3152,7 @@ def test_colliding_spellings_fold_in_chain_order_not_first_appearance(
     assert options.get("aws_region") == REGION, options
 
 
+@pytest.mark.unit
 def test_a_null_section_under_another_spelling_takes_the_section_away(tmp_path, caplog):
     """One operator file writes the section and, under another spelling, a
     null section (a key with nothing after it). The null is the file's later
@@ -3102,6 +3184,7 @@ def test_a_null_section_under_another_spelling_takes_the_section_away(tmp_path, 
     assert (section or {}).get("enabled") is not True, section
 
 
+@pytest.mark.unit
 def test_an_operator_patch_under_another_spelling_folds_onto_the_section(
     tmp_path, caplog
 ):
@@ -3139,6 +3222,7 @@ def test_an_operator_patch_under_another_spelling_folds_onto_the_section(
     assert options.get("findings_scope") == "patched-scope", options
 
 
+@pytest.mark.unit
 def test_an_operator_patch_that_adds_the_reporters_section_runs(tmp_path, caplog):
     """The operator's --config extends the repository's file (which writes
     nothing for the section) and adds the whole ``reporters`` section with a
@@ -3177,6 +3261,7 @@ def test_an_operator_patch_that_adds_the_reporters_section_runs(tmp_path, caplog
     assert _security_hub_warnings(caplog) == []
 
 
+@pytest.mark.unit
 def test_an_operator_root_patch_sets_an_option_over_its_own_base(tmp_path, caplog):
     """The operator's --config extends an operator base that writes the
     section, and patches one option at /reporters/.../findings_scope. The op
@@ -3220,6 +3305,7 @@ def test_an_operator_root_patch_sets_an_option_over_its_own_base(tmp_path, caplo
     assert _security_hub_warnings(caplog) == []
 
 
+@pytest.mark.unit
 def test_a_repository_patch_of_the_section_does_not_run(tmp_path, caplog):
     """The repository's file adds the section with its own ``patch`` op. A
     repository file's ops are the repository's choice, so nothing they write
@@ -3267,6 +3353,7 @@ def test_a_repository_patch_of_the_section_does_not_run(tmp_path, caplog):
 
 
 @pytest.mark.parametrize("shape", ["empty-list", "single-string"])
+@pytest.mark.unit
 def test_the_chain_rebuild_counts_an_empty_list_and_a_single_string(
     tmp_path, caplog, shape
 ):
@@ -3322,6 +3409,7 @@ def test_the_chain_rebuild_counts_an_empty_list_and_a_single_string(
     ]
 
 
+@pytest.mark.unit
 def test_a_chain_that_cannot_be_rebuilt_says_so_and_takes_nothing(tmp_path, caplog):
     """A chain whose tree does not rebuild takes nothing as the operator's
     own -- and says so, naming the file and no value: silently reducing what
@@ -3349,6 +3437,7 @@ def test_a_chain_that_cannot_be_rebuilt_says_so_and_takes_nothing(tmp_path, capl
     assert "operator-scope" not in warning, warning
 
 
+@pytest.mark.unit
 def test_a_rebuild_warning_names_an_environment_chosen_file_as_value(tmp_path, caplog):
     """The file the rebuild warning names can be one an ``extends`` entry chose
     with a value read from the environment -- the drift the warning exists for
@@ -3374,6 +3463,7 @@ def test_a_rebuild_warning_names_an_environment_chosen_file_as_value(tmp_path, c
     assert "<value>" in warning, warning
 
 
+@pytest.mark.unit
 def test_the_resolve_hands_the_chain_walk_the_environment_chosen_paths(
     tmp_path, monkeypatch, caplog
 ):
@@ -3410,6 +3500,7 @@ def test_the_resolve_hands_the_chain_walk_the_environment_chosen_paths(
     assert any(base in paths or base.resolve() in paths for paths in handed), handed
 
 
+@pytest.mark.unit
 def test_a_rebuild_warning_names_an_environment_chosen_file_by_resolved_path(
     tmp_path, caplog
 ):
@@ -3438,6 +3529,7 @@ def test_a_rebuild_warning_names_an_environment_chosen_file_by_resolved_path(
     assert "<value>" in warning, warning
 
 
+@pytest.mark.unit
 def test_the_operator_s_file_merges_over_the_trusted_base_for_the_section(
     tmp_path, monkeypatch, caplog
 ):
@@ -3493,6 +3585,7 @@ _SCOPE_FROM_THE_ENVIRONMENT = "operator-scope-read-from-the-environment"
     ids=["no-override", "a-reporters-override"],
 )
 @pytest.mark.parametrize("option", ["findings_scope", "aws_profile"])
+@pytest.mark.unit
 def test_a_value_the_reporter_runs_with_from_the_environment_is_redacted(
     tmp_path, monkeypatch, option, overrides
 ):
@@ -3561,6 +3654,7 @@ _REPOSITORY_SCOPES = {
 
 
 @pytest.mark.parametrize("repository", list(_REPOSITORY_SCOPES))
+@pytest.mark.unit
 def test_an_operator_file_s_scope_read_from_the_environment_is_recorded_as_written(
     tmp_path, monkeypatch, repository
 ):
@@ -3607,6 +3701,7 @@ def test_an_operator_file_s_scope_read_from_the_environment_is_recorded_as_writt
         assert _SCOPE_FROM_THE_ENVIRONMENT not in json.dumps(view)
 
 
+@pytest.mark.unit
 def test_the_trusted_base_s_reference_is_recorded_where_its_scope_replaces_the_repository_s(
     tmp_path, monkeypatch
 ):
@@ -3642,6 +3737,7 @@ def test_the_trusted_base_s_reference_is_recorded_where_its_scope_replaces_the_r
 
 
 @pytest.mark.parametrize("kept_by", ["override", "operator-file"])
+@pytest.mark.unit
 def test_a_trusted_reference_is_not_recorded_where_the_scope_is_kept(
     tmp_path, monkeypatch, kept_by
 ):
@@ -3694,6 +3790,7 @@ def test_a_trusted_reference_is_not_recorded_where_the_scope_is_kept(
         assert options["findings_scope"] == _SCOPE_FROM_THE_ENVIRONMENT, options
 
 
+@pytest.mark.unit
 def test_confinement_returns_the_options_that_took_the_trusted_base_s_value(
     tmp_path, monkeypatch
 ):
@@ -3749,6 +3846,7 @@ def test_confinement_returns_the_options_that_took_the_trusted_base_s_value(
 
 
 @pytest.mark.parametrize("kept_by", ["override", "operator-file"])
+@pytest.mark.unit
 def test_a_repository_reference_is_not_recorded_where_the_scope_is_kept(
     tmp_path, monkeypatch, kept_by
 ):
@@ -3804,6 +3902,7 @@ def test_a_repository_reference_is_not_recorded_where_the_scope_is_kept(
     ]
 
 
+@pytest.mark.unit
 def test_a_reference_from_a_repository_file_that_links_out_of_the_tree_is_not_recorded(
     tmp_path, monkeypatch
 ):
@@ -3848,6 +3947,7 @@ def test_a_reference_from_a_repository_file_that_links_out_of_the_tree_is_not_re
     ]
 
 
+@pytest.mark.unit
 def test_an_unrelated_override_does_not_charge_the_repository_with_either(
     tmp_path, caplog
 ):
@@ -3878,6 +3978,7 @@ def test_an_unrelated_override_does_not_charge_the_repository_with_either(
     assert _operator_only_warnings(caplog) == []
 
 
+@pytest.mark.unit
 def test_a_repository_section_under_another_spelling_is_confined_too(tmp_path, caplog):
     """get_plugin_config reads AwsSecurityHub as aws-security-hub's section."""
     from automated_security_helper.config.resolve_config import resolve_config
@@ -3909,6 +4010,7 @@ def _underscore_overrides() -> list[str]:
     ]
 
 
+@pytest.mark.unit
 def test_a_decoy_section_does_not_carry_the_operators_overrides_to_the_payload(
     tmp_path,
 ):
@@ -3957,6 +4059,7 @@ def test_a_decoy_section_does_not_carry_the_operators_overrides_to_the_payload(
     assert imports.requests == []
 
 
+@pytest.mark.unit
 def test_a_decoy_section_does_not_shelter_an_underscore_payload_from_ash_report(
     tmp_path,
 ):
@@ -3995,6 +4098,7 @@ def test_a_decoy_section_does_not_shelter_an_underscore_payload_from_ash_report(
         assert options.archive_resolved_findings is False, name
 
 
+@pytest.mark.unit
 def test_an_underscore_override_of_the_only_section_is_the_operators(tmp_path):
     """With one section, an override spelled with underscores is applied to it
     (the '-' and '_' spellings are one key), so it is the operator's value."""
@@ -4023,6 +4127,7 @@ _SPACED_OVERRIDES = [
 ]
 
 
+@pytest.mark.unit
 def test_ash_report_refuses_an_override_key_with_a_space_before_it(
     tmp_path, monkeypatch
 ):
@@ -4071,6 +4176,7 @@ def test_ash_report_refuses_an_override_key_with_a_space_before_it(
     session.assert_not_called()
 
 
+@pytest.mark.unit
 def test_confinement_reads_an_override_key_as_it_was_applied(tmp_path):
     """apply_config_overrides refuses a key with whitespace around it, so a scan
     never hands confinement one. Confinement reads each key exactly as the
@@ -4136,6 +4242,7 @@ def test_confinement_reads_an_override_key_as_it_was_applied(tmp_path):
     }
 
 
+@pytest.mark.unit
 def test_the_warning_takes_an_in_tree_path_as_text_not_markup(tmp_path, caplog):
     """The repository names its own files. A base at .ash/a[/x].yaml held a
     closing Rich tag, and the console handler raised MarkupError out of
@@ -4191,6 +4298,7 @@ def _resolve_and_select(checkout: Path, caplog) -> Any:
         return reporter_section(config, SecurityHubReporter)
 
 
+@pytest.mark.unit
 def test_each_confinement_names_what_it_ignores_from_the_repositorys_section(
     tmp_path, caplog
 ):
@@ -4223,6 +4331,7 @@ def test_each_confinement_names_what_it_ignores_from_the_repositorys_section(
     assert "aws_profile" not in section["options"]
 
 
+@pytest.mark.unit
 def test_the_options_alone_draw_the_options_warning(tmp_path, caplog):
     """Where the dropped options were the only difference, reporter_section
     finds the operator's section and ignores nothing more, so the warning names
@@ -4242,6 +4351,7 @@ def test_the_options_alone_draw_the_options_warning(tmp_path, caplog):
     assert "the rest of" not in warning
 
 
+@pytest.mark.unit
 def test_the_destination_step_names_a_profile_only_the_repository_wrote(
     tmp_path, caplog
 ):
@@ -4268,6 +4378,7 @@ def test_the_destination_step_names_a_profile_only_the_repository_wrote(
     assert "aws_profile" not in section["options"]
 
 
+@pytest.mark.unit
 def test_a_section_key_with_controls_is_shown_as_escapes(tmp_path, caplog):
     """A key get_plugin_config reads as aws-security-hub's can hold a carriage
     return, an escape and a bell, and the warning shows each one as an escape."""
@@ -4314,6 +4425,7 @@ def _symlink_or_skip(link: Path, target: Path) -> None:
         pytest.skip(f"cannot make a symlink here: {error}")
 
 
+@pytest.mark.unit
 def test_a_discovered_config_that_links_out_of_the_tree_is_confined(tmp_path):
     """The scan root is no git checkout, and its .ash/.ash.yaml is a symlink to
     a file outside it. The file is judged by the in-tree path the scan reached it
@@ -4334,6 +4446,7 @@ def test_a_discovered_config_that_links_out_of_the_tree_is_confined(tmp_path):
     assert options.archive_resolved_findings is False
 
 
+@pytest.mark.unit
 def test_a_named_config_that_links_out_of_the_tree_is_confined(tmp_path):
     """The same, for --config naming a path inside the tree."""
     from automated_security_helper.config.resolve_config import resolve_config
@@ -4353,6 +4466,7 @@ def test_a_named_config_that_links_out_of_the_tree_is_confined(tmp_path):
     assert options.archive_resolved_findings is False
 
 
+@pytest.mark.unit
 def test_the_operators_config_outside_the_tree_is_honored(tmp_path):
     """--config naming the outside file itself is the operator's choice."""
     from automated_security_helper.config.resolve_config import resolve_config
@@ -4385,6 +4499,7 @@ def _operator_file(tmp_path: Path, scope: str) -> Path:
 
 
 @pytest.mark.parametrize("operator_source", ["ASH_CONFIG", "workspace default"])
+@pytest.mark.unit
 def test_the_trusted_bases_value_replaces_the_repositorys(
     tmp_path, monkeypatch, operator_source
 ):
@@ -4416,6 +4531,7 @@ def test_the_trusted_bases_value_replaces_the_repositorys(
     assert section["options"]["archive_resolved_findings"] is True
 
 
+@pytest.mark.unit
 def test_ash_report_judges_the_config_against_the_results_tree(
     tmp_path, monkeypatch, capsys
 ):
@@ -4515,6 +4631,7 @@ def _security_hub_options(result: dict[str, Any]) -> dict[str, Any]:
     "layout",
     ["in a checkout", "a link into a checkout", "a link out of one", "a base in one"],
 )
+@pytest.mark.unit
 def test_get_config_marks_the_operator_only_options_a_repository_file_sets(
     tmp_path, monkeypatch, layout, scope
 ):
@@ -4587,6 +4704,7 @@ def test_get_config_marks_the_operator_only_options_a_repository_file_sets(
         ("neither", False),
     ],
 )
+@pytest.mark.unit
 def test_in_a_checkout_reads_the_name_and_the_target(tmp_path, layout, inside):
     """get_config passes in_a_checkout the resolved chain as well as the name, so
     there each half of the check also has the other behind it; this holds each
@@ -4624,6 +4742,7 @@ def test_in_a_checkout_reads_the_name_and_the_target(tmp_path, layout, inside):
     assert in_a_checkout(path) is inside
 
 
+@pytest.mark.unit
 def test_get_config_shows_an_operator_file_outside_every_checkout_as_written(
     tmp_path, monkeypatch
 ):
@@ -4640,6 +4759,7 @@ def test_get_config_shows_an_operator_file_outside_every_checkout_as_written(
     assert options["archive_resolved_findings"] is True
 
 
+@pytest.mark.unit
 def test_get_config_does_not_judge_a_named_file_by_ash_configs_checkout(
     tmp_path, monkeypatch
 ):
@@ -4666,6 +4786,7 @@ def test_get_config_does_not_judge_a_named_file_by_ash_configs_checkout(
     assert options["findings_scope"] == "victim"
 
 
+@pytest.mark.unit
 def test_get_config_shows_the_operators_value_where_the_target_holds_the_file(
     tmp_path, monkeypatch
 ):
@@ -4687,6 +4808,7 @@ def test_get_config_shows_the_operators_value_where_the_target_holds_the_file(
     assert options["findings_scope"] == "operator-scope"
 
 
+@pytest.mark.unit
 def test_a_result_with_no_identity_fails_the_reporter_and_sends_nothing(
     tmp_path, monkeypatch
 ):
@@ -4735,6 +4857,7 @@ def test_a_result_with_no_identity_fails_the_reporter_and_sends_nothing(
 
 @pytest.mark.parametrize("project_name", ["ash-scan", "a-name-of-its-own"])
 @pytest.mark.parametrize("unset", [None, "", "   "], ids=["none", "empty", "blank"])
+@pytest.mark.unit
 def test_an_unset_findings_scope_is_refused_before_any_aws_call(
     tmp_path, unset, project_name
 ):
@@ -4754,12 +4877,14 @@ def test_an_unset_findings_scope_is_refused_before_any_aws_call(
     assert "\n" not in message
 
 
+@pytest.mark.unit
 def test_an_unset_findings_scope_is_refused_with_no_findings_too(tmp_path):
     with pytest.raises(SecurityHubImportError) as raised:
         _report_with(_reporter(tmp_path, findings_scope=None), _model([]), {})
     assert "findings_scope" in str(raised.value)
 
 
+@pytest.mark.unit
 def test_a_project_name_naming_another_scope_does_not_reach_its_findings(tmp_path):
     """Repository A's config names repository B's project; A keeps its own scope."""
     theirs = _reporter(tmp_path, findings_scope="repo-b", project_name="repo-b")
@@ -4776,6 +4901,7 @@ def test_a_project_name_naming_another_scope_does_not_reach_its_findings(tmp_pat
     assert our_finding["Resources"][0]["Id"].startswith("repo-a/")
 
 
+@pytest.mark.unit
 def test_findings_scope_comes_from_this_reporters_config_not_the_results_file(
     tmp_path,
 ):
@@ -4805,6 +4931,7 @@ def test_findings_scope_comes_from_this_reporters_config_not_the_results_file(
     assert finding["Resources"][0]["Id"].startswith("operator-scope/")
 
 
+@pytest.mark.unit
 def test_the_default_project_name_is_no_obstacle_once_findings_scope_is_set(
     tmp_path,
 ):
@@ -4823,6 +4950,7 @@ def test_the_default_project_name_is_no_obstacle_once_findings_scope_is_set(
     assert sent["ProductFields"]["ash/target"] == "fixture-project"
 
 
+@pytest.mark.unit
 def test_a_findings_scope_too_long_for_its_product_field_is_refused(tmp_path):
     """ash/target is findings_scope plus a workspace project's key, and a
     ProductFields value is cut at 2048 characters. A cut value no longer equals
@@ -4851,6 +4979,7 @@ def test_a_findings_scope_too_long_for_its_product_field_is_refused(tmp_path):
     assert "at most 1024 characters" in str(raised.value)
 
 
+@pytest.mark.unit
 def test_findings_scope_from_config_overrides_reaches_the_reporter(tmp_path):
     """The form the docs give: a value with a slash, set on the command line."""
     from automated_security_helper.config.resolve_config import resolve_config
@@ -4876,6 +5005,7 @@ def test_findings_scope_from_config_overrides_reaches_the_reporter(tmp_path):
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.unit
 def test_fingerprints_replace_the_line_numbers_in_the_id(tmp_path):
     """An edit above a finding moves its line; its fingerprint does not move."""
     reporter = _reporter(tmp_path)
@@ -4888,6 +5018,7 @@ def test_fingerprints_replace_the_line_numbers_in_the_id(tmp_path):
     )
 
 
+@pytest.mark.unit
 def test_partial_fingerprints_are_used_when_there_are_no_fingerprints(tmp_path):
     reporter = _reporter(tmp_path)
     partial = {"primaryLocationLineHash": "39fa2ee980eb94b0:1"}
@@ -4896,6 +5027,7 @@ def test_partial_fingerprints_are_used_when_there_are_no_fingerprints(tmp_path):
     )
 
 
+@pytest.mark.unit
 def test_distinct_findings_on_one_line_are_all_sent(tmp_path):
     """Two secrets on one line are two findings, not one with the other dropped."""
     securityhub, stub = _stubbed_client("securityhub")
@@ -4920,6 +5052,7 @@ def test_distinct_findings_on_one_line_are_all_sent(tmp_path):
     assert document["duplicates_skipped"] == 0
 
 
+@pytest.mark.unit
 def test_the_occurrence_index_does_not_depend_on_result_order(tmp_path):
     reporter = _reporter(tmp_path)
     first, second = _result(message="secret one"), _result(message="secret two")
@@ -4930,6 +5063,7 @@ def test_the_occurrence_index_does_not_depend_on_result_order(tmp_path):
     assert by_message == reversed_ids
 
 
+@pytest.mark.unit
 def test_an_earlier_column_newcomer_does_not_take_the_existing_findings_id(tmp_path):
     """A newcomer at column 5 gets an Id of its own, so the finding at column 20
     keeps its Id and its triage state."""
@@ -4946,6 +5080,7 @@ def test_an_earlier_column_newcomer_does_not_take_the_existing_findings_id(tmp_p
     assert newcomer != existing
 
 
+@pytest.mark.unit
 def test_removing_the_first_occurrence_does_not_hand_its_id_to_the_next(tmp_path):
     reporter = _reporter(tmp_path)
     first, _second = _ids(
@@ -4959,6 +5094,7 @@ def test_removing_the_first_occurrence_does_not_hand_its_id_to_the_next(tmp_path
     assert survivor != first
 
 
+@pytest.mark.unit
 def test_occurrence_suffixes_are_by_content(tmp_path):
     """Among findings sharing a key, each one's Id depends on its own column and
     message, so the same pair yields the same two Ids next to any third."""
@@ -4971,6 +5107,7 @@ def test_occurrence_suffixes_are_by_content(tmp_path):
     assert pair < triple
 
 
+@pytest.mark.unit
 def test_a_placeholder_fingerprint_counts_as_absent(tmp_path):
     """semgrep 1.180 writes matchBasedId/v1 "requires login" on every result."""
     reporter = _reporter(tmp_path)
@@ -4992,6 +5129,7 @@ def test_a_placeholder_fingerprint_counts_as_absent(tmp_path):
     )
 
 
+@pytest.mark.unit
 def test_a_fingerprint_shared_by_two_locations_counts_as_absent(tmp_path):
     reporter = _reporter(tmp_path)
     shared = {"matchBasedId/v1": "0000aaaa"}
@@ -5003,6 +5141,7 @@ def test_a_fingerprint_shared_by_two_locations_counts_as_absent(tmp_path):
     assert ids == _ids(reporter, [_result(line=3), _result(line=9)])
 
 
+@pytest.mark.unit
 def test_a_fingerprint_in_another_file_or_from_another_scanner_moves_no_id(tmp_path):
     """Counted per scanner, rule, file, package and project, which the key holds:
     fixing the finding in one file does not re-key the one in another that
@@ -5019,6 +5158,7 @@ def test_a_fingerprint_in_another_file_or_from_another_scanner_moves_no_id(tmp_p
     assert _ids(reporter, [in_a, other])[0] == alone[0]
 
 
+@pytest.mark.unit
 def test_fingerprints_win_over_partial_fingerprints(tmp_path):
     reporter = _reporter(tmp_path)
     full = {"matchBasedId/v1": "4f1c0e"}
@@ -5046,6 +5186,7 @@ def test_fingerprints_win_over_partial_fingerprints(tmp_path):
     "written",
     ["app/../app/app.py", "./app/./app.py"],
 )
+@pytest.mark.unit
 def test_path_spellings_of_one_file_give_one_id(tmp_path, written):
     reporter = _reporter(tmp_path)
     [finding] = reporter.build_asff_findings(
@@ -5057,6 +5198,7 @@ def test_path_spellings_of_one_file_give_one_id(tmp_path, written):
     )
 
 
+@pytest.mark.unit
 def test_a_backslash_in_a_relative_path_names_another_file(tmp_path):
     """A sanitized relative path's backslash is part of a POSIX file name (a path
     made on Windows has "/" by then), so app\\app.py is not app/app.py. Each
@@ -5072,6 +5214,7 @@ def test_a_backslash_in_a_relative_path_names_another_file(tmp_path):
     )
 
 
+@pytest.mark.unit
 def test_the_id_is_the_contract_v2_hash_of_target_and_key(tmp_path):
     """Id = "ash/" + sha256(json.dumps([target, key], sort_keys=True))."""
     import hashlib
@@ -5110,6 +5253,7 @@ def test_the_id_is_the_contract_v2_hash_of_target_and_key(tmp_path):
         ("123456789012", "123456789012"),
     ],
 )
+@pytest.mark.unit
 def test_an_integer_account_id_is_read_as_twelve_digits(tmp_path, raw, expected):
     reporter = SecurityHubReporter(
         context=PluginContext(
@@ -5124,6 +5268,7 @@ def test_an_integer_account_id_is_read_as_twelve_digits(tmp_path, raw, expected)
     assert reporter.config.options.account_id == expected
 
 
+@pytest.mark.unit
 def test_an_account_id_from_config_overrides_reaches_the_reporter(tmp_path):
     from automated_security_helper.config.resolve_config import resolve_config
 
@@ -5150,6 +5295,7 @@ def test_an_account_id_from_config_overrides_reaches_the_reporter(tmp_path):
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.unit
 def test_a_fenced_code_block_in_the_message_is_not_sent(tmp_path):
     """FlatVulnerability reads a fenced block in a message as a code snippet."""
     message = (
@@ -5166,6 +5312,7 @@ def test_a_fenced_code_block_in_the_message_is_not_sent(tmp_path):
     assert finding["Title"] == "B602: Hardcoded key found"
 
 
+@pytest.mark.unit
 def test_a_message_that_is_only_a_code_block_still_has_a_description(tmp_path):
     [finding] = _reporter(tmp_path).build_asff_findings(
         _model([_result(message="```\nFENCED-ONLY\n```")]),
@@ -5185,6 +5332,7 @@ def test_a_message_that_is_only_a_code_block_still_has_a_description(tmp_path):
         ("cn-north-1", "aws-cn"),
     ],
 )
+@pytest.mark.unit
 def test_the_product_arn_uses_the_regions_partition(tmp_path, region, partition):
     [finding] = _reporter(tmp_path, region=region).build_asff_findings(
         _model([_result()]), account_id=ACCOUNT, region=region
@@ -5199,6 +5347,7 @@ def test_the_product_arn_uses_the_regions_partition(tmp_path, region, partition)
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.unit
 def test_a_batch_rejected_entirely_with_invalid_access_stops_the_import(tmp_path):
     """Security Hub answers so for every finding when it is off; do not keep sending."""
     securityhub, stub = _stubbed_client("securityhub")
@@ -5226,6 +5375,7 @@ def test_a_batch_rejected_entirely_with_invalid_access_stops_the_import(tmp_path
     assert "Not sent: 50" in str(raised.value)
 
 
+@pytest.mark.unit
 def test_a_request_botocore_refuses_is_not_reported_as_unreachable(
     tmp_path, monkeypatch
 ):
@@ -5317,6 +5467,7 @@ def _archive_run(
     return document, imports, queries
 
 
+@pytest.mark.unit
 def test_archiving_is_off_by_default():
     """Opt-in: what a scan did not report is not always fixed (a scanner that lost
     some targets, a narrower --source-dir, a refused converted tree, new
@@ -5324,6 +5475,7 @@ def test_archiving_is_off_by_default():
     assert SecurityHubReporterConfigOptions().archive_resolved_findings is False
 
 
+@pytest.mark.unit
 def test_a_finding_the_scan_no_longer_reports_is_archived(tmp_path):
     reporter = _reporter(tmp_path)
     gone = _stored(_built(reporter, _result(rule_id="B105", line=5)))
@@ -5365,6 +5517,7 @@ def test_a_finding_the_scan_no_longer_reports_is_archived(tmp_path):
     assert len(sent) == 2
 
 
+@pytest.mark.unit
 def test_every_page_of_existing_findings_is_read(tmp_path):
     reporter = _reporter(tmp_path)
     first = _stored(_built(reporter, _result(rule_id="R1")))
@@ -5388,6 +5541,7 @@ def test_every_page_of_existing_findings_is_read(tmp_path):
     assert archived == {first["Id"], second["Id"]}
 
 
+@pytest.mark.unit
 def test_an_existing_finding_keeps_its_created_at(tmp_path):
     reporter = _reporter(tmp_path)
     still_there = _stored(_built(reporter, _result()))
@@ -5406,6 +5560,7 @@ def test_an_existing_finding_keeps_its_created_at(tmp_path):
     assert finding["UpdatedAt"] == SCAN_TIME
 
 
+@pytest.mark.unit
 def test_a_suppressed_finding_keeps_its_created_at_too(tmp_path):
     """Archived findings are read as well, or suppression would reset CreatedAt."""
     reporter = _reporter(tmp_path)
@@ -5481,6 +5636,7 @@ def _scoped_model(rule: str):
         "a target of the scanner failed",
     ],
 )
+@pytest.mark.unit
 def test_archiving_is_limited_to_what_the_scan_looked_at(tmp_path, rule):
     reporter = _reporter(tmp_path)
     stale = _stored(_built(reporter, _result(rule_id="B105", line=5)))
@@ -5532,6 +5688,7 @@ def _in_a_wrapper_run(monkeypatch) -> None:
     monkeypatch.delenv("ASH_SCAN_SOURCE", raising=False)
 
 
+@pytest.mark.unit
 def test_a_wrapper_runs_results_say_once_on_stderr_that_nothing_is_archived(
     tmp_path, monkeypatch, capsys, caplog, no_notice_yet
 ):
@@ -5572,6 +5729,7 @@ def test_a_wrapper_runs_results_say_once_on_stderr_that_nothing_is_archived(
         assert "scan_source" in document["archive_skipped"]
 
 
+@pytest.mark.unit
 def test_results_from_elsewhere_with_no_directory_give_the_possible_reasons(
     tmp_path, monkeypatch, capsys, no_notice_yet
 ):
@@ -5617,6 +5775,7 @@ def test_results_from_elsewhere_with_no_directory_give_the_possible_reasons(
 
 
 @pytest.mark.parametrize("case", ["archiving off", "directory recorded"])
+@pytest.mark.unit
 def test_no_notice_when_archiving_is_off_or_the_directory_is_recorded(
     tmp_path, monkeypatch, capsys, no_notice_yet, case
 ):
@@ -5653,6 +5812,7 @@ def test_no_notice_when_archiving_is_off_or_the_directory_is_recorded(
         "no scan scope recorded",
     ],
 )
+@pytest.mark.unit
 def test_archiving_leaves_findings_this_scan_cannot_speak_for(tmp_path, case):
     reporter = _reporter(tmp_path)
     finding = _built(reporter, _result(rule_id="B105", line=5))
@@ -5687,6 +5847,7 @@ def test_archiving_leaves_findings_this_scan_cannot_speak_for(tmp_path, case):
     assert document["archived"] == 0
 
 
+@pytest.mark.unit
 def test_archiving_never_touches_findings_outside_findings_scope(tmp_path):
     """Only this scope is read and archived, even with project_name naming another
     project. GetFindings answers with the other project's finding too, as a
@@ -5714,6 +5875,7 @@ def test_archiving_never_touches_findings_outside_findings_scope(tmp_path):
     assert document["archived_ids"] == [our_stale["Id"]]
 
 
+@pytest.mark.unit
 def test_a_scope_and_project_never_archive_a_scope_that_reads_the_same(tmp_path):
     """ash/target is "<findings_scope>/<project>", so findings_scope "org" with
     workspace project "repo" reads the same as findings_scope "org/repo" with
@@ -5748,6 +5910,7 @@ def test_a_scope_and_project_never_archive_a_scope_that_reads_the_same(tmp_path)
     assert document["archived_ids"] == [our_stale["Id"]]
 
 
+@pytest.mark.unit
 def test_a_stored_finding_missing_a_required_field_is_skipped_with_a_warning(
     tmp_path, caplog
 ):
@@ -5776,6 +5939,7 @@ def test_a_stored_finding_missing_a_required_field_is_skipped_with_a_warning(
     )
 
 
+@pytest.mark.unit
 def test_a_stored_finding_with_a_required_field_absent_is_skipped_too(tmp_path, caplog):
     """Absent, not blank: the test above cannot remove Title, because the stubbed
     GetFindings response is validated against the API shape. Here the archive
@@ -5804,6 +5968,7 @@ def test_a_stored_finding_with_a_required_field_absent_is_skipped_too(tmp_path, 
     )
 
 
+@pytest.mark.unit
 def test_a_scan_with_no_findings_archives_what_it_no_longer_finds(tmp_path):
     reporter = _reporter(tmp_path)
     stale = _stored(_built(reporter, _result()))
@@ -5819,6 +5984,7 @@ def test_a_scan_with_no_findings_archives_what_it_no_longer_finds(tmp_path):
     assert document["archived"] == 1
 
 
+@pytest.mark.unit
 def test_a_scan_with_no_findings_and_nothing_to_archive_makes_no_call(tmp_path):
     securityhub, stub = _stubbed_client("securityhub")
     document = json.loads(
@@ -5833,6 +5999,7 @@ def test_a_scan_with_no_findings_and_nothing_to_archive_makes_no_call(tmp_path):
     assert document["imported"] == 0
 
 
+@pytest.mark.unit
 def test_with_archiving_off_existing_findings_are_not_read(tmp_path):
     securityhub, stub = _stubbed_client("securityhub")
     imports = _Capture(securityhub)
@@ -5853,6 +6020,7 @@ def test_with_archiving_off_existing_findings_are_not_read(tmp_path):
     assert "archive_resolved_findings" in document["archive_skipped"]
 
 
+@pytest.mark.unit
 def test_a_denied_get_findings_still_imports_and_then_fails(tmp_path):
     securityhub, stub = _stubbed_client("securityhub")
     imports = _Capture(securityhub)
@@ -5879,6 +6047,7 @@ def test_a_denied_get_findings_still_imports_and_then_fails(tmp_path):
     assert "imported 1" in message.lower() or "imported: 1" in message.lower()
 
 
+@pytest.mark.unit
 def test_the_archive_reimport_passes_request_validation(tmp_path):
     """The rebuilt archive record is checked by botocore like any other finding."""
     reporter = _reporter(tmp_path)
@@ -5912,6 +6081,7 @@ def test_the_archive_reimport_passes_request_validation(tmp_path):
         ("2026-01-15T14:00:00.000+02:00", (2026, 1, 15, 12, 0, 0, 0)),
     ],
 )
+@pytest.mark.unit
 def test_security_hub_timestamps_parse_on_every_supported_python(value, expected):
     from datetime import datetime, timezone
 
@@ -5928,6 +6098,7 @@ def _git_checkout(root: Path) -> Path:
     return root
 
 
+@pytest.mark.integration
 def test_the_scope_is_the_one_the_scan_recorded_not_the_reporting_hosts(tmp_path):
     """``ash merge`` on a collector without the checkout, or ``ash report`` on
     another host, cannot see the scanned directory. The scope must still be the
@@ -5959,6 +6130,7 @@ def test_the_scope_is_the_one_the_scan_recorded_not_the_reporting_hosts(tmp_path
     assert document["archived_ids"] == [stale["Id"]]
 
 
+@pytest.mark.unit
 def test_results_that_do_not_record_the_scanned_directory_archive_nothing(tmp_path):
     """Results from an ASH that did not record it: the reporter does not guess
     from the host, it says why nothing was archived."""
@@ -5978,6 +6150,7 @@ def test_results_that_do_not_record_the_scanned_directory_archive_nothing(tmp_pa
     assert all("ash/scope" not in f["ProductFields"] for f in imports.findings)
 
 
+@pytest.mark.unit
 def test_the_scope_says_whether_the_converted_tree_was_scanned(tmp_path):
     reporter = _reporter(tmp_path)
     model = _model([_result()])
@@ -5989,6 +6162,7 @@ def test_the_scope_says_whether_the_converted_tree_was_scanned(tmp_path):
     assert finding["ProductFields"]["ash/scope"].endswith(";converted=yes")
 
 
+@pytest.mark.unit
 def test_a_workspace_results_file_is_refused(tmp_path):
     """Its findings span projects and it records no generated_at, ash_config or
     changed_files_only, so UpdatedAt would be "now" and archive newer findings."""
@@ -6022,6 +6196,7 @@ def test_a_workspace_results_file_is_refused(tmp_path):
     assert "projects/api/ash_aggregated_results.json" in str(raised.value)
 
 
+@pytest.mark.unit
 def test_report_refuses_when_the_reporter_is_not_enabled(tmp_path):
     """`ash report --format aws-security-hub` builds the reporter whatever its
     `enabled` says; the send path is where that is enforced."""
@@ -6037,6 +6212,7 @@ def test_report_refuses_when_the_reporter_is_not_enabled(tmp_path):
     assert "reporters.aws-security-hub.enabled" in str(raised.value)
 
 
+@pytest.mark.unit
 def test_an_invalid_option_is_refused_when_the_reporter_is_built(tmp_path):
     """A fallback to ReporterPluginConfigBase after a failed validation, whose enabled
     defaults to True, would let one bad value switch the reporter on. The generic
@@ -6061,6 +6237,7 @@ def test_an_invalid_option_is_refused_when_the_reporter_is_built(tmp_path):
     assert "max_retries" in str(raised.value)
 
 
+@pytest.mark.unit
 def test_a_config_named_for_another_reporter_is_refused_when_the_reporter_is_built(
     tmp_path,
 ):

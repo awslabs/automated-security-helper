@@ -25,6 +25,8 @@ from automated_security_helper.core.scanner_statistics_calculator import (
 )
 from automated_security_helper.utils.redacted_model import EnvResolvedScalar
 
+pytestmark = pytest.mark.unit
+
 THRESHOLD_CANARY = "zz-thr-canary-krw"
 VARIABLE = "ASH_SHOWN_THR_CANARY"
 REFERENCE = "${" + VARIABLE + "}"

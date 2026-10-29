@@ -55,6 +55,8 @@ from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner
     SnykCodeScanner,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _healthy_scanner(name="bandit"):
     """A scanner double that passes every filter and is queued for execution."""

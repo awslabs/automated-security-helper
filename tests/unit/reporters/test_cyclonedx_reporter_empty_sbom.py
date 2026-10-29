@@ -44,6 +44,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_cyclo
 )
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 
+pytestmark = pytest.mark.unit
+
 #: ``"required"`` at the top level of the CycloneDX 1.6 JSON schema.
 SCHEMA_REQUIRED = ("bomFormat", "specVersion")
 

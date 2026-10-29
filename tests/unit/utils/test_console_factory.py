@@ -98,6 +98,7 @@ def ci_logger(capsys, monkeypatch):
         logger.handlers = []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("message, width", REPROS)
 def test_no_wrapped_or_folded_line_of_a_log_message_is_a_command(
     ci_logger, capsys, message, width
@@ -108,6 +109,7 @@ def test_no_wrapped_or_folded_line_of_a_log_message_is_a_command(
     assert not COMMAND.search(out), out
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("width", [80, 150])
 def test_no_wrap_or_fold_position_starts_a_command(ci_logger, capsys, width):
     """The repros above at every offset, so whichever column Rich breaks at, the
@@ -123,6 +125,7 @@ def test_no_wrap_or_fold_position_starts_a_command(ci_logger, capsys, width):
     assert not COMMAND.search(out), COMMAND.search(out)
 
 
+@pytest.mark.unit
 def test_no_wrap_position_in_the_live_panel_starts_a_command():
     """The panel lays its rows out at the console width the same way."""
     from automated_security_helper.utils.console import ash_console
@@ -146,6 +149,7 @@ def test_no_wrap_position_in_the_live_panel_starts_a_command():
     assert not COMMAND.search(out.getvalue()), COMMAND.search(out.getvalue())
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("k, width", FOLDED_PATHS)
 def test_a_folded_plugin_message_does_not_start_a_command(
     ci_logger, capsys, monkeypatch, k, width
@@ -168,6 +172,7 @@ def test_a_folded_plugin_message_does_not_start_a_command(
     assert not COMMAND.search(out), out
 
 
+@pytest.mark.unit
 def test_a_wrapped_suppression_reason_does_not_start_a_command(
     ci_logger, capsys, monkeypatch
 ):
@@ -202,6 +207,7 @@ def test_a_wrapped_suppression_reason_does_not_start_a_command(
     assert not COMMAND.search(out), out
 
 
+@pytest.mark.unit
 def test_a_wrapped_traceback_does_not_start_a_command(ci_logger, capsys):
     logger = ci_logger(80)
     for n in range(0, 120, 5):
@@ -215,6 +221,7 @@ def test_a_wrapped_traceback_does_not_start_a_command(ci_logger, capsys):
     assert not COMMAND.search(out), COMMAND.search(out)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("message, width", REPROS)
 def test_the_live_display_off_a_terminal_starts_no_command(
     capsys, monkeypatch, message, width
@@ -244,6 +251,7 @@ def test_the_live_display_off_a_terminal_starts_no_command(
     assert not COMMAND.search(out), out
 
 
+@pytest.mark.unit
 def test_a_status_off_a_terminal_starts_no_command(capsys):
     from automated_security_helper.utils.console import ash_console
 
@@ -269,6 +277,7 @@ CI_RUNNERS = [
 ]
 
 
+@pytest.mark.unit
 def test_a_terminal_gets_the_output_as_rendered(monkeypatch):
     """Only a stream that is not a terminal is checked, outside a CI runner."""
     from automated_security_helper.utils.console import ash_console
@@ -284,6 +293,7 @@ def test_a_terminal_gets_the_output_as_rendered(monkeypatch):
     assert re.search(r"^::error::shown as is", tty.getvalue(), re.MULTILINE)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("name, value", CI_RUNNERS)
 def test_a_terminal_under_a_ci_runner_is_checked_too(monkeypatch, name, value):
     """A CI job can give ASH a terminal (docker run -t, script, unbuffer, container
@@ -385,6 +395,7 @@ def _log_on_a_pty(extra: dict[str, str]) -> str:
     return _TERMINAL_SEQUENCE.sub("", written.decode("utf-8", errors="replace"))
 
 
+@pytest.mark.integration
 @needs_a_pty
 @pytest.mark.parametrize("name, value", CI_RUNNERS)
 def test_a_wrapped_warning_on_a_pty_under_a_ci_runner_starts_no_command(name, value):
@@ -394,6 +405,7 @@ def test_a_wrapped_warning_on_a_pty_under_a_ci_runner_starts_no_command(name, va
     assert not COMMAND.search(written), (COMMAND.search(written), written)
 
 
+@pytest.mark.integration
 @needs_a_pty
 def test_a_wrapped_warning_on_a_pty_outside_ci_is_written_as_rendered():
     written = _log_on_a_pty({})
@@ -401,6 +413,7 @@ def test_a_wrapped_warning_on_a_pty_outside_ci_is_written_as_rendered():
     assert re.search(r"^\s*::error title=injected::", written, re.MULTILINE), written
 
 
+@pytest.mark.unit
 def test_a_line_start_after_a_carriage_return_or_color_codes_is_checked():
     from automated_security_helper.utils.console import CommandSafeStream
 
@@ -413,6 +426,7 @@ def test_a_line_start_after_a_carriage_return_or_color_codes_is_checked():
     assert target.getvalue().count("\\x3a:error") == 3, target.getvalue()
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("sink", ["stream", "console", "stdout"])
 def test_a_markdown_heading_is_no_command(sink, capsys):
     """A bare "##" at a line start, a Markdown heading's ("## Scan Metadata"), is
@@ -449,6 +463,7 @@ def test_a_markdown_heading_is_no_command(sink, capsys):
     assert "\\x3a:warning::w" in written, written
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "written",
     [
@@ -470,6 +485,7 @@ def test_a_command_split_by_color_codes_is_checked(written):
     assert not COMMAND.search(plain), (plain, target.getvalue())
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("value", ["x ##vso[task.complete]y", "x ##[error]y"])
 def test_a_highlighted_value_starts_no_command_once_color_is_stripped(
     monkeypatch, value
@@ -490,6 +506,7 @@ def test_a_highlighted_value_starts_no_command_once_color_is_stripped(
     assert not COMMAND.search(plain), (plain, tty.getvalue())
 
 
+@pytest.mark.unit
 def test_rich_print_and_its_global_console_write_through_the_check(capsys):
     """run_ash_scan, merge, scan, config and dependencies print with this print,
     and rich's Progress and Live default to the same global console."""
@@ -507,6 +524,7 @@ def test_rich_print_and_its_global_console_write_through_the_check(capsys):
     assert isinstance(rich.get_console().file, CommandSafeStream)
 
 
+@pytest.mark.unit
 def test_the_global_console_the_factory_hands_out_is_richs():
     """global_console is how code outside this module reaches it: the same object,
     so a test that points rich._console at a recording console sees its output."""
@@ -522,6 +540,7 @@ def test_the_global_console_the_factory_hands_out_is_richs():
 _LONG = "a" * 70 + " ::error::stays mid-line"
 
 
+@pytest.mark.unit
 def test_text_off_a_terminal_is_not_wrapped():
     """Off a terminal (a pipe, a file, a CI log) there is no screen to fit, and a
     reader wraps long lines itself. Rich hard-wrapping printed text at the width
@@ -540,6 +559,7 @@ def test_text_off_a_terminal_is_not_wrapped():
     assert out.getvalue() == f"{_LONG}\n{_LONG}\n", out.getvalue()
 
 
+@pytest.mark.unit
 def test_a_line_of_unwrapped_text_still_has_its_command_broken():
     """A long str whose own newline puts a "::" past the break at a line start:
     its lines are not wrapped, and that line's command is broken."""
@@ -551,6 +571,7 @@ def test_a_line_of_unwrapped_text_still_has_its_command_broken():
     assert out.getvalue() == "b" * 90 + "\n\\x3a:error::own line\n", out.getvalue()
 
 
+@pytest.mark.unit
 def test_the_global_console_does_not_wrap_text_off_a_terminal(capsys):
     """rich's global console, through the factory's print and as handed out."""
     from automated_security_helper.utils.console import global_console
@@ -562,6 +583,7 @@ def test_the_global_console_does_not_wrap_text_off_a_terminal(capsys):
     assert capsys.readouterr().out == f"{_LONG}\n{_LONG}\n"
 
 
+@pytest.mark.unit
 def test_the_snapshot_harness_prints_through_ashs_global_console():
     """tests/snapshot's pinned_console replaces rich's global console for a run. It
     dropped it, and rich then built a plain one: no line check, and text wrapped
@@ -577,6 +599,7 @@ def test_the_snapshot_harness_prints_through_ashs_global_console():
         assert type(console).__name__ == "_AshConsole", type(console)
 
 
+@pytest.mark.unit
 def test_a_table_or_panel_off_a_terminal_keeps_its_layout(monkeypatch):
     """Only text is left unwrapped: a renderable with a layout of its own is laid
     out at the console's width."""
@@ -595,6 +618,7 @@ def test_a_table_or_panel_off_a_terminal_keeps_its_layout(monkeypatch):
     assert len(lines) > 3 and {len(line) for line in lines} == {40}, out.getvalue()
 
 
+@pytest.mark.unit
 def test_a_terminal_wraps_text_at_its_width(monkeypatch):
     """On a terminal Rich keeps fitting the screen."""
     from automated_security_helper.utils.console import ash_console
@@ -607,6 +631,7 @@ def test_a_terminal_wraps_text_at_its_width(monkeypatch):
     assert len(tty.getvalue().splitlines()) > 1, tty.getvalue()
 
 
+@pytest.mark.unit
 def test_a_callers_own_soft_wrap_wins_off_a_terminal():
     """Text off a terminal is left unwrapped only when the caller did not say."""
     from automated_security_helper.utils.console import ash_console
@@ -617,6 +642,7 @@ def test_a_callers_own_soft_wrap_wins_off_a_terminal():
     assert len(out.getvalue().splitlines()) > 1, out.getvalue()
 
 
+@pytest.mark.unit
 def test_force_color_on_a_pipe_leaves_text_unwrapped(monkeypatch):
     """FORCE_COLOR makes rich treat any stream as a terminal, for color. The
     stream is still a pipe, with no screen to fit, so text stays one line."""
@@ -631,6 +657,7 @@ def test_force_color_on_a_pipe_leaves_text_unwrapped(monkeypatch):
     assert len(out.getvalue().splitlines()) == 1, out.getvalue()
 
 
+@pytest.mark.unit
 def test_the_report_sink_off_a_terminal_leaves_text_unwrapped_and_unchecked():
     """check_commands=False drops only the line check: its text is not wrapped
     either, as every factory console's is."""
@@ -644,6 +671,7 @@ def test_the_report_sink_off_a_terminal_leaves_text_unwrapped_and_unchecked():
     assert out.getvalue() == "b" * 90 + "\n::error::kept as written\n", out.getvalue()
 
 
+@pytest.mark.unit
 def test_an_arn_mid_line_is_left_readable():
     from automated_security_helper.utils.console import ash_console
 
@@ -653,6 +681,7 @@ def test_an_arn_mid_line_is_left_readable():
     assert "arn:aws:iam::123456789012:role/x" in out.getvalue()
 
 
+@pytest.mark.integration
 def test_importing_the_stream_module_leaves_richs_global_console_alone():
     """utils/command_safe_stream.py holds the stream and only what it calls, so a
     module that wraps a stream can import it without console.py's set-up of rich's
@@ -750,6 +779,7 @@ def _run_on_a_fake_terminal(body: str) -> str:
     return done.stdout
 
 
+@pytest.mark.integration
 def test_a_console_under_live_on_a_terminal_writes_past_its_stdout_proxy():
     """On a terminal, Rich's Live replaces sys.stdout with a FileProxy that prints
     into its console. Rich's own Console writes to the file behind the proxy; a
@@ -773,6 +803,7 @@ sys.__stdout__.write(tty.getvalue())
     assert "from print, through the proxy" in out, out
 
 
+@pytest.mark.integration
 def test_a_stderr_console_under_live_on_a_terminal_writes_past_its_stderr_proxy():
     """The same cycle on stderr: dependencies' error console, given a Live (a
     status spinner) on a terminal, with Live's redirect_stderr."""
@@ -794,6 +825,7 @@ sys.__stdout__.write(tty.getvalue())
     assert "from print, through the proxy" in out, out
 
 
+@pytest.mark.integration
 def test_the_live_display_on_a_terminal_starts_and_stops():
     """LiveProgressDisplay as an interactive scan runs it: its console finds the
     terminal for itself, starts Live, logs into the panel, updates a task, stops."""
@@ -995,6 +1027,7 @@ def _package_sources(package: Path = PACKAGE) -> list[Path]:
     return package_sources(package)
 
 
+@pytest.mark.unit
 def test_the_factory_guard_refuses_a_tree_with_nothing_to_check(tmp_path):
     """Moved or pointed elsewhere, the guard would pass having read no module."""
     (tmp_path / "one.py").write_text("x = 1\n", encoding="utf-8")
@@ -1003,6 +1036,7 @@ def test_the_factory_guard_refuses_a_tree_with_nothing_to_check(tmp_path):
         _package_sources(tmp_path)
 
 
+@pytest.mark.unit
 def test_every_console_comes_from_the_factory():
     """A Console built anywhere else would write past the stream's check, and so
     would rich's own print, whose global console nobody configured, and the
@@ -1018,6 +1052,7 @@ def test_every_console_comes_from_the_factory():
     assert offenders == [], offenders
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "source, line",
     [

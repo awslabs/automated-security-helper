@@ -76,6 +76,7 @@ def _invoke(*args: str):
 
 
 class TestTheInstalledGuideIsUsed:
+    @pytest.mark.unit
     def test_a_wheel_install_writes_the_guide_it_ships(self, install_root, tmp_path):
         _write(install_root / WHEEL_MEMBER, PACKAGED)
         output = tmp_path / "out.md"
@@ -86,6 +87,7 @@ class TestTheInstalledGuideIsUsed:
         assert output.read_text(encoding="utf-8") == PACKAGED
         assert "GitHub" not in result.output
 
+    @pytest.mark.unit
     def test_a_checkout_writes_its_docs_copy(self, install_root, tmp_path):
         """The docs file is what a checkout edits, so it wins over a packaged copy."""
         _write(install_root / WHEEL_MEMBER, PACKAGED)
@@ -100,6 +102,7 @@ class TestTheInstalledGuideIsUsed:
         assert result.exit_code == 0, result.output
         assert output.read_text(encoding="utf-8") == CHECKOUT
 
+    @pytest.mark.unit
     def test_the_output_keeps_lf_line_endings_where_text_mode_writes_crlf(
         self, install_root, tmp_path, monkeypatch
     ):
@@ -129,6 +132,7 @@ class TestTheInstalledGuideIsUsed:
         assert result.exit_code == 0, result.output
         assert output.read_bytes() == guide.encode("utf-8")
 
+    @pytest.mark.integration
     def test_a_console_that_cannot_encode_non_ascii_text(self, tmp_path):
         """The summary it prints must not fail the command after the file is written.
 
@@ -173,6 +177,7 @@ class TestTheInstalledGuideIsUsed:
         assert run.returncode == 0, (run.stdout + run.stderr).decode("latin-1")
         assert output.read_bytes() == DOCS_GUIDE.read_bytes()
 
+    @pytest.mark.unit
     def test_no_copy_is_refused_without_a_download(self, install_root, tmp_path):
         output = tmp_path / "out.md"
 
@@ -182,6 +187,7 @@ class TestTheInstalledGuideIsUsed:
         assert "--from-github" in result.output
         assert not output.exists()
 
+    @pytest.mark.unit
     def test_from_github_downloads(self, install_root, tmp_path, monkeypatch):
         _write(install_root / WHEEL_MEMBER, PACKAGED)
         seen = []
@@ -302,6 +308,7 @@ def _sections_the_guide_lacks(listed: List[str]) -> List[str]:
     ]
 
 
+@pytest.mark.unit
 class TestTheCommandListsOnlySectionsTheGuideHas:
     """What the command and its reference say the guide covers is in the guide."""
 
@@ -398,6 +405,7 @@ def _dockerignore_excludes(relative: str) -> bool:
     return excluded
 
 
+@pytest.mark.unit
 class TestTheImageBuildContext:
     """The image's own `uv build` runs on what .dockerignore leaves of a checkout."""
 
@@ -523,6 +531,7 @@ def _run_from_wheel(tmp_path: Path, wheel_path: Path) -> None:
     assert output.read_bytes() == DOCS_GUIDE.read_bytes()
 
 
+@pytest.mark.integration
 @builds_with_uv
 def test_the_sdist_and_its_wheel_carry_one_current_guide_that_works_offline(
     tmp_path,
@@ -558,6 +567,7 @@ def test_the_sdist_and_its_wheel_carry_one_current_guide_that_works_offline(
     _run_from_wheel(tmp_path, wheel_path)
 
 
+@pytest.mark.integration
 @builds_with_uv
 def test_the_wheel_built_from_the_image_build_context_carries_the_guide(tmp_path):
     """What `RUN uv build` in the Dockerfile sees for INSTALL_ASH_REVISION=LOCAL.
@@ -600,6 +610,7 @@ def test_the_wheel_built_from_the_image_build_context_carries_the_guide(tmp_path
         assert wheel.read(WHEEL_MEMBER) == DOCS_GUIDE.read_bytes()
 
 
+@pytest.mark.unit
 class TestTheBuildHook:
     """hatch_build.py's ``_include_genai_guide``, branch by branch.
 
@@ -661,6 +672,7 @@ class TestTheBuildHook:
         assert "carries no GenAI guide" in out and "--from-github" in out
 
 
+@pytest.mark.integration
 def test_the_staged_guide_is_gitignored():
     """The staged copy must never be committed or picked up as a tracked file."""
     git = shutil.which("git")

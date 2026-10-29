@@ -28,6 +28,8 @@ from automated_security_helper.plugins.plugin_manager import (
     callable_module,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _defined_in(module: str, name: str = "Plugin") -> type:
     return type(name, (), {"__module__": module})

@@ -36,6 +36,8 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterWorkspaceBehaviour,
 )
 
+pytestmark = pytest.mark.unit
+
 #: The RFC's reporter table, transcribed. Keyed on the reporter's configured
 #: ``name`` rather than its class name, because that is the identifier an
 #: operator writes in ``--output-format`` and in config.

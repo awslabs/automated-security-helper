@@ -99,6 +99,7 @@ def _committed_spool(
 LAYOUTS = ["inside", "the-directory"]
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("mode", [RunMode.local, RunMode.container])
 @pytest.mark.parametrize("layout", LAYOUTS)
 def test_a_cli_workspace_scan_stops_before_it_touches_a_committed_spool(
@@ -137,6 +138,7 @@ def test_a_cli_workspace_scan_stops_before_it_touches_a_committed_spool(
     assert SPOOL in capsys.readouterr().out.replace("\n", "")
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("layout", LAYOUTS)
 async def test_the_mcp_workspace_tool_refuses_a_committed_spool(
@@ -187,6 +189,7 @@ def _spool_one_project(aggregator: WorkspaceAggregator) -> Dict[str, object]:
     return run
 
 
+@pytest.mark.unit
 def test_a_link_at_the_spool_directory_is_replaced_not_written_through(tmp_path):
     outside = _outside(tmp_path)
     aggregator, output = _aggregator(tmp_path)
@@ -207,6 +210,7 @@ def test_a_link_at_the_spool_directory_is_replaced_not_written_through(tmp_path)
     assert [run["results"][0]["ruleId"] for run in runs] == ["RULE-API"]
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
@@ -264,6 +268,7 @@ def test_a_junction_at_the_spool_name_is_replaced_not_written_through(
     assert sorted(p.name for p in spool.iterdir()) == ["api.run.json"]
 
 
+@pytest.mark.unit
 def test_a_link_at_a_spool_file_is_replaced_not_written_through(tmp_path):
     """A link at a spool file's name is refused, not written through and not
     replaced: the spool is written with ``fs_guard.open_for_atomic_write`` below

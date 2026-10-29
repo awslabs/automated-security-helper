@@ -21,6 +21,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 
+pytestmark = pytest.mark.unit
+
 #: ASH_EXIT_USAGE_ERROR's published value; see tests/unit/cli/test_usage_error_exit_code.py.
 USAGE_ERROR_EXIT = 5
 

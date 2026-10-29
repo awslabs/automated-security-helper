@@ -27,6 +27,8 @@ from mcp.server.mcpserver import Context
 
 from automated_security_helper.cli import mcp_server, mcp_tools
 
+pytestmark = pytest.mark.unit
+
 SESSION = "session-a"
 URL = "https://git.example.com/team/repo.git"
 

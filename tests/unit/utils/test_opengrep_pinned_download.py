@@ -74,6 +74,7 @@ from automated_security_helper.utils.tool_downloads import (
 pytestmark = pytest.mark.usefixtures("receipt_home")
 
 
+@pytest.mark.unit
 def test_receipts_from_this_module_stay_out_of_the_real_home(tmp_path):
     """An install writes its receipt under Path.home(), here the test's own home.
 
@@ -130,6 +131,7 @@ def _pin(filename: str, digest: str):
     return patch.object(tool_downloads, "_DIGESTS", patched)
 
 
+@pytest.mark.unit
 class TestEveryDeclaredPlatformIsPinned:
     def test_the_table_covers_every_platform_the_scanner_installs_on(self):
         assert sorted(supported_platforms("opengrep")) == DECLARED_PLATFORMS
@@ -162,6 +164,7 @@ class TestEveryDeclaredPlatformIsPinned:
         assert not any("musllinux" in n for n in names)
 
 
+@pytest.mark.unit
 class TestThePluginInstallsThroughThePin:
     def test_default_version_uses_the_pinned_installer_on_every_platform(
         self, test_plugin_context
@@ -222,6 +225,7 @@ def _run_inline(command, tmp_path_dest: Path):
 class TestACustomVersionNeedsItsOwnDigest:
     """A version other than the pin installs only with a configured sha256."""
 
+    @pytest.mark.unit
     def test_without_a_digest_every_platform_is_refused(self, test_plugin_context):
         scanner = _custom_scanner(test_plugin_context)
         for target_platform, arch in DECLARED_PLATFORMS:
@@ -231,6 +235,7 @@ class TestACustomVersionNeedsItsOwnDigest:
             assert "install_pinned_tool" not in joined
             assert argv[2] == "import sys; sys.exit(sys.argv[1])"
 
+    @pytest.mark.unit
     def test_the_refusal_names_the_key_and_how_to_get_the_digest(
         self, test_plugin_context
     ):
@@ -252,6 +257,7 @@ class TestACustomVersionNeedsItsOwnDigest:
             "running sha256sum opengrep_manylinux_x86 on the downloaded asset."
         )
 
+    @pytest.mark.integration
     def test_the_refusal_command_exits_non_zero_with_the_message(
         self, test_plugin_context
     ):
@@ -267,6 +273,7 @@ class TestACustomVersionNeedsItsOwnDigest:
         assert "scanners.opengrep.options.sha256" in result.stderr
         assert "opengrep_osx_arm64" in result.stderr
 
+    @pytest.mark.unit
     def test_a_digest_for_one_platform_does_not_unlock_another(
         self, test_plugin_context
     ):
@@ -276,6 +283,7 @@ class TestACustomVersionNeedsItsOwnDigest:
         assert "install_binary_from_url" in linux[2]
         assert arm[2] == "import sys; sys.exit(sys.argv[1])"
 
+    @pytest.mark.unit
     def test_with_a_digest_it_goes_through_the_verified_download(
         self, test_plugin_context
     ):
@@ -287,6 +295,7 @@ class TestACustomVersionNeedsItsOwnDigest:
         assert argv[5] == "a" * 64
         assert argv[6] == "opengrep"
 
+    @pytest.mark.unit
     def test_a_matching_custom_digest_installs(self, test_plugin_context, tmp_path):
         digest = hashlib.sha256(PAYLOAD).hexdigest()
         scanner = _custom_scanner(test_plugin_context, {"linux/amd64": digest})
@@ -297,6 +306,7 @@ class TestACustomVersionNeedsItsOwnDigest:
         assert (bin_dir / "opengrep").read_bytes() == PAYLOAD
         assert read_receipt(bin_dir, "opengrep")["sha256"] == digest
 
+    @pytest.mark.unit
     def test_a_mismatched_custom_digest_installs_nothing(
         self, test_plugin_context, tmp_path
     ):
@@ -311,6 +321,7 @@ class TestACustomVersionNeedsItsOwnDigest:
         assert not (bin_dir / "opengrep").exists()
         assert read_receipt(bin_dir, "opengrep") is None
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "sha256",
         [
@@ -324,6 +335,7 @@ class TestACustomVersionNeedsItsOwnDigest:
         with pytest.raises(ValidationError):
             OpengrepScannerConfigOptions(version=CUSTOM, sha256=sha256)
 
+    @pytest.mark.unit
     def test_the_pinned_version_ignores_a_configured_digest(self, test_plugin_context):
         """The pin's digests ship with ASH and cannot be overridden from config."""
         scanner = OpengrepScanner(
@@ -337,6 +349,7 @@ class TestACustomVersionNeedsItsOwnDigest:
         assert "0" * 64 not in argv
 
 
+@pytest.mark.unit
 class TestTheDigestCheckCanFail:
     def test_a_mismatched_digest_installs_nothing(self, tmp_path):
         filename = _ASSET_TABLES["opengrep"][("linux", "amd64")]
@@ -383,6 +396,7 @@ class TestTheDigestCheckCanFail:
             get_tool_asset("opengrep", "linux", "amd64")
 
 
+@pytest.mark.unit
 class TestNixPinsTheSameBytes:
     def _nix_pins(self) -> dict[str, str]:
         text = NIX_OPENGREP.read_text(encoding="utf-8")
@@ -409,6 +423,7 @@ class TestNixPinsTheSameBytes:
         assert f"v{match.group(1)}" == TOOL_VERSIONS["opengrep"]
 
 
+@pytest.mark.unit
 class TestTheReleaseAssetCacheCoversOpengrep:
     """ASH_TOOL_DOWNLOAD_CACHE wraps the bare-executable path too, not only archives.
 

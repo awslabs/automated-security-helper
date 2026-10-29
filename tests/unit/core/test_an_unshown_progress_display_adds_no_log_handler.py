@@ -15,9 +15,13 @@ a home for them, so the last resort never shows what nothing else will.
 import logging
 import threading
 
+import pytest
+
 from automated_security_helper.core.progress import LiveProgressDisplay
 from automated_security_helper.utils import log as ash_log
 from automated_security_helper.utils.log import ASH_LOGGER
+
+pytestmark = pytest.mark.unit
 
 
 class _Recording(logging.Handler):

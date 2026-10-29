@@ -20,7 +20,11 @@ import io
 import logging
 import re
 
+import pytest
+
 from automated_security_helper.utils.log import ASH_LOGGER
+
+pytestmark = pytest.mark.unit
 
 #: A record quoting text from a scanned repository, holding two runners' commands.
 LINE = "x\n::add-mask::A ##vso[task.setvariable variable=x]B"

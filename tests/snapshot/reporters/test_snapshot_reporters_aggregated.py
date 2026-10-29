@@ -21,6 +21,8 @@ from tests.snapshot.support.fixture_model import (
 )
 from tests.snapshot.support.reporter_catalog import reporter_classes
 
+pytestmark = pytest.mark.unit
+
 WORKSPACE_FIXTURES = {
     "workspace": ("fixture_workspace_model", WORKSPACE_FILE),
     "skipped-workspace": ("fixture_skipped_workspace_model", SKIPPED_WORKSPACE_FILE),

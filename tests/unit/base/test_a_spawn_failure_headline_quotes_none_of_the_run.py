@@ -45,6 +45,8 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 PluginContext.model_rebuild()
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()

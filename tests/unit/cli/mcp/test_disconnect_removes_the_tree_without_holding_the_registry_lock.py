@@ -25,6 +25,8 @@ import pytest
 
 from automated_security_helper.cli.mcp.sessions import MCPSessionRegistry
 
+pytestmark = pytest.mark.unit
+
 _JOIN_S = 30.0
 
 

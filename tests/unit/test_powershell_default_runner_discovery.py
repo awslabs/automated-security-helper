@@ -28,6 +28,8 @@ import pytest
 
 from tests.utils.pwsh_env import inherited_env, scratch_home
 
+pytestmark = pytest.mark.integration
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HELPERS = REPO_ROOT / "utils" / "ash_helpers.ps1"
 PWSH = shutil.which("pwsh")

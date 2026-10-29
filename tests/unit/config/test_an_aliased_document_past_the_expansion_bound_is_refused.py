@@ -34,6 +34,8 @@ from automated_security_helper.core.exceptions import (
 )
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 
 def _bomb_text() -> str:
     """A small document that expands to well over the bound: nine aliases

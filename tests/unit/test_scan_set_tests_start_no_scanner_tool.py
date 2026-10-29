@@ -32,6 +32,8 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from tests.utils.process_guard import refuse_process_starts
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 PluginContext.model_rebuild()
 

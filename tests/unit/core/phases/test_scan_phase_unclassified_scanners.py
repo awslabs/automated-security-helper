@@ -60,6 +60,8 @@ from automated_security_helper.models.asharp_model import (
     ScannerStatusInfo,
 )
 
+pytestmark = pytest.mark.unit
+
 RAISED = "third-party hook blew up: expected config file not found"
 
 

@@ -33,6 +33,8 @@ from automated_security_helper.core.enums import ExecutionPhase, ExportFormat
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 #: One scanner's entry, which is what a scan phase records for every scanner it
 #: considered. A saved set with no scanner results and no findings holds no scan,
 #: and --use-existing refuses it (utils/inner_run_outcome.py,

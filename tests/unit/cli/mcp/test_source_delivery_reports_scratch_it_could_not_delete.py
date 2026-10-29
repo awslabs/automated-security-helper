@@ -76,6 +76,8 @@ import pytest
 from automated_security_helper.cli.mcp import source_delivery as sd
 from automated_security_helper.cli.mcp.sessions import reset_default_registry_for_tests
 
+pytestmark = pytest.mark.unit
+
 _SESSION = "scratch-it-cannot-delete"
 
 #: What ``_git_executable`` answers, so the argv the doubles read is the same on

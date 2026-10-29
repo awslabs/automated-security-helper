@@ -24,6 +24,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 
+pytestmark = pytest.mark.unit
+
 #: The refusal's own words, which the scan shows with exit 3.
 WORDS = "is not a plugin module ASH imports"
 NOTHING = "Nothing was imported and nothing was scanned"

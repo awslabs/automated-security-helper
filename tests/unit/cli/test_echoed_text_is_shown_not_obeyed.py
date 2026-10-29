@@ -34,6 +34,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import app
 from tests.unit.walked_package import package_sources
 
+pytestmark = pytest.mark.unit
+
 runner = CliRunner()
 
 #: A raw control a terminal acts on (tab and newline lay text out and are kept),

@@ -19,6 +19,8 @@ import pytest
 
 from automated_security_helper.cli.mcp import workspace as workspace_module
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _clear_policy_env(monkeypatch, tmp_path):

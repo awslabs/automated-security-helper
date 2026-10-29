@@ -62,6 +62,7 @@ def _scan(scanner, work_dir, paths):
     )
 
 
+@pytest.mark.unit
 def test_the_worker_command_holds_the_arguments_after_the_interpreter(tmp_path):
     request = tmp_path / "request.json"
     output = tmp_path / "output.json"
@@ -74,6 +75,7 @@ def test_the_worker_command_holds_the_arguments_after_the_interpreter(tmp_path):
     assert command == ["-m", WORKER_MODULE, str(request), str(output)]
 
 
+@pytest.mark.unit
 def test_the_worker_is_started_with_one_interpreter_running_the_module(
     scanner, tmp_path, monkeypatch
 ):
@@ -109,6 +111,7 @@ def test_the_worker_is_started_with_one_interpreter_running_the_module(
     ], argv
 
 
+@pytest.mark.integration
 def test_the_worker_the_scanner_starts_runs_and_reports_nothing_to_scan(
     scanner, tmp_path, monkeypatch
 ):
@@ -121,6 +124,7 @@ def test_the_worker_the_scanner_starts_runs_and_reports_nothing_to_scan(
     assert dict(collection.data) == {}
 
 
+@pytest.mark.integration
 def test_the_worker_the_scanner_starts_runs_and_reports_a_planted_key(
     scanner, tmp_path, monkeypatch
 ):

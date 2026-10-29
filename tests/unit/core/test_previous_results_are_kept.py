@@ -114,6 +114,7 @@ def _orchestrator(source: Path, output: Path):
     )
 
 
+@pytest.mark.unit
 class TestTheOrchestratorPutsThePreviousResultsBack:
     @pytest.mark.parametrize(
         "ending",
@@ -266,6 +267,7 @@ class TestTheOrchestratorPutsThePreviousResultsBack:
         assert not _marked(output)
 
 
+@pytest.mark.unit
 def test_run_ash_scan_with_keep_previous_results_leaves_them_set_aside(tmp_path):
     """The MCP runner's path: run_ash_scan leaves the last step to its caller.
 
@@ -308,6 +310,7 @@ def test_run_ash_scan_with_keep_previous_results_leaves_them_set_aside(tmp_path)
     ) == new_results
 
 
+@pytest.mark.unit
 def test_run_ash_scan_with_keep_previous_results_that_fails_puts_them_back(tmp_path):
     from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 
@@ -327,6 +330,7 @@ def test_run_ash_scan_with_keep_previous_results_that_fails_puts_them_back(tmp_p
     assert _marked(output)
 
 
+@pytest.mark.unit
 def test_run_ash_scan_with_keep_previous_results_whose_set_up_fails(tmp_path):
     """A failure in initialize after they were set aside: they are put back."""
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator
@@ -351,6 +355,7 @@ def test_run_ash_scan_with_keep_previous_results_whose_set_up_fails(tmp_path):
     assert _marked(output)
 
 
+@pytest.mark.unit
 def test_run_ash_scan_with_keep_previous_results_and_a_refused_selection(tmp_path):
     """A scanner both selected and excluded is refused before anything is moved."""
     from automated_security_helper.interactions.run_ash_scan import run_ash_scan
@@ -371,6 +376,7 @@ def test_run_ash_scan_with_keep_previous_results_and_a_refused_selection(tmp_pat
     assert not _marked(output)
 
 
+@pytest.mark.unit
 def test_a_cancel_after_the_last_phase_writes_no_results_file(tmp_path):
     """The check before run_ash_scan writes ash_aggregated_results.json.
 
@@ -416,6 +422,7 @@ def test_a_cancel_after_the_last_phase_writes_no_results_file(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_an_mcp_scan_cancelled_right_after_it_starts(tmp_path, monkeypatch):
     """The reported case, through the MCP tool and the real run_ash_scan."""
     from mcp.server.mcpserver import Context
@@ -465,6 +472,7 @@ async def test_an_mcp_scan_cancelled_right_after_it_starts(tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_an_mcp_scan_task_cancelled_mid_scan_stops_the_scan_thread(
     tmp_path, monkeypatch
 ):
@@ -561,6 +569,7 @@ def _results_document(scanner: str) -> str:
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_an_earlier_scans_progress_reads_its_own_results(tmp_path, monkeypatch):
     """A failed scan's entry reads nothing; the scan whose results those are still does."""
     from mcp.server.mcpserver import Context
@@ -609,6 +618,7 @@ async def test_an_earlier_scans_progress_reads_its_own_results(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_a_scan_the_executor_never_ran_still_gets_its_results_back(
     tmp_path, monkeypatch
 ):
@@ -645,6 +655,7 @@ async def test_a_scan_the_executor_never_ran_still_gets_its_results_back(
     assert entry.output_holds_previous_results is True
 
 
+@pytest.mark.unit
 def test_the_handoff_gives_the_previous_results_to_exactly_one_side():
     from automated_security_helper.core.previous_results import SettleHandoff
 
@@ -658,6 +669,7 @@ def test_the_handoff_gives_the_previous_results_to_exactly_one_side():
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_a_failed_workspace_project_gets_its_previous_results_back(
     tmp_path, monkeypatch
 ):
@@ -703,6 +715,7 @@ async def test_a_failed_workspace_project_gets_its_previous_results_back(
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_a_cancel_that_lands_as_the_scan_returns_puts_them_back(
     tmp_path, monkeypatch
 ):
@@ -752,6 +765,7 @@ async def test_a_cancel_that_lands_as_the_scan_returns_puts_them_back(
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_a_scan_with_results_drops_them_in_the_runner(tmp_path, monkeypatch):
     from automated_security_helper.cli import mcp_tools
     from automated_security_helper.core.previous_results import (
@@ -809,6 +823,7 @@ def _report_phase_only(self, phases=None, **kwargs):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("previous", [True, False], ids=["previous", "first-scan"])
+@pytest.mark.unit
 async def test_a_cancel_during_the_report_phase_leaves_no_report_of_this_scan(
     tmp_path, monkeypatch, previous
 ):
@@ -880,6 +895,7 @@ async def test_a_cancel_during_the_report_phase_leaves_no_report_of_this_scan(
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_a_report_built_after_the_cancel_is_not_written(tmp_path, monkeypatch):
     """cancel_scan lands while a reporter builds its report: nothing is written.
 
@@ -936,6 +952,7 @@ async def test_a_report_built_after_the_cancel_is_not_written(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_a_timeout_after_the_scan_settled_its_results_leaves_it_completed(
     tmp_path, monkeypatch
 ):
@@ -996,6 +1013,7 @@ async def test_a_timeout_after_the_scan_settled_its_results_leaves_it_completed(
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_a_runner_cancelled_before_its_thread_starts_puts_them_back(
     tmp_path, monkeypatch
 ):

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 
+import pytest
 from rich.text import Text
 
 from automated_security_helper.utils.log import (
@@ -28,6 +29,8 @@ from automated_security_helper.utils.log import (
     console_text,
     escape_markup,
 )
+
+pytestmark = pytest.mark.unit
 
 #: A value a repository chose: a control, and escaped text the ASCII rewrite
 #: turns into a tag ("[↓x]" shown is no tag; "[vx]" is one).

@@ -20,6 +20,8 @@ import pytest
 
 from automated_security_helper.config.resolve_config import resolve_config
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-7f3e-0123456789"
 CONFIG = (
     "project_name: demo\n"

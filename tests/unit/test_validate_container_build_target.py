@@ -24,7 +24,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterator, List
 
+import pytest
 import yaml
+
+pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ACTION = REPO_ROOT / ".github" / "actions" / "validate-container" / "action.yml"

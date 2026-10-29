@@ -35,9 +35,13 @@ and leaves the tool as transport.
 import json
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.core.resource_management.scan_tracking import (
     summarize_scanner_statuses,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _write_results(output_dir: Path, scanner_results: dict) -> None:

@@ -48,6 +48,7 @@ def sleeper():
 
 
 @pytest.mark.parametrize("where", ["proc", "no-proc"])
+@pytest.mark.integration
 def test_a_running_process_is_running(where, sleeper, no_proc):
     kwargs = {"proc_root": no_proc} if where == "no-proc" else {}
     assert process_running(sleeper.pid, **kwargs)
@@ -57,6 +58,7 @@ def test_a_running_process_is_running(where, sleeper, no_proc):
     not hasattr(os, "waitid"), reason="this build of Python has no os.waitid"
 )
 @pytest.mark.parametrize("where", ["proc", "no-proc"])
+@pytest.mark.integration
 def test_a_zombie_is_not_running(where, sleeper, no_proc):
     kwargs = {"proc_root": no_proc} if where == "no-proc" else {}
     sleeper.kill()
@@ -67,6 +69,7 @@ def test_a_zombie_is_not_running(where, sleeper, no_proc):
 
 
 @pytest.mark.parametrize("where", ["proc", "no-proc"])
+@pytest.mark.integration
 def test_a_reaped_process_is_not_running(where, sleeper, no_proc):
     kwargs = {"proc_root": no_proc} if where == "no-proc" else {}
     sleeper.kill()
@@ -82,6 +85,7 @@ def fake_proc(tmp_path):
     return root
 
 
+@pytest.mark.unit
 def test_a_process_gone_while_its_stat_is_read_is_not_running(fake_proc, monkeypatch):
     """A process killed between the lookup and the read makes the read raise
     ProcessLookupError (ESRCH), not FileNotFoundError: one under a gate's load
@@ -100,6 +104,7 @@ def test_a_process_gone_while_its_stat_is_read_is_not_running(fake_proc, monkeyp
     assert process_running(4242, proc_root=fake_proc) is False
 
 
+@pytest.mark.unit
 def test_a_stat_read_empty_as_its_process_goes_is_not_running(fake_proc):
     (fake_proc / "4242").mkdir()
     (fake_proc / "4242" / "stat").write_text("", encoding="ascii")
@@ -107,6 +112,7 @@ def test_a_stat_read_empty_as_its_process_goes_is_not_running(fake_proc):
     assert process_running(4242, proc_root=fake_proc) is False
 
 
+@pytest.mark.integration
 def test_a_recorded_group_is_killed_and_forgotten(sleeper):
     """What the autouse fixture in tests/conftest.py does after every test.
 

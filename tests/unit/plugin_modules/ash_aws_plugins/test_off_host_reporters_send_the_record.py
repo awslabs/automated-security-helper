@@ -33,6 +33,8 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import
     S3ReporterConfigOptions,
 )
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-7f3e-0123456789"
 VALUE = "${ASH_PROBE_VALUE}"
 CLOUDWATCH = (

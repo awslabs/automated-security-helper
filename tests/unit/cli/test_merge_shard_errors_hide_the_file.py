@@ -34,6 +34,8 @@ from automated_security_helper.cli.merge import (
 from automated_security_helper.config.ash_config import AshConfig  # noqa: F401
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 SECRET = "wJalrXUtnFEMIK7MDENG"
 HOSTILE = SECRET + "\x1b[31m\n::error title=merge::" + SECRET
 

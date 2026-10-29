@@ -55,7 +55,10 @@ PACKAGE = REPO_ROOT / "automated_security_helper"
 SCRIPT = PACKAGE / "assets" / "install-pinned-tool.py"
 PIN = RULES_BUNDLES["aws-guard-rules-registry"]
 
-pytestmark = pytest.mark.skipif(os.name == "nt", reason="the shell hook is POSIX sh")
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(os.name == "nt", reason="the shell hook is POSIX sh"),
+]
 
 _RULE = b"rule A { }\n"
 _RULE_NAME = "wa-Security-Pillar.guard"

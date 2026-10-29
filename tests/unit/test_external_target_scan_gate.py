@@ -25,6 +25,8 @@ import pytest
 
 from tests.utils.helpers import iter_repo_files
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GATE_PATH = REPO_ROOT / "scripts" / "verify_external_target_scan.py"
 

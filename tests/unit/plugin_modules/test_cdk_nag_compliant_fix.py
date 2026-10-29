@@ -5,9 +5,13 @@ reports with INFO-level "compliant" findings.  Now the default is False,
 keeping reports focused on actual violations.
 """
 
+import pytest
+
 from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
     CdkNagScannerConfigOptions,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestCdkNagCompliantDefault:

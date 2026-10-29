@@ -13,6 +13,8 @@ from automated_security_helper.core.resource_management.result_filters import (
     filter_summary,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def full_results():

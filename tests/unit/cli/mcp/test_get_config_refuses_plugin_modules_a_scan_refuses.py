@@ -32,6 +32,8 @@ from typing import Any, Dict
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 SESSION = "client-one"
 OUTSIDE = "outside_module_r"
 NOT_PROVIDED = "ash_plugins.module_no_package_provides"

@@ -125,6 +125,7 @@ def _says_why(row) -> bool:
     return any("could not be graded" in str(error) for error in row.errors)
 
 
+@pytest.mark.unit
 class TestAResultWithNothingToGradeIsAnError:
     @pytest.mark.parametrize(
         "content",
@@ -151,6 +152,7 @@ class TestAResultWithNothingToGradeIsAnError:
         assert _says_why(row), f"errors: {row.errors!r}"
 
 
+@pytest.mark.unit
 class TestTheDictShapesTheExecutorGrades:
     """Controls: a dict that carries a verdict or counts is graded as before."""
 
@@ -183,6 +185,7 @@ class TestTheDictShapesTheExecutorGrades:
         assert row.status == ScannerStatus.PASSED
 
 
+@pytest.mark.unit
 class TestAResultWithNoRunIsAnError:
     """An empty results file, or SARIF with no run, records no scan at all.
 
@@ -220,6 +223,7 @@ class PostProcessingFails(TemplateScanner):
         raise RuntimeError("post-processing defect")
 
 
+@pytest.mark.unit
 def test_a_post_processing_failure_is_not_reported_as_unreadable_sarif(
     plugin_context,
 ):
@@ -243,6 +247,7 @@ def test_a_post_processing_failure_is_not_reported_as_unreadable_sarif(
     assert "not SARIF" not in errors, errors
 
 
+@pytest.mark.unit
 class TestAResultOfAnotherTypeIsAnError:
     """A ``scan()`` override can return anything; only some of it can be graded.
 
@@ -292,6 +297,7 @@ sys.exit(0)
 """
 
 
+@pytest.mark.integration
 class TestGrypeWithNoRunIsAnError:
     """The run check reads what grype wrote, before the scanner adjusts the report.
 
@@ -388,6 +394,7 @@ class TestGrypeWithNoRunIsAnError:
         assert row.status == ScannerStatus.PASSED, row.errors
 
 
+@pytest.mark.unit
 class TestOnlyACompletedStatusIsGraded:
     """A returned dict's ``status`` says whether its tool completed.
 
@@ -425,6 +432,7 @@ class TestOnlyACompletedStatusIsGraded:
         assert (row.status, row.finding_count) == (ScannerStatus.FAILED, 1)
 
 
+@pytest.mark.unit
 class TestNoResultIsAnErrorThatSaysSo:
     """A ``scan()`` that returns None: the row is ERROR, and its errors say why."""
 

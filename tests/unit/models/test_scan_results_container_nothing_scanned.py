@@ -22,6 +22,8 @@ from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 
+pytestmark = pytest.mark.unit
+
 
 def _container(**kwargs) -> ScanResultsContainer:
     return ScanResultsContainer(scanner_name="probe-scanner", **kwargs)

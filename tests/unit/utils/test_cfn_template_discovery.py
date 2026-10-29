@@ -61,6 +61,7 @@ def context(ash_temp_path) -> PluginContext:
     )
 
 
+@pytest.mark.unit
 def test_discovery_classifies_the_tree(context):
     found = discover_templates(context, "source")
     source = Path(context.source_dir)
@@ -73,6 +74,7 @@ def test_discovery_classifies_the_tree(context):
     assert [display_path(p, source) for p, _ in found.unmodelable] == ["custom.yaml"]
 
 
+@pytest.mark.integration
 def test_cfn_nag_selects_the_same_templates(context):
     """The agreement test the discovery module's docstring promises."""
     handed_to_cfn_nag = []
@@ -115,6 +117,7 @@ def _symlink_or_skip(link: Path, target: Path) -> None:
         pytest.skip(f"symlink creation unavailable on this platform: {exc}")
 
 
+@pytest.mark.integration
 def test_a_symlinked_template_is_refused_by_both(context):
     """A template reached through a symlink is read by neither, and named by both.
 
@@ -131,6 +134,7 @@ def test_a_symlinked_template_is_refused_by_both(context):
     test_cfn_nag_selects_the_same_templates(context)
 
 
+@pytest.mark.integration
 def test_a_template_linked_from_outside_the_tree_is_left_out_by_the_scan_set(
     context, ash_temp_path, caplog
 ):
@@ -155,6 +159,7 @@ def test_a_template_linked_from_outside_the_tree_is_left_out_by_the_scan_set(
     test_cfn_nag_selects_the_same_templates(context)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("honor", [True, False])
 def test_the_gitignore_applies_as_the_config_says(context, honor):
     """The scan set discovery computes itself follows ``honor_ignore_files``, as
@@ -171,6 +176,7 @@ def test_the_gitignore_applies_as_the_config_says(context, honor):
     assert "nested/stack.json" in names
 
 
+@pytest.mark.unit
 def test_display_path_is_relative_inside_and_absolute_outside(tmp_path):
     source = tmp_path / "src"
     assert display_path(source / "a" / "b.yaml", source) == "a/b.yaml"

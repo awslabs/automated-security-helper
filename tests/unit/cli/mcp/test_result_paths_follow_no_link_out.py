@@ -24,6 +24,8 @@ from typing import Any, Dict, List
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 SESSION = "client-one"
 #: A size no file of ours has, so it shows if the reply reports the other file.
 OTHER_SIZE = 12345

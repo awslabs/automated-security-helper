@@ -15,9 +15,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
+
+pytestmark = pytest.mark.unit
 
 
 def test_validate_reads_each_file_of_both_chains_once(tmp_path, monkeypatch):

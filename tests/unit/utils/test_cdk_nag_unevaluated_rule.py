@@ -55,6 +55,8 @@ import pytest
 
 from tests.utils.optional_extras import require_cdk_extra
 
+pytestmark = pytest.mark.unit
+
 
 def _write_report(tmp_path: Path, payload: dict) -> Path:
     path = tmp_path / "validation-report.json"
@@ -338,10 +340,14 @@ class TestTheMarkerStillMatchesTheInstalledCdkNag:
     ---------------------------------------------------------------
     A skip here must not be a test that cannot fail, since a plain ``uv sync`` leaving cdk-nag
     absent from every test run would let a breaking major bump of it land green.
-    ``ASH_REQUIRE_CDK_EXTRA: "1"`` is set on the "Run cdk-nag integration tests" step of
-    ``.github/actions/run-unit-tests/action.yml`` and on the "Run PyTest" step that collects
-    this module, and
-    ``tests/unit/test_unit_test_step_gates.py`` fails if it stops. So this uses the guarded
+    ``ASH_REQUIRE_CDK_EXTRA: "1"`` is set on the one "Run PyTest" step of
+    ``.github/actions/run-unit-tests/action.yml``, which the unit-test jobs run with
+    ``-m unit`` (collecting this module) and the integration-test jobs run with
+    ``-m integration`` on every OS and Python version, where
+    ``tests/integration/scanners/test_cdk_nag_real_pack.py`` carries the integration
+    marker. The separate cdk-nag step the action used to have is gone because the tier job
+    runs that file itself. ``tests/unit/test_unit_test_step_gates.py`` fails if the
+    variable stops being set or the file loses its marker. So this uses the guarded
     skip from ``tests/utils/optional_extras.py``: a plain ``uv sync`` run skips it and names
     ``uv sync --extra cdk``, and every CI leg fails rather than skips if the extra goes missing.
     """

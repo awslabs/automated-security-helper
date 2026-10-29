@@ -53,6 +53,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.yaml_reporte
     YamlReporter,
 )
 
+pytestmark = pytest.mark.unit
+
 #: Any tag that makes a document constructible only by an unsafe loader. Matched
 #: as a prefix because pydantic emits at least two spellings --
 #: ``!!python/object:pydantic.networks.AnyUrl`` and

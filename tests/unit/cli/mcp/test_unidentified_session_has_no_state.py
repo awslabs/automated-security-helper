@@ -31,6 +31,8 @@ from automated_security_helper.cli.mcp.session_identity import UNIDENTIFIED_SESS
 from automated_security_helper.cli.mcp.session_paths import mark_session_workspace
 from automated_security_helper.config.ash_config import AshConfig
 
+pytestmark = pytest.mark.unit
+
 STALE_REAL_SESSIONS = ["stale-real-1", "stale-real-2", "stale-real-3"]
 
 

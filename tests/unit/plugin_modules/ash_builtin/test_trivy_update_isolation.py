@@ -32,6 +32,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners import (
     _trivy_scanner_base as trivy_base,
 )
 
+pytestmark = pytest.mark.unit
+
 try:
     from automated_security_helper.utils import content_db_refresh as refresh
 except ImportError:  # a revision before utils/content_db_refresh.py

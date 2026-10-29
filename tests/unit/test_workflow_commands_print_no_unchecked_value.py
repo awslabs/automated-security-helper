@@ -446,6 +446,7 @@ def _files_other_repositories_call() -> set[str]:
     return found
 
 
+@pytest.mark.unit
 class TestEveryPrintedValueIsNeutralizedOrAllowed:
     def test_the_census_finds_the_prints(self):
         found = _printed()
@@ -518,6 +519,7 @@ class TestEveryPrintedValueIsNeutralizedOrAllowed:
             assert "[[:cntrl:]]" in run and "'##['" in run, f"{file} | {step}"
 
 
+@pytest.mark.unit
 class TestTheCensusReadsWhatTheRunnerWouldRead:
     """Controls: a fixture workflow whose prints are known."""
 
@@ -579,6 +581,7 @@ _DEFINER = {"name": wc.DEFINER_NAME, "shell": "bash", "run": wc.DEFINER_RUN}
 _LOADER = {"name": "loads it", "run": wc.HELPER_SOURCE + '\necho "$(one_line x)"\n'}
 
 
+@pytest.mark.unit
 class TestEveryLoaderHasADefinerBeforeIt:
     def test_every_definer_writes_the_same_helper(self):
         definers = wc.definer_steps()
@@ -682,12 +685,14 @@ def _bash_one_line(values: list[str], locale_name: str) -> list[str]:
 
 
 class TestEveryCopyOfOneLineAgrees:
+    @pytest.mark.unit
     def test_every_python_copy_is_the_canonical_text(self):
         copies = wc.python_one_line_copies()
         assert copies, "no Python step carries one_line"
         for file, step, text in copies:
             assert text == wc.PY_ONE_LINE, (file, step, text)
 
+    @pytest.mark.integration
     @_REQUIRES_BASH
     @pytest.mark.parametrize("locale_name", wc.runner_locales())
     def test_bash_and_python_give_the_same_answer(self, locale_name):
@@ -701,6 +706,7 @@ class TestEveryCopyOfOneLineAgrees:
         ]
         assert not differ, differ[:10]
 
+    @pytest.mark.integration
     @_REQUIRES_BASH
     @pytest.mark.parametrize("locale_name", wc.runner_locales())
     def test_the_answer_is_one_line_holding_no_command(self, locale_name):
@@ -708,6 +714,7 @@ class TestEveryCopyOfOneLineAgrees:
             assert not any(c in got for c in REPLACED), (value, got)
             assert "::" not in got and "##[" not in got, (value, got)
 
+    @pytest.mark.integration
     def test_text_without_controls_or_markers_is_kept(self):
         assert _python_one_line(KEPT) == KEPT
 
@@ -782,6 +789,7 @@ _SAVE_GUARD = "Check the grype database may be saved (default branch only)"
 _FAILING = "#!/bin/sh\nexit 1\n"
 
 
+@pytest.mark.integration
 @_REQUIRES_BASH
 class TestTheGrypeGuardsPrintTheBuildTimeOnOneLine:
     def _run(self, tmp_path, workflow_path, job_id, name, value, *, uv_fails, **env):
@@ -839,6 +847,7 @@ class TestTheGrypeGuardsPrintTheBuildTimeOnOneLine:
         _assert_stays_on_its_line(run, value, commands=1)
 
 
+@pytest.mark.integration
 @_REQUIRES_BASH
 class TestTheOpenGrepInstallPrintsWhatItWasToldOnOneLine:
     def _run(self, tmp_path, tools: Path | None, **env):
@@ -918,6 +927,7 @@ NO_COLON = [
 ]
 
 
+@pytest.mark.integration
 @_REQUIRES_BASH
 class TestTheCfnNagInstallPrintsItsPathsOnOneLine:
     """The paths come from RUNNER_TEMP and from what `command -v` finds on PATH.

@@ -23,6 +23,8 @@ import pytest
 
 from automated_security_helper.cli.mcp_server import mcp
 
+pytestmark = pytest.mark.unit
+
 
 def _default_scanner_names() -> List[str]:
     from automated_security_helper.config.ash_config import AshConfig

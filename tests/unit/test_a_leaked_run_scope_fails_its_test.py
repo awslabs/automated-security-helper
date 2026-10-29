@@ -51,9 +51,16 @@ from automated_security_helper.utils.log import open_run_log_scope
 
 def test_that_leaks_a_scope():
     open_run_log_scope()
+
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
+@pytest.mark.integration
 def test_a_test_that_leaks_a_scope_fails_and_the_failure_names_it(
     tmp_path: Path,
 ) -> None:
@@ -87,9 +94,16 @@ def test_aa_closes_its_own_scope_by_value():
 
 def test_zz_the_following_test_runs_in_no_scope():
     assert current_run_log_scope() is None
+
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
+@pytest.mark.integration
 def test_a_scope_closed_by_value_does_not_poison_the_following_test(
     tmp_path: Path,
 ) -> None:
@@ -127,9 +141,14 @@ def test_aa_uses_the_module_fixture(_a_scope_for_the_module):
 
 def test_zz_uses_nothing():
     pass
+
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
+@pytest.mark.integration
 def test_a_scope_a_module_fixture_leaks_is_not_blamed_on_the_last_test(
     tmp_path: Path,
 ) -> None:
@@ -179,9 +198,16 @@ def test_zz_only_the_scope_whose_close_raised_is_left():
     for scope in left:
         _real_close(scope)
     assert left == set(_raised_for)
+
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
+@pytest.mark.integration
 def test_a_close_that_raises_leaves_the_other_scopes_closed_and_fails_once(
     tmp_path: Path,
 ) -> None:
@@ -220,9 +246,14 @@ def test_aa_uses_the_wide_fixture(_a_scope_for_the_run):
 
 def test_zz_uses_nothing():
     pass
+
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
+@pytest.mark.integration
 def test_a_scope_a_session_fixture_leaks_fails_the_run(tmp_path: Path) -> None:
     """A session-scoped fixture is set up before the module's guard takes its
     count, and torn down after it, so neither the test's nor the module's
@@ -261,9 +292,14 @@ def test_aa_fails(_a_scope_for_the_run):
 
 def test_zz_would_run_next():
     pass
+
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
+@pytest.mark.integration
 def test_a_leak_is_reported_when_the_run_is_stopped_early(tmp_path: Path) -> None:
     """``-x`` ends the run after the first failure, while a next test still
     exists: the session's fixtures are then torn down in pytest's own
@@ -296,6 +332,7 @@ raise ImportError("this module does not collect")
 """
 
 
+@pytest.mark.integration
 def test_a_leak_is_reported_when_no_test_ran(tmp_path: Path) -> None:
     """A module that opens a scope at import and then fails to collect runs no
     test, so no fixture -- the guards included -- is ever set up: the leak
@@ -331,9 +368,14 @@ def test_aa_interrupts_the_run(_a_scope_for_the_run):
 
 def test_zz_would_run_next():
     pass
+
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
+@pytest.mark.integration
 def test_a_leak_is_reported_when_the_run_is_interrupted(tmp_path: Path) -> None:
     """An interrupt ends the run outside every test's protocol: the session's
     fixtures are torn down in pytest's own sessionfinish, and a guard that
@@ -365,9 +407,16 @@ def test_aa_runs_after_the_module_opened_a_scope():
 
 def test_zz_uses_nothing():
     pass
+
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
+@pytest.mark.integration
 def test_a_scope_opened_while_tests_are_collected_fails_the_run(
     tmp_path: Path,
 ) -> None:
@@ -404,9 +453,16 @@ def test_aa_renames_the_open_scopes():
 
 def test_zz_uses_nothing():
     pass
+
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
+@pytest.mark.integration
 def test_a_guard_whose_scope_set_is_renamed_fails_the_run(tmp_path: Path) -> None:
     """The guards read utils/log.py's set of open scopes by its name, with no
     fallback: if it is renamed they error, rather than read an empty set and
@@ -439,6 +495,7 @@ def test_a_guard_whose_scope_set_is_renamed_fails_the_run(tmp_path: Path) -> Non
     )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("workers", ["2", "0"], ids=["with workers", "one process"])
 def test_a_scope_a_session_fixture_leaks_fails_the_run_in_a_worker_too(
     tmp_path: Path, workers: str
@@ -481,9 +538,16 @@ def test_aa_leaks_an_unclosable_scope():
 
 def test_zz_runs_after_the_leak():
     log.close_run_log_scope = _real_close
+
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
+@pytest.mark.integration
 def test_an_unclosable_scope_is_reported_once(tmp_path: Path) -> None:
     """A scope no guard can close fails the test that leaked it, once: the
     module's and the session's guards see the same open scope at their own
@@ -511,6 +575,7 @@ def test_an_unclosable_scope_is_reported_once(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.unit
 def test_the_gate_restore_restores_a_level_a_test_left(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -537,6 +602,7 @@ def test_the_gate_restore_restores_a_level_a_test_left(
     )
 
 
+@pytest.mark.unit
 def test_the_gate_restore_reads_the_module_through_sys_modules(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -588,9 +654,14 @@ def test_aa_uses_the_wide_fixture(_a_scope_for_the_run):
 
 def test_zz_uses_nothing():
     pass
+
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
+@pytest.mark.integration
 def test_control_a_session_fixture_that_ends_its_scope_passes(tmp_path: Path) -> None:
     """A session fixture that ends the scope it opened leaves the run green."""
     returncode, output = _run_probe(
@@ -638,6 +709,12 @@ def _a_scope_for_the_package():
 _PACKAGE_TEST = """\
 def test_aa_inside_the_package():
     pass
+
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 _TEST_AFTER_THE_PACKAGE = """\
@@ -653,9 +730,16 @@ def test_zz_runs_after_the_package_ended():
     # the session would tear down after this test, with no marker yet.
     assert pathlib.Path(os.environ["TMPDIR"], "package-torn-down").exists()
     assert current_run_log_scope() is None
+
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
+@pytest.mark.integration
 def test_a_scope_a_package_fixture_leaks_fails_the_run(tmp_path: Path) -> None:
     """A package-scoped fixture in a real package's conftest tears down when
     the package ends, before later modules run; a scope it leaked is seen by
@@ -663,7 +747,12 @@ def test_a_scope_a_package_fixture_leaks_fails_the_run(tmp_path: Path) -> None:
     returncode, output = _run_probe(
         tmp_path,
         "pkg",
-        "def test_zz_outside_the_package():\n    pass\n",
+        (
+            "def test_zz_outside_the_package():\n    pass\n"
+            "\n\nimport pytest\n\n"
+            "# The collection hook of the suite requires one tier per test.\n"
+            "pytestmark = pytest.mark.unit\n"
+        ),
         extra_files={
             "aa_pkg/__init__.py": "",
             "aa_pkg/conftest.py": _PACKAGE_CONFTEST_THAT_LEAKS,
@@ -682,6 +771,7 @@ def test_a_scope_a_package_fixture_leaks_fails_the_run(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.integration
 def test_control_a_package_fixture_that_ends_its_scope_passes(tmp_path: Path) -> None:
     """A package fixture that ends its scope at the package's own end leaves
     the run green, and the module after the package runs outside any scope --
@@ -712,6 +802,7 @@ def _a_stub_session() -> object:
     return types.SimpleNamespace(config=types.SimpleNamespace(stash=pytest.Stash()))
 
 
+@pytest.mark.unit
 def test_the_end_of_run_reporters_survive_a_raising_redaction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -744,6 +835,7 @@ def test_the_end_of_run_reporters_survive_a_raising_redaction(
     assert reporters == ["writes", "scopes"], reporters
 
 
+@pytest.mark.unit
 def test_the_writes_reporter_hides_an_environment_value_in_a_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -789,6 +881,7 @@ def test_the_writes_reporter_hides_an_environment_value_in_a_path(
     assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
 
 
+@pytest.mark.unit
 def test_the_writes_reporter_replaces_a_message_it_cannot_redact(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -834,6 +927,7 @@ def pytest_sessionfinish(session, exitstatus):
 """
 
 
+@pytest.mark.integration
 def test_the_end_of_run_reporters_survive_a_raising_inner_impl(
     tmp_path: Path,
 ) -> None:
@@ -863,6 +957,7 @@ def test_the_end_of_run_reporters_survive_a_raising_inner_impl(
     )
 
 
+@pytest.mark.unit
 def test_the_worker_sends_a_notice_for_a_path_it_cannot_redact(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -910,6 +1005,7 @@ def test_the_worker_sends_a_notice_for_a_path_it_cannot_redact(
     }, sent
 
 
+@pytest.mark.unit
 def test_the_controller_pass_hides_a_value_a_worker_sent_raw(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -948,6 +1044,7 @@ def test_the_controller_pass_hides_a_value_a_worker_sent_raw(
     assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
 
 
+@pytest.mark.unit
 def test_the_scopes_reporters_composed_message_hides_a_value_in_a_label(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -994,6 +1091,7 @@ def test_the_scopes_reporters_composed_message_hides_a_value_in_a_label(
     assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
 
 
+@pytest.mark.unit
 def test_the_scopes_reporters_unreadable_notice_hides_a_value(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

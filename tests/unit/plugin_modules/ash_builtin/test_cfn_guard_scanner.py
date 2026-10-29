@@ -59,6 +59,8 @@ from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.tool_config_dir import TOOL_CONFIG_DIR_PREFIX
 from automated_security_helper.utils.tool_downloads import get_rules_bundle
 
+pytestmark = pytest.mark.unit
+
 FIXTURES = (
     Path(__file__).resolve().parents[3] / "test_data" / "scanners" / "cfn_lint_guard"
 )

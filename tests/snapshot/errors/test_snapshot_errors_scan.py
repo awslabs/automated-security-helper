@@ -28,6 +28,8 @@ from automated_security_helper.interactions.run_ash_scan import ScanIncompletene
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.content_db_staleness import ContentDbAgeRecord
 
+pytestmark = pytest.mark.unit
+
 SCAN = ["scan", "--no-progress"]
 
 

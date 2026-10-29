@@ -58,6 +58,8 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 #: A path nothing reads: the confinement only names it in its warning.
 CONFIG_FILE = Path("/elsewhere/.ash.yaml")
 

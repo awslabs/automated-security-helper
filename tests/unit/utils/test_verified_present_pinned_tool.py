@@ -67,7 +67,7 @@ from automated_security_helper.utils.tool_downloads import (
     get_tool_asset,
 )
 
-pytestmark = pytest.mark.usefixtures("receipt_home")
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("receipt_home")]
 
 
 def test_receipts_from_this_module_stay_out_of_the_real_home(tmp_path):

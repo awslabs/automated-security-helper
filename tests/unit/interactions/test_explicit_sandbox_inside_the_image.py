@@ -48,6 +48,8 @@ from tests.unit.core.phases.test_scanner_executor_lifecycle import (
     _ScriptedScanner,
 )
 
+pytestmark = pytest.mark.unit
+
 #: Landlock needs no package, so it is the mode an operator can most plausibly ask
 #: for inside the image; the probe is stubbed, so the kernel here plays no part.
 MODE = "landlock"

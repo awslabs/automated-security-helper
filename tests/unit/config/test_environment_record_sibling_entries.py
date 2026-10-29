@@ -9,6 +9,8 @@ that merely starts or ends with the text the reference resolved to must keep the
 text the file wrote.
 """
 
+import pytest
+
 from automated_security_helper.config.environment_record import (
     UNKNOWN_INDEX,
     EnvironmentReference,
@@ -17,6 +19,8 @@ from automated_security_helper.config.environment_record import (
     fill_environment_references,
     record_environment_references,
 )
+
+pytestmark = pytest.mark.unit
 
 VARIABLE = "ASH_PROBE_SCOPE"
 REFERENCE = "${" + VARIABLE + "}"

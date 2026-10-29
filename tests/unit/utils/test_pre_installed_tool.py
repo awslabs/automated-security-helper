@@ -100,6 +100,7 @@ def tool_env(tmp_path):
     return root, site_packages, script
 
 
+@pytest.mark.integration
 @real_uv
 def test_satisfied_when_the_environment_has_every_extra(tool_env):
     _, site_packages, script = tool_env
@@ -112,6 +113,7 @@ def test_satisfied_when_the_environment_has_every_extra(tool_env):
     assert verdict.status == "satisfied", verdict.detail
 
 
+@pytest.mark.integration
 @real_uv
 def test_missing_extra_is_named(tool_env):
     _, _, script = tool_env
@@ -125,6 +127,7 @@ def test_missing_extra_is_named(tool_env):
     assert "missing extra: sarif" in verdict.detail
 
 
+@pytest.mark.integration
 @real_uv
 def test_version_outside_the_constraint_is_named(tool_env):
     _, site_packages, script = tool_env
@@ -139,6 +142,7 @@ def test_version_outside_the_constraint_is_named(tool_env):
     assert "does not satisfy '>=2.0'" in verdict.detail
 
 
+@pytest.mark.integration
 @real_uv
 @pytest.mark.parametrize(
     "name, value",
@@ -170,6 +174,7 @@ def test_the_verdict_does_not_follow_the_callers_terminal(
     assert "\x1b" not in verdict.detail
 
 
+@pytest.mark.integration
 @real_uv
 def test_symlinked_entry_point_resolves_to_its_venv(tool_env, tmp_path):
     """``uv tool install`` puts a symlink in ~/.local/bin; follow it to the venv."""
@@ -188,6 +193,7 @@ def test_symlinked_entry_point_resolves_to_its_venv(tool_env, tmp_path):
     assert verdict.status == "satisfied", verdict.detail
 
 
+@pytest.mark.integration
 def test_a_binary_that_does_not_run_is_unsatisfied(tmp_path):
     broken = tmp_path / "faketool"
     broken.write_text("#!/bin/sh\necho boom >&2\nexit 3\n")
@@ -199,6 +205,7 @@ def test_a_binary_that_does_not_run_is_unsatisfied(tmp_path):
     assert "exited 3" in verdict.detail and "boom" in verdict.detail
 
 
+@pytest.mark.unit
 def test_the_probe_excerpt_hides_a_respelled_env_read_version(tmp_path, monkeypatch):
     """The failed --version probe's excerpt gets the UV layer, not the
     neutral one: a pre-installed copy of a uv-managed tool can print an
@@ -229,6 +236,7 @@ def test_the_probe_excerpt_hides_a_respelled_env_read_version(tmp_path, monkeypa
     assert "9.9.9" not in verdict.detail, verdict.detail
 
 
+@pytest.mark.integration
 def test_a_tool_with_no_python_environment_is_unverifiable(tmp_path):
     native = tmp_path / "faketool"
     native.write_text("#!/bin/sh\necho 1.0\n")
@@ -239,6 +247,7 @@ def test_a_tool_with_no_python_environment_is_unverifiable(tmp_path):
     assert verdict.status == "unverifiable"
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("status", ["satisfied", "unsatisfied"])
 def test_a_verdict_carries_the_version_its_probe_answered(
     tmp_path, monkeypatch, status
@@ -277,6 +286,7 @@ def test_a_verdict_carries_the_version_its_probe_answered(
     assert getattr(verdict, "version", None) == "7.16.0"
 
 
+@pytest.mark.unit
 def test_the_version_hides_a_value_spanning_its_first_line_cut(tmp_path, monkeypatch):
     """The version the verdict carries is the probe answer's first line, and
     that cut rewrites an env-read value's line break before the downstream
@@ -319,6 +329,7 @@ def test_the_version_hides_a_value_spanning_its_first_line_cut(tmp_path, monkeyp
     assert "Pw4Nv2RtTail" not in version, version
 
 
+@pytest.mark.unit
 def test_the_version_hides_a_respelled_env_read_version(tmp_path, monkeypatch):
     """The successful probe's answer gets the same uv layer as the failed
     one: the probed copy can be a uv-managed tool's, and it can print an
@@ -358,6 +369,7 @@ def test_the_version_hides_a_respelled_env_read_version(tmp_path, monkeypatch):
     assert "9.9.9" not in version, version
 
 
+@pytest.mark.unit
 def test_a_value_the_probe_never_printed_leaves_the_version_as_answered(
     tmp_path, monkeypatch
 ):
@@ -395,11 +407,13 @@ def test_a_value_the_probe_never_printed_leaves_the_version_as_answered(
     assert getattr(verdict, "version", None) == "7.16.0"
 
 
+@pytest.mark.unit
 def test_a_missing_path_is_unverifiable(tmp_path):
     verdict = verify_pre_installed_tool(str(tmp_path / "nope"), "faketool")
     assert verdict.status == "unverifiable"
 
 
+@pytest.mark.integration
 def test_uv_errors_unrelated_to_resolution_are_unverifiable(tool_env, monkeypatch):
     """A dry run that fails for another reason says nothing about the extras."""
     _, _, script = tool_env
@@ -422,6 +436,7 @@ def test_uv_errors_unrelated_to_resolution_are_unverifiable(tool_env, monkeypatc
     assert verdict.status == "unverifiable"
 
 
+@pytest.mark.integration
 @real_uv
 def test_verdicts_are_memoized(tool_env, monkeypatch):
     _, _, script = tool_env
@@ -441,6 +456,7 @@ def test_verdicts_are_memoized(tool_env, monkeypatch):
     )
 
 
+@pytest.mark.unit
 def test_build_requirement_matches_the_uv_from_spec():
     assert build_requirement("bandit", ["sarif", "toml"], ">=1.7.0,<2.0.0") == (
         "bandit[sarif,toml]>=1.7.0,<2.0.0"
@@ -508,6 +524,7 @@ CHECKOV_CLOSURE = [
 ]
 
 
+@pytest.mark.integration
 @real_uv
 def test_a_nix_wrapped_program_is_verified_against_its_closure(tmp_path):
     """Before: 'could not locate the Python environment', so uv ran a PyPI build."""
@@ -527,6 +544,7 @@ def test_a_nix_wrapped_program_is_verified_against_its_closure(tmp_path):
     assert verdict.from_nix is True
 
 
+@pytest.mark.integration
 @real_uv
 def test_a_nix_wrapped_program_that_is_too_old_names_the_version(tmp_path):
     program, _, _ = _nix_program(tmp_path, "checkov", "3.3.9", CHECKOV_CLOSURE)
@@ -541,6 +559,7 @@ def test_a_nix_wrapped_program_that_is_too_old_names_the_version(tmp_path):
     assert "installed checkov does not satisfy '>=3.4.0,<4.0.0'" in verdict.detail
 
 
+@pytest.mark.integration
 @real_uv
 def test_a_nix_closure_missing_an_extra_names_the_extra(tmp_path):
     """nixpkgs' bandit omits the sarif extra the scan's --format sarif needs."""
@@ -560,6 +579,7 @@ def test_a_nix_closure_missing_an_extra_names_the_extra(tmp_path):
     assert "does not satisfy '>=1.7.0,<2.0.0'" not in verdict.detail
 
 
+@pytest.mark.integration
 @real_uv
 def test_a_gap_deeper_in_a_nix_closure_is_not_called_a_version_mismatch(tmp_path):
     """nixpkgs' semgrep requires pyjwt[crypto] but ships pyjwt without cryptography."""
@@ -586,6 +606,7 @@ def test_a_gap_deeper_in_a_nix_closure_is_not_called_a_version_mismatch(tmp_path
     assert "\x1b[" not in verdict.detail
 
 
+@pytest.mark.integration
 @real_uv
 def test_a_nix_wrapped_script_installed_without_make_wrapper(tmp_path):
     """No makeWrapper arguments: bin/<tool> is the python script itself."""
@@ -604,12 +625,14 @@ def test_a_nix_wrapped_script_installed_without_make_wrapper(tmp_path):
     assert verdict.from_nix is True
 
 
+@pytest.mark.unit
 def test_a_venv_tool_is_not_mistaken_for_a_nix_program(tool_env):
     _, _, script = tool_env
 
     assert pre_installed_tool.find_nix_python_environment(str(script)) is None
 
 
+@pytest.mark.integration
 @real_uv
 class TestACheckTheSandboxRefusedIsNotRemembered:
     """A check the scanner sandbox refused never ran, so it has no verdict to keep.
@@ -683,6 +706,7 @@ class TestACheckTheSandboxRefusedIsNotRemembered:
         assert later.status == "satisfied", later.detail
 
 
+@pytest.mark.integration
 def test_a_probe_failures_summary_names_no_path_and_no_tool_output(tmp_path):
     """``summary`` reaches recorded reasons (the jupyter converter's), so it
     carries the category and the exit code only; the copy's path and the
@@ -702,6 +726,7 @@ def test_a_probe_failures_summary_names_no_path_and_no_tool_output(tmp_path):
     assert "CARRIED-VALUE" not in verdict.summary, verdict.summary
 
 
+@pytest.mark.integration
 def test_a_version_mismatch_summary_names_no_interpreter_and_no_constraint(tmp_path):
     """The judged verdict's summary says the version constraint is not met
     without quoting the constraint (it can be read from the environment) or
@@ -733,6 +758,7 @@ def test_a_version_mismatch_summary_names_no_interpreter_and_no_constraint(tmp_p
     assert "999" not in verdict.summary, verdict.summary
 
 
+@pytest.mark.unit
 def test_the_judges_values_parameter_cannot_be_passed_positionally():
     """The judge's redaction values are a required keyword: a positional
     eleventh argument raises at the call, so a new caller cannot silently
@@ -754,6 +780,7 @@ def test_the_judges_values_parameter_cannot_be_passed_positionally():
         )
 
 
+@pytest.mark.integration
 def test_a_probe_excerpt_hides_a_value_straddling_its_cut(tmp_path):
     """The probe's stderr is redacted BEFORE the excerpt's 500-character cut.
 
@@ -778,6 +805,7 @@ def test_a_probe_excerpt_hides_a_value_straddling_its_cut(tmp_path):
     assert "EDGE-SEC" not in verdict.detail, verdict.detail
 
 
+@pytest.mark.integration
 def test_a_generator_of_values_reaches_the_verify_whole(tmp_path, monkeypatch):
     """``values`` is consumed once: the memo key's ``tuple(values)`` used to
     drain a generator, so ``_verify`` got an empty set, cached an unredacted
@@ -817,6 +845,7 @@ def _first_cause_adaptive(output, values, requirement, package):
     return pre_installed_tool._first_cause(output)
 
 
+@pytest.mark.unit
 def test_the_cause_is_redacted_before_its_lines_are_flowed():
     """uv wraps long clauses at the terminal's width, so an env-read value can
     span the wrap. ``_first_cause`` flowed the RAW lines into one text (every
@@ -839,6 +868,7 @@ def test_the_cause_is_redacted_before_its_lines_are_flowed():
         assert part not in reason, (part, reason)
 
 
+@pytest.mark.unit
 def test_the_cause_hides_a_value_uv_wrapped_with_an_indent():
     """uv wraps a long clause at a SPACE and indents the continuation line.
     The raw-text redaction cannot match the value across "\\n      ", and the
@@ -862,6 +892,7 @@ def test_the_cause_hides_a_value_uv_wrapped_with_an_indent():
         assert part not in reason, (part, reason)
 
 
+@pytest.mark.unit
 def test_the_fallback_hides_a_value_uv_wrapped_with_an_indent():
     """The first-line fallback reads the redacted lines too: a value whose
     first half ends the first line must not ride out in it."""
@@ -874,6 +905,7 @@ def test_the_fallback_hides_a_value_uv_wrapped_with_an_indent():
     assert "Zq7Kx9Lm" not in reason, reason
 
 
+@pytest.mark.unit
 def test_the_hidden_argument_marker_survives_the_glyph_strip():
     """The tree glyphs uv draws are stripped from line edges; a both-edges
     strip AFTER the redaction ate the closing ">" of a line-ending
@@ -903,6 +935,7 @@ def test_the_hidden_argument_marker_survives_the_glyph_strip():
     assert requirement not in reason, reason
 
 
+@pytest.mark.unit
 def test_the_cause_is_still_unwrapped_with_no_values():
     """Control: with nothing env-read the extraction is unchanged."""
     output = (
@@ -918,6 +951,7 @@ def test_the_cause_is_still_unwrapped_with_no_values():
     ), reason
 
 
+@pytest.mark.unit
 def test_the_fallback_first_line_is_taken_from_the_redacted_text():
     """When uv's output has no "Because" clause, ``_first_cause`` answers
     with the output's first line. That line has to come from the redacted
@@ -933,6 +967,7 @@ def test_the_fallback_first_line_is_taken_from_the_redacted_text():
     assert value not in reason, reason
 
 
+@pytest.mark.unit
 def test_the_fallback_is_the_first_line_with_no_values():
     """Control for the fallback pin: with nothing env-read the first line is
     answered as uv printed it."""
@@ -959,6 +994,7 @@ _TAIL = (
 )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "value, lines, core",
     [
@@ -1005,6 +1041,7 @@ def test_the_cause_hides_a_value_at_a_line_edge(value, lines, core):
     assert core not in reason, reason
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "value, lines",
     [
@@ -1039,6 +1076,7 @@ def test_the_cause_hides_a_value_wrapped_beside_a_strip_character(value, lines):
     assert "Zq7Kx9Lm" not in reason and "Pw4Nv2Rt" not in reason, reason
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "value, lines",
     [
@@ -1101,6 +1139,7 @@ def _dry_run_children(tmp_path, monkeypatch, stderr_text):
     return tool, uv
 
 
+@pytest.mark.integration
 def test_a_crlf_value_from_a_real_dry_run_is_hidden(tmp_path, monkeypatch):
     """End to end through the real text-mode decode: a multi-word value whose
     own separator is CRLF reaches the cause as LF, the normalization restores
@@ -1142,6 +1181,7 @@ def _probed(monkeypatch, dry_run_returncode, dry_run_output):
     )
 
 
+@pytest.mark.unit
 def test_the_unverifiable_verdict_detail_hides_a_wrapped_value(tmp_path, monkeypatch):
     """An answer that is neither satisfied nor unsatisfied returns uv's own
     output as the verdict detail, never through the cause extraction, and
@@ -1168,6 +1208,7 @@ def test_the_unverifiable_verdict_detail_hides_a_wrapped_value(tmp_path, monkeyp
     assert "Pw4Nv2Rt" not in verdict.detail, verdict.detail
 
 
+@pytest.mark.unit
 def test_the_unsatisfied_verdict_detail_hides_a_wrapped_value(tmp_path, monkeypatch):
     """The control for the cell above: the unsatisfied arm's detail goes
     through the cause extraction, which already redacts."""

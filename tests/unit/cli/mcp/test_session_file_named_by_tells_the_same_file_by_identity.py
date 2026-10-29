@@ -26,6 +26,8 @@ from automated_security_helper.cli.mcp_tools import (
     _session_file_named_by,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _a_session_file(tmp_path: Path) -> Path:
     config_dir = tmp_path / "config"

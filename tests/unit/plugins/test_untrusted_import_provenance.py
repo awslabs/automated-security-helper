@@ -25,6 +25,8 @@ from automated_security_helper.plugins.plugin_manager import (
     AshPluginManager,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _plugin(name: str, module: str) -> type:
     cls = type(name, (), {"ash_plugin_type": "scanner"})

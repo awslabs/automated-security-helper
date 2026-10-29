@@ -92,6 +92,7 @@ def _scan(tmp_path: Path, files: dict, **options) -> int:
         ("environment.yml", f"name: demo\nchannel_alias: {_FAKE_INDEX_URL}\n"),
     ],
 )
+@pytest.mark.integration
 def test_credential_in_a_hand_authored_declaration_is_reported(
     tmp_path, filename, body
 ):
@@ -106,6 +107,7 @@ def test_credential_in_a_hand_authored_declaration_is_reported(
     assert _scan(tmp_path, {filename: body}) == 1
 
 
+@pytest.mark.unit
 def test_generated_lockfile_is_still_skipped(tmp_path):
     """The other half of the split: generated locks stay out by default.
 
@@ -120,6 +122,7 @@ def test_generated_lockfile_is_still_skipped(tmp_path):
     assert _scan(tmp_path, {"npm-shrinkwrap.json": body}) == 0
 
 
+@pytest.mark.integration
 def test_the_lever_re_admits_generated_lockfiles(tmp_path):
     """``skip_generated_lockfiles=False`` makes the residual exclusion recoverable.
 
@@ -136,6 +139,7 @@ def test_the_lever_re_admits_generated_lockfiles(tmp_path):
     assert found > 0, "flipping the lever did not re-admit the file"
 
 
+@pytest.mark.integration
 def test_hash_pinned_requirements_file_does_not_flood(tmp_path):
     """False-positive control for the newly-scanned side.
 
@@ -154,6 +158,7 @@ def test_hash_pinned_requirements_file_does_not_flood(tmp_path):
     assert _scan(tmp_path, {"requirements.txt": "\n".join(lines)}) == 0
 
 
+@pytest.mark.unit
 def test_the_two_lists_stay_disjoint():
     """A name may be generated or hand-authored, never both.
 
@@ -167,6 +172,7 @@ def test_the_two_lists_stay_disjoint():
     assert overlap == set(), f"names classified as both: {sorted(overlap)}"
 
 
+@pytest.mark.unit
 def test_hand_authored_names_are_not_in_the_exclusion_list():
     """The defect stated as a property, independent of any one fixture."""
     for name in ("requirements.txt", "Pipfile", "environment.yml", "environment.yaml"):
@@ -174,6 +180,7 @@ def test_hand_authored_names_are_not_in_the_exclusion_list():
         assert name not in KNOWN_GENERATED_LOCKFILE_NAMES
 
 
+@pytest.mark.unit
 def test_compatibility_alias_still_holds_the_original_merged_value():
     """``KNOWN_LOCKFILE_NAMES`` is imported by out-of-tree plugins, so it keeps its
     old contents. It is deprecated and ASH itself must not filter on it."""

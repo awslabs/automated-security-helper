@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from automated_security_helper.config.config_sources import (
@@ -21,6 +22,8 @@ from automated_security_helper.config.config_sources import (
     parse_config_text_literally,
     read_config_file_as_written,
 )
+
+pytestmark = pytest.mark.unit
 
 TEXT = (
     "project_name: !ENV ${ASH_TAG_CELL_NAME}\n"

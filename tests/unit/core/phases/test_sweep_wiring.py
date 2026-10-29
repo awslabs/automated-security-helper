@@ -20,7 +20,11 @@ other modules; those stay the review's to catch.
 import ast
 from pathlib import Path
 
+import pytest
+
 import automated_security_helper.core.phases.scanner_executor as executor_module
+
+pytestmark = pytest.mark.unit
 
 
 def test_every_sweep_passes_the_scopes_values():

@@ -31,10 +31,13 @@ MERGE_BUILDSPEC = (
     / "buildspec-merge.yml.tftpl"
 )
 
-pytestmark = pytest.mark.skipif(
-    os.name == "nt",
-    reason="executes a POSIX buildspec command destined for a Linux build container",
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        os.name == "nt",
+        reason="executes a POSIX buildspec command destined for a Linux build container",
+    ),
+]
 
 
 def _verdict_command() -> str:

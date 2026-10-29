@@ -41,6 +41,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 
+pytestmark = pytest.mark.unit
+
 # ``AshAggregatedResults`` carries a forward reference to ``AshConfig`` that is only resolved by
 # an explicit rebuild. Done here at import rather than borrowed from whichever other test module
 # happened to run first: without it every test below raises PydanticUserError when this file is

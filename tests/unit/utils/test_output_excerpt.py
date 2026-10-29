@@ -10,6 +10,8 @@ from automated_security_helper.utils.output_excerpt import (
     tool_output_excerpt,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def test_text_within_the_limit_is_unchanged():
     assert head_and_tail("short", 10) == "short"

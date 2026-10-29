@@ -24,10 +24,13 @@ from automated_security_helper.config.resolve_config import resolve_config
 
 GRANTS = "sandbox:\n  extra_read_paths: ['/']\n  network_scanners: ['bandit']\n"
 
-pytestmark = pytest.mark.skipif(
-    not hasattr(os, "symlink") or os.name == "nt",
-    reason="creates symbolic links, which need privileges on Windows",
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        not hasattr(os, "symlink") or os.name == "nt",
+        reason="creates symbolic links, which need privileges on Windows",
+    ),
+]
 
 
 @pytest.fixture(autouse=True)

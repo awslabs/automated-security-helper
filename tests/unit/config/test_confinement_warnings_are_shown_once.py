@@ -26,6 +26,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from tests.utils.helpers import importing_this_checkout, mark_git_checkout
 
 ESC, BEL = chr(0x1B), chr(0x07)
@@ -85,6 +87,7 @@ _ARCHIVING = (
 )
 
 
+@pytest.mark.unit
 def test_a_forged_record_in_a_base_name_stays_on_the_warnings_line(tmp_path):
     """ash.log keeps a message's newlines, so a base named
     "b<newline><timestamp><tab>INFO<tab>scan_phase.py:1<tab>FORGED.yaml" is shown
@@ -112,6 +115,7 @@ def test_a_forged_record_in_a_base_name_stays_on_the_warnings_line(tmp_path):
     assert len(written.splitlines()) == 1, repr(written)
 
 
+@pytest.mark.unit
 def test_a_section_keys_controls_are_shown_once_in_ash_log(tmp_path):
     """The key "aws-security-hub<CR><ESC>]<BEL>" is read as aws-security-hub's
     section. The warning shows its carriage return, ESC and BEL at the call site,
@@ -140,6 +144,7 @@ def test_a_section_keys_controls_are_shown_once_in_ash_log(tmp_path):
     assert not _RAW_CONTROL.search(written), repr(written)
 
 
+@pytest.mark.unit
 def test_a_sandbox_grants_file_name_is_shown_once_in_ash_log(tmp_path):
     """The sandbox-grant warning names the extends base that set
     network_scanners: "b<ESC>]<BEL><newline>x.yaml", each control shown once and
@@ -165,6 +170,7 @@ def test_a_sandbox_grants_file_name_is_shown_once_in_ash_log(tmp_path):
     assert len(written.splitlines()) == 1, repr(written)
 
 
+@pytest.mark.unit
 def test_a_plugin_module_name_is_shown_once_in_ash_log(tmp_path):
     """The plugin-module warning names the module the repository's file asked
     for: "m<ESC>]<BEL><newline>x", each control shown once and the newline kept
@@ -220,6 +226,7 @@ def _the_one_warning(records, start: str) -> logging.LogRecord:
     return record
 
 
+@pytest.mark.unit
 def test_the_sandbox_grant_warning_is_logged_as_text_not_markup(tmp_path):
     """A base named "b[red]<ESC>.yaml": "[red]" is a Rich style tag, which would
     restyle the rest of the line and drop from it. The record carries markup
@@ -244,6 +251,7 @@ def test_the_sandbox_grant_warning_is_logged_as_text_not_markup(tmp_path):
     assert "b[red]\\x1b.yaml" in record.getMessage()
 
 
+@pytest.mark.unit
 def test_the_plugin_module_warning_is_logged_as_text_not_markup(tmp_path):
     """A module named "m[/x]<ESC>", which the repository's file asks for."""
     from automated_security_helper.config.resolve_config import resolve_config
@@ -274,6 +282,7 @@ mcp_get_config(search_dir=sys.argv[1])
 """
 
 
+@pytest.mark.integration
 def test_get_config_in_a_fresh_process_writes_no_control_from_a_base_name(tmp_path):
     """A base named "b<ESC>]52;c;ZXZpbA==<BEL><newline>::add-mask::hidden.yaml": an
     OSC 52 clipboard write, and a line GitHub Actions reads as a command. MCP

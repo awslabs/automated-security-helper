@@ -60,6 +60,8 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 from automated_security_helper.workspace.resolver import resolve_workspace
 
+pytestmark = pytest.mark.unit
+
 
 class Plugin(NamedTuple):
     kind: str

@@ -68,6 +68,7 @@ def _scanner(tmp_path: Path, source: Path, **options) -> TrivyScanner:
     not sys.platform.startswith("linux"), reason="trivy's XDG rule is Linux's"
 )
 @pytest.mark.parametrize("offline", [False, True], ids=["online", "offline"])
+@pytest.mark.unit
 def test_the_scan_and_the_staleness_probe_read_one_cache(
     tmp_path, monkeypatch, offline
 ):
@@ -108,6 +109,7 @@ print(json.dumps({{"Version": "0.75.0",
 
 
 @pytest.mark.skipif(os.name == "nt", reason="the stand-in trivy is a POSIX script")
+@pytest.mark.integration
 def test_the_offline_database_check_reads_nothing_from_the_tree(tmp_path, monkeypatch):
     from automated_security_helper.utils import subprocess_utils
 
@@ -167,6 +169,7 @@ def _config_flag(argv):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="the stand-in trivy is a POSIX script")
+@pytest.mark.integration
 def test_the_post_scan_probe_reads_nothing_from_the_working_directory(
     tmp_path, monkeypatch
 ):
@@ -193,6 +196,7 @@ def test_the_post_scan_probe_reads_nothing_from_the_working_directory(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="the stand-in trivy is a POSIX script")
+@pytest.mark.integration
 def test_the_probe_reads_through_the_config_the_scan_passed(tmp_path, monkeypatch):
     """An operator's trivy.yaml can name the cache; the probe must read that one."""
     record = _fake_trivy(tmp_path, monkeypatch)
@@ -237,6 +241,7 @@ def test_the_probe_reads_through_the_config_the_scan_passed(tmp_path, monkeypatc
 
 
 @pytest.mark.skipif(os.name == "nt", reason="the stand-in trivy is a POSIX script")
+@pytest.mark.integration
 def test_a_probe_whose_temporary_directory_is_in_a_checkout_runs_from_the_root(
     tmp_path, monkeypatch
 ):

@@ -45,6 +45,8 @@ from automated_security_helper.models.workspace import (
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
+pytestmark = pytest.mark.unit
+
 PROJECTS = ("api", "web")
 
 #: The skipped project used by the skip fixtures below. Named distinctly from

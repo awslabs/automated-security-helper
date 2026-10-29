@@ -28,6 +28,7 @@ paired half.
 
 from __future__ import annotations
 
+import pytest
 import yaml
 from pydantic import BaseModel
 from typer.testing import CliRunner
@@ -43,6 +44,8 @@ from automated_security_helper.config.ash_config import (
 )
 from automated_security_helper.config.resolve_config import apply_config_overrides
 from automated_security_helper.config.runtime_patch import apply_runtime_patch
+
+pytestmark = pytest.mark.unit
 
 # The override `cli/scan.py` synthesizes for `--compact-report`. Used throughout
 # as the "unrelated change" so these tests exercise the argument list a real run

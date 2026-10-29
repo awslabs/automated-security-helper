@@ -166,6 +166,7 @@ def _results_of(tmp_path, mode: str, *, plant_symlink: bool = False):
     sys.platform == "darwin",
     reason="sandbox-exec is the named-but-unavailable backend off macOS",
 )
+@pytest.mark.unit
 def test_a_probing_scanner_under_a_named_unavailable_backend_is_an_error(tmp_path):
     """The operator named sandbox-exec and it cannot run here. The probing
     scanner's check is not run (its probes could only fail for the sandbox),
@@ -183,6 +184,7 @@ def test_a_probing_scanner_under_a_named_unavailable_backend_is_an_error(tmp_pat
     assert "sandbox-exec" in recorded, recorded
 
 
+@pytest.mark.unit
 def test_a_probing_scanner_under_auto_is_missing_naming_the_sandbox(
     tmp_path, monkeypatch
 ):
@@ -201,6 +203,7 @@ def test_a_probing_scanner_under_auto_is_missing_naming_the_sandbox(
 
 
 @pytest.mark.parametrize("mode", ["bwrap", "auto"])
+@pytest.mark.unit
 def test_a_probing_scanner_whose_sandbox_is_refused_is_an_error_naming_it(
     tmp_path, monkeypatch, mode
 ):
@@ -221,6 +224,7 @@ def test_a_probing_scanner_whose_sandbox_is_refused_is_an_error_naming_it(
     assert "symlink" in recorded, recorded
 
 
+@pytest.mark.unit
 def test_a_planted_symlink_does_not_make_the_dependency_verdict_absent(
     tmp_path, monkeypatch
 ):
@@ -253,6 +257,7 @@ def test_a_planted_symlink_does_not_make_the_dependency_verdict_absent(
     )
 
 
+@pytest.mark.integration
 def test_control_the_same_probes_pass_with_the_sandbox_off(tmp_path):
     """The probes themselves are sound: with no sandbox the check passes and the
     scanner runs, so the cells above show the sandbox failing them."""
@@ -268,6 +273,7 @@ def test_control_the_same_probes_pass_with_the_sandbox_off(tmp_path):
     sys.platform == "darwin",
     reason="sandbox-exec is the named-but-unavailable backend off macOS",
 )
+@pytest.mark.unit
 def test_a_named_unavailable_backend_fails_the_dependency_verdict_naming_the_sandbox(
     tmp_path,
 ):

@@ -30,6 +30,8 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.models.core import AshSuppression, expiration_has_passed
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CONFIG = REPO_ROOT / ".ash" / ".ash.yaml"
 

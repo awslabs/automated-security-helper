@@ -53,6 +53,8 @@ from mcp.server.mcpserver import Context
 from automated_security_helper.cli import mcp_server
 from automated_security_helper.cli.mcp.scan_target import ASH_MCP_ALLOWED_ROOTS_ENV
 
+pytestmark = pytest.mark.unit
+
 REPO = Path(__file__).resolve().parents[4]
 TOOL_REFERENCE = (
     REPO

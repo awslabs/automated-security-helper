@@ -39,6 +39,8 @@ from automated_security_helper.utils.sandbox.backends import (
 )
 from tests.utils.fake_tool_paths import fake_tool_path
 
+pytestmark = pytest.mark.unit
+
 #: Where the fake programs "are". ASH's lookup of the sandbox's own programs answers a
 #: path only when the host counts it as anchored, which on Windows takes a drive, so a
 #: bare ``/usr/bin/firejail`` there is refused and the probe reports firejail as not

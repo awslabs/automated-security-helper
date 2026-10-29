@@ -34,6 +34,8 @@ import pytest
 from automated_security_helper.cli import mcp_server
 from tests.snapshot.mcp.mcp_snapshot_support import make_ctx, record
 
+pytestmark = pytest.mark.unit
+
 _BAD_SESSION = {"mcp-session-id": "../escape"}
 _SESSION = {"mcp-session-id": "session-a"}
 _STAGING_SUFFIX = re.compile(r"\.source\.incoming-[0-9a-f]{32}")

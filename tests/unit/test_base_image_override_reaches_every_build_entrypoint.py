@@ -196,6 +196,7 @@ def _build_argv(recording_runner, tmp_path, override: str | None) -> str:
     return argv_log.read_text(encoding="utf-8").strip()
 
 
+@pytest.mark.integration
 class TestTheBashEntrypoint:
     """``./ash``, which is what the ``bash`` scan legs run."""
 
@@ -255,6 +256,7 @@ class TestTheBashEntrypoint:
         )
 
 
+@pytest.mark.unit
 class TestThePowerShellEntrypoint:
     """``utils/ash_helpers.ps1``, which is what the ``powershell`` scan legs run.
 
@@ -290,6 +292,7 @@ class TestThePowerShellEntrypoint:
         )
 
 
+@pytest.mark.unit
 class TestEveryBuildEntrypointIsCovered:
     """The completeness guard. One entrypoint left out is the failure mode, not a gap.
 

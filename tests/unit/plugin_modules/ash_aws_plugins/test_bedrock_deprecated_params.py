@@ -42,6 +42,9 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_pipeline i
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 def _validation_error(message: str) -> botocore.exceptions.ClientError:
     return botocore.exceptions.ClientError(
         {"Error": {"Code": "ValidationException", "Message": message}},

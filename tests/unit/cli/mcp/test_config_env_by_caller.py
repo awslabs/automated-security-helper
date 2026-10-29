@@ -37,6 +37,8 @@ from automated_security_helper.cli.mcp.profile_registry import (
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core import exceptions as _exceptions
 
+pytestmark = pytest.mark.unit
+
 SESSION = "client-1"
 PROBE_VAR = "ASH_ENV_PROBE"
 PROBE = "probe-value-7f3a"

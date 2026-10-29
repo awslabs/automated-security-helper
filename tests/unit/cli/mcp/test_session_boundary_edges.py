@@ -44,6 +44,8 @@ from automated_security_helper.cli.mcp.session_identity import (
     resolve_caller_session_id,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _workspace_root(tmp_path, monkeypatch) -> None:

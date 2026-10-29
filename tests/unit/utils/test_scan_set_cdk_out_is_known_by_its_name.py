@@ -21,6 +21,8 @@ import pytest
 
 from automated_security_helper.utils.get_scan_set import scan_set
 
+pytestmark = pytest.mark.unit
+
 
 def _write(root: Path, relative: str, text: str = "{}\n") -> None:
     path = root / relative

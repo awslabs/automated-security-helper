@@ -7,11 +7,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugin_modules.ash_builtin.reporters.text_reporter import (
     TextReporter,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _results_in(directory: Path) -> None:

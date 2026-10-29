@@ -43,6 +43,8 @@ from automated_security_helper.cli.mcp import source_delivery as sd
 from tests.utils import source_delivery_doubles as doubles
 from tests.utils.source_delivery_doubles import UNDELETABLE
 
+pytestmark = pytest.mark.unit
+
 #: The shared fixture, bound to this module's namespace so pytest finds it here.
 windows_semantics = doubles.windows_semantics
 

@@ -21,6 +21,8 @@ import threading
 from contextlib import suppress
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from automated_security_helper.cli import mcp_tools
 from automated_security_helper.cli.mcp.scan_target import ASH_MCP_ALLOWED_ROOTS_ENV
 from automated_security_helper.core.resource_management.scan_registry import (
@@ -30,6 +32,8 @@ from automated_security_helper.core.resource_management.scan_registry import (
 from automated_security_helper.utils import log as ash_log
 from automated_security_helper.utils.log import ASHLogger
 from tests.utils.tasks import drain_clean
+
+pytestmark = pytest.mark.unit
 
 _TOOLS = "automated_security_helper.cli.mcp_tools"
 _RUN_ASH_SCAN = "automated_security_helper.interactions.run_ash_scan.run_ash_scan"

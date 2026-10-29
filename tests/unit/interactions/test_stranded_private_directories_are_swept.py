@@ -126,6 +126,7 @@ def _record(tmp_path: Path, directory: Path, pid: int) -> Path:
     return path
 
 
+@pytest.mark.integration
 def test_a_recorded_directory_of_each_prefix_under_two_parents_is_swept(
     parents, tmp_path, dead_pid
 ):
@@ -148,6 +149,7 @@ def test_a_recorded_directory_of_each_prefix_under_two_parents_is_swept(
     assert outside.read_text(encoding="utf-8") == _CANARY, "a symlink was followed"
 
 
+@pytest.mark.unit
 def test_an_unrecorded_directory_past_the_age_bound_is_swept(parents):
     old = [
         _private_dir(parent, f"{prefix}old00001")
@@ -163,6 +165,7 @@ def test_an_unrecorded_directory_past_the_age_bound_is_swept(parents):
     assert not any(d.exists() for d in old)
 
 
+@pytest.mark.unit
 def test_an_unrecorded_directory_younger_than_the_bound_is_left(parents):
     young = [
         _private_dir(parent, f"{prefix}young001")
@@ -174,6 +177,7 @@ def test_an_unrecorded_directory_younger_than_the_bound_is_left(parents):
     assert all(d.exists() for d in young)
 
 
+@pytest.mark.unit
 def test_a_directory_with_another_prefix_is_left_however_old(parents):
     other = _private_dir(parents[0], "other-prefix-old00001")
     lookalike = _private_dir(parents[1], "xash-container-env-old00001")
@@ -184,6 +188,7 @@ def test_a_directory_with_another_prefix_is_left_however_old(parents):
     assert other.exists() and lookalike.exists()
 
 
+@pytest.mark.unit
 def test_a_recorded_directory_whose_creator_is_alive_is_left(parents, tmp_path):
     directory = _private_dir(parents[0], f"{_PREFIXES[0]}live0001")
     record = _record(tmp_path, directory, os.getpid())
@@ -192,6 +197,7 @@ def test_a_recorded_directory_whose_creator_is_alive_is_left(parents, tmp_path):
     assert directory.exists() and record.exists()
 
 
+@pytest.mark.unit
 def test_a_directory_that_is_not_mode_0700_is_left(parents):
     loose = _private_dir(parents[0], f"{_PREFIXES[0]}loose001", mode=0o755)
     _age(loose, _past_the_bound())
@@ -200,6 +206,7 @@ def test_a_directory_that_is_not_mode_0700_is_left(parents):
     assert loose.exists()
 
 
+@pytest.mark.unit
 def test_a_symlink_with_a_prefix_name_is_not_followed(parents, tmp_path):
     target = _private_dir(tmp_path, "somewhere-else-0001")
     _age(target, _past_the_bound())
@@ -211,6 +218,7 @@ def test_a_symlink_with_a_prefix_name_is_not_followed(parents, tmp_path):
     assert target.exists() and (target / "env").exists()
 
 
+@pytest.mark.integration
 def test_a_record_naming_a_place_that_is_not_searched_is_ignored(
     parents, tmp_path, dead_pid
 ):
@@ -223,6 +231,7 @@ def test_a_record_naming_a_place_that_is_not_searched_is_ignored(
     assert directory.exists()
 
 
+@pytest.mark.integration
 def test_a_record_whose_directory_is_gone_is_dropped(parents, tmp_path, dead_pid):
     gone = parents[0] / f"{_PREFIXES[0]}gone0001"
     record = _record(tmp_path, gone, dead_pid)
@@ -231,6 +240,7 @@ def test_a_record_whose_directory_is_gone_is_dropped(parents, tmp_path, dead_pid
     assert not record.exists()
 
 
+@pytest.mark.integration
 def test_what_is_in_a_directory_is_never_logged(parents, tmp_path, dead_pid, logged):
     directory = _private_dir(parents[0], f"{_PREFIXES[0]}logged001")
     _record(tmp_path, directory, dead_pid)
@@ -244,6 +254,7 @@ def test_what_is_in_a_directory_is_never_logged(parents, tmp_path, dead_pid, log
     assert "nested" not in text and "config.json" not in text, logged.messages
 
 
+@pytest.mark.unit
 def test_the_directories_are_swept_before_the_clear_in_nix_mode(
     parents, tmp_path, monkeypatch
 ):
@@ -278,6 +289,7 @@ def test_the_directories_are_swept_before_the_clear_in_nix_mode(
     assert seen == [False], "the clear ran while the stranded directory still existed"
 
 
+@pytest.mark.unit
 def test_the_directories_are_swept_before_the_clear_in_container_mode(
     parents, tmp_path, monkeypatch
 ):

@@ -43,6 +43,8 @@ from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
 
+pytestmark = pytest.mark.unit
+
 ASH_DRIVER = "AWS Labs - Automated Security Helper"
 SCANNERS = [
     ("bandit", "1.8.6", ["a.py", "b.py"]),

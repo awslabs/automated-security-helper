@@ -34,6 +34,8 @@ from automated_security_helper.config.runtime_patch import (
     apply_runtime_patch,
 )
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-7f3e-0123456789"
 # The same length as CANARY, so a right and a wrong guess differ only in text.
 OTHER = "ash-canary-0000-9876543210"

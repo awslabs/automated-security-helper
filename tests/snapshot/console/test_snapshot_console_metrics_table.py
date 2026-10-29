@@ -39,6 +39,8 @@ from tests.snapshot.console.console_inputs import (
     scan_results_model,
 )
 
+pytestmark = pytest.mark.unit
+
 WIDTHS = pytest.mark.parametrize("width", [WIDE, NARROW], ids=["wide", "narrow"])
 
 #: What ``platform.system()`` returns on the two families the module distinguishes.

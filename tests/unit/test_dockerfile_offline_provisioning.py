@@ -149,6 +149,7 @@ def _run(
     )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("shell", SHELLS)
 class TestTrivyStep:
     STEP = "--download-db-only"
@@ -195,6 +196,7 @@ class TestTrivyStep:
         assert result.returncode != 0
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("shell", SHELLS)
 class TestGrypeAndRulesetStep:
     STEP = "grype db update"
@@ -243,6 +245,7 @@ def _and_chains_under_set_e(path: Path) -> list:
     ]
 
 
+@pytest.mark.unit
 def test_no_run_under_set_e_chains_commands_with_and():
     offenders = _and_chains_under_set_e(DOCKERFILE)
     header = (
@@ -255,6 +258,7 @@ def test_no_run_under_set_e_chains_commands_with_and():
     )
 
 
+@pytest.mark.unit
 def test_the_set_e_check_fires_on_the_old_trivy_step(tmp_path):
     """The control for the check above: the step as it was must trip it."""
     old = tmp_path / "Dockerfile"
@@ -272,5 +276,6 @@ def test_the_set_e_check_fires_on_the_old_trivy_step(tmp_path):
     assert [line for line, _ in _and_chains_under_set_e(old)] == [1]
 
 
+@pytest.mark.unit
 def test_the_shells_under_test_include_one():
     assert SHELLS, "neither dash nor bash is installed, so nothing above ran"

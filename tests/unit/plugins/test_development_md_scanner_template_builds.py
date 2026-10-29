@@ -23,6 +23,8 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.plugins import ash_plugin_manager
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 

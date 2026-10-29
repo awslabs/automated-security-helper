@@ -101,6 +101,7 @@ def _set_fsmonitor(repo: Path, env: dict[str, str], marker: Path) -> None:
     assert _run(["git", "config", "core.fsmonitor", command], repo, env).returncode == 0
 
 
+@pytest.mark.integration
 class TestTheRepositorysFsmonitorCommand:
     def test_plain_git_runs_it(self, repo, tmp_path):
         """The control: without the options, the marker appears."""
@@ -145,6 +146,7 @@ class TestTheRepositorysFsmonitorCommand:
         assert _marks(marker) == 0
 
 
+@pytest.mark.integration
 class TestTheRepositorysHooks:
     def _hook_dir(self, tmp_path: Path, marker: Path) -> Path:
         hooks = tmp_path / "repo-hooks"
@@ -181,6 +183,7 @@ class TestTheRepositorysHooks:
         assert _marks(marker) == 0
 
 
+@pytest.mark.unit
 def test_the_options_turn_both_settings_off():
     assert git_argv("status") == [
         "git",
@@ -193,6 +196,7 @@ def test_the_options_turn_both_settings_off():
     assert git_argv()[1:] == list(GIT_SAFETY_OPTIONS)
 
 
+@pytest.mark.unit
 def test_a_resolved_git_keeps_the_options():
     """A caller that resolved git to an absolute path still gets both options."""
     assert git_argv("status", program="/opt/git/bin/git") == [
@@ -228,6 +232,7 @@ def _git_argv_literals(path: Path) -> list[int]:
     ]
 
 
+@pytest.mark.unit
 def test_every_git_command_in_the_package_is_built_by_git_argv():
     """A literal ``["git", ...]`` outside ``git_command.py`` skips the options."""
     builder = PACKAGE_ROOT / "utils" / "git_command.py"
@@ -242,6 +247,7 @@ def test_every_git_command_in_the_package_is_built_by_git_argv():
     assert found == {}, found
 
 
+@pytest.mark.unit
 def test_the_gate_sees_a_literal_git_argv(tmp_path):
     """The gate's own control: the pattern it looks for is found when present."""
     sample = tmp_path / "sample.py"
@@ -251,6 +257,7 @@ def test_the_gate_sees_a_literal_git_argv(tmp_path):
     assert _git_argv_literals(sample) == [2]
 
 
+@pytest.mark.unit
 def test_the_gate_sees_a_resolved_git_argv(tmp_path):
     """The same control for a list that starts with a resolved ``git`` path."""
     sample = tmp_path / "sample.py"

@@ -14,7 +14,11 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from automated_security_helper.config.ash_config import resolve_env_references
+
+pytestmark = pytest.mark.unit
 
 DEFAULT = "fallback-text-7f3e"
 

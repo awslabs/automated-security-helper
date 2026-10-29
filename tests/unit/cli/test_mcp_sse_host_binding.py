@@ -42,6 +42,8 @@ from automated_security_helper.cli.mcp import build_sse_app, mcp_command
 from automated_security_helper.core.exceptions import ASHValidationError
 from tests.utils.mcp_transport_harness import LOOPBACK_PORT
 
+pytestmark = pytest.mark.unit
+
 #: Status the SDK returns when the Host header is not on the allowlist.
 HOST_REJECTED = 421
 

@@ -26,6 +26,8 @@ import pytest
 
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 OPTION = "scanners.detect-secrets.options.max_worker_output_mib"
 
 # os.rmdir of the process's working directory is PermissionError on Windows,

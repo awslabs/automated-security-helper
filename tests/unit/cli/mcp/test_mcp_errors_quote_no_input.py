@@ -23,6 +23,8 @@ from automated_security_helper.core.resource_management.error_handling import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-7f3e"
 
 

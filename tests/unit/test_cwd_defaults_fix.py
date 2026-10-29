@@ -31,6 +31,8 @@ import pytest
 
 from tests.utils.helpers import iter_repo_files
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PKG_ROOT = REPO_ROOT / "automated_security_helper"
 

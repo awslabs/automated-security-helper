@@ -74,6 +74,7 @@ def _recorded_lines(monkeypatch: pytest.MonkeyPatch) -> List[str]:
     return lines
 
 
+@pytest.mark.integration
 def test_a_failed_commands_stderr_dump_is_skipped_without_a_debug_handler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -88,6 +89,7 @@ def test_a_failed_commands_stderr_dump_is_skipped_without_a_debug_handler(
     assert not [line for line in lines if line.startswith("Command stderr:")]
 
 
+@pytest.mark.integration
 def test_the_raising_arms_stderr_dump_is_skipped_without_a_debug_handler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -102,6 +104,7 @@ def test_the_raising_arms_stderr_dump_is_skipped_without_a_debug_handler(
     assert not [line for line in lines if line.startswith("Command stderr:")]
 
 
+@pytest.mark.integration
 def test_control_the_stderr_dump_is_built_for_a_listening_debug_handler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -165,6 +168,7 @@ def _spawn_plan_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> List[s
     return lines
 
 
+@pytest.mark.unit
 def test_a_spawn_plans_sandbox_line_is_skipped_without_a_debug_handler(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -174,6 +178,7 @@ def test_a_spawn_plans_sandbox_line_is_skipped_without_a_debug_handler(
     assert not [line for line in lines if line.startswith("Scanner sandbox")]
 
 
+@pytest.mark.unit
 def test_control_the_sandbox_line_is_built_for_a_listening_debug_handler(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

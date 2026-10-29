@@ -25,6 +25,8 @@ import json
 from pathlib import Path
 from typing import Dict, List
 
+import pytest
+
 from automated_security_helper.config.untrusted_source import MERGE_CONFIG_FILE
 from tests.unit.cli.off_host_plugin_support import (
     DECLARED_ON_PLUGIN,
@@ -37,6 +39,8 @@ from tests.unit.cli.off_host_plugin_support import (
     reporter_texts,
     run_merge,
 )
+
+pytestmark = pytest.mark.integration
 
 
 def _declared_merge(tmp_path: Path, site: Path, overrides: List[str]) -> Dict:

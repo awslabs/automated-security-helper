@@ -43,6 +43,8 @@ from automated_security_helper.cli.mcp import mcp_command
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.utils.log import get_logger
 
+pytestmark = pytest.mark.unit
+
 
 class TestTheLoggerHonoursTheStderrSwitch:
     """The logger is the larger stdout source, and it only attaches during a scan."""

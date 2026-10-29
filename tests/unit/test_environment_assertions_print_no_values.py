@@ -1747,6 +1747,16 @@ if os.supports_bytes_environ:
 
     def test_a_set_of_an_imported_environb():
         assert b"ASH_TEST_UNSET_VARIABLE" in set(imported_environb)
+
+import warnings
+
+import pytest
+
+# The suite collection hook requires one tier per test. Under its own rootdir
+# this child does not know the mark and would warn, so the warning is dropped.
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    pytestmark = pytest.mark.unit
 """
 
 #: The child's first cell, which passes: the ASH the child imported is this
@@ -1797,6 +1807,7 @@ SHAPES: Tuple[str, ...] = tuple(
 )
 
 
+@pytest.mark.unit
 def test_the_child_tests_are_read_from_its_source() -> None:
     """_tests_in reads a module's tests as pytest collects them: test
     functions and the test methods of Test classes, not helpers or another
@@ -1935,6 +1946,7 @@ def _run_the_child(
     return failures, ran, run.returncode
 
 
+@pytest.mark.integration
 def test_a_failing_environment_assertion_prints_no_other_value(tmp_path):
     sentinel = "sentinel-" + secrets.token_hex(16)
     # The most verbose: no explanation is cut short.
@@ -1954,6 +1966,7 @@ def test_a_failing_environment_assertion_prints_no_other_value(tmp_path):
     assert leaked == [], "these failures printed a value the assertion is not about"
 
 
+@pytest.mark.integration
 def test_under_the_suites_conftest_no_failure_prints_the_value(
     tmp_path: Path,
 ) -> None:
@@ -2103,6 +2116,7 @@ COMPARISON_CONTROLS = (
 PYTESTS_OWN_DIFF = ("test_control_a_copy_compared_with_a_dict", "Differing items:")
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("options", "extra_environment"),
     [
@@ -2177,6 +2191,7 @@ def _holds_line(lines: Optional[Sequence[str]], line: str) -> bool:
     return line in "\n".join(lines or ()).splitlines()
 
 
+@pytest.mark.unit
 def test_a_comparison_with_an_environment_mapping_is_explained_by_names(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2234,6 +2249,7 @@ class _ResultEnvironmentLast:
     env: object
 
 
+@pytest.mark.unit
 def test_a_differing_attribute_beside_an_environment_is_shown_as_the_summary_shows_values(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2338,6 +2354,7 @@ class _Level(enum.IntEnum):
     LOW = 1
 
 
+@pytest.mark.unit
 def test_a_number_beside_an_environment_is_shown_by_its_repr_only_when_short(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2465,6 +2482,7 @@ def _free_of_environment_values(make: Callable[[], str]) -> str:
     raise RuntimeError("no candidate was free of the environment's values")
 
 
+@pytest.mark.unit
 def test_text_and_numbers_beside_an_environment_are_shown_when_they_hold_no_value(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2605,6 +2623,7 @@ def test_text_and_numbers_beside_an_environment_are_shown_when_they_hold_no_valu
     assert leaked == [], "these explanations show a value"
 
 
+@pytest.mark.unit
 def test_the_raw_text_check_hides_a_quoting_value_on_its_own(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2641,6 +2660,7 @@ def test_the_raw_text_check_hides_a_quoting_value_on_its_own(
     assert quoted not in "\n".join(lines or ())
 
 
+@pytest.mark.unit
 def test_attributes_are_hidden_when_the_products_matching_cannot_be_imported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2671,6 +2691,7 @@ class _Pair:
     second: object
 
 
+@pytest.mark.unit
 def test_an_environment_is_drilled_into_first_at_each_level() -> None:
     """Of two values each holding an environment beside a number, nested in
     one pair, each is drilled into in field order, and inside each the
@@ -2702,6 +2723,7 @@ def test_an_environment_is_drilled_into_first_at_each_level() -> None:
     )
 
 
+@pytest.mark.unit
 def test_a_number_is_shown_below_the_length_the_product_redacts_from() -> None:
     """explain_environment_comparison shows a number by its repr only below
     env_assertions' ``MIN_REDACTED_LENGTH``, which is config_validator's: the
@@ -2749,6 +2771,7 @@ def test_control_the_number_compared_on_its_own():
 """
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "options",
     [
@@ -2791,6 +2814,7 @@ def test_a_number_read_from_the_environment_beside_one_is_not_reported(
     assert clean_shown, "a number the environment does not hold is not shown"
 
 
+@pytest.mark.unit
 def test_a_comparison_without_an_environment_mapping_is_left_to_pytest() -> None:
     """Two plain mappings, two dataclasses holding plain mappings, and a
     membership test get pytest's own explanation, which explains them better
@@ -2803,6 +2827,7 @@ def test_a_comparison_without_an_environment_mapping_is_left_to_pytest() -> None
     assert left_to_pytest == [None, None, None]
 
 
+@pytest.mark.unit
 def test_this_runs_comparisons_with_an_environment_mapping_are_explained_by_names(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2909,6 +2934,7 @@ _EXPLAINED_CELLS = (
 CANARY = "ASH_TEST_CANARY_VALUE"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("plant", "options", "failing"),
     [
@@ -2966,6 +2992,7 @@ def test_the_explanation_cells_print_no_value_when_they_fail(
 _EXPLANATION_RAISED = "the explanation could not be built"
 
 
+@pytest.mark.integration
 def test_the_explanation_cells_hand_no_value_to_an_explanation_that_raises(
     tmp_path: Path,
 ) -> None:
@@ -3074,6 +3101,7 @@ def _holds_a_sentinel_run(text: str, sentinel: str) -> bool:
     )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "options",
     [pytest.param((), id="default"), pytest.param(("-vv",), id="most-verbose")],
@@ -3112,6 +3140,7 @@ def test_a_unittest_assertion_on_an_environment_mapping_prints_its_names(
     assert unnamed == [], "these unittest messages do not show the names-only repr"
 
 
+@pytest.mark.unit
 def test_code_a_mock_calls_gets_the_environments_values(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3128,6 +3157,7 @@ def test_code_a_mock_calls_gets_the_environments_values(
     assert shown, "code a mock called got the names-only repr"
 
 
+@pytest.mark.unit
 def test_this_sessions_root_conftest_is_asked_first(
     request: pytest.FixtureRequest,
 ) -> None:
@@ -3142,6 +3172,7 @@ def test_this_sessions_root_conftest_is_asked_first(
     assert problems == []
 
 
+@pytest.mark.unit
 def test_the_root_conftest_registers_the_suites_hook(
     request: pytest.FixtureRequest,
 ) -> None:
@@ -3197,6 +3228,7 @@ _CHILD_CONFTEST_REBOUND = (
 )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("conftest", "registers_the_suites"),
     [
@@ -3226,6 +3258,7 @@ def test_the_childs_conftest_registers_the_suites_hook(
         assert "[False] == [True]" in failure, f"the child exited {returncode}"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "workers", [pytest.param("0", id="no-workers"), pytest.param("2", id="workers")]
 )
@@ -3337,6 +3370,7 @@ def test_the_conftest_is_asked_first(request):
 """
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("plugin", "refusal"),
     [
@@ -3385,6 +3419,7 @@ def test_the_order_pin_refuses_a_late_or_wrapping_implementation(
         )
 
 
+@pytest.mark.unit
 def test_os_environ_shows_values_to_code_and_names_to_pytest(monkeypatch):
     """repr(os.environ) called by ordinary code, the code under test first,
     gives the values, so a leak a test checks a command's output for stays
@@ -3401,6 +3436,7 @@ def test_os_environ_shows_values_to_code_and_names_to_pytest(monkeypatch):
     assert (shown_to_code, shown_to_pytest, named_to_pytest) == (True, False, True)
 
 
+@pytest.mark.unit
 def test_a_generator_is_looked_through_to_the_frame_that_runs_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3429,6 +3465,7 @@ def test_a_generator_is_looked_through_to_the_frame_that_runs_it(
     ) == (True, True, False, True)
 
 
+@pytest.mark.unit
 def test_a_names_only_environment_shows_values_to_code():
     """The same split for NamesOnlyEnvironment: code under test that formats
     one prints the values, so its leak stays visible, and pytest's reporting
@@ -3445,6 +3482,7 @@ def test_a_names_only_environment_shows_values_to_code():
     assert (shown_to_code, shown_to_pytest, named_to_pytest) == (True, False, True)
 
 
+@pytest.mark.unit
 def test_a_leak_planted_in_code_under_test_is_caught(tmp_path, monkeypatch):
     """A print of ``repr(os.environ)`` planted in a command's path puts the
     environment's values in the command's output, where the leak cells that
@@ -3481,6 +3519,7 @@ def test_a_leak_planted_in_code_under_test_is_caught(tmp_path, monkeypatch):
     )
 
 
+@pytest.mark.unit
 def test_a_carrier_built_repr_shows_names_to_pytest():
     """pytest's reporting prints a frame's arguments with repr. A carrier
     object's own Python ``__repr__`` that embeds the mapping
@@ -3504,6 +3543,7 @@ def test_a_carrier_built_repr_shows_names_to_pytest():
     assert (shown_to_code, shown_to_pytest, named_to_pytest) == (True, False, True)
 
 
+@pytest.mark.unit
 def test_os_environ_in_a_carrier_built_repr_shows_names_to_pytest(monkeypatch):
     """The same split for ``os.environ`` under ``hide_environ_values``, which
     the root conftest has applied: a carrier's ``__repr__`` embedding
@@ -3523,6 +3563,7 @@ def test_os_environ_in_a_carrier_built_repr_shows_names_to_pytest(monkeypatch):
     assert (shown_to_code, shown_to_pytest, named_to_pytest) == (True, False, True)
 
 
+@pytest.mark.unit
 def test_environment_views_show_names_to_pytest(monkeypatch):
     """``os.environ.keys()`` and ``.items()`` are views whose Python
     ``__repr__`` (in ``_collections_abc``) rebuilds the mapping's repr from
@@ -3560,6 +3601,7 @@ def _mock_failure_message(env):
     raise AssertionError("the mock assertion did not fail")
 
 
+@pytest.mark.unit
 def test_a_mock_assertion_message_shows_names_for_os_environ(monkeypatch):
     """``unittest.mock`` builds a failing assertion's message in its own
     frames, formatting the actual call's arguments; pytest prints that message
@@ -3574,6 +3616,7 @@ def test_a_mock_assertion_message_shows_names_for_os_environ(monkeypatch):
     assert (shown, named) == (False, True)
 
 
+@pytest.mark.unit
 def test_a_mock_assertion_message_shows_names_for_names_only_environment(
     monkeypatch,
 ):
@@ -3589,6 +3632,7 @@ def test_a_mock_assertion_message_shows_names_for_names_only_environment(
     assert (shown, named) == (False, True)
 
 
+@pytest.mark.unit
 def test_a_names_only_environments_views_show_names_to_pytest():
     """``.items()`` and ``.values()`` of a ``NamesOnlyEnvironment`` hold the
     names-only split too: a plain dict's C views would print raw key-value
@@ -3615,6 +3659,7 @@ def test_a_names_only_environments_views_show_names_to_pytest():
     ) == (False, False, True, True, True)
 
 
+@pytest.mark.unit
 def test_pprint_called_by_code_shows_values(monkeypatch):
     """``pprint`` and ``reprlib`` are ordinary library code: code under test
     that formats an environment through them prints the values, so a leak
@@ -3645,6 +3690,7 @@ def test_pprint_called_by_code_shows_values(monkeypatch):
     )
 
 
+@pytest.mark.unit
 def test_pprint_formatting_for_pytest_shows_names(monkeypatch):
     """``safeformat``, pytest's locals formatter, formats through stdlib
     ``pprint``: the mapping still gives it names only, because the formatting
@@ -3663,6 +3709,7 @@ def test_pprint_formatting_for_pytest_shows_names(monkeypatch):
     assert (mapping_hidden, mapping_named, environ_hidden) == (True, True, True)
 
 
+@pytest.mark.unit
 def test_a_pprint_leak_planted_in_code_under_test_is_caught(tmp_path, monkeypatch):
     """Like the planted ``repr`` leak above, but the planted print formats the
     environment through ``pprint``: the values must reach the command's

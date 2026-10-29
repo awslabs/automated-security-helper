@@ -27,6 +27,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 GUIDES = Path(__file__).resolve().parents[3] / "docs" / "content" / "plugins"
 PAGES = (
     "write-a-converter.md",

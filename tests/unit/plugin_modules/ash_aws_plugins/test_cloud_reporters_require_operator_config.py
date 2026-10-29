@@ -212,6 +212,7 @@ def _scan(source_dir, output_dir, **kwargs):
 
 
 class TestCloudReportersNeedTheOperator:
+    @pytest.mark.integration
     def test_a_loaded_cloud_reporter_contacts_nothing_when_no_config_enables_it(
         self, tmp_path, cloud, reports_run
     ):
@@ -220,6 +221,7 @@ class TestCloudReportersNeedTheOperator:
         assert not cloud.any(), cloud.summary()
         assert reports_run == []
 
+    @pytest.mark.integration
     def test_loading_the_aws_module_without_enabling_a_reporter_contacts_nothing(
         self, tmp_path, cloud, reports_run
     ):
@@ -232,6 +234,7 @@ class TestCloudReportersNeedTheOperator:
         assert not cloud.any(), cloud.summary()
         assert reports_run == []
 
+    @pytest.mark.unit
     def test_rerendering_stored_results_contacts_nothing(
         self, tmp_path, cloud, reports_run, constructed
     ):
@@ -250,6 +253,7 @@ class TestCloudReportersNeedTheOperator:
         assert not cloud.any(), cloud.summary()
         assert reports_run == []
 
+    @pytest.mark.unit
     def test_rerendering_results_that_hold_no_scan_is_refused(
         self, tmp_path, cloud, reports_run
     ):
@@ -307,6 +311,7 @@ class TestCloudReportersNeedTheOperator:
             ash_plugin_modules=[AWS_PLUGIN_MODULE],
         )
 
+    @pytest.mark.integration
     def test_an_operator_config_that_enables_a_cloud_reporter_reaches_it(
         self, tmp_path, cloud, reports_run
     ):

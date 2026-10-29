@@ -28,6 +28,8 @@ from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.core.previous_results import HELD_DIR_NAME
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 _ENGINE = (
     "automated_security_helper.core.execution_engine.ScanExecutionEngine.execute_phases"
 )

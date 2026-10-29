@@ -23,8 +23,12 @@ not masked, and a prefix that is not "PyInit_" beside the masked name).
 
 from __future__ import annotations
 
+import pytest
+
 from automated_security_helper.config.config_validator import redact_values
 from automated_security_helper.plugins.loader import _masked_module_forms
+
+pytestmark = pytest.mark.unit
 
 MASK = "<value>"
 MESSAGE = "ImportError: dynamic module does not define module export function ({})"

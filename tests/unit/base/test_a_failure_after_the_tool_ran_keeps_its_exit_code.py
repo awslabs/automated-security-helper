@@ -90,6 +90,7 @@ def _has_a_flag(response: Dict[str, Any]) -> bool:
 
 
 @pytest.mark.parametrize("exit_code", EXIT_CODES)
+@pytest.mark.integration
 def test_the_runner_keeps_the_exit_code_when_the_log_write_raises(tmp_path, exit_code):
     with _log_write_fails():
         response = run_command_with_output_handling(
@@ -114,6 +115,7 @@ def _tool_with_stderr(exit_code: int) -> List[str]:
 
 @pytest.mark.parametrize("preference", ["write", "return", "both", "none"])
 @pytest.mark.parametrize("exit_code", EXIT_CODES)
+@pytest.mark.integration
 def test_a_post_run_response_carries_the_tools_stderr(tmp_path, exit_code, preference):
     """ASH's own failure is when the tool's diagnostics matter, and the stderr log
     may be what could not be written: the response carries the stderr as the tool
@@ -130,6 +132,7 @@ def test_a_post_run_response_carries_the_tools_stderr(tmp_path, exit_code, prefe
     assert response.get("stderr") == TOOL_STDERR, response
 
 
+@pytest.mark.integration
 def test_control_a_post_run_response_without_stderr_carries_none(tmp_path):
     with _log_write_fails():
         response = run_command_with_output_handling(
@@ -140,6 +143,7 @@ def test_control_a_post_run_response_without_stderr_carries_none(tmp_path):
     assert not response.get("stderr"), response
 
 
+@pytest.mark.integration
 def test_run_subprocess_after_a_run_returned_keeps_its_stderr(tmp_path):
     context = _context(tmp_path)
     scanner = _ResponseHandlingFails(config=_Config(), context=context)
@@ -154,6 +158,7 @@ def test_run_subprocess_after_a_run_returned_keeps_its_stderr(tmp_path):
     assert response.get("stderr") == TOOL_STDERR, response
 
 
+@pytest.mark.integration
 def test_the_post_run_log_line_is_one_line(tmp_path, caplog):
     raised = OSError("first\nsecond\x1b[31m")
     with (
@@ -239,6 +244,7 @@ def _run(context, scanner):
     ids=["ignores-the-response", "findings-file-empty-passes"],
 )
 @pytest.mark.parametrize("exit_code", EXIT_CODES)
+@pytest.mark.integration
 def test_a_scanner_whose_output_was_not_recorded_is_an_error(
     tmp_path, scanner_class, exit_code
 ):
@@ -261,6 +267,7 @@ class _ResponseHandlingFails(_IgnoresTheResponse):
         raise RuntimeError("reading the run's response failed")
 
 
+@pytest.mark.integration
 def test_run_subprocess_after_a_run_returned_keeps_its_exit_code(tmp_path):
     context = _context(tmp_path)
     scanner = _ResponseHandlingFails(config=_Config(), context=context)
@@ -276,6 +283,7 @@ def test_run_subprocess_after_a_run_returned_keeps_its_exit_code(tmp_path):
     assert scanner.scan_post_run_error, scanner.scan_post_run_error
 
 
+@pytest.mark.integration
 def test_a_scanner_whose_response_handling_raised_is_an_error(tmp_path):
     context = _context(tmp_path)
     scanner = _ResponseHandlingFails(config=_Config(), context=context)
@@ -296,6 +304,7 @@ def _handling_fails_after(tmp_path, command, scanner_class=None):
     return scanner._run_subprocess(command=command, results_dir=tmp_path / "results")
 
 
+@pytest.mark.integration
 def test_under_write_the_stderr_log_is_read_back(tmp_path):
     """Under "write", the default, the run's response holds no stderr."""
     response = _handling_fails_after(tmp_path, _tool_with_stderr(1))
@@ -304,6 +313,7 @@ def test_under_write_the_stderr_log_is_read_back(tmp_path):
     assert response.get("stderr") == TOOL_STDERR, response
 
 
+@pytest.mark.integration
 def test_control_under_write_a_tool_without_stderr_carries_none(tmp_path):
     response = _handling_fails_after(tmp_path, _tool(1))
 
@@ -312,6 +322,7 @@ def test_control_under_write_a_tool_without_stderr_carries_none(tmp_path):
     assert "stderr log" not in response["error"], response
 
 
+@pytest.mark.integration
 def test_a_stderr_log_an_earlier_run_left_is_not_read_back(tmp_path):
     results = tmp_path / "results"
     results.mkdir()
@@ -323,6 +334,7 @@ def test_a_stderr_log_an_earlier_run_left_is_not_read_back(tmp_path):
     assert not response.get("stderr"), response
 
 
+@pytest.mark.integration
 def test_a_stderr_log_read_back_is_bounded(tmp_path, monkeypatch):
     from automated_security_helper.base import plugin_base
 
@@ -348,6 +360,7 @@ class _LogReplacedByALink(_IgnoresTheResponse):
     results_dir_of_run: str = ""
 
 
+@pytest.mark.integration
 def test_a_stderr_log_replaced_by_a_link_is_not_read_back(tmp_path, monkeypatch):
     secret = tmp_path / "host-file"
     secret.write_text("NOT-THE-TOOLS-STDERR\n", encoding="utf-8")
@@ -365,6 +378,7 @@ def test_a_stderr_log_replaced_by_a_link_is_not_read_back(tmp_path, monkeypatch)
     assert "its stderr log could not be read" in response["error"], response
 
 
+@pytest.mark.integration
 def test_a_stderr_log_read_that_raises_is_named_and_raises_nothing(
     tmp_path, monkeypatch
 ):
@@ -385,6 +399,7 @@ def test_a_stderr_log_read_that_raises_is_named_and_raises_nothing(
     assert not response.get("stderr"), response
 
 
+@pytest.mark.unit
 def test_the_uv_runner_carries_the_flag(tmp_path):
     from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 
@@ -412,6 +427,7 @@ def test_the_uv_runner_carries_the_flag(tmp_path):
     assert result.stderr == TOOL_STDERR, result
 
 
+@pytest.mark.unit
 def test_the_uv_mixin_carries_the_flag(tmp_path):
     from automated_security_helper.utils.subprocess_utils import PostRunErrorProcess
 
@@ -439,6 +455,7 @@ def test_the_uv_mixin_carries_the_flag(tmp_path):
 # -- a check after the tool exited is inside the post-run handling ---------------
 
 
+@pytest.mark.integration
 def test_run_command_after_a_clean_exit_keeps_the_code_when_its_log_raises(
     monkeypatch,
 ):
@@ -466,6 +483,7 @@ def test_run_command_after_a_clean_exit_keeps_the_code_when_its_log_raises(
     assert "No space left on device" in result.error, result
 
 
+@pytest.mark.unit
 def test_the_uv_runner_after_a_clean_exit_keeps_the_code_when_its_conversion_raises(
     tmp_path, monkeypatch
 ):
@@ -497,6 +515,7 @@ class _UvResponseHandlingFails(_IgnoresTheResponse):
         raise RuntimeError("reading the uv run's response failed")
 
 
+@pytest.mark.unit
 def test_the_uv_mixin_after_a_clean_exit_keeps_the_code_and_runs_nothing_again(
     tmp_path,
 ):
@@ -564,6 +583,7 @@ def test_the_uv_mixin_after_a_clean_exit_keeps_the_code_and_runs_nothing_again(
         ),
     ],
 )
+@pytest.mark.unit
 def test_the_uv_path_carries_the_error_of_a_failed_start_or_a_timeout(
     tmp_path, answered, flag, cause
 ):
@@ -597,6 +617,7 @@ def test_the_uv_path_carries_the_error_of_a_failed_start_or_a_timeout(
     assert cause in response.get("error", ""), response
 
 
+@pytest.mark.integration
 def test_the_uv_fallback_after_the_start_keeps_the_code_and_runs_nothing_again(
     monkeypatch, tmp_path
 ):
@@ -625,6 +646,7 @@ def test_the_uv_fallback_after_the_start_keeps_the_code_and_runs_nothing_again(
     assert "handling the output failed" in result.error, result
 
 
+@pytest.mark.unit
 def test_the_uv_fallback_timeout_carries_its_error(monkeypatch):
     """run_tool without a results_dir runs through spawn_run; its timeout's
     result had no error either."""
@@ -672,6 +694,7 @@ def _waiting_fails_while_it_runs():
     )
 
 
+@pytest.mark.integration
 def test_ashs_stop_of_the_tool_is_never_its_exit_code(tmp_path):
     """The kill that ended a tool ASH gave up waiting on is ASH's, so no code is
     reported for the tool, and none reaches the scanner's exit code through
@@ -690,6 +713,7 @@ def test_ashs_stop_of_the_tool_is_never_its_exit_code(tmp_path):
     assert scanner.exit_code not in _ASH_STOP_CODES, scanner.exit_code
 
 
+@pytest.mark.unit
 def test_handling_a_stopped_tools_response_keeps_no_code_and_its_reason(tmp_path):
     """ASH's handling of the response raised after the run. The code stays None,
     never 0, a clean exit. The run's own reason is kept, and the handling
@@ -726,6 +750,7 @@ def test_handling_a_stopped_tools_response_keeps_no_code_and_its_reason(tmp_path
         ),
     ],
 )
+@pytest.mark.unit
 def test_handling_a_timed_out_or_cancelled_response_keeps_its_flag(
     tmp_path, flag, code, reason
 ):
@@ -752,6 +777,7 @@ def test_handling_a_timed_out_or_cancelled_response_keeps_its_flag(
 @pytest.mark.parametrize(
     "code", [pytest.param(None, id="no-code"), pytest.param(1, id="exits-1")]
 )
+@pytest.mark.unit
 def test_the_uv_runner_with_check_returns_a_post_run_result(tmp_path, code):
     """check= reads the flags before the code: a post-run result is returned, not
     raised as a failed run (None != 0 raised)."""
@@ -813,6 +839,7 @@ class _TextThatFailsOnce:
         ),
     ],
 )
+@pytest.mark.unit
 def test_the_uv_runners_conversion_failure_keeps_a_timeout_or_a_cancel(
     tmp_path, answered, flag, cause
 ):
@@ -837,6 +864,7 @@ def test_the_uv_runners_conversion_failure_keeps_a_timeout_or_a_cancel(
     assert "converting the response failed" in result.error, result
 
 
+@pytest.mark.unit
 def test_the_uv_runner_keeps_a_cancel_through_its_conversion(tmp_path):
     """A cancelled response keeps ``cancelled`` through every conversion, the uv
     runner's included."""
@@ -884,6 +912,7 @@ def _uv_mixin_response(tmp_path, result, scanner_class=_IgnoresTheResponse):
         return scanner._try_uv_tool_execution(["semgrep", "scan"], tmp_path)
 
 
+@pytest.mark.unit
 def test_the_uv_mixin_carries_a_cancel(tmp_path):
     """The mixin's response carries ``cancelled`` and its error, as it carries
     ``timed_out``."""
@@ -927,6 +956,7 @@ def test_the_uv_mixin_carries_a_cancel(tmp_path):
         ),
     ],
 )
+@pytest.mark.unit
 def test_the_uv_mixins_handling_failure_keeps_a_timeout_or_a_cancel(
     tmp_path, result, flag, cause
 ):
@@ -989,6 +1019,7 @@ class _UvResponseHandlingFailsWithMarkup(_IgnoresTheResponse):
         raise RuntimeError(_MARKUP_IN_THE_ERROR)
 
 
+@pytest.mark.unit
 def test_the_uv_mixins_response_error_line_shows_markup_as_text(
     tmp_path, markup_console
 ):
@@ -1006,6 +1037,7 @@ def test_the_uv_mixins_response_error_line_shows_markup_as_text(
     assert _MARKUP_IN_THE_ERROR in output, output
 
 
+@pytest.mark.unit
 def test_the_uv_mixins_execution_error_line_shows_markup_as_text(
     tmp_path, markup_console
 ):
@@ -1059,6 +1091,7 @@ class _FindingsFileEmptyPassesAToolThatRuns(_FindingsFileEmptyPasses):
     [_IgnoresAToolThatRuns, _FindingsFileEmptyPassesAToolThatRuns],
     ids=["ignores-the-response", "findings-file-empty-passes"],
 )
+@pytest.mark.integration
 def test_a_scanner_whose_tool_ash_stopped_is_an_error(tmp_path, scanner_class):
     """Waiting on the started tool fails while it runs, and ASH stops it. Its exit
     code is unknown, so nothing can pass for a clean run: ERROR, "could not
@@ -1260,6 +1293,7 @@ def _the_reason_shows_as_text(rendered: str) -> None:
         ),
     ],
 )
+@pytest.mark.unit
 def test_a_child_left_running_has_no_code(
     tmp_path, monkeypatch, markup_console, flag, timeout, first_read_fails, own_text
 ):
@@ -1298,6 +1332,7 @@ def test_a_child_left_running_has_no_code(
     assert container.status == ScannerStatus.ERROR, container.status
 
 
+@pytest.mark.unit
 def test_a_child_left_running_has_no_code_when_the_scan_was_cancelled(
     tmp_path, monkeypatch, markup_console
 ):
@@ -1355,6 +1390,7 @@ _PARTIAL_PROGRAM = (
 _PARTIAL_THEN_SLEEPS = [sys.executable, "-c", _PARTIAL_PROGRAM]
 
 
+@pytest.mark.integration
 def test_a_timeout_whose_log_write_fails_keeps_its_timeout(tmp_path):
     """What the timed-out tool printed is written to its stream logs, and that write
     failed. The run still timed out: timed_out, with its own reason and the write's
@@ -1394,6 +1430,7 @@ class _TimesOutWritingItsLogs(_IgnoresTheResponse):
         return {"severity_counts": {}}
 
 
+@pytest.mark.integration
 def test_a_scanner_whose_timeout_log_write_failed_reports_the_timeout(tmp_path):
     """_run_subprocess read the runner's exception as a tool that never ran: 127,
     spawn_failed and "could not start", for a tool that ran its whole timeout."""
@@ -1487,6 +1524,7 @@ def _numbers_besides_the_code(response: Dict[str, Any]) -> List[int]:
 
 @pytest.mark.skipif(os.name != "posix", reason="a signal death is POSIX's case")
 @pytest.mark.parametrize("signal_name", ["SIGKILL", "SIGHUP"])
+@pytest.mark.integration
 def test_a_tool_that_ended_on_a_signal_ash_did_not_send_is_an_error(
     tmp_path, monkeypatch, signal_name
 ):
@@ -1511,6 +1549,7 @@ def test_a_tool_that_ended_on_a_signal_ash_did_not_send_is_an_error(
     assert container.status == ScannerStatus.ERROR, container.status
 
 
+@pytest.mark.integration
 def test_control_a_tool_that_exits_with_an_accepted_code_passes(tmp_path, monkeypatch):
     """The cell above isn't vacuous: exit 1 is in the template's accepted set, and
     the same one-run results file reads as a clean scan."""
@@ -1537,6 +1576,7 @@ class _OneCommandPerTarget(_TemplateScanner):
 
 
 @pytest.mark.skipif(os.name != "posix", reason="a signal death is POSIX's case")
+@pytest.mark.integration
 def test_a_signaled_run_is_reported_even_when_the_other_target_rendered(
     tmp_path, monkeypatch
 ):
@@ -1608,6 +1648,7 @@ def _killed_on(killed: str):
 
 @pytest.mark.skipif(os.name != "posix", reason="a signal death is POSIX's case")
 @pytest.mark.parametrize("killed", ["source", "converted"])
+@pytest.mark.integration
 def test_a_signaled_run_survives_the_phase_rollup(tmp_path, monkeypatch, killed):
     """The cell above, through the phase itself. ScanPhase runs the scanner on
     the source and converted targets in one task; one target's tool was killed
@@ -1742,6 +1783,7 @@ def _template_scan_on_its_own_thread(tmp_path, monkeypatch, command: List[str]):
 @pytest.mark.skipif(
     os.name != "posix", reason="the server records groups on POSIX only"
 )
+@pytest.mark.integration
 def test_the_servers_stop_of_a_waiting_tool_is_a_cancel_never_a_signal(
     tmp_path, monkeypatch
 ):
@@ -1779,6 +1821,7 @@ def test_the_servers_stop_of_a_waiting_tool_is_a_cancel_never_a_signal(
 
 
 @pytest.mark.skipif(os.name != "posix", reason="a signal death is POSIX's case")
+@pytest.mark.integration
 def test_control_a_tool_that_killed_itself_in_a_cancellable_spawn_is_signaled(
     tmp_path, monkeypatch
 ):
@@ -1819,6 +1862,7 @@ _KEPT_TOKEN = "kept-flag-reason-7319"
         pytest.param("result_rejected", 125, id="result_rejected"),
     ],
 )
+@pytest.mark.unit
 def test_a_kept_flag_makes_the_scan_an_error_and_is_reported_once(tmp_path, flag, code):
     """The scanner's scan() ignores the response it got, so only the kept flag says
     its run failed. The executor grades the scan ERROR whatever scan() returned, and
@@ -1898,6 +1942,7 @@ def _repeated(lines) -> List[str]:
         pytest.param("_record_post_run_error", id="post-run-recorder"),
     ],
 )
+@pytest.mark.unit
 def test_a_timeout_whose_other_recorder_raised_is_reported_once(
     tmp_path, monkeypatch, recorder
 ):
@@ -1957,6 +2002,7 @@ _RECORDED_AGAIN = {
 
 
 @pytest.mark.parametrize("case", sorted(_RECORDED_AGAIN))
+@pytest.mark.unit
 def test_a_recorder_that_always_raises_stays_inside_run_subprocess(
     tmp_path, monkeypatch, case
 ):
@@ -2072,6 +2118,7 @@ def _catch_all_responses(tmp_path) -> Dict[str, Dict[str, Any]]:
     return responses
 
 
+@pytest.mark.integration
 def test_every_response_with_an_error_names_what_happened(tmp_path):
     responses = _catch_all_responses(tmp_path)
 
@@ -2085,6 +2132,7 @@ def test_every_response_with_an_error_names_what_happened(tmp_path):
     assert all("error" in response for response in responses.values()), responses
 
 
+@pytest.mark.integration
 def test_no_code_appears_only_with_post_run_error(tmp_path):
     """returncode None means ASH failed while the tool still ran and stopped it, so
     a response carries it only with post_run_error."""
@@ -2102,6 +2150,7 @@ def test_no_code_appears_only_with_post_run_error(tmp_path):
     assert stopped["returncode"] is None, stopped
 
 
+@pytest.mark.unit
 def test_a_rejected_result_names_what_happened():
     """A remote executor's rejected result counts, though nothing here sets it."""
     rejected = {"error": "the result was rejected", "result_rejected": True}
@@ -2110,6 +2159,7 @@ def test_a_rejected_result_names_what_happened():
     assert not _has_a_flag({"error": "unflagged"}), "the property is vacuous"
 
 
+@pytest.mark.integration
 def test_control_never_started_is_127(tmp_path):
     responses = _catch_all_responses(tmp_path)
 

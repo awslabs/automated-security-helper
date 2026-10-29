@@ -47,6 +47,8 @@ import typer
 
 from automated_security_helper.cli.report import report_command
 
+pytestmark = pytest.mark.unit
+
 # U+009D encodes to UTF-8 as C2 9D. 0x9D is one of cp1252's five unmapped bytes, which is
 # why the CI failure named that byte specifically.
 NON_CP1252_CHAR = chr(0x9D)

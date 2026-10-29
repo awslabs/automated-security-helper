@@ -44,6 +44,8 @@ from automated_security_helper.models.asharp_model import (
     ScannerStatusInfo,
 )
 
+pytestmark = pytest.mark.unit
+
 FIELD = "global_settings.severity_threshold"
 REFERENCE = "${ASH_PROBE_SEV:LOW}"
 OTHER_FIELD = "output_formats"

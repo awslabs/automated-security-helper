@@ -76,6 +76,7 @@ def _flat(output: str) -> str:
     return " ".join(re.sub(r"\x1b\[[0-9;]*m", "", output).split())
 
 
+@pytest.mark.unit
 def test_a_later_lookup_finds_the_bin_path_only_through_ash_bin_path(
     tmp_path, fresh_lookup
 ):
@@ -97,6 +98,7 @@ def test_a_later_lookup_finds_the_bin_path_only_through_ash_bin_path(
     assert subprocess_utils.find_executable("ash-standin-tool") == tool.as_posix()
 
 
+@pytest.mark.unit
 def test_the_install_writes_nothing_to_the_home_directory(tmp_path, fresh_lookup):
     home = fresh_lookup
     result = _install(tmp_path / "project", "--bin-path", str(tmp_path / "bin"))
@@ -104,6 +106,7 @@ def test_the_install_writes_nothing_to_the_home_directory(tmp_path, fresh_lookup
     assert not any(home.rglob("*")), sorted(map(str, home.rglob("*")))
 
 
+@pytest.mark.unit
 def test_a_relative_bin_path_is_exported_absolute(tmp_path, fresh_lookup):
     """A scan ignores a relative ASH_BIN_PATH, so the install's children get it absolute."""
     project = tmp_path / "project"
@@ -113,6 +116,7 @@ def test_a_relative_bin_path_is_exported_absolute(tmp_path, fresh_lookup):
     assert (project / "tools").is_dir()
 
 
+@pytest.mark.unit
 def test_the_install_ends_with_how_to_set_ash_bin_path(tmp_path, fresh_lookup):
     project = tmp_path / "project"
     result = _install(project, "--bin-path", "tools")
@@ -126,6 +130,7 @@ def test_the_install_ends_with_how_to_set_ash_bin_path(tmp_path, fresh_lookup):
     assert out.rindex("ASH_BIN_PATH") > out.index("Installation Complete")
 
 
+@pytest.mark.unit
 def test_a_failed_install_ends_with_the_hint_too(tmp_path, fresh_lookup, monkeypatch):
     monkeypatch.setattr(dependencies, "run_command", lambda *_a, **_k: 1)
     bin_dir = tmp_path / "bin dir"
@@ -145,6 +150,7 @@ def test_a_failed_install_ends_with_the_hint_too(tmp_path, fresh_lookup, monkeyp
     assert f"export ASH_BIN_PATH={shlex.quote(str(bin_dir))}" in out, out
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("source", ["environment", "default"])
 def test_no_hint_when_scans_already_look_there(
     source, tmp_path, fresh_lookup, monkeypatch
@@ -159,6 +165,7 @@ def test_no_hint_when_scans_already_look_there(
     assert "export ASH_BIN_PATH" not in result.output, result.output
 
 
+@pytest.mark.unit
 def test_an_ash_bin_path_spelled_differently_is_the_same_directory(
     tmp_path, fresh_lookup
 ):
@@ -178,17 +185,20 @@ BLANK_VALUES = [
 ]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("blank", BLANK_VALUES)
 def test_blank_values_name_no_directory(blank):
     assert is_blank_bin_path(blank)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("value", ["/", ".", " /x", "x/ ", "bin"])
 def test_other_values_are_used_as_given(value):
     """A value with a component that is not blank names a directory, relative or not."""
     assert not is_blank_bin_path(value)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("blank", BLANK_VALUES)
 def test_a_blank_ash_bin_path_is_unset(blank, tmp_path, fresh_lookup):
     """ASH_BIN_PATH that is empty or only whitespace means the default directory."""
@@ -217,6 +227,7 @@ def _blank_environment(tmp_path, blank):
     return home, project, env
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("blank", BLANK_VALUES)
 def test_a_blank_ash_bin_path_does_not_point_into_the_working_directory(
     blank, tmp_path
@@ -268,6 +279,7 @@ def _install_in_a_new_process(tmp_path, blank, *args):
     return home, project, result, _flat(result.stdout + result.stderr)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("blank", BLANK_VALUES)
 def test_a_blank_ash_bin_path_installs_into_the_default_directory(blank, tmp_path):
     """The installer, in a new process: no directory named " " in the repository."""
@@ -278,6 +290,7 @@ def test_a_blank_ash_bin_path_installs_into_the_default_directory(blank, tmp_pat
     assert "export ASH_BIN_PATH" not in out, out
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "args",
     [
@@ -302,6 +315,7 @@ def test_a_blank_bin_path_option_installs_into_the_default_directory(args, tmp_p
     assert "export ASH_BIN_PATH" not in out, out
 
 
+@pytest.mark.unit
 def test_an_explicit_dot_bin_path_is_the_working_directory(tmp_path, fresh_lookup):
     """A dot names a directory: it is used as given, unlike "" or " "."""
     project = tmp_path / "project"
@@ -311,6 +325,7 @@ def test_an_explicit_dot_bin_path_is_the_working_directory(tmp_path, fresh_looku
     assert not (fresh_lookup / ".ash").exists()
 
 
+@pytest.mark.unit
 def test_a_console_script_beside_the_interpreter_is_found(
     tmp_path, monkeypatch, fresh_lookup
 ):
@@ -327,6 +342,7 @@ def test_a_console_script_beside_the_interpreter_is_found(
     assert subprocess_utils.find_executable("ferret-scan-standin") == tool.as_posix()
 
 
+@pytest.mark.unit
 def test_the_default_directory_gets_the_hint_when_ash_bin_path_points_elsewhere(
     tmp_path, fresh_lookup, monkeypatch
 ):
@@ -338,6 +354,7 @@ def test_the_default_directory_gets_the_hint_when_ash_bin_path_points_elsewhere(
     assert f"export ASH_BIN_PATH={shlex.quote(str(default))}" in _flat(result.output)
 
 
+@pytest.mark.unit
 def test_a_relative_ash_bin_path_gets_the_absolute_hint(
     tmp_path, fresh_lookup, monkeypatch
 ):
@@ -350,6 +367,7 @@ def test_a_relative_ash_bin_path_gets_the_absolute_hint(
     assert f"export ASH_BIN_PATH={shlex.quote(absolute)}" in _flat(result.output)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("quote", ["'", "‘", "’", "‚", "‛"])
 def test_the_powershell_line_doubles_every_quote_powershell_ends_a_string_on(
     quote, tmp_path, fresh_lookup
@@ -361,6 +379,7 @@ def test_the_powershell_line_doubles_every_quote_powershell_ends_a_string_on(
     assert f"$env:ASH_BIN_PATH = '{doubled}'" in hint, hint
 
 
+@pytest.mark.unit
 def test_the_hint_does_not_claim_tools_went_there(tmp_path, fresh_lookup):
     """A uv tool or a failed command puts nothing in the directory."""
     hint = dependencies._bin_path_hint(tmp_path / "bin", None)

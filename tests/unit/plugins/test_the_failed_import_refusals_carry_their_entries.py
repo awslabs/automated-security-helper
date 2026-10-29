@@ -27,6 +27,8 @@ from automated_security_helper.plugins.loader import (
     refuse_failed_plugin_imports,
 )
 
+pytestmark = pytest.mark.unit
+
 IMPORTS = "zz_entries_import_fake_mod"
 REGISTERS = "zz_entries_register_fake_mod"
 REMEDY = "or unset it in ASH_PLUGIN_MODULES."

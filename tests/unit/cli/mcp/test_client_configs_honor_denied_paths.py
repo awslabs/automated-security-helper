@@ -39,6 +39,8 @@ from automated_security_helper.cli.mcp.profile_registry import (
     set_profile_registry,
 )
 
+pytestmark = pytest.mark.unit
+
 SESSION = "client-1"
 
 BEDROCK_REGION = (

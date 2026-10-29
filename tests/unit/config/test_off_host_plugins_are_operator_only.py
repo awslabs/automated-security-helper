@@ -190,12 +190,14 @@ def _shipped_plugins() -> Dict[Plugin, type]:
     return found
 
 
+@pytest.mark.unit
 def test_the_inventory_finds_the_plugin_packages():
     """Control: the walk reaches every package, built-in and add-on."""
     names = {name for _, name in _shipped_plugins()}
     assert {"bandit", "snyk-code", "trivy-repo", "ferret-scan", "s3"} <= names
 
 
+@pytest.mark.unit
 def test_every_shipped_plugin_is_classified():
     shipped = set(_shipped_plugins())
     assert not set(OFF_HOST) & set(LOCAL)
@@ -206,6 +208,7 @@ def test_every_shipped_plugin_is_classified():
     assert sorted(set(OFF_HOST) | set(LOCAL)) == sorted(shipped), "stale entries"
 
 
+@pytest.mark.unit
 def test_a_local_plugin_that_declares_a_network_says_what_it_fetches():
     for plugin, plugin_class in _shipped_plugins().items():
         requirements = getattr(plugin_class, "sandbox_requirements", None)
@@ -213,6 +216,7 @@ def test_a_local_plugin_that_declares_a_network_says_what_it_fetches():
             assert plugin in FETCH_ONLY, plugin
 
 
+@pytest.mark.unit
 def test_every_off_host_plugin_is_always_denied():
     missing = [
         f"/{section}/{name}/**"
@@ -223,6 +227,7 @@ def test_every_off_host_plugin_is_always_denied():
 
 
 @pytest.mark.parametrize("plugin", sorted(OFF_HOST), ids=lambda p: "/".join(p))
+@pytest.mark.unit
 def test_no_profile_lets_a_client_configure_an_off_host_plugin(plugin):
     """Its section, its options and ``enabled: true`` are refused under any profile.
 
@@ -248,6 +253,7 @@ def test_no_profile_lets_a_client_configure_an_off_host_plugin(plugin):
             check_runtime_ops(ops, allowlist=policy, config=None)
 
 
+@pytest.mark.unit
 def test_control_a_local_plugin_stays_tunable():
     policy = RuntimeOverridesConfig(
         enabled=True, allowed_paths=["/**"], denied_paths=[]
@@ -640,6 +646,7 @@ def _scan_with_client_enabled(
 @pytest.mark.parametrize("change", _CHANGES_OVER_A_SECTION)
 @pytest.mark.parametrize("reporter", OFF_HOST_REPORTERS)
 @pytest.mark.usefixtures("mcp_server")
+@pytest.mark.integration
 def test_a_client_s_enabled_false_leaves_the_operator_s_reporter_running(
     tmp_path, aws_requests, other_traffic, ash_warnings, reporter, change
 ):
@@ -677,6 +684,7 @@ def test_a_client_s_enabled_false_leaves_the_operator_s_reporter_running(
 @pytest.mark.parametrize("change", _CHANGES)
 @pytest.mark.parametrize("reporter", OFF_HOST_REPORTERS)
 @pytest.mark.usefixtures("mcp_server")
+@pytest.mark.integration
 def test_a_client_s_enabled_false_runs_nothing_the_operator_did_not_enable(
     tmp_path, aws_requests, other_traffic, reporter, change
 ):
@@ -699,6 +707,7 @@ def test_a_client_s_enabled_false_runs_nothing_the_operator_did_not_enable(
 @pytest.mark.parametrize("change", _CHANGES)
 @pytest.mark.parametrize("reporter", OFF_HOST_REPORTERS)
 @pytest.mark.usefixtures("mcp_server")
+@pytest.mark.integration
 def test_a_client_s_enabled_true_is_refused(
     tmp_path, aws_requests, other_traffic, reporter, change
 ):
@@ -804,6 +813,7 @@ _CLIENT_DESTINATIONS = [
 @pytest.mark.parametrize("route", _ROUTES)
 @pytest.mark.parametrize("reporter, option, value", _CLIENT_DESTINATIONS)
 @pytest.mark.usefixtures("mcp_server")
+@pytest.mark.integration
 def test_a_client_cannot_aim_an_operator_s_reporter_elsewhere(
     tmp_path, aws_requests, other_traffic, reporter, option, value, route
 ):
@@ -835,6 +845,7 @@ def test_a_client_cannot_aim_an_operator_s_reporter_elsewhere(
 
 @pytest.mark.parametrize("route", _ROUTES)
 @pytest.mark.usefixtures("mcp_server")
+@pytest.mark.integration
 def test_enabled_false_sent_with_a_destination_is_refused(
     tmp_path, aws_requests, other_traffic, route
 ):
@@ -864,6 +875,7 @@ def test_enabled_false_sent_with_a_destination_is_refused(
 
 @pytest.mark.parametrize("route", _ROUTES)
 @pytest.mark.usefixtures("mcp_server")
+@pytest.mark.integration
 def test_a_client_cannot_configure_a_plugin_modules_reporter(
     tmp_path, aws_requests, other_traffic, route
 ):
@@ -897,6 +909,7 @@ def test_a_client_cannot_configure_a_plugin_modules_reporter(
 
 @pytest.mark.parametrize("route", _ROUTES)
 @pytest.mark.usefixtures("mcp_server")
+@pytest.mark.integration
 def test_control_a_client_still_sets_a_built_in_reporter(tmp_path, route):
     """Under the same allowlist, a built-in reporter's section is the client's to
     change: the scan runs."""
@@ -916,6 +929,7 @@ def test_control_a_client_still_sets_a_built_in_reporter(tmp_path, route):
 
 
 @pytest.mark.usefixtures("mcp_server")
+@pytest.mark.integration
 def test_control_the_operator_s_profile_still_enables_and_aims_s3(
     tmp_path, aws_requests, other_traffic
 ):

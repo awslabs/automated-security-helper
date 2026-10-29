@@ -65,6 +65,8 @@ if sys.version_info >= (3, 11):
 else:  # pragma: no cover - exercised only on 3.10
     import tomli as tomllib
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CODEBUILD = REPO_ROOT / "examples" / "AWSCodeBuild" / "buildspec.yml"
 CODEBUILD_README = REPO_ROOT / "examples" / "AWSCodeBuild" / "README.md"

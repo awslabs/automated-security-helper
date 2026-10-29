@@ -36,6 +36,8 @@ from automated_security_helper.core.scanner_inventory import (
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 
+pytestmark = pytest.mark.unit
+
 _TOOLS = "automated_security_helper.cli.mcp_tools"
 
 

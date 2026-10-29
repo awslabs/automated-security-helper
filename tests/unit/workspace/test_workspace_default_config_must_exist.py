@@ -22,6 +22,8 @@ from automated_security_helper.cli.main import app
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.workspace.resolver import resolve_workspace
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _no_ash_config_variable(monkeypatch):

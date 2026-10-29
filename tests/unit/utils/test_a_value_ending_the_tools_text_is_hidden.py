@@ -26,6 +26,8 @@ import pytest
 
 from automated_security_helper.utils import pre_installed_tool
 
+pytestmark = pytest.mark.unit
+
 #: The value's visible core: this spelling surviving anywhere is the leak.
 _CORE = "ops-canary-kq81"
 

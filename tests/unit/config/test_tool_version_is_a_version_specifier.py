@@ -34,6 +34,8 @@ from automated_security_helper.utils.uv_tool_runner import (
     checked_requirement,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _fresh_warnings():

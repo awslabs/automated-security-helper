@@ -24,6 +24,8 @@ from automated_security_helper.utils.subprocess_utils import _is_anchored
 from tests.utils import fake_tool_paths
 from tests.utils.fake_tool_paths import fake_tool_path
 
+pytestmark = pytest.mark.unit
+
 
 def test_a_posix_spelling_is_not_anchored_on_windows():
     assert not _is_anchored("/usr/bin/firejail", ntpath)

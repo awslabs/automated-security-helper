@@ -13,6 +13,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.markdown_rep
     MarkdownReporterConfigOptions,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _make_scanner_metric(
     name: str,

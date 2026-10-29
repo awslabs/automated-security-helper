@@ -39,6 +39,8 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.utils import get_scan_set as gss
 from automated_security_helper.utils.get_scan_set import scan_set
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 PluginContext.model_rebuild()
 

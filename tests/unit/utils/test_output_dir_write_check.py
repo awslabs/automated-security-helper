@@ -29,6 +29,7 @@ _NON_ROOT_ONLY = pytest.mark.skipif(
 )
 
 
+@pytest.mark.unit
 def test_control_a_writable_directory_is_not_refused_and_keeps_nothing(tmp_path):
     out = tmp_path / "out"
     out.mkdir()
@@ -38,6 +39,7 @@ def test_control_a_writable_directory_is_not_refused_and_keeps_nothing(tmp_path)
     assert sorted(path.name for path in out.iterdir()) == ["kept.txt"]
 
 
+@pytest.mark.unit
 @_NON_ROOT_ONLY
 def test_a_directory_without_write_permission_is_refused(tmp_path):
     out = tmp_path / "out"
@@ -53,6 +55,7 @@ def test_a_directory_without_write_permission_is_refused(tmp_path):
     assert left == []
 
 
+@pytest.mark.unit
 def test_a_directory_that_is_not_there_is_not_checked(tmp_path):
     assert output_dir_refusal(tmp_path / "not-yet") is None
     assert list(tmp_path.iterdir()) == []
@@ -71,6 +74,7 @@ print(output_dir_refusal(target))
 """
 
 
+@pytest.mark.integration
 def test_a_read_only_mount_is_refused(tmp_path):
     """A read-only file system refuses a write whatever the permissions say, root
     included: the child is root in its own namespace, and is still refused."""

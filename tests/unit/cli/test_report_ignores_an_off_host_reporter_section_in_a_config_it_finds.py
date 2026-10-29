@@ -29,6 +29,8 @@ import sys
 from pathlib import Path
 from typing import Dict, List
 
+import pytest
+
 from tests.unit.cli.off_host_plugin_support import (
     DEFAULT_ENDPOINT,
     FILE_ENDPOINT,
@@ -41,6 +43,8 @@ from tests.unit.cli.off_host_plugin_support import (
     write_results,
 )
 from tests.utils.helpers import importing_this_checkout
+
+pytestmark = pytest.mark.integration
 
 
 def _report(tmp_path: Path, site: Path, overrides: List[str]) -> Dict:

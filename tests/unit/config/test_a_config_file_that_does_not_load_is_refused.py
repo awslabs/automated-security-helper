@@ -39,6 +39,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 
+pytestmark = pytest.mark.unit
+
 #: Text no YAML parser reads: an unclosed flow sequence.
 UNPARSABLE = "project_name: [unclosed\n"
 #: How every refusal says it: where the parser stopped, and nothing the parser

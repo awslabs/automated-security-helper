@@ -31,6 +31,8 @@ from automated_security_helper.interactions.run_ash_scan import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 _ENV = ("ASH_DEBUG", "ASH_VERBOSE", "CI", "ASH_IN_CONTAINER")
 
 

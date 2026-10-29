@@ -443,7 +443,8 @@ ALLOWLIST: tuple[Entry, ...] = (
             "name=test-results-${{ inputs.os }}-"
             "${{ steps.runner-arch.outputs.label }}-"
             "py${{ inputs.python-version }}-"
-            "shard${{ inputs.shard }} path=test-results/"
+            "${{ inputs.marker }}-"
+            "shard${{ inputs.shard || '1of1' }} path=test-results/"
         ),
         reason=(
             "Test results and coverage data. No build output. The arch component "
@@ -451,8 +452,11 @@ ALLOWLIST: tuple[Entry, ...] = (
             "from RUNNER_ARCH. The shard component was added when the unit-test job "
             "was split into shards: each shard uploads its own test-results "
             "directory, and two uploads under one name fail, so the name carries "
-            "the shard (1of1 for a whole-suite run). The bytes and the path are "
-            "the same kind as before."
+            "the shard (1of1 for a run of a whole tier). The tier component (the "
+            "marker input: unit, integration or e2e) was added when the jobs were "
+            "split by test tier, since the unit, integration and e2e jobs of one "
+            "operating system and Python version would otherwise upload under one "
+            "name. The bytes and the path are the same kind as before."
         ),
     ),
     Entry(

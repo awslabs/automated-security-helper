@@ -23,6 +23,8 @@ from automated_security_helper.core import exceptions
 from automated_security_helper.utils import get_scan_set
 from automated_security_helper.utils.scan_output_dirs import scan_set_of
 
+pytestmark = pytest.mark.unit
+
 
 def _context(tmp_path):
     source = tmp_path / "src"

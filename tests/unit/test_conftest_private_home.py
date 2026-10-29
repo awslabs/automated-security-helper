@@ -33,6 +33,8 @@ from automated_security_helper.core import constants
 from automated_security_helper.utils.download_utils import receipt_root, write_receipt
 from tests.utils import real_home_guard
 
+pytestmark = pytest.mark.unit
+
 #: The shared caches as the run set them, read when pytest imported this module. A unit
 #: test has a uv cache of its own inside its home instead (tests/unit/conftest.py), so
 #: only the value at import is the run's.

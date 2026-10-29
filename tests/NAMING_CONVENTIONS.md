@@ -24,6 +24,67 @@ tests/
 └── conftest.py            # Fixtures shared by every test
 ```
 
+## Test tiers
+
+Every test belongs to exactly one of three tiers, and says so with a marker. The tier
+is decided by what the test does when it runs, not by the directory it sits in.
+
+- `unit`: runs in-process. It starts no subprocess (no `subprocess.run`, no child
+  Python, no `git`, no `ash` executable), touches no network, runs no real external
+  tool such as bandit, semgrep, trivy or docker, and writes only under `tmp_path`.
+  Mocks, monkeypatch, fakes, in-memory fixtures and Typer's `CliRunner` calling the app
+  in-process are all unit, as long as the code path they drive spawns nothing real. A
+  test that reads files of this repository (a docs page, a workflow YAML, `pyproject.toml`)
+  in-process is unit.
+- `integration`: one component with a real dependency. A real external tool or a
+  product subprocess is started (a child Python, a child pytest, `git`, the `ash` CLI
+  run as a subprocess for one command), a sandbox backend is exercised for real,
+  boto3 or moto stands up an AWS stand-in, or a converter invokes a tool. A test that
+  cannot be classed from its text is integration.
+- `e2e`: the whole product, driven as an operator would drive it. The `ash` CLI runs as
+  a subprocess against a real target tree with real scanners and its output is
+  asserted, the container image is built or run, or the MCP server is started as a
+  child process and driven through a client. A test of one scanner or one command
+  against one real tool is integration, not e2e.
+
+Mark a file whose tests are all one tier with a module-level `pytestmark`:
+
+```python
+import pytest
+
+pytestmark = pytest.mark.unit
+```
+
+Mark a mixed file per test or per class. A class decorator covers every method of the
+class, so do not also mark its methods, and a parametrized test takes one marker:
+
+```python
+@pytest.mark.integration
+def test_scan_runs_the_real_tool(tmp_path): ...
+
+
+class TestRendering:
+    pytestmark = pytest.mark.unit
+```
+
+There is no directory default. A test with no tier marker, or with more than one (a
+module-level `integration` and a function-level `unit` count as two), makes collection
+refuse the whole session with a usage error that lists the first offenders, so nothing
+runs until each one has exactly one. The check is in `tests/conftest.py` and is pinned
+by `tests/unit/test_every_test_carries_one_tier_marker.py`. Other markers (`slow`,
+`skipif`, `usefixtures` and so on) are separate and stay as they are. `--strict-markers`
+is on, so a marker has to be registered in `pytest.ini` or in a `conftest.py` before a
+test can use it.
+
+CI selects its jobs by tier: `-m unit` runs unsharded for each operating system and
+Python version, `-m integration` runs sharded, and `-m e2e` runs unsharded. Locally,
+integration and e2e tests are skipped unless `--run-integration` is given:
+
+```bash
+uv run pytest -m unit
+uv run pytest --run-integration -m "integration or e2e"
+```
+
 ## File Naming
 
 ### Unit Tests

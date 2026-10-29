@@ -38,6 +38,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scann
 )
 from automated_security_helper.utils import uv_tool_runner
 
+pytestmark = pytest.mark.unit
+
 UV = "/opt/ash-env/bin/uv"
 
 

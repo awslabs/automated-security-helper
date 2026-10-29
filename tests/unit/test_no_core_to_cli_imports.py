@@ -3,6 +3,10 @@
 import ast
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 def _collect_imports(tree: ast.Module) -> list[str]:
     imports = []

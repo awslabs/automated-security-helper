@@ -88,6 +88,7 @@ print(json.dumps({
 """
 
 
+@pytest.mark.unit
 def test_the_sweep_covers_the_package():
     """The positive control: the list is the package, not a handful of modules."""
     assert len(ENTRY_MODULES) > 150, len(ENTRY_MODULES)
@@ -96,6 +97,7 @@ def test_the_sweep_covers_the_package():
 
 
 @pytest.mark.parametrize("module", ENTRY_MODULES)
+@pytest.mark.integration
 def test_importing_a_module_first_loses_no_plugin_group(module):
     completed = subprocess.run(  # nosec B603 - fixed argv, the test's own interpreter
         [sys.executable, "-I", "-c", importing_this_checkout(DRIVER), module],

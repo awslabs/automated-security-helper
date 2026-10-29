@@ -51,6 +51,8 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_con
 )
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_runner
 
+pytestmark = pytest.mark.integration
+
 PROBE_MODULE = "ashprobe_exporter"
 PROBE_EXPORTER = f"{PROBE_MODULE}.ProbeExporter"
 

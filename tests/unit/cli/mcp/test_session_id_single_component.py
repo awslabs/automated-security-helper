@@ -53,6 +53,8 @@ from automated_security_helper.cli.mcp.session_identity import (
     validate_path_component,
 )
 
+pytestmark = pytest.mark.unit
+
 # Shapes a client legitimately mints. A UUID, a JWT and a base64url token all
 # have to keep working; the charset was chosen against this list rather than
 # tightened until the tests passed.

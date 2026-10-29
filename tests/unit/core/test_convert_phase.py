@@ -7,6 +7,8 @@ import pytest
 from automated_security_helper.core.phases.convert_phase import ConvertPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 AshAggregatedResults.model_rebuild()
 
 

@@ -43,6 +43,8 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import
 from automated_security_helper.utils.error_text import config_environment_values
 from automated_security_helper.utils.redacted_model import NO_RICH_REPR
 
+pytestmark = pytest.mark.unit
+
 #: Values the file reads from the environment: an ignore path's reason (a
 #: section's nested list), a scanner option (a section a plugin module's
 #: scanner reads), and a reporter option.

@@ -25,6 +25,8 @@ from __future__ import annotations
 import hashlib
 import json
 
+import pytest
+
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -49,6 +51,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 from automated_security_helper.utils.finding_identity import identity_keys
+
+pytestmark = pytest.mark.unit
 
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()

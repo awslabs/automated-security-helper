@@ -94,6 +94,7 @@ JUDGED_CASES = [
 ]
 
 
+@pytest.mark.unit
 class TestCfnNagRefusesJudgedCauseCodes:
     """cfn_nag's band accepts any non-negative count; the judged codes are
     all non-negative, so without reading the cause flag every one of these
@@ -138,6 +139,7 @@ class TestCfnNagRefusesJudgedCauseCodes:
         assert cfn_scanner._sarif_execution_successful() is True
 
 
+@pytest.mark.unit
 class TestNpmAuditRefusesJudgedCauseCodes:
     """npm audit's 0-31 band already excludes 124, 130 and 125; these cells
     keep that refusal pinned to the flag, so a future widening of the band
@@ -153,6 +155,7 @@ class TestNpmAuditRefusesJudgedCauseCodes:
         assert npm_scanner._sarif_execution_successful() is False
 
 
+@pytest.mark.unit
 class TestAStopBeforeAnyTargetCountedIsNotASuccess:
     """A scan stopped before it counted a target has ``targets_attempted``
     None or 0 and nothing failed, so the counters alone read as
@@ -252,6 +255,7 @@ def _complete_cfn_nag_sarif() -> str:
     )
 
 
+@pytest.mark.integration
 def test_a_timed_out_run_with_complete_output_is_not_successful(
     plugin_context, tmp_path, monkeypatch
 ):

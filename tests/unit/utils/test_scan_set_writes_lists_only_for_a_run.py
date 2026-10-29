@@ -21,10 +21,14 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.utils.get_scan_set import main, scan_set
 from automated_security_helper.utils.scan_output_dirs import scan_set_of
+
+pytestmark = pytest.mark.unit
 
 AshConfig.model_rebuild()
 PluginContext.model_rebuild()

@@ -15,8 +15,12 @@ import re
 from pathlib import Path
 from typing import List
 
+import pytest
+
 import automated_security_helper
 from automated_security_helper.utils import subprocess_utils
+
+pytestmark = pytest.mark.unit
 
 #: The spellings: the "may still be running" tail of every reason, and a string
 #: literal that opens with the was-killed ending.

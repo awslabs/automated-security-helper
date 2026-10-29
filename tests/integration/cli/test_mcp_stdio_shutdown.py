@@ -59,7 +59,10 @@ from tests.utils.processes import process_running
 if sys.platform == "win32":
     pytest.skip("POSIX signals", allow_module_level=True)
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals"),
+]
 
 STARTUP_TIMEOUT_SECONDS = 180
 

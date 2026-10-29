@@ -64,6 +64,8 @@ from automated_security_helper.core.resource_management.scan_tracking import (
 from automated_security_helper.interactions import run_ash_scan as ras
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 _TOOLS = "automated_security_helper.cli.mcp_tools"
 HOLD_SECONDS = 30.0
 # The threshold the entry is registered with. ``finish_scan`` replaces it only with a

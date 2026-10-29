@@ -9,6 +9,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanne
 )
 from automated_security_helper.models.core import IgnorePathWithReason
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def test_bandit_scanner(test_plugin_context):

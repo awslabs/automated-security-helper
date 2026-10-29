@@ -18,6 +18,8 @@ from pydantic import ValidationError
 
 from automated_security_helper.config.ash_config import AshConfig
 
+pytestmark = pytest.mark.unit
+
 SPELLINGS = ["cdk-nag", "cdk_nag", "CdkNag", "CDK-NAG", "cdknag"]
 
 

@@ -6,6 +6,8 @@ from pydantic import ValidationError
 
 from automated_security_helper.models.core import AshSuppression
 
+pytestmark = pytest.mark.unit
+
 
 class TestSuppression:
     """Tests for the Suppression model."""

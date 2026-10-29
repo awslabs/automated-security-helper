@@ -62,6 +62,8 @@ from tests.utils.container_scan import (
 )
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 FLAG = "--config-file-from-another-checkout"
 #: An option the scan inside no longer knows: a file whose link walk stopped is
 #: marked FLAG like any file in another checkout.

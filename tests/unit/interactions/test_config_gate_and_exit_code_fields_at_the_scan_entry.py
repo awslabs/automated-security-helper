@@ -29,6 +29,8 @@ from automated_security_helper.interactions import run_ash_scan as ras
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 from tests.utils.helpers import stand_in_host_ids
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 

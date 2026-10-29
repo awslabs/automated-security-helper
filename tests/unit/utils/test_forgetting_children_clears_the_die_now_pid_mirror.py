@@ -19,11 +19,14 @@ import signal
 import subprocess
 import sys
 
+import pytest
+
 from automated_security_helper.core import cancellation
 from automated_security_helper.utils import subprocess_utils
 from tests.utils.processes import forget_running_groups
 
 
+@pytest.mark.integration
 def test_forget_running_groups_clears_a_recorded_pid():
     """A reaped child's pid leaves the pid mirror when the registry forgets
     it, exactly as the group mirror does."""
@@ -52,6 +55,7 @@ def test_forget_running_groups_clears_a_recorded_pid():
             subprocess_utils._RUNNING_GROUPS.pop(process.pid, None)
 
 
+@pytest.mark.unit
 def test_the_die_now_kill_signals_recorded_pids_one_at_a_time(monkeypatch):
     """The default-kill branch kills recorded plain pids with ``os.kill``,
     never ``killpg``: these children lead no group of their own."""
@@ -76,6 +80,7 @@ def test_the_die_now_kill_signals_recorded_pids_one_at_a_time(monkeypatch):
     assert killed_groups == [], killed_groups
 
 
+@pytest.mark.unit
 def test_a_refused_pid_kill_does_not_raise(monkeypatch):
     """A pid already gone, or one the kernel refuses, is left to its end:
     the same OSError pass as the group kill, because a raise here would
@@ -95,6 +100,7 @@ def test_a_refused_pid_kill_does_not_raise(monkeypatch):
         cancellation.discard_tool_pid(stand_in)
 
 
+@pytest.mark.unit
 def test_recording_a_pid_twice_keeps_one_entry(monkeypatch):
     """The record/discard pair keeps the same idempotence contract as the
     group pair, so a retried spawn does not double a kill target."""

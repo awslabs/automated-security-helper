@@ -46,6 +46,8 @@ from automated_security_helper.core.exceptions import ASHConfigSourceError
 from automated_security_helper.utils.log import ASH_LOGGER
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 OWN_GRANT = "/opt/operator-own-grant"
 BASE_SCANNER = "grype"
 #: How every warning that drops a grant says to keep it.

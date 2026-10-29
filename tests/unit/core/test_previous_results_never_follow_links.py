@@ -25,6 +25,8 @@ from automated_security_helper.core.previous_results import (
     PreviousResults,
 )
 
+pytestmark = pytest.mark.unit
+
 PLANTS = [
     "top_reports_link",
     "held_dir_link",

@@ -33,11 +33,14 @@ import pytest
 from automated_security_helper.core import cancellation
 from automated_security_helper.core.cancellation import CancelEvent
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="the installer is deliberately a no-op on Windows: TerminateProcess "
-    "ends a process without running Python signal handlers",
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="the installer is deliberately a no-op on Windows: TerminateProcess "
+        "ends a process without running Python signal handlers",
+    ),
+]
 
 #: Planted where an operator's environment value would sit in the env file.
 _CANARY = "operator-value-mz84q"

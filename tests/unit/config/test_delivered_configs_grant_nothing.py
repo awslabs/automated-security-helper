@@ -32,6 +32,8 @@ from automated_security_helper.config import resolve_config as rc
 from automated_security_helper.config.ash_config import SandboxConfig
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 #: The sandbox settings every client file writes: the four grants and a
 #: network_scanners list. Each differs from the default.
 GRANTS: Dict[str, Any] = {

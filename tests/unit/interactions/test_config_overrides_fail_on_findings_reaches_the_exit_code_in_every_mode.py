@@ -33,6 +33,8 @@ from automated_security_helper.utils.inner_run_outcome import OUTER_RUN_ID_ENV
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 from tests.utils.helpers import stand_in_host_ids
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 _ENGINE = (

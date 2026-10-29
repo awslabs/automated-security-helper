@@ -116,6 +116,7 @@ def _patch_spawn(monkeypatch, fake) -> None:
     monkeypatch.setattr(f"{SUBPROCESS_UTILS}.run_command_with_output_handling", fake)
 
 
+@pytest.mark.unit
 def test_one_child_answers_the_whole_batch(tmp_path, monkeypatch):
     templates = _templates(tmp_path, 3)
     answers = {t.as_posix(): NOT_CFN for t in templates}
@@ -131,6 +132,7 @@ def test_one_child_answers_the_whole_batch(tmp_path, monkeypatch):
     assert calls[0][:3] == [sys.executable, "-c", cdk_nag_worker._CHILD_BOOTSTRAP]
 
 
+@pytest.mark.unit
 def test_the_scratch_directory_is_removed(tmp_path, monkeypatch):
     template = _templates(tmp_path, 1)[0]
     _patch_spawn(monkeypatch, _fake_child({template.as_posix(): NOT_CFN}, []))
@@ -140,6 +142,7 @@ def test_the_scratch_directory_is_removed(tmp_path, monkeypatch):
     assert not (outdir / ".cdk-nag-worker").exists()
 
 
+@pytest.mark.unit
 def test_a_child_that_died_before_answering_fails_everything_once(
     tmp_path, monkeypatch
 ):
@@ -160,6 +163,7 @@ def test_a_child_that_died_before_answering_fails_everything_once(
     assert len(calls) == 1, "a child that answered nothing must not be restarted"
 
 
+@pytest.mark.unit
 def test_a_child_that_died_part_way_keeps_its_answers(tmp_path, monkeypatch):
     """The child answered the first template and died on the second. The first keeps
     its answer, the second fails, and a new child takes the third."""
@@ -184,6 +188,7 @@ def test_a_child_that_died_part_way_keeps_its_answers(tmp_path, monkeypatch):
     assert len(calls) == 2
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "limit,token",
     [
@@ -217,6 +222,7 @@ def test_a_timed_out_child_fails_what_it_had_not_answered(
     assert timeouts == [limit], "the timeout reaches the spawn and is not retried"
 
 
+@pytest.mark.unit
 def test_the_timeout_line_prints_the_shared_limit_token(tmp_path, monkeypatch):
     """The worker's timeout line prints its limit through the one formatter
     every timeout message uses (error_text.timeout_limit_token), so it cannot
@@ -262,6 +268,7 @@ def _could_not_stop_child(answers_by_template, answer_first: int):
     return fake
 
 
+@pytest.mark.unit
 def test_a_timeout_the_worker_could_not_stop_is_never_said_killed(
     tmp_path, monkeypatch
 ):
@@ -283,6 +290,7 @@ def test_a_timeout_the_worker_could_not_stop_is_never_said_killed(
     assert "was killed" not in message, message
 
 
+@pytest.mark.unit
 def test_a_stopped_worker_timeout_keeps_was_killed(tmp_path, monkeypatch):
     """The control: a timeout whose stop worked IS a killed child."""
     templates = _templates(tmp_path, 2)
@@ -303,6 +311,7 @@ def test_a_stopped_worker_timeout_keeps_was_killed(tmp_path, monkeypatch):
     assert "may still be running" not in message, message
 
 
+@pytest.mark.unit
 def test_the_scanner_passes_its_scan_timeout():
     import inspect
 
@@ -314,6 +323,7 @@ def test_the_scanner_passes_its_scan_timeout():
     assert "timeout=self._effective_scan_timeout()" in source
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("content", ["{not json", "[]", '{"protocol": 999}\n'])
 def test_a_malformed_response_fails_the_batch_once(tmp_path, monkeypatch, content):
     templates = _templates(tmp_path, 3)
@@ -335,6 +345,7 @@ def test_a_malformed_response_fails_the_batch_once(tmp_path, monkeypatch, conten
     assert len(calls) == 1
 
 
+@pytest.mark.unit
 def test_a_symlinked_response_is_not_followed(tmp_path, monkeypatch):
     """The response file sits where a sandboxed child can write. Replacing it with a
     link must not make the parent read the link's target."""
@@ -359,6 +370,7 @@ def test_a_symlinked_response_is_not_followed(tmp_path, monkeypatch):
             _call(template, outdir)
 
 
+@pytest.mark.unit
 def test_every_spelling_of_a_template_shares_the_batch(tmp_path, monkeypatch):
     """The scanner lists templates as posix strings and passes Path objects; on
     Windows ``str(Path)`` has backslashes. Every spelling has to find the batch, or
@@ -380,6 +392,7 @@ def test_every_spelling_of_a_template_shares_the_batch(tmp_path, monkeypatch):
     )
 
 
+@pytest.mark.integration
 def test_control_a_child_that_keeps_sys_path_0_imports_from_the_scanned_directory(
     tmp_path, monkeypatch
 ):
@@ -422,6 +435,7 @@ def _run_from_a_planted_repository(tmp_path, monkeypatch):
     return marker
 
 
+@pytest.mark.integration
 def test_the_child_does_not_import_from_the_scanned_directory(tmp_path, monkeypatch):
     """A real child, started from a directory holding modules that leave a mark when
     imported. Under ``python -m`` the working directory is first on the import path,
@@ -451,6 +465,7 @@ def test_the_child_does_not_import_from_the_scanned_directory(tmp_path, monkeypa
     assert response is not None and response.failure is not None
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("kind", "type_name", "message", "base"),
     [
@@ -505,6 +520,7 @@ def _fields_set(model) -> object:
     return None
 
 
+@pytest.mark.unit
 def test_results_and_failure_round_trip_unchanged():
     """Shaped like a wrapper finding: explicit ``suppressions=None``, enums, a region
     with a snippet, and a property bag carrying extra keys."""
@@ -558,6 +574,7 @@ def test_results_and_failure_round_trip_unchanged():
     assert cdk_nag_worker._answer_for_response(None) == {"status": "not-cloudformation"}
 
 
+@pytest.mark.unit
 def test_logs_are_replayed_with_their_origin(tmp_path, monkeypatch, caplog):
     template = _templates(tmp_path, 1)[0]
     answers = {
@@ -588,6 +605,7 @@ def test_logs_are_replayed_with_their_origin(tmp_path, monkeypatch, caplog):
     assert records[0].lineno == 742
 
 
+@pytest.mark.unit
 def test_template_names_match_get_shortest_name_in_the_parent(tmp_path, monkeypatch):
     """Built from the parent's directory, then used from another one, as the child
     does."""
@@ -606,6 +624,7 @@ def test_template_names_match_get_shortest_name_in_the_parent(tmp_path, monkeypa
     assert emulated(inside) == "cfn/t.yaml"
 
 
+@pytest.mark.integration
 def test_a_real_child_reports_a_failed_cdk_nag_import(tmp_path, monkeypatch, caplog):
     """End to end, with a real child. A ``cdk_nag`` that cannot be imported is first on
     the child's path, so the outcome does not depend on whether the cdk extra is
@@ -632,6 +651,7 @@ def test_a_real_child_reports_a_failed_cdk_nag_import(tmp_path, monkeypatch, cap
     assert not (outdir / ".cdk-nag-worker").exists()
 
 
+@pytest.mark.integration
 def test_the_child_is_started_through_the_sandbox_choke_point(tmp_path):
     """An active sandbox scope rewrites the child's command. The fake backend replaces
     it with a process that exits 3, so the batch can only fail with exit 3 if the
@@ -680,6 +700,7 @@ def test_the_child_is_started_through_the_sandbox_choke_point(tmp_path):
     ]
 
 
+@pytest.mark.unit
 def test_the_scanner_declares_a_sandboxable_no_network_child():
     from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
         CdkNagScanner,
@@ -695,6 +716,7 @@ def test_the_scanner_declares_a_sandboxable_no_network_child():
     )
 
 
+@pytest.mark.unit
 def test_the_worker_refuses_a_request_from_another_protocol(tmp_path, capsys):
     request = tmp_path / "request.json"
     request.write_text(json.dumps({"protocol": 999}), encoding="utf-8")
@@ -703,6 +725,7 @@ def test_the_worker_refuses_a_request_from_another_protocol(tmp_path, capsys):
     assert "protocol" in capsys.readouterr().err
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("stale", ["file", "link"])
 def test_a_response_already_there_is_an_error_result_not_a_traceback(
     tmp_path, capsys, stale
@@ -738,6 +761,7 @@ def test_a_response_already_there_is_an_error_result_not_a_traceback(
         assert response.read_text() == "stale\n"
 
 
+@pytest.mark.unit
 def test_each_child_gets_a_directory_of_its_own(tmp_path, monkeypatch):
     """A retry's directory is new: one already at its name is not reused."""
     import uuid

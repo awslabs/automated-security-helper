@@ -57,6 +57,8 @@ from automated_security_helper.models.asharp_model import (
 )
 from automated_security_helper.utils.atomic_write import write_text_atomically
 
+pytestmark = pytest.mark.unit
+
 SCANNER_NAMES = ("bandit", "detect-secrets", "semgrep")
 PAD_BYTES = 1_000_000
 MIN_OVERLAPPING_READS = 20

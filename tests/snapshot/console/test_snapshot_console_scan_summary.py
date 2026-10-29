@@ -53,6 +53,8 @@ from tests.snapshot.console.console_inputs import (
     stale_records,
 )
 
+pytestmark = pytest.mark.unit
+
 SCAN_STARTED = 1_000.0
 SCAN_FINISHED = 1_042.5
 

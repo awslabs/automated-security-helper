@@ -21,6 +21,8 @@ import pytest
 from automated_security_helper.interactions import run_ash_scan as mod
 from automated_security_helper.utils import subprocess_utils
 
+pytestmark = pytest.mark.unit
+
 
 class Stop(Exception):
     pass

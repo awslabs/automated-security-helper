@@ -51,6 +51,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 
+pytestmark = pytest.mark.unit
+
 MODULE = "automated_security_helper.plugin_modules.ash_builtin.reporters.ocsf_reporter"
 
 AshAggregatedResults.model_rebuild()

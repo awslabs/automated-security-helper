@@ -45,10 +45,13 @@ from tests.utils.helpers import bound_run_command
 # stand-in that exits 1 (tests/utils/tool_guard.py GUARDED_TOOLS). The module is
 # listed in tests/unit/conftest.py REAL_TOOL_MODULES; the HOME check still applies,
 # and the tools write only under the HOME the `machine` fixture gives them.
-pytestmark = pytest.mark.runs_real_tools(
-    reason="what the real npm and gem read from their working directory is what "
-    "these tests measure"
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.runs_real_tools(
+        reason="what the real npm and gem read from their working directory is what "
+        "these tests measure"
+    ),
+]
 
 #: Variables through which the operator's environment could set the same settings,
 #: cleared so the planted file and the user file are the only sources.

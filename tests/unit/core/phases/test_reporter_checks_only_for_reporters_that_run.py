@@ -72,6 +72,8 @@ from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import load_plugins
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 
+pytestmark = pytest.mark.unit
+
 AWS_REPORTERS = (
     BedrockSummaryReporter,
     CloudWatchLogsReporter,

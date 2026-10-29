@@ -14,7 +14,11 @@ import base64
 import re
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.utils.tool_downloads import _DIGESTS, TOOL_VERSIONS
+
+pytestmark = pytest.mark.unit
 
 NIX_CFN_GUARD = Path(__file__).resolve().parents[3] / "nix" / "cfn-guard.nix"
 

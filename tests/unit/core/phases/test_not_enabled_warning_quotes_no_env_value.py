@@ -24,6 +24,8 @@ import pytest
 
 from tests.utils.helpers import importing_this_checkout
 
+pytestmark = pytest.mark.integration
+
 CANARY = "ash-canary-zq9"
 AWS_PLUGIN_MODULE = "automated_security_helper.plugin_modules.ash_aws_plugins"
 #: The control for the scan: the warning was written, for this reporter.

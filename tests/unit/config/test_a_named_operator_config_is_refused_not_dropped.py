@@ -20,6 +20,8 @@ import pytest
 from automated_security_helper.config.resolve_config import _load_operator_config
 from automated_security_helper.core.exceptions import ASHConfigSourceError
 
+pytestmark = pytest.mark.unit
+
 
 def _repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"

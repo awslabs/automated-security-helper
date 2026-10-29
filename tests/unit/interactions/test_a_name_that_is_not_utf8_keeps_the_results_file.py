@@ -31,6 +31,8 @@ import pytest
 from tests.utils.helpers import checkout_env
 from tests.utils.isolated_tool_env import network_containment
 
+pytestmark = pytest.mark.integration
+
 #: For the tests that plant the file whose name is not UTF-8.
 _NO_NON_UTF8_NAMES = pytest.mark.skipif(
     os.name == "nt",

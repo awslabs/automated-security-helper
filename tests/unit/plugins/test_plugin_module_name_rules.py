@@ -38,6 +38,8 @@ from automated_security_helper.plugins.loader import (
     scan_plugin_filter,
 )
 
+pytestmark = pytest.mark.unit
+
 PLUGIN_ROOT = "automated_security_helper.plugin_modules"
 SNYK_PACKAGE = f"{PLUGIN_ROOT}.ash_snyk_plugins"
 

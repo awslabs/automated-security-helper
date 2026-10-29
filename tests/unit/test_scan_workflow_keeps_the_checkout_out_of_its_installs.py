@@ -214,6 +214,7 @@ def _uv_config_problem(sandbox: ga.StepSandbox, call: dict[str, Any]) -> str | N
     )
 
 
+@pytest.mark.integration
 class TestToolInstallsRunOutsideTheCheckout:
     @pytest.mark.parametrize("config", CONFIG_INPUTS)
     @pytest.mark.parametrize("step_name", INSTALL_STEPS)
@@ -253,6 +254,7 @@ class TestToolInstallsRunOutsideTheCheckout:
         )
 
 
+@pytest.mark.integration
 class TestHelperCodeComesFromTheInstalledAsh:
     @pytest.mark.parametrize("step_name", PYTHON_STEPS)
     def test_python_started_by_the_scan_job_does_not_import_from_the_checkout(
@@ -304,6 +306,7 @@ _FROZEN_NO_CONFIG = (
 )
 
 
+@pytest.mark.integration
 class TestTheHarnessCanFail:
     """The predicates above must reject the pre-fix shape and accept the fixed shapes."""
 
@@ -331,6 +334,7 @@ class TestTheHarnessCanFail:
         assert _uv_config_problem(sandbox, call) is None
 
 
+@pytest.mark.unit
 class TestUvItselfIsNotChosenByTheCheckout:
     """setup-uv's own default reads the checkout.
 
@@ -387,6 +391,7 @@ class TestUvItselfIsNotChosenByTheCheckout:
             )
 
 
+@pytest.mark.unit
 class TestRubyIsNotChosenByTheCheckout:
     """setup-ruby's defaults read version files in the checkout.
 
@@ -427,6 +432,7 @@ class TestRubyIsNotChosenByTheCheckout:
             )
 
 
+@pytest.mark.integration
 class TestOnlyTheAshStepsSeeTheConfig:
     """ASH_CONFIG is set on the scan and report steps and nowhere else.
 

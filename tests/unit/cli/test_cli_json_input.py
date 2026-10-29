@@ -32,6 +32,8 @@ from automated_security_helper.cli.scan import run_ash_scan_cli_command
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.core.enums import ExecutionStrategy, RunMode
 
+pytestmark = pytest.mark.unit
+
 RUN_ASH_SCAN = "automated_security_helper.cli.scan.run_ash_scan"
 
 

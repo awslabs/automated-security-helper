@@ -25,6 +25,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List
 
+import pytest
 import yaml
 
 from automated_security_helper.config.reporter_trust import (
@@ -44,6 +45,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Tool,
     ToolComponent,
 )
+
+pytestmark = pytest.mark.unit
 
 MODULE = (
     "automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter"

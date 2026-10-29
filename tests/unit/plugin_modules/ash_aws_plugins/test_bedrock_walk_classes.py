@@ -29,6 +29,8 @@ from tests.unit.plugin_modules.ash_aws_plugins.test_bedrock_summary_reporter_pat
     sarif_model,
 )
 
+pytestmark = pytest.mark.unit
+
 URL = "https://bedrock-runtime.invalid/model/x/converse"
 OK = {
     "output": {

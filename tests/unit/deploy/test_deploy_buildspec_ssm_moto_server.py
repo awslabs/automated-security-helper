@@ -142,6 +142,7 @@ def secure_parameter(ssm, unique_name) -> Callable[[str], str]:
     return _put
 
 
+@pytest.mark.integration
 class TestByteExactness:
     def test_written_config_is_byte_identical_to_the_parameter(
         self, child_env: dict[str, str], secure_parameter, tmp_path: pathlib.Path
@@ -204,6 +205,7 @@ class TestByteExactness:
         assert lines[2] == "  severity_threshold: MEDIUM", lines
 
 
+@pytest.mark.integration
 class TestDecryption:
     def test_the_value_is_decrypted_and_not_the_ciphertext_marker(
         self, child_env: dict[str, str], secure_parameter, ssm, tmp_path: pathlib.Path
@@ -261,6 +263,7 @@ class TestDecryption:
         assert config.read_bytes() == CONFIG_YAML.encode("utf-8")
 
 
+@pytest.mark.integration
 class TestBranches:
     def test_no_parameter_supplied_writes_the_defaults_document(
         self, child_env: dict[str, str], tmp_path: pathlib.Path
@@ -335,6 +338,7 @@ class TestBranches:
         assert config.read_bytes() == b"", "the failed read leaves it empty"
 
 
+@pytest.mark.unit
 class TestOneReadEverywhere:
     def test_the_buildspec_and_the_mcp_entrypoint_use_the_same_read(self):
         """A config materialized by a buildspec cannot differ from one the

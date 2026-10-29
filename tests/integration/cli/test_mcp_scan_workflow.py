@@ -89,6 +89,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 # The AWS documentation's example secret key. detect-secrets flags it, which is what
 # makes the findings assertions below real, and it is published as an example so
 # committing it leaks nothing.

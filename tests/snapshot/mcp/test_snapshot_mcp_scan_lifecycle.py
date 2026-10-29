@@ -40,6 +40,8 @@ from tests.snapshot.mcp.mcp_snapshot_support import (
     write_results,
 )
 
+pytestmark = pytest.mark.unit
+
 _LAUNCHER = "automated_security_helper.interactions.run_ash_scan.run_ash_scan"
 
 

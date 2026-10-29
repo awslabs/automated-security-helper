@@ -16,6 +16,8 @@ After the fix, a HIGH issue_severity MUST take priority over level=warning
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
@@ -36,6 +38,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.sarif_utils import (
     get_severity_metrics_from_sarif,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _build_sarif_report(

@@ -91,6 +91,7 @@ _CONVERSION_ERRORS = pytest.mark.parametrize(
 )
 
 
+@pytest.mark.unit
 @_CONVERSION_ERRORS
 def test_the_uv_runner_keeps_both_flags_of_a_signaled_post_run_failure(
     uv_runner, tmp_path, error
@@ -118,6 +119,7 @@ def test_the_uv_runner_keeps_both_flags_of_a_signaled_post_run_failure(
     assert result.returncode == -10, result
 
 
+@pytest.mark.unit
 @_CONVERSION_ERRORS
 def test_the_uv_runner_copies_the_signal_of_a_signaled_only_response(
     uv_runner, tmp_path, error
@@ -141,6 +143,7 @@ def test_the_uv_runner_copies_the_signal_of_a_signaled_only_response(
     assert getattr(result, "post_run_error", False) is False, result
 
 
+@pytest.mark.unit
 @_CONVERSION_ERRORS
 def test_a_timed_out_response_with_stray_flags_stays_a_timeout(
     uv_runner, tmp_path, error
@@ -167,6 +170,7 @@ def test_a_timed_out_response_with_stray_flags_stays_a_timeout(
     assert getattr(result, "timed_out", False) is True, result
 
 
+@pytest.mark.unit
 @_CONVERSION_ERRORS
 def test_a_timed_out_response_does_not_take_a_signal_label(uv_runner, tmp_path, error):
     """The signal copy rides only the types that carry the ending (signaled and
@@ -192,6 +196,7 @@ def test_a_timed_out_response_does_not_take_a_signal_label(uv_runner, tmp_path, 
     assert getattr(result, "signal", None) is None, result
 
 
+@pytest.mark.unit
 @_CONVERSION_ERRORS
 def test_a_cancelled_response_with_stray_flags_stays_a_cancel(
     uv_runner, tmp_path, error
@@ -221,6 +226,7 @@ def test_a_cancelled_response_with_stray_flags_stays_a_cancel(
     assert getattr(result, "signal", None) is None, result
 
 
+@pytest.mark.unit
 @_CONVERSION_ERRORS
 def test_a_rejected_result_with_a_stray_signal_stays_rejected(
     uv_runner, tmp_path, error
@@ -251,6 +257,7 @@ def test_a_rejected_result_with_a_stray_signal_stays_rejected(
     assert getattr(result, "signal", None) is None, result
 
 
+@pytest.mark.unit
 @_CONVERSION_ERRORS
 def test_a_rejected_result_with_stray_post_run_flags_stays_rejected(
     uv_runner, tmp_path, error
@@ -279,6 +286,7 @@ def test_a_rejected_result_with_stray_post_run_flags_stays_rejected(
     assert getattr(result, "signaled", False) is False, result
 
 
+@pytest.mark.integration
 @_POSIX
 def test_a_returned_signal_death_whose_result_cannot_be_built_is_logged_once(
     tmp_path, monkeypatch, caplog
@@ -304,6 +312,7 @@ def test_a_returned_signal_death_whose_result_cannot_be_built_is_logged_once(
     assert len(deaths) == 1, [r.getMessage() for r in deaths]
 
 
+@pytest.mark.integration
 @_POSIX
 def test_a_failed_wait_while_the_server_stops_reports_no_signal(tmp_path, monkeypatch):
     """Once the server's last stop has begun, a SIGKILL that ended a waited-on
@@ -326,6 +335,7 @@ def test_a_failed_wait_while_the_server_stops_reports_no_signal(tmp_path, monkey
     assert NOT_ASHS_SIGNAL not in response["error"], response
 
 
+@pytest.mark.integration
 @_POSIX
 def test_a_tools_own_signal_during_a_server_stop_keeps_the_label(tmp_path, monkeypatch):
     """Only the signals ASH's stops send (SIGKILL, SIGTERM) are withheld while
@@ -349,6 +359,7 @@ def test_a_tools_own_signal_during_a_server_stop_keeps_the_label(tmp_path, monke
     assert NOT_ASHS_SIGNAL in response["error"], response
 
 
+@pytest.mark.integration
 @_POSIX
 def test_the_builders_keep_a_tools_own_signal_during_a_server_stop(
     tmp_path, monkeypatch
@@ -377,6 +388,7 @@ def test_the_builders_keep_a_tools_own_signal_during_a_server_stop(
     assert response.get("signal") == signum, response
 
 
+@pytest.mark.integration
 @_POSIX
 def test_a_failed_wait_on_a_running_server_keeps_the_signal(tmp_path):
     """The same recipe with the server running: the SIGKILL was not ASH's, so
@@ -391,6 +403,7 @@ def test_a_failed_wait_on_a_running_server_keeps_the_signal(tmp_path):
     assert NOT_ASHS_SIGNAL in (getattr(result, "error", "") or ""), result
 
 
+@pytest.mark.integration
 @_POSIX
 def test_the_failure_after_the_start_builders_keep_a_signal_death(tmp_path):
     """StartWatch.failure_after_the_start and spawn_run_failure_after_the_start
@@ -424,6 +437,7 @@ def test_the_failure_after_the_start_builders_keep_a_signal_death(tmp_path):
     assert NOT_ASHS_SIGNAL in response["error"], response
 
 
+@pytest.mark.integration
 @_POSIX
 def test_the_builders_report_no_signal_while_the_server_stops(tmp_path, monkeypatch):
     """The builders read a code from a wait that raised, so a stopping server's
@@ -450,6 +464,7 @@ def test_the_builders_report_no_signal_while_the_server_stops(tmp_path, monkeypa
     assert NOT_ASHS_SIGNAL not in response["error"], response
 
 
+@pytest.mark.integration
 @_POSIX
 def test_a_signal_death_on_a_failed_wait_is_logged_once(tmp_path, caplog):
     """The death appears in one log record: the failure line that carries the
@@ -479,6 +494,7 @@ def test_a_signal_death_on_a_failed_wait_is_logged_once(tmp_path, caplog):
     assert len(run_two) == 1, [r.getMessage() for r in deaths]
 
 
+@pytest.mark.integration
 @_POSIX
 @pytest.mark.parametrize("builder", ["spawn_run_builder", "start_watch"])
 def test_the_builders_log_a_signal_death_once(tmp_path, caplog, builder):
@@ -518,6 +534,7 @@ _WRITES_THEN_DIES = (
 )
 
 
+@pytest.mark.integration
 @_POSIX
 def test_a_stream_log_write_after_the_death_logs_it_once(tmp_path, caplog):
     """A stream log that cannot be written fails after the run was read, so the
@@ -542,6 +559,7 @@ def test_a_stream_log_write_after_the_death_logs_it_once(tmp_path, caplog):
     assert len(deaths) == 1, [r.getMessage() for r in deaths]
 
 
+@pytest.mark.integration
 @_POSIX
 def test_a_cleanup_failure_before_the_run_was_read_logs_the_death_once(
     tmp_path, caplog
@@ -576,6 +594,7 @@ def test_a_cleanup_failure_before_the_run_was_read_logs_the_death_once(
     assert len(deaths) == 1, [r.getMessage() for r in deaths]
 
 
+@pytest.mark.unit
 def test_an_unsignaled_post_run_result_reads_signal_none():
     """``signal`` is read only beside a True ``signaled``, and reading it on an
     unsignaled instance answers None rather than raising."""
@@ -589,6 +608,7 @@ def test_an_unsignaled_post_run_result_reads_signal_none():
     assert raised.signal is None, raised
 
 
+@pytest.mark.unit
 def test_a_signaled_post_run_result_derives_the_number_from_the_code():
     """A signaled instance built without the number derives it from the kept
     negative code, as SignaledProcess derives it."""
@@ -607,6 +627,7 @@ def test_a_signaled_post_run_result_derives_the_number_from_the_code():
     assert raised.signal == 9, raised
 
 
+@pytest.mark.unit
 def test_a_negative_code_alone_does_not_mark_a_post_run_result_signaled():
     """The flag drives the derivation, never the code alone: a caller that kept
     a negative code without saying signaled gets neither flag nor number."""
@@ -632,6 +653,7 @@ def test_a_negative_code_alone_does_not_mark_a_post_run_result_signaled():
     assert fresh.signaled is False and fresh.signal is None, fresh
 
 
+@pytest.mark.unit
 def test_the_signal_flags_splat_into_every_keeper_without_translation():
     """The keepers' parameter names are the producer's dict keys.
 
@@ -714,6 +736,7 @@ def _a_returned_run_whose_record_then_raises(monkeypatch):
     )
 
 
+@pytest.mark.unit
 def test_the_returned_run_check_site_raises_with_both_flags(monkeypatch):
     """check=True after a returned run: the PostRunError raised there.
 
@@ -732,6 +755,7 @@ def test_the_returned_run_check_site_raises_with_both_flags(monkeypatch):
     assert raised.value.returncode == -_STAND_IN_SIGNAL, vars(raised.value)
 
 
+@pytest.mark.unit
 def test_the_returned_run_result_site_keeps_both_flags(monkeypatch):
     """check=False after a returned run: the PostRunErrorProcess returned there."""
     _a_returned_run_whose_record_then_raises(monkeypatch)
@@ -744,6 +768,7 @@ def test_the_returned_run_result_site_keeps_both_flags(monkeypatch):
     assert result.returncode == -_STAND_IN_SIGNAL, result
 
 
+@pytest.mark.integration
 @_POSIX
 def test_the_failed_wait_check_site_raises_with_both_flags(tmp_path):
     """check=True after the wait on a started child raised: the PostRunError
@@ -758,6 +783,7 @@ def test_the_failed_wait_check_site_raises_with_both_flags(tmp_path):
     assert raised.value.signal == int(signal.SIGUSR1), vars(raised.value)
 
 
+@pytest.mark.integration
 @_POSIX
 def test_the_failed_wait_result_site_keeps_both_flags(tmp_path):
     """check=False after the wait on a started child raised: the

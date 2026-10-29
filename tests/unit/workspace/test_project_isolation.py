@@ -121,6 +121,8 @@ from automated_security_helper.workspace.execution import (
 from automated_security_helper.workspace.resolver import resolve_workspace
 from tests.utils.helpers import ASH_TEST_TEMP_ROOT, iter_repo_files
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
 

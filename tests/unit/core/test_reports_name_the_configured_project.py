@@ -28,6 +28,8 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 
+pytestmark = pytest.mark.unit
+
 
 def _orchestrator(tmp_path: Path, config_yaml=None, **kwargs) -> ASHScanOrchestrator:
     source = tmp_path / "src"

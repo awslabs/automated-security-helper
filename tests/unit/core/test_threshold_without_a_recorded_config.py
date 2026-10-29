@@ -22,6 +22,8 @@ from automated_security_helper.core.scanner_statistics_calculator import (
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 # Not ASH_DEFAULT_SEVERITY_LEVEL, so a threshold taken from this file is visible.
 READING_PROCESS_THRESHOLD = "LOW" if ASH_DEFAULT_SEVERITY_LEVEL != "LOW" else "HIGH"
 

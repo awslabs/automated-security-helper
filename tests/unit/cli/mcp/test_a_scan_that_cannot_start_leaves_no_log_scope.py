@@ -24,6 +24,8 @@ import pytest
 
 from automated_security_helper.utils import log as log_module
 
+pytestmark = pytest.mark.unit
+
 SESSION = "client-one"
 
 

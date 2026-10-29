@@ -10,11 +10,15 @@ message keeps its own line breaks.
 
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.config.config_sources import describe_config_path
 from automated_security_helper.utils.display_text import (
     escape_controls_in,
     path_spellings,
 )
+
+pytestmark = pytest.mark.unit
 
 NAME = "/configs/op\x1b[31mred\nnext.yaml"
 

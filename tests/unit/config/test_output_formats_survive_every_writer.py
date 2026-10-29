@@ -45,6 +45,8 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.enums import ExportFormat
 
+pytestmark = pytest.mark.unit
+
 FORMATS = [ExportFormat.SARIF, ExportFormat.GITHUB_GHAS]
 NAMES = [fmt.value for fmt in FORMATS]
 INVALID_CONFIG = 3

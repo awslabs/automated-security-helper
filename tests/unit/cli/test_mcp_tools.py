@@ -17,6 +17,8 @@ from automated_security_helper.cli.mcp_tools import (
     mcp_check_installation,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.asyncio
 async def test_mcp_get_scan_results():

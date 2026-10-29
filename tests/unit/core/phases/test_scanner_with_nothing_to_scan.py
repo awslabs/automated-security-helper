@@ -46,6 +46,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
 from automated_security_helper.utils.console import ash_console
 from automated_security_helper.utils.log import ASH_LOGGER, ConsoleHandler
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
 

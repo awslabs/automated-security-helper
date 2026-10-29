@@ -32,8 +32,12 @@ remember the name.
 import json
 from pathlib import Path
 
+import pytest
+
 import automated_security_helper.schemas.generate_schemas as generate_schemas_module
 from automated_security_helper.schemas.generate_schemas import generate_schemas
+
+pytestmark = pytest.mark.unit
 
 SCHEMAS_DIR = Path(generate_schemas_module.__file__).resolve().parent
 

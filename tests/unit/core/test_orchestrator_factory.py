@@ -8,8 +8,12 @@ These tests verify:
 
 from unittest.mock import patch
 
+import pytest
+
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.config.ash_config import AshConfig
+
+pytestmark = pytest.mark.unit
 
 
 def _minimal_kwargs(tmp_path):

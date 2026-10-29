@@ -32,6 +32,8 @@ from automated_security_helper.core.constants import ASH_EXIT_CODES
 from automated_security_helper.models.workspace import WorkspaceExitCode
 from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
 
+pytestmark = pytest.mark.unit
+
 needs_symlinks = pytest.mark.skipif(
     sys.platform == "win32", reason="symlinks need privileges on Windows"
 )

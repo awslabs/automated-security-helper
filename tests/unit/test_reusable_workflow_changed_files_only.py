@@ -61,6 +61,7 @@ def _step(*, name: str | None = None, step_id: str | None = None) -> dict:
     return matches[0]
 
 
+@pytest.mark.unit
 def test_the_checkout_fetches_history_when_the_input_is_on():
     checkout = _step(name="Checkout")
     # '0' and '1' quoted: in a GitHub expression the number 0 is falsy, so
@@ -70,6 +71,7 @@ def test_the_checkout_fetches_history_when_the_input_is_on():
     ), checkout
 
 
+@pytest.mark.unit
 def test_a_step_resolves_the_base_and_the_scan_uses_it():
     resolve = _step(step_id="base-ref")
     assert resolve["if"] == "inputs.changed-files-only"
@@ -94,6 +96,7 @@ def test_a_step_resolves_the_base_and_the_scan_uses_it():
     assert steps.index(resolve) < steps.index(run_ash)
 
 
+@pytest.mark.unit
 def test_the_scan_passes_the_resolved_base_and_nothing_else():
     """ASH must diff against the ref the step resolved, not a literal.
 
@@ -220,6 +223,7 @@ def _assert_refused(result, output: str) -> str:
     return message
 
 
+@pytest.mark.integration
 @posix_only
 def test_a_merge_group_diffs_against_its_base_commit(upstream, tmp_path):
     from automated_security_helper.utils.get_scan_set import get_changed_files
@@ -285,6 +289,7 @@ def pushed_main(tmp_path) -> tuple[Path, str]:
     return checkout, before
 
 
+@pytest.mark.integration
 @posix_only
 def test_a_base_that_contains_head_fails_the_step(pushed_main, tmp_path):
     """A push or schedule on the default branch with the default base-ref.
@@ -304,6 +309,7 @@ def test_a_base_that_contains_head_fails_the_step(pushed_main, tmp_path):
     assert "base-ref" in _assert_refused(result, output)
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize(
     "before, reason",
@@ -352,6 +358,7 @@ def test_without_a_usable_push_before_it_still_fails(
     assert reason in message, message
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize(
     "variable", ["PR_BASE_SHA", "MERGE_GROUP_BASE_SHA", "CONFIGURED_BASE_REF"]
@@ -388,6 +395,7 @@ def loud_git(tmp_path) -> Path:
     return bin_dir
 
 
+@pytest.mark.integration
 @posix_only
 def test_what_git_prints_is_not_read_as_a_command(pushed_main, loud_git, tmp_path):
     """The push path runs all six of the step's git calls: three on the configured
@@ -409,6 +417,7 @@ def test_what_git_prints_is_not_read_as_a_command(pushed_main, loud_git, tmp_pat
     assert not [line for line in honored_commands(message) if "from-git" in line]
 
 
+@pytest.mark.integration
 @posix_only
 def test_what_git_prints_is_not_read_as_a_command_on_a_refusal(
     pushed_main, loud_git, tmp_path
@@ -452,6 +461,7 @@ def broken_od(tmp_path: Path, fail_from: int) -> Path:
     return bin_dir
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize(
     "fail_from", [1, 3], ids=["first-call", "the-is-ancestor-call"]
@@ -477,6 +487,7 @@ def test_a_git_call_that_could_not_run_ends_the_step(upstream, tmp_path, fail_fr
     assert "changed-files-only" not in message, "only the helper's own error"
 
 
+@pytest.mark.integration
 @posix_only
 def test_an_unrelated_before_is_one_ash_cannot_diff(pushed_main, tmp_path):
     """Control for the unrelated case: ASH would have reported every file."""
@@ -488,6 +499,7 @@ def test_an_unrelated_before_is_one_ash_cannot_diff(pushed_main, tmp_path):
     assert get_changed_files(unrelated, cwd=checkout) is None
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize(
     "variable, named",
@@ -510,6 +522,7 @@ def test_an_event_base_that_contains_head_names_the_event_base(
     assert "Set base-ref" not in message, message
 
 
+@pytest.mark.integration
 @posix_only
 def test_a_push_diffs_against_the_commit_before_it(pushed_main, tmp_path):
     from automated_security_helper.utils.get_scan_set import get_changed_files
@@ -525,6 +538,7 @@ def test_a_push_diffs_against_the_commit_before_it(pushed_main, tmp_path):
     assert get_changed_files(before, cwd=checkout) == [Path("pushed.py")]
 
 
+@pytest.mark.integration
 @posix_only
 def test_a_push_keeps_a_configured_base_that_has_a_diff(upstream, tmp_path):
     """A feature-branch push is measured against base-ref, as documented."""
@@ -539,6 +553,7 @@ def test_a_push_keeps_a_configured_base_that_has_a_diff(upstream, tmp_path):
     assert "ref=origin/main" in output.splitlines()
 
 
+@pytest.mark.integration
 @posix_only
 def test_a_pull_request_diffs_against_its_base_commit(upstream, tmp_path):
     from automated_security_helper.utils.get_scan_set import get_changed_files
@@ -553,6 +568,7 @@ def test_a_pull_request_diffs_against_its_base_commit(upstream, tmp_path):
     assert get_changed_files(base, cwd=checkout) == [Path("changed.py")]
 
 
+@pytest.mark.integration
 @posix_only
 def test_another_event_uses_the_configured_base(upstream, tmp_path):
     from automated_security_helper.utils.get_scan_set import get_changed_files
@@ -567,6 +583,7 @@ def test_another_event_uses_the_configured_base(upstream, tmp_path):
     assert get_changed_files("origin/main", cwd=checkout) == [Path("changed.py")]
 
 
+@pytest.mark.integration
 @posix_only
 def test_a_base_missing_from_the_checkout_fails_the_step(upstream, tmp_path):
     """A depth-1 checkout, which lacks the base: ASH would report every file."""
@@ -583,6 +600,7 @@ def test_a_base_missing_from_the_checkout_fails_the_step(upstream, tmp_path):
     assert "is not in the checkout" in _assert_refused(result, output)
 
 
+@pytest.mark.integration
 @posix_only
 def test_a_base_ash_would_refuse_fails_the_step(upstream, tmp_path):
     """ASH's own check (utils/get_scan_set.py) refuses some refs git resolves.
@@ -615,6 +633,7 @@ def test_a_base_ash_would_refuse_fails_the_step(upstream, tmp_path):
     assert "base-ref" in message, message
 
 
+@pytest.mark.integration
 @posix_only
 def test_a_base_with_no_history_in_common_fails_the_step(upstream, tmp_path):
     """A configured base on another history, which the checkout does have.
@@ -641,6 +660,7 @@ def test_a_base_with_no_history_in_common_fails_the_step(upstream, tmp_path):
     assert "shares no history" in message, message
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize(
     "ash_mode, ash_args",
@@ -690,6 +710,7 @@ def test_container_mode_fails_the_step(upstream, tmp_path, ash_mode, ash_args):
     assert "container mode" in _assert_refused(result, output)
 
 
+@pytest.mark.integration
 @posix_only
 def test_container_mode_is_refused_before_any_git_call(tmp_path):
     """No checkout at all: the mode is checked first, so its error is the one."""
@@ -703,6 +724,7 @@ def test_container_mode_is_refused_before_any_git_call(tmp_path):
     assert "is not in the checkout" not in message, message
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize(
     "ash_mode, ash_args",
@@ -740,6 +762,7 @@ def test_other_modes_keep_the_base(upstream, tmp_path, ash_mode, ash_args):
     assert "ref=origin/main" in output.splitlines()
 
 
+@pytest.mark.integration
 @posix_only
 def test_a_base_with_the_characters_ash_accepts_passes(upstream, tmp_path):
     from automated_security_helper.utils.get_scan_set import get_changed_files

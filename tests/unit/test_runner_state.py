@@ -19,6 +19,8 @@ import pytest
 
 from tests.utils.runner_state import RECORD_ENV, developer_runner_env
 
+pytestmark = pytest.mark.unit
+
 
 def _record(monkeypatch: pytest.MonkeyPatch, record: dict) -> None:
     monkeypatch.setenv(RECORD_ENV, json.dumps(record))

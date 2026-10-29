@@ -30,6 +30,8 @@ import pytest
 from automated_security_helper.core.exceptions import ASHConfigEnvNotResolvedError
 from automated_security_helper.interactions import run_ash_scan
 
+pytestmark = pytest.mark.unit
+
 PROBE_VAR = "ASH_ENV_PROBE"
 PROBE = "probe-value-1342"
 ENV_FORMS = {

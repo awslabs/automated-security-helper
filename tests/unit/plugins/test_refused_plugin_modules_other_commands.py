@@ -44,6 +44,8 @@ from automated_security_helper.plugins.loader import (
 )
 from tests.unit.cli.test_merge import build_shards, write_shards
 
+pytestmark = pytest.mark.unit
+
 REFUSED = "zz_other_command_pkg"
 ACCEPTED = "zzother_ash_plugins"
 #: A second accepted package, for an entry that names two.

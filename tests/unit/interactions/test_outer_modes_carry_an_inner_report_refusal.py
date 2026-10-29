@@ -227,6 +227,7 @@ def _errors(logger: MagicMock) -> str:
 
 
 @OUTER
+@pytest.mark.unit
 def test_an_inner_name_refusal_refuses_the_outer_run(tmp_path, outer):
     opts = _opts(tmp_path)
 
@@ -241,6 +242,7 @@ def test_an_inner_name_refusal_refuses_the_outer_run(tmp_path, outer):
 
 
 @OUTER
+@pytest.mark.unit
 def test_a_later_run_that_writes_its_reports_clears_the_refusal(tmp_path, outer):
     """``--use-existing`` reads the results file back, record included."""
     opts = _opts(tmp_path)
@@ -261,6 +263,7 @@ def test_a_later_run_that_writes_its_reports_clears_the_refusal(tmp_path, outer)
 
 
 @OUTER
+@pytest.mark.unit
 def test_an_inner_run_without_a_refusal_is_read_back(tmp_path, outer):
     opts = _opts(tmp_path)
 
@@ -270,6 +273,7 @@ def test_an_inner_run_without_a_refusal_is_read_back(tmp_path, outer):
 
 
 @OUTER
+@pytest.mark.unit
 def test_a_refusal_that_could_not_be_recorded_still_fails_the_outer_run(
     tmp_path, outer
 ):
@@ -309,6 +313,7 @@ def test_a_refusal_that_could_not_be_recorded_still_fails_the_outer_run(
 
 
 @OUTER
+@pytest.mark.unit
 def test_a_completion_record_that_could_not_be_written_fails_the_outer_run(
     tmp_path, outer
 ):
@@ -336,6 +341,7 @@ def test_a_completion_record_that_could_not_be_written_fails_the_outer_run(
 
 
 @OUTER
+@pytest.mark.unit
 def test_a_run_that_fails_after_reading_an_earlier_runs_results_says_so(
     tmp_path, outer
 ):
@@ -357,6 +363,7 @@ def test_a_run_that_fails_after_reading_an_earlier_runs_results_says_so(
 
 
 @OUTER
+@pytest.mark.unit
 def test_an_inner_run_that_failed_after_the_scan_phase_fails_the_outer_run(
     tmp_path, outer
 ):
@@ -375,6 +382,7 @@ def test_an_inner_run_that_failed_after_the_scan_phase_fails_the_outer_run(
 
 
 @OUTER
+@pytest.mark.integration
 def test_a_process_the_inner_run_starts_does_not_see_the_run_id(tmp_path, outer):
     """The ID is taken out of the environment when the inner run starts."""
     opts = _opts(tmp_path)
@@ -400,6 +408,7 @@ def test_a_process_the_inner_run_starts_does_not_see_the_run_id(tmp_path, outer)
     assert results.name == "inner scan"
 
 
+@pytest.mark.unit
 def test_a_malformed_run_id_is_reported_and_not_used(tmp_path, monkeypatch):
     """Not an ID this ASH gives an inner run, so no marker carries it."""
     from automated_security_helper.utils.log import ASH_LOGGER
@@ -462,6 +471,7 @@ def _refused(run_id: Optional[str], message: str) -> dict:
 
 
 @OUTER
+@pytest.mark.unit
 def test_the_refusal_is_recorded_beside_the_results_not_in_them(tmp_path, outer):
     """So no results file is left that a later --use-existing reads as a scan."""
     opts = _opts(tmp_path)
@@ -505,6 +515,7 @@ class _RefusedBeforeWriting:
 
 
 @OUTER
+@pytest.mark.unit
 def test_a_refusal_before_any_results_file_is_reported_with_its_message(
     tmp_path, outer
 ):
@@ -541,6 +552,7 @@ def test_a_refusal_before_any_results_file_is_reported_with_its_message(
 
 
 @OUTER
+@pytest.mark.unit
 def test_a_refusal_record_that_is_a_link_is_not_read(tmp_path, outer):
     """It refuses the read-back, as a link in reports/ does."""
     opts = _opts(tmp_path)
@@ -564,6 +576,7 @@ def test_a_refusal_record_that_is_a_link_is_not_read(tmp_path, outer):
 
 @OUTER
 @pytest.mark.parametrize("kind", ["symlink", "directory"])
+@pytest.mark.unit
 def test_a_results_file_that_is_not_a_regular_file_is_not_read(tmp_path, outer, kind):
     """It refuses the read-back without being read: a link could name any file."""
     opts = _opts(tmp_path)
@@ -591,6 +604,7 @@ def test_a_results_file_that_is_not_a_regular_file_is_not_read(tmp_path, outer, 
 
 
 @OUTER
+@pytest.mark.unit
 def test_a_results_file_that_does_not_parse_is_reported_without_its_content(
     tmp_path, outer
 ):
@@ -615,6 +629,7 @@ def test_a_results_file_that_does_not_parse_is_reported_without_its_content(
 
 
 @OUTER
+@pytest.mark.unit
 def test_an_earlier_runs_refusal_record_is_removed_before_the_inner_run(
     tmp_path, outer
 ):
@@ -637,6 +652,7 @@ def test_an_earlier_runs_refusal_record_is_removed_before_the_inner_run(
 
 
 @OUTER
+@pytest.mark.unit
 def test_a_refusal_another_run_recorded_is_ignored_when_this_run_completed(
     tmp_path, outer
 ):
@@ -653,6 +669,7 @@ def test_a_refusal_another_run_recorded_is_ignored_when_this_run_completed(
 
 
 @OUTER
+@pytest.mark.unit
 def test_a_refusal_another_run_recorded_does_not_explain_this_one(tmp_path, outer):
     opts = _opts(tmp_path)
     logger = MagicMock()
@@ -672,6 +689,7 @@ def test_a_refusal_another_run_recorded_does_not_explain_this_one(tmp_path, oute
 
 @OUTER
 @pytest.mark.parametrize("inner_status", [0, 2])
+@pytest.mark.unit
 def test_a_results_file_without_a_completion_marker_is_not_read_back(
     tmp_path, outer, inner_status
 ):
@@ -714,6 +732,7 @@ def test_a_results_file_without_a_completion_marker_is_not_read_back(
         ("3.8.0", "v3.8.0", None),
     ],
 )
+@pytest.mark.unit
 def test_the_container_hint_names_a_release_only_when_it_records_completion(
     tmp_path, monkeypatch, version, revision, named
 ):
@@ -758,6 +777,7 @@ def test_the_container_hint_names_a_release_only_when_it_records_completion(
 
 
 @OUTER
+@pytest.mark.unit
 def test_a_completion_marker_without_a_run_id_is_attributed_to_an_older_ash(
     tmp_path, outer
 ):
@@ -779,6 +799,7 @@ def test_a_completion_marker_without_a_run_id_is_attributed_to_an_older_ash(
 
 
 @OUTER
+@pytest.mark.unit
 def test_a_refusal_recorded_without_a_run_id_is_not_this_runs(tmp_path, outer):
     opts = _opts(tmp_path)
     logger = MagicMock()
@@ -797,6 +818,7 @@ def test_a_refusal_recorded_without_a_run_id_is_not_this_runs(tmp_path, outer):
 
 
 @OUTER
+@pytest.mark.unit
 def test_a_completion_marker_another_run_wrote_is_not_read_back(tmp_path, outer):
     opts = _opts(tmp_path)
 
@@ -810,6 +832,7 @@ def test_a_completion_marker_another_run_wrote_is_not_read_back(tmp_path, outer)
     assert refused.value.code == 1
 
 
+@pytest.mark.unit
 def test_a_workspace_refused_before_any_project_refuses_the_container_run(
     tmp_path, monkeypatch
 ):
@@ -860,6 +883,7 @@ def test_a_workspace_refused_before_any_project_refuses_the_container_run(
     assert not (opts.output_dir / "ash_aggregated_results.json").exists()
 
 
+@pytest.mark.unit
 def test_the_container_output_directory_in_a_refusal_is_given_as_the_hosts(tmp_path):
     """The container sees the output directory at another path, as /out.
 
@@ -932,6 +956,7 @@ ASH = Path(sys.executable).with_name("ash")
 @pytest.mark.skipif(
     not ASH.is_file(), reason="no ash entry point beside the interpreter"
 )
+@pytest.mark.integration
 def test_ash_scan_in_nix_mode_exits_1_when_the_inner_run_refuses_a_name(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()

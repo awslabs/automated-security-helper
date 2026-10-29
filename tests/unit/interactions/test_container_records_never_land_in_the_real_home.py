@@ -31,6 +31,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.mark.unit
 def test_the_default_state_dir_is_under_the_tests_home(monkeypatch):
     """With nothing set but the home, the state directory is in the test's home."""
     monkeypatch.delenv(container_leftovers.STATE_DIR_ENV, raising=False)
@@ -46,6 +47,7 @@ def test_the_default_state_dir_is_under_the_tests_home(monkeypatch):
         assert not state.is_relative_to(developer / ".ash"), (state, developer)
 
 
+@pytest.mark.unit
 def test_the_fixture_names_the_state_dir_under_the_tests_home():
     """The autouse fixture sets the variable, so a replaced HOME cannot move it."""
     named = os.environ.get(container_leftovers.STATE_DIR_ENV)
@@ -54,6 +56,7 @@ def test_the_fixture_names_the_state_dir_under_the_tests_home():
     assert Path(named).is_relative_to(Path(os.environ["HOME"])), named
 
 
+@pytest.mark.unit
 def test_a_record_aimed_at_a_guarded_root_is_seen_by_the_guard(tmp_path, monkeypatch):
     """The arm that must disagree: the guard's mkdir event is the catch.
 
@@ -76,6 +79,7 @@ def test_a_record_aimed_at_a_guarded_root_is_seen_by_the_guard(tmp_path, monkeyp
     assert not target.exists()
 
 
+@pytest.mark.unit
 def test_a_record_in_the_tests_home_is_not_seen_by_the_guard():
     """The negative control: the same call at the default location is not seen."""
     path = container_leftovers.record_container(
@@ -86,12 +90,14 @@ def test_a_record_in_the_tests_home_is_not_seen_by_the_guard():
     assert real_home_guard.drain() == []
 
 
+@pytest.mark.unit
 def test_a_runtime_that_is_not_a_stub_in_the_run_is_refused():
     """The control: ``docker`` resolves outside the base temp directory."""
     with pytest.raises(pytest.fail.Exception):
         container_leftovers._removed(["docker"], "ash-scan-1-00000000")
 
 
+@pytest.mark.integration
 def test_a_stub_runtime_in_the_run_is_called_through(tmp_path):
     """The positive arm: a stub under the base temp directory runs and is logged."""
     log = tmp_path / "calls.log"

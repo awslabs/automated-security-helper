@@ -26,6 +26,8 @@ from automated_security_helper.models.workspace import WorkspaceExitCode
 from automated_security_helper.workspace.resolver import resolve_workspace
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 _NOT_THE_OPERATORS = "must be the operator's"
 
 

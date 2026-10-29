@@ -20,6 +20,8 @@ from automated_security_helper.cli.inspect.inspect_findings_app import (
 )
 from automated_security_helper.core.constants import ASH_DEFAULT_CONFIG_FILE_NAME
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

@@ -28,6 +28,8 @@ from automated_security_helper.core.exceptions import (
 )
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 
 def _scan_resolution(tmp_path, override):
     """resolve_config as a scan calls it: an in-tree repository config without

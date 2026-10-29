@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 MODULE_LOGGER = "automated_security_helper.interactions.run_ash_scan"
 
 

@@ -50,6 +50,8 @@ from automated_security_helper.cli.mcp.sessions import (
     sweep_stale_workspaces,
 )
 
+pytestmark = pytest.mark.unit
+
 SESSION = "racing-session"
 #: How long a held delete waits before it gives up: far past any cell, so a cell
 #: that fails early cannot leave a thread behind for long.

@@ -45,6 +45,8 @@ from automated_security_helper.utils.cfn_template_model import (
     get_model_from_template,
 )
 
+pytestmark = pytest.mark.unit
+
 # Names this change adds are imported inside the tests that use them, so that on a
 # tree without them each test fails on its own assertion rather than the whole module
 # failing to collect.

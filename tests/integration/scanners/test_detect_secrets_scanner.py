@@ -11,6 +11,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
 )
 from automated_security_helper.schemas.sarif_schema_model import Level, Kind
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def detect_secrets_scanner(test_plugin_context):

@@ -27,6 +27,8 @@ import pydantic_core
 import pytest
 from mcp.server.mcpserver import Context
 
+pytestmark = pytest.mark.unit
+
 ESC, CR, RLO = chr(0x1B), chr(0x0D), chr(0x202E)
 
 #: A value holding an ESC sequence, a carriage return and a right-to-left override.

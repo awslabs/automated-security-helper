@@ -13,6 +13,8 @@ import pytest
 
 from tests.unit.walked_package import PACKAGE, package_sources
 
+pytestmark = pytest.mark.unit
+
 #: The package's modules, by their path in it, as the walk finds them now.
 _MODULES = sorted(
     source.relative_to(PACKAGE).as_posix() for source in package_sources()

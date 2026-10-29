@@ -34,6 +34,8 @@ from tests.unit.workspace.test_execution import (
     _run,
 )
 
+pytestmark = pytest.mark.unit
+
 #: Rich reads both as markup: a closing tag with no opening one, and a style.
 MESSAGE = "committed reports/[/x].sarif and reports/[bold]y[/bold].sarif"
 

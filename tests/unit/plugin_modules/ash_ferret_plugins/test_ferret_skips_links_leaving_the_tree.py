@@ -31,9 +31,12 @@ from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner 
     FerretScanScanner,
 )
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    ),
+]
 
 
 def _scan(scanner, target: Path):

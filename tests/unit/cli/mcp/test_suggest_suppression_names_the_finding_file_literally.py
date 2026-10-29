@@ -33,6 +33,8 @@ from tests.unit.cli.mcp.test_suggest_suppression import (
     _make_vuln,
 )
 
+pytestmark = pytest.mark.unit
+
 #: A finding's file, and a neighbor the suggestion must not cover.
 CASES = {
     "a class": ("x[1].py", "x1.py"),

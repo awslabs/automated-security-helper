@@ -76,6 +76,8 @@ import pytest
 
 from tests.utils.helpers import checkout_env
 
+pytestmark = pytest.mark.e2e
+
 # Long enough that a cold import of ASH under a 192-wide run is not mistaken for a
 # hang. Startup measured 1.7 seconds unloaded.
 PROCESS_TIMEOUT_SECONDS = 180

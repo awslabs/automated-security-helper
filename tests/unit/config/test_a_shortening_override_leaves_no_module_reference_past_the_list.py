@@ -34,6 +34,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 
+pytestmark = pytest.mark.unit
+
 KEPT = "shortkept_ash_plugins"
 FIRST = "shortfirst_ash_plugins"
 FROM_ENV = "shortenv_ash_plugins"

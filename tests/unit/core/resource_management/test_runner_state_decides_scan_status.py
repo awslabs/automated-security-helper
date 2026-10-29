@@ -55,6 +55,8 @@ from automated_security_helper.models.asharp_model import (
     ScannerTargetStatusInfo,
 )
 
+pytestmark = pytest.mark.unit
+
 RESULTS_FILE = "ash_aggregated_results.json"
 SCANNERS = ("bandit", "semgrep")
 

@@ -26,12 +26,16 @@ import threading
 import uuid
 from unittest import mock
 
+import pytest
+
 from automated_security_helper.cli import mcp_tools
 from automated_security_helper.cli.mcp import profile_registry
 from automated_security_helper.core.resource_management.scan_registry import (
     MCScanStatus,
     ScanRegistry,
 )
+
+pytestmark = pytest.mark.unit
 
 _WAIT = 30  # seconds; only a failure path ever reaches it
 

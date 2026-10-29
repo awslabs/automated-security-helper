@@ -21,6 +21,10 @@ import json
 import subprocess
 import sys
 
+import pytest
+
+pytestmark = pytest.mark.integration
+
 #: Imports everything first, so only what building the reporter does is recorded.
 _BUILD_THE_REPORTER = r"""
 import json, sys, warnings

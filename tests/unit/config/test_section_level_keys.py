@@ -33,6 +33,8 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
     TrivyRepoScanner,
 )
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 MOVE = "{where}.{key} is not a section-level key; move {key} under options"

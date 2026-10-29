@@ -22,12 +22,16 @@ trusted base's looser value would take its place. So a new field of
 
 from __future__ import annotations
 
+import pytest
+
 from automated_security_helper.config.ash_config import SandboxConfig
 from automated_security_helper.config.resolve_config import (
     _ADDITIVE_SANDBOX_SETTINGS,
     _NARROWED_SANDBOX_SETTING,
     _REWRITE_KEPT_SANDBOX_SETTING,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_each_sandbox_setting_is_in_one_class():

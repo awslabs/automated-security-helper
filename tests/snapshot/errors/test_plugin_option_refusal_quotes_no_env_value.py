@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-7f3e-0123456789"
 TRIVY_PLUGINS = "automated_security_helper.plugin_modules.ash_trivy_plugins"
 

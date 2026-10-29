@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ReportMetadata,
@@ -23,6 +25,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
     Level,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_report_metadata_initialization():

@@ -36,6 +36,8 @@ from automated_security_helper.models.asharp_model import (
     RefusedInputInfo,
 )
 
+pytestmark = pytest.mark.unit
+
 #: Names a refusal record can hold, each with a line that is a workflow command
 #: unless the writer escapes or encodes it.
 NAMES = {

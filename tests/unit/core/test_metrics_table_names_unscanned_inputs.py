@@ -22,6 +22,8 @@ from rich.table import Table
 from automated_security_helper.core import metrics_table
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 
 def _render(model: AshAggregatedResults) -> str:
     made = []

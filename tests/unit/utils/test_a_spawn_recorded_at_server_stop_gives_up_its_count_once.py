@@ -33,9 +33,12 @@ from automated_security_helper.core.cancellation import ScanCancelled
 from automated_security_helper.utils import subprocess_utils
 
 
-pytestmark = pytest.mark.skipif(
-    os.name != "posix", reason="EPERM on a group kill is POSIX's case"
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        os.name != "posix", reason="EPERM on a group kill is POSIX's case"
+    ),
+]
 
 #: Exits by itself, so a child the refused kill left is not waited on for long.
 _SLEEPS_BRIEFLY = (sys.executable, "-c", "import time; time.sleep(5)")

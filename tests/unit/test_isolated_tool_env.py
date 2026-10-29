@@ -41,6 +41,7 @@ def _inside(path: str, root: Path) -> bool:
     return Path(path).resolve().is_relative_to(root.resolve())
 
 
+@pytest.mark.unit
 def test_every_write_location_is_under_the_root(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))
     monkeypatch.setenv("UV_TOOL_DIR", str(Path.home() / ".local" / "share" / "uv"))
@@ -57,6 +58,7 @@ def test_every_write_location_is_under_the_root(tmp_path, monkeypatch):
     assert env["NO_PROXY"] == "" and env["no_proxy"] == ""
 
 
+@pytest.mark.unit
 def test_the_directory_variables_alone_are_every_write_location(tmp_path):
     """What an in-process test sets with monkeypatch: each write location, no more."""
     dirs = isolated_tool_dirs(tmp_path)
@@ -65,12 +67,14 @@ def test_the_directory_variables_alone_are_every_write_location(tmp_path):
     assert all(_inside(path, tmp_path) for path in dirs.values()), dirs
 
 
+@pytest.mark.unit
 def test_an_operator_uv_cache_is_reused(tmp_path, monkeypatch):
     monkeypatch.setenv("UV_CACHE_DIR", "/operator/uv-cache")
 
     assert isolated_tool_env(tmp_path)["UV_CACHE_DIR"] == "/operator/uv-cache"
 
 
+@pytest.mark.unit
 def test_without_an_operator_uv_cache_the_cache_is_under_the_root(
     tmp_path, monkeypatch
 ):
@@ -79,6 +83,7 @@ def test_without_an_operator_uv_cache_the_cache_is_under_the_root(
     assert _inside(isolated_tool_env(tmp_path)["UV_CACHE_DIR"], tmp_path)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("name", REFUSED_INSTALLERS)
 def test_an_installer_stub_refuses_and_writes_nothing(tmp_path, name):
     """The stub is what PATH resolves the installer to, and it installs nothing."""
@@ -115,6 +120,7 @@ _REFUSING_AWS = {
 }
 
 
+@pytest.mark.unit
 def test_the_environment_gives_no_usable_aws_settings(tmp_path, monkeypatch):
     monkeypatch.setenv("AWS_CONFIG_FILE", str(Path.home() / ".aws" / "config"))
 
@@ -134,6 +140,7 @@ def _harness_envs(tmp_path):
     yield "plugin selection _Process", _Process(tmp_path / "process")._env()
 
 
+@pytest.mark.unit
 def test_each_harness_drops_inherited_aws_settings(tmp_path, monkeypatch):
     """An inherited profile or key would apply even beside the refusing settings."""
     monkeypatch.setenv("AWS_PROFILE", "inherited-profile")

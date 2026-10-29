@@ -25,6 +25,8 @@ from automated_security_helper.config import config_sources, operator_only_optio
 from automated_security_helper.config import resolve_config as resolve_config_module
 from automated_security_helper.config.config_validator import ConfigValidator
 
+pytestmark = pytest.mark.unit
+
 CHECKED = "project_name: checked\n"
 # The replacement's content. Every cell asserts it is nowhere in the answer, so it
 # is a word no test name or temporary directory holds: the answers quote the

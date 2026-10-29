@@ -18,6 +18,8 @@ from automated_security_helper.utils.path_containment import (
     validate_contained_path,
 )
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Helpers

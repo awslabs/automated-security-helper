@@ -33,12 +33,15 @@ from automated_security_helper.core.constants import ASH_EXIT_TERMINATED
 from tests.utils.helpers import checkout_env
 from tests.utils.processes import process_running
 
-pytestmark = pytest.mark.skipif(
-    not sys.platform.startswith("linux"),
-    reason="the pid identity checks read /proc, which only Linux has; on another "
-    "POSIX the readlink raises before the SIGTERM is ever sent, and the cleanup's "
-    "identity read answers nothing, so the stand-in tool outlives the test",
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not sys.platform.startswith("linux"),
+        reason="the pid identity checks read /proc, which only Linux has; on another "
+        "POSIX the readlink raises before the SIGTERM is ever sent, and the cleanup's "
+        "identity read answers nothing, so the stand-in tool outlives the test",
+    ),
+]
 
 FIXTURE = Path(__file__).resolve().parents[2] / "test_data" / "sigterm_stop"
 

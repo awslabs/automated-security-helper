@@ -23,6 +23,8 @@ import pytest
 
 from automated_security_helper.core.constants import ASH_ASSETS_DIR
 
+pytestmark = pytest.mark.unit
+
 RULE_DIR = ASH_ASSETS_DIR.joinpath("appsec_cfn_rules")
 
 # `PolicyDocumentParser.new.parse(` or `PolicyDocumentParser.new().parse(`, capturing the

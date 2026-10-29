@@ -40,6 +40,8 @@ from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 from tests.utils.helpers import stand_in_host_ids
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _host_ids(monkeypatch):

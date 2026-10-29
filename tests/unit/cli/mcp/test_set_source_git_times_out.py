@@ -31,6 +31,8 @@ from automated_security_helper.cli.mcp.sessions import reset_default_registry_fo
 from automated_security_helper.cli.mcp_tools import mcp_set_source_git
 from automated_security_helper.utils.subprocess_utils import clear_find_executable_cache
 
+pytestmark = pytest.mark.integration
+
 URL = "https://git.example.invalid/team/repo.git"
 SESSION = "clone-session"
 #: How long the test lets the server take before calling the call stuck.

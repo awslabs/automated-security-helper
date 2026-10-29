@@ -104,6 +104,8 @@ from tests.utils.refusing_proxy import (
     scrub_cloud_credentials,
 )
 
+pytestmark = pytest.mark.integration
+
 _FALSE = {"0", "false", "f", "no", "n", "off"}
 _TRUE = {"1", "true", "t", "yes", "y", "on"}
 

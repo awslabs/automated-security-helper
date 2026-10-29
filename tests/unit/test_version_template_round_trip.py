@@ -73,6 +73,8 @@ if sys.version_info >= (3, 11):
 else:  # pragma: no cover - exercised only on 3.10
     import tomli as tomllib
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "version_template_manager.py"
 #: Both placeholders the manager renders. Kept here as well as in the manager so a

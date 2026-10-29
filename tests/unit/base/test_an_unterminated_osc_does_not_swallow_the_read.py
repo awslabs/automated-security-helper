@@ -14,6 +14,8 @@ import pytest
 from automated_security_helper.base.plugin_base import trimmed_at_read_edge
 from automated_security_helper.utils.error_text import ESCAPE_CODES
 
+pytestmark = pytest.mark.unit
+
 
 def test_a_c1_terminated_hyperlink_is_a_complete_code_everywhere():
     """U+009C ends an OSC for the sinks and the trim alike, so a link a

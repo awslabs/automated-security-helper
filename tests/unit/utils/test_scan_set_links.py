@@ -34,9 +34,12 @@ from automated_security_helper.utils.get_scan_set import (
     scan_set,
 )
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    ),
+]
 
 #: In every file outside the tree, so a test can tell whether any of it was read.
 OUTSIDE_MARKER = "OUTSIDE-ONLY-CONTENT-5b2e"

@@ -53,6 +53,7 @@ def _no_git_config_from_the_host(monkeypatch, tmp_path):
     _isolate_git(monkeypatch, tmp_path)
 
 
+@pytest.mark.unit
 def test_no_git_variable_from_the_host_reaches_these_tests():
     """GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE and GIT_CONFIG_PARAMETERS point every
     git at another repository or configuration. git exports GIT_DIR to its hooks,
@@ -62,6 +63,7 @@ def test_no_git_variable_from_the_host_reaches_these_tests():
     ]
 
 
+@pytest.mark.integration
 def test_the_isolation_clears_a_git_dir_the_host_set(monkeypatch, tmp_path):
     """The check above only fails on a host that exports a GIT_* variable, and CI
     exports none, so this sets one and runs the isolation itself."""
@@ -138,6 +140,7 @@ def _sha(hatch_build) -> str:
     return hatch_build.CustomBuildHook._get_commit_sha(None)
 
 
+@pytest.mark.integration
 def test_a_checkout_records_its_commit_id(hatch_build):
     sha = _commit(hatch_build.ASH_REPO_ROOT)
 
@@ -151,6 +154,7 @@ _NOT_ON_WINDOWS = pytest.mark.skipif(
 )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "name",
     [
@@ -181,6 +185,7 @@ def test_a_checkout_whose_path_has_an_odd_character_records_its_commit_id(
     assert _sha(hatch_build) == sha
 
 
+@pytest.mark.integration
 @_NOT_ON_WINDOWS
 def test_a_subdirectory_named_like_a_commit_record_is_not_a_commit(
     monkeypatch, tmp_path
@@ -198,6 +203,7 @@ def test_a_subdirectory_named_like_a_commit_record_is_not_a_commit(
     assert _sha(hatch_build) == "unknown-commit"
 
 
+@pytest.mark.integration
 def test_a_detached_checkout_records_its_commit_id_not_head(hatch_build):
     """A tag checkout is detached, and records its commit id, not the literal "HEAD"."""
     sha = _commit(hatch_build.ASH_REPO_ROOT)
@@ -206,6 +212,7 @@ def test_a_detached_checkout_records_its_commit_id_not_head(hatch_build):
     assert _sha(hatch_build) == sha
 
 
+@pytest.mark.integration
 def test_a_tree_inside_another_repository_is_not_a_commit_of_it(hatch_build, tmp_path):
     """The ASH tree is tmp_path/tree; the repository is tmp_path."""
     _commit(tmp_path)
@@ -213,6 +220,7 @@ def test_a_tree_inside_another_repository_is_not_a_commit_of_it(hatch_build, tmp
     assert _sha(hatch_build) == "unknown-commit"
 
 
+@pytest.mark.integration
 def test_without_git_metadata_an_earlier_record_is_kept(hatch_build):
     """A wheel built from an sdist keeps the commit the sdist recorded."""
     sha = "0123456789abcdef0123456789abcdef01234567"
@@ -221,6 +229,7 @@ def test_without_git_metadata_an_earlier_record_is_kept(hatch_build):
     assert _sha(hatch_build) == sha
 
 
+@pytest.mark.integration
 def test_without_git_metadata_or_a_record_nothing_is_claimed(
     hatch_build, capsys, monkeypatch
 ):
@@ -245,6 +254,7 @@ def _another_repository(tmp_path: Path) -> tuple[Path, str]:
     return other, _git(other, "rev-parse", "HEAD")
 
 
+@pytest.mark.integration
 def test_a_git_dir_from_the_caller_does_not_choose_the_commit(
     hatch_build, monkeypatch, tmp_path
 ):
@@ -258,6 +268,7 @@ def test_a_git_dir_from_the_caller_does_not_choose_the_commit(
     assert _sha(hatch_build) == sha != other_sha
 
 
+@pytest.mark.integration
 def test_a_git_dir_from_the_caller_is_no_commit_of_a_tree_with_none(
     hatch_build, monkeypatch, tmp_path
 ):
@@ -267,6 +278,7 @@ def test_a_git_dir_from_the_caller_is_no_commit_of_a_tree_with_none(
     assert _sha(hatch_build) == "unknown-commit"
 
 
+@pytest.mark.integration
 def test_a_work_tree_from_the_caller_does_not_move_the_top_level(
     hatch_build, monkeypatch
 ):
@@ -278,6 +290,7 @@ def test_a_work_tree_from_the_caller_does_not_move_the_top_level(
     assert _sha(hatch_build) == sha
 
 
+@pytest.mark.integration
 def test_a_common_dir_from_the_caller_does_not_hide_the_repository(
     hatch_build, monkeypatch, tmp_path
 ):
@@ -290,6 +303,7 @@ def test_a_common_dir_from_the_caller_does_not_hide_the_repository(
     assert _sha(hatch_build) == sha
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "variables",
     [
@@ -325,6 +339,7 @@ def test_other_git_variables_from_the_caller_do_not_reach_git(
     assert not set(variables) & set(seen)
 
 
+@pytest.mark.integration
 def test_the_callers_ceiling_directories_reach_git(hatch_build, monkeypatch):
     """GIT_CEILING_DIRECTORIES only narrows where git looks for a repository, so
     it is the one GIT_* variable kept."""
@@ -345,6 +360,7 @@ def test_the_callers_ceiling_directories_reach_git(hatch_build, monkeypatch):
     assert seen.get("GIT_CEILING_DIRECTORIES") == ceiling
 
 
+@pytest.mark.unit
 def test_a_git_message_the_console_cannot_encode_is_still_printed(
     hatch_build, monkeypatch
 ):
@@ -372,6 +388,7 @@ def test_a_git_message_the_console_cannot_encode_is_still_printed(
     assert b"introuvable \\u2717" in console.buffer.getvalue()
 
 
+@pytest.mark.integration
 def test_a_tree_whose_path_the_console_cannot_encode_keeps_its_commit(
     monkeypatch, tmp_path
 ):
@@ -392,6 +409,7 @@ def test_a_tree_whose_path_the_console_cannot_encode_keeps_its_commit(
     assert hatch_build.ASH_INSTALLED_REVISION_PATH.read_text() == sha
 
 
+@pytest.mark.unit
 def test_an_error_the_console_cannot_encode_still_records_build_error(
     hatch_build, monkeypatch
 ):

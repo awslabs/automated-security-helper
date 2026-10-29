@@ -70,6 +70,8 @@ import pytest
 from tests.utils.helpers import importing_this_checkout
 from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
 
+pytestmark = pytest.mark.e2e
+
 #: The variables, by the setting each one supplies. None of the names ends in a
 #: suffix a configuration may not read (``_KEY``, ``_TOKEN`` and the rest).
 VARIABLES = {

@@ -16,6 +16,8 @@ from __future__ import annotations
 import sys
 from unittest.mock import MagicMock
 
+import pytest
+
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -26,6 +28,8 @@ from automated_security_helper.core.phases.scanner_executor import ScannerExecut
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import COULD_NOT_STOP_MARKER
+
+pytestmark = pytest.mark.unit
 
 PluginContext.model_rebuild()
 AshConfig.model_rebuild()

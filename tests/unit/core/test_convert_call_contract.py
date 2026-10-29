@@ -42,6 +42,8 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.phases.convert_phase import ConvertPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 
 # Deliberately undecorated: @ash_converter_plugin registers into the process-wide
 # plugin manager, and these fixtures must not appear in another test's library.

@@ -18,6 +18,10 @@ import ast
 from pathlib import Path
 from typing import List, Tuple
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 PACKAGE = Path(__file__).resolve().parents[3] / "automated_security_helper"
 
 DISCOVERY_FUNCTIONS = {

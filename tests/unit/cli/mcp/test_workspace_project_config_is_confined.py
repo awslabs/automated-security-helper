@@ -28,6 +28,8 @@ from typing import Any, Dict
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 SESSION = "client-one"
 MARKER = "OUTSIDE-THE-ROOTS-MARKER"
 

@@ -24,6 +24,8 @@ from automated_security_helper.utils.log import TextFileFormatter, console_text
 from automated_security_helper.utils.scanned_tree import TreeInputRefused
 from automated_security_helper.utils.terminal_text import ShownText
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def ash_warnings():

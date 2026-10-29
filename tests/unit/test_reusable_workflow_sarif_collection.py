@@ -78,6 +78,7 @@ def _steps() -> dict[str, dict]:
     return {step["name"]: step for step in _report_steps() if "name" in step}
 
 
+@pytest.mark.unit
 def test_the_evaluator_reads_known_expressions():
     context = {"inputs.on": True, "github.event_name": "push"}
     assert evaluate("inputs.on && github.event_name == 'push'", context, "success")
@@ -115,6 +116,7 @@ def _context(event: str, collect: bool) -> dict:
     }
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("event", sorted(EVENTS))
 @pytest.mark.parametrize("collect", [True, False])
 @pytest.mark.parametrize("status", ["success", "failure"])
@@ -126,6 +128,7 @@ def test_the_upload_runs_only_where_it_can_succeed(event, collect, status):
     assert uploads == (collect and event.endswith("pull request")), condition
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("event", sorted(EVENTS))
 @pytest.mark.parametrize("collect", [True, False])
 @pytest.mark.parametrize("status", ["success", "failure"])
@@ -170,6 +173,7 @@ posix_only = pytest.mark.skipif(
 )
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize("event_name", ["push", "workflow_dispatch", "schedule"])
 def test_the_notice_names_the_workflow_that_can_upload(tmp_path, event_name):
@@ -180,6 +184,7 @@ def test_the_notice_names_the_workflow_that_can_upload(tmp_path, event_name):
     assert "the ash_output artifact" in notice, notice
 
 
+@pytest.mark.integration
 @posix_only
 def test_a_merge_group_notice_gives_the_merge_queues_own_reason(tmp_path):
     notice = _notice_for(tmp_path, "merge_group")
@@ -189,6 +194,7 @@ def test_a_merge_group_notice_gives_the_merge_queues_own_reason(tmp_path):
     assert notice != _notice_for(tmp_path, "push")
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize(
     "event_name, artifact_name",

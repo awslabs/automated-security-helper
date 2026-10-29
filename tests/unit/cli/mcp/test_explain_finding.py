@@ -11,6 +11,8 @@ import pytest
 from automated_security_helper.cli.mcp_tools import mcp_explain_finding
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 
+pytestmark = pytest.mark.unit
+
 
 def _make_vuln(**kwargs) -> FlatVulnerability:
     defaults = {

@@ -39,6 +39,8 @@ import automated_security_helper.utils.console as ash_console_module
 from automated_security_helper.utils.command_safe_stream import CommandSafeStream
 from automated_security_helper.utils.console import print as ash_print
 
+pytestmark = pytest.mark.unit
+
 _ESCAPE = "\x1b"
 _MESSAGE = "[bold red]refused[/bold red]"
 

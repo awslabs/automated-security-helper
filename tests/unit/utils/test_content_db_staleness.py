@@ -65,6 +65,7 @@ from automated_security_helper.utils import content_databases as cdb
 from automated_security_helper.utils import content_db_staleness as staleness
 
 
+@pytest.mark.unit
 def test_a_probes_stderr_excerpt_hides_a_value_straddling_its_cut(monkeypatch):
     """A status probe's stderr is redacted BEFORE the 300-character cut.
 
@@ -321,6 +322,13 @@ CASES = {
     "semgrep-offline-rules": _ruleset_case("semgrep"),
     "opengrep-offline-rules": _ruleset_case("opengrep"),
 }
+CASE_TIERS = {
+    "grype-db": pytest.mark.integration,
+    "trivy-db": pytest.mark.integration,
+    "semgrep-offline-rules": pytest.mark.unit,
+    "opengrep-offline-rules": pytest.mark.unit,
+}
+TIERED_CASES = [pytest.param(name, marks=CASE_TIERS[name]) for name in sorted(CASES)]
 
 
 def _over(name: str) -> timedelta:
@@ -331,7 +339,7 @@ def _under(name: str) -> timedelta:
     return cdb.get(name).max_age - timedelta(hours=1)
 
 
-@pytest.mark.parametrize("name", sorted(CASES))
+@pytest.mark.parametrize("name", TIERED_CASES)
 class TestEachDatabaseType:
     def test_stale_fails_the_scan_by_default(self, tmp_path, name):
         scanner = CASES[name](tmp_path, _over(name))
@@ -397,6 +405,7 @@ class TestEachDatabaseType:
 
 
 class TestMeasurement:
+    @pytest.mark.integration
     def test_grype_built_is_read_even_when_grype_exits_nonzero(self, tmp_path):
         built = datetime.now(UTC) - timedelta(days=10)
         exe = fake_grype(tmp_path, built)
@@ -409,6 +418,7 @@ class TestMeasurement:
         assert record.built == built.replace(microsecond=0)
         assert "grype db status" in record.measured_by
 
+    @pytest.mark.integration
     def test_trivy_without_a_database_is_absent_and_counts_as_stale(self, tmp_path):
         """No database at all is more than an unread age: the record says absent."""
         exe = fake_trivy(tmp_path, None)
@@ -422,6 +432,7 @@ class TestMeasurement:
         assert "does not exist" in record.message()
         assert staleness.ContentDbAgeRecord.from_dict(record.to_dict()).absent
 
+    @pytest.mark.integration
     def test_grype_reporting_no_database_is_absent(self, tmp_path):
         status = {
             "schemaVersion": "",
@@ -442,6 +453,7 @@ class TestMeasurement:
         assert record.absent and record.stale
         assert "does not exist" in record.message()
 
+    @pytest.mark.integration
     def test_a_database_grype_cannot_date_but_that_exists_is_not_absent(self, tmp_path):
         """Unreadable is stale, not absent: the file is there and grype says why not."""
         database = tmp_path / "cache" / "6" / "vulnerability.db"
@@ -466,6 +478,7 @@ class TestMeasurement:
         assert record.stale and not record.absent
         assert "absent" not in record.to_dict()
 
+    @pytest.mark.unit
     def test_a_missing_executable_is_unknown_not_fresh(self):
         record = staleness.measure(
             cdb.get("grype-db"),
@@ -474,6 +487,7 @@ class TestMeasurement:
         )
         assert record.stale and "not found" in (record.error or "")
 
+    @pytest.mark.integration
     def test_grype_reporting_a_database_path_that_does_not_exist_is_absent(
         self, tmp_path
     ):
@@ -496,6 +510,7 @@ class TestMeasurement:
         )
         assert record.absent, record.error
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "name", ["semgrep-offline-rules", "opengrep-offline-rules"]
     )
@@ -505,6 +520,7 @@ class TestMeasurement:
         )
         assert record.absent and "no offline rules cache directory" in record.error
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "name", ["semgrep-offline-rules", "opengrep-offline-rules"]
     )
@@ -519,6 +535,7 @@ class TestMeasurement:
         )
         assert record.absent and "no rules files found" in record.error
 
+    @pytest.mark.unit
     def test_ruleset_manifest_wins_over_a_fresh_mtime(self, tmp_path):
         """A copy resets mtime to now; the recorded download time still says 40 days."""
         fetched = datetime.now(UTC) - timedelta(days=40)
@@ -531,6 +548,7 @@ class TestMeasurement:
         assert record.stale
         assert cdb.RULESET_FETCHED_AT_FILE in record.measured_by
 
+    @pytest.mark.unit
     def test_ruleset_without_a_manifest_falls_back_to_mtime_and_says_so(self, tmp_path):
         old = datetime.now(UTC) - timedelta(days=45)
         cache = ruleset_dir(tmp_path / "rules", None, mtime=old)
@@ -542,6 +560,7 @@ class TestMeasurement:
         assert record.stale
         assert "mtime" in record.measured_by and "weaker" in record.measured_by
 
+    @pytest.mark.unit
     def test_a_scanner_that_cannot_describe_its_database_is_recorded_not_skipped(self):
         class Broken(StubScanner):
             def content_database_probe_context(self):
@@ -555,6 +574,7 @@ class TestMeasurement:
         assert "boom" in (records[0].error or "")
         assert staleness.stale_content_databases(_model(sarif), enforced_only=True)
 
+    @pytest.mark.integration
     def test_a_report_with_no_runs_still_carries_the_record(self, tmp_path):
         """merge_sarif_report drops a runless report, so the record must create a run."""
         scanner = _grype_case(tmp_path, timedelta(days=10))
@@ -566,6 +586,7 @@ class TestMeasurement:
 # --------------------------------------------------------------------------- reading it back
 
 
+@pytest.mark.integration
 class TestTheRecordTravelsWithTheResults:
     def test_it_survives_a_merge_behind_another_scanner(self, tmp_path):
         """The aggregate keeps the FIRST run's properties; the record is on the invocation."""
@@ -680,6 +701,7 @@ def _run_through_executor(scanner, context) -> AshAggregatedResults:
     return _aggregate(containers[0].raw_results)
 
 
+@pytest.mark.integration
 class TestOfflineGrypeTenDaysOld:
     """The measured silent case: offline, validate-age off, a database built 10 days ago."""
 
@@ -717,6 +739,7 @@ class TestOfflineGrypeTenDaysOld:
 # --------------------------------------------------------------------------- the flag
 
 
+@pytest.mark.unit
 class TestTheFlag:
     def test_the_config_default_is_fail(self):
         assert AshConfig(project_name="x").content_db_staleness == "fail"
@@ -814,6 +837,7 @@ def _relax(database: str, expiration: str = "2999-01-01", policy: str = "warn") 
 
 
 class TestPerDatabaseOverrides:
+    @pytest.mark.integration
     def test_the_default_has_no_overrides_and_still_fails_a_stale_database(
         self, tmp_path
     ):
@@ -834,6 +858,7 @@ class TestPerDatabaseOverrides:
         assert "policy_source" not in records[0].to_dict()
         assert _exit_code(tmp_path, _model(sarif)) == 1
 
+    @pytest.mark.integration
     def test_an_override_relaxes_only_the_database_it_names(self, tmp_path):
         overrides = _overrides(_relax("trivy-db"))
         trivy = _trivy_case(tmp_path, _over("trivy-db"))
@@ -870,6 +895,7 @@ class TestPerDatabaseOverrides:
         ]
         assert _exit_code(tmp_path, both) == 1
 
+    @pytest.mark.integration
     def test_an_expired_override_is_ignored_with_a_warning(self, tmp_path, caplog):
         overrides = _overrides(_relax("trivy-db", expiration="2020-01-01"))
         scanner = _trivy_case(tmp_path, _over("trivy-db"))
@@ -885,6 +911,7 @@ class TestPerDatabaseOverrides:
             for m in caplog.messages
         ), caplog.messages
 
+    @pytest.mark.unit
     def test_expiry_is_midnight_utc_on_the_expiration_date(self):
         (entry,) = _overrides(_relax("trivy-db", expiration="2026-10-11"))
         assert entry.expires_at == datetime(2026, 10, 11, tzinfo=UTC)
@@ -892,6 +919,7 @@ class TestPerDatabaseOverrides:
         assert entry.is_expired(datetime(2026, 10, 11, 0, 0, 0, tzinfo=UTC))
         assert entry.is_expired(datetime(2026, 10, 12, tzinfo=UTC))
 
+    @pytest.mark.integration
     def test_an_override_can_also_tighten(self, tmp_path):
         overrides = _overrides(_relax("trivy-db", policy="fail"))
         scanner = _trivy_case(tmp_path, _over("trivy-db"))
@@ -902,6 +930,7 @@ class TestPerDatabaseOverrides:
         assert record.enforced
         assert _exit_code(tmp_path, _model(sarif)) == 1
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "entry,needle",
         [
@@ -917,6 +946,7 @@ class TestPerDatabaseOverrides:
             _overrides(entry)
         assert needle in str(raised.value)
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("missing", ["expiration", "reason", "database", "policy"])
     def test_every_field_is_required(self, missing):
         entry = _relax("trivy-db")
@@ -925,11 +955,13 @@ class TestPerDatabaseOverrides:
             _overrides(entry)
         assert missing in str(raised.value)
 
+    @pytest.mark.unit
     def test_one_entry_per_database(self):
         with pytest.raises(ValueError) as raised:
             _overrides(_relax("trivy-db"), _relax("trivy-db", policy="fail"))
         assert "more than one" in str(raised.value)
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("allow_stale,expected", [(False, "fail"), (True, "warn")])
     def test_either_form_of_the_flag_clears_the_overrides(self, allow_stale, expected):
         from_file = AshConfig(
@@ -942,6 +974,7 @@ class TestPerDatabaseOverrides:
         assert overridden.content_db_staleness_overrides == []
         assert staleness.resolve_policy(overridden) == expected
 
+    @pytest.mark.unit
     def test_a_runtime_patch_cannot_add_an_override(self):
         from automated_security_helper.config.ash_config import RuntimeOverridesConfig
 
@@ -949,6 +982,7 @@ class TestPerDatabaseOverrides:
             "/content_db_staleness_overrides" in RuntimeOverridesConfig().denied_paths
         )
 
+    @pytest.mark.unit
     def test_the_config_validator_accepts_the_key(self):
         from automated_security_helper.config.config_validator import ConfigValidator
 
@@ -956,6 +990,7 @@ class TestPerDatabaseOverrides:
             "content_db_staleness_overrides" in ConfigValidator.VALID_TOP_LEVEL_FIELDS
         )
 
+    @pytest.mark.integration
     @pytest.mark.parametrize("relaxed,exit_code", [("trivy-db", 1), ("grype-db", 0)])
     def test_the_executor_applies_the_overrides_from_the_config(
         self, tmp_path, offline_grype, test_plugin_context, relaxed, exit_code
@@ -992,10 +1027,12 @@ class TestTheOfflineImageDefault:
     image's own environment, and the config can only turn it off.
     """
 
+    @pytest.mark.unit
     def test_it_names_exactly_trivy_db(self):
         assert dict(cdb.OFFLINE_IMAGE_POLICIES) == {"trivy-db": cdb.STALENESS_WARN}
         assert cdb.OFFLINE_IMAGE_ENV == "ASH_OFFLINE_AT_BUILD_TIME"
 
+    @pytest.mark.integration
     def test_a_stale_trivy_db_warns_and_every_report_says_why(self, tmp_path):
         scanner = _trivy_case(tmp_path, _over("trivy-db"))
         sarif = _sarif(scanner.config.name)
@@ -1026,7 +1063,12 @@ class TestTheOfflineImageDefault:
         assert "OFFLINE=YES" in flat["policy_source"]
 
     @pytest.mark.parametrize(
-        "name", ["grype-db", "semgrep-offline-rules", "opengrep-offline-rules"]
+        "name",
+        [
+            pytest.param("grype-db", marks=pytest.mark.integration),
+            pytest.param("semgrep-offline-rules", marks=pytest.mark.unit),
+            pytest.param("opengrep-offline-rules", marks=pytest.mark.unit),
+        ],
     )
     def test_every_other_database_still_fails(self, tmp_path, name):
         scanner = CASES[name](tmp_path, _over(name))
@@ -1037,6 +1079,7 @@ class TestTheOfflineImageDefault:
         assert record.enforced and record.policy_source is None
         assert _exit_code(tmp_path, _model(sarif)) == 1
 
+    @pytest.mark.integration
     def test_outside_an_offline_image_trivy_db_still_fails(self, tmp_path):
         scanner = _trivy_case(tmp_path, _over("trivy-db"))
         sarif = _sarif(scanner.config.name)
@@ -1044,6 +1087,7 @@ class TestTheOfflineImageDefault:
         assert record.enforced and record.policy_source is None
         assert _exit_code(tmp_path, _model(sarif)) == 1
 
+    @pytest.mark.integration
     def test_a_fresh_trivy_db_is_not_reported(self, tmp_path):
         scanner = _trivy_case(tmp_path, _under("trivy-db"))
         sarif = _sarif(scanner.config.name)
@@ -1053,6 +1097,7 @@ class TestTheOfflineImageDefault:
         assert not record.stale
         assert staleness.stale_content_databases(_model(sarif)) == []
 
+    @pytest.mark.integration
     def test_an_override_entry_outranks_it(self, tmp_path):
         overrides = _overrides(_relax("trivy-db", policy="fail"))
         scanner = _trivy_case(tmp_path, _over("trivy-db"))
@@ -1067,6 +1112,7 @@ class TestTheOfflineImageDefault:
         assert record.enforced
         assert "content_db_staleness_overrides entry" in (record.policy_source or "")
 
+    @pytest.mark.integration
     def test_an_expired_override_falls_back_to_it_and_says_so(self, tmp_path, caplog):
         overrides = _overrides(
             _relax("trivy-db", policy="fail", expiration="2020-01-01")
@@ -1086,6 +1132,7 @@ class TestTheOfflineImageDefault:
         assert "OFFLINE=YES" in expired
         assert "content_db_staleness (fail)" not in expired
 
+    @pytest.mark.integration
     def test_under_warn_it_changes_nothing(self, tmp_path):
         scanner = _trivy_case(tmp_path, _over("trivy-db"))
         sarif = _sarif(scanner.config.name)
@@ -1094,6 +1141,7 @@ class TestTheOfflineImageDefault:
         )
         assert record.policy == cdb.STALENESS_WARN and record.policy_source is None
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "env,field,expected",
         [
@@ -1114,12 +1162,14 @@ class TestTheOfflineImageDefault:
         )
         assert staleness.resolve_offline_image_default(config) is expected
 
+    @pytest.mark.unit
     def test_the_config_default_leaves_it_on(self, monkeypatch):
         _offline_image_env(monkeypatch)
         assert AshConfig(project_name="x").content_db_staleness_offline_image_default
         assert get_default_config().content_db_staleness_offline_image_default
         assert staleness.resolve_offline_image_default(AshConfig(project_name="x"))
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("allow_stale", [False, True])
     def test_either_form_of_the_flag_turns_it_off(self, monkeypatch, allow_stale):
         _offline_image_env(monkeypatch)
@@ -1130,6 +1180,7 @@ class TestTheOfflineImageDefault:
         assert overridden.content_db_staleness_offline_image_default is False
         assert staleness.resolve_offline_image_default(overridden) is False
 
+    @pytest.mark.unit
     def test_a_runtime_patch_cannot_turn_it_back_on(self):
         from automated_security_helper.config.ash_config import RuntimeOverridesConfig
 
@@ -1138,6 +1189,7 @@ class TestTheOfflineImageDefault:
             in RuntimeOverridesConfig().denied_paths
         )
 
+    @pytest.mark.unit
     def test_the_config_validator_accepts_the_key(self):
         from automated_security_helper.config.config_validator import ConfigValidator
 
@@ -1146,6 +1198,7 @@ class TestTheOfflineImageDefault:
             in ConfigValidator.VALID_TOP_LEVEL_FIELDS
         )
 
+    @pytest.mark.integration
     @pytest.mark.parametrize("env,enforced", [("YES", False), (None, True)])
     def test_the_executor_applies_it_from_the_environment(
         self, tmp_path, monkeypatch, test_plugin_context, env, enforced
@@ -1165,6 +1218,7 @@ class TestTheOfflineImageDefault:
         (record,) = staleness.content_db_records(_model(sarif))
         assert record.stale and record.enforced is enforced
 
+    @pytest.mark.unit
     def test_the_image_sets_it_from_its_offline_build_argument_only(self):
         dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
         assignments = re.findall(
@@ -1177,6 +1231,7 @@ class TestTheOfflineImageDefault:
 # --------------------------------------------------------------------------- the registry
 
 
+@pytest.mark.unit
 class TestEveryDatabaseIsBoundedAndMeasurable:
     def test_every_entry_declares_a_bound_its_source_and_a_refresh(self):
         for entry in cdb.CONTENT_DATABASES:
@@ -1203,6 +1258,7 @@ class TestEveryDatabaseIsBoundedAndMeasurable:
             assert f'"${{{env}}}/{cdb.RULESET_FETCHED_AT_FILE}"' in dockerfile, env
 
 
+@pytest.mark.unit
 class TestNoSecondLiteral:
     """The new bounds are declared once, like grype's (see test_content_databases.py)."""
 
@@ -1234,6 +1290,7 @@ class TestNoSecondLiteral:
         assert offenders == [], offenders
 
 
+@pytest.mark.unit
 class TestNoScannerReadsAnUndeclaredDatabase:
     """The drift gate for scanners: a new offline-cache scanner must declare its database."""
 
@@ -1304,6 +1361,7 @@ class TestAStaleDatabaseIsOneConditionWithTheGateOnOrOff:
         )
         return _model(sarif)
 
+    @pytest.mark.integration
     @pytest.mark.parametrize("gate", [True, False])
     def test_it_is_carried_once_in_its_own_field(self, tmp_path, gate):
         from automated_security_helper.core.unified_metrics import ScannerMetrics
@@ -1323,6 +1381,7 @@ class TestAStaleDatabaseIsOneConditionWithTheGateOnOrOff:
         assert [d["name"] for d in payload["stale_content_databases"]] == ["grype-db"]
         json.dumps(payload)
 
+    @pytest.mark.integration
     def test_a_stale_scanner_that_also_lost_targets_keeps_its_row(self, tmp_path):
         from automated_security_helper.core.unified_metrics import ScannerMetrics
         from automated_security_helper.interactions.run_ash_scan import (
@@ -1342,11 +1401,13 @@ class TestAStaleDatabaseIsOneConditionWithTheGateOnOrOff:
         assert "4 of 10 targets unevaluated" in got.scanners[0][1]
         assert [r.name for r in got.stale_content_databases] == ["grype-db"]
 
+    @pytest.mark.integration
     @pytest.mark.parametrize("gate", [True, False])
     def test_it_exits_1_with_the_gate_on_or_off(self, tmp_path, gate):
         model = self._stale_model(tmp_path)
         assert _exit_code(tmp_path, model, fail_on_incomplete_scanners=gate) == 1
 
+    @pytest.mark.integration
     @pytest.mark.parametrize("gate", [True, False])
     def test_the_opt_out_still_passes_with_the_gate_on_or_off(self, tmp_path, gate):
         from automated_security_helper.interactions.run_ash_scan import (
@@ -1358,6 +1419,7 @@ class TestAStaleDatabaseIsOneConditionWithTheGateOnOrOff:
         with patch(f"{_MODULE}.get_unified_scanner_metrics", return_value=[]):
             assert not scan_incompleteness(model, gate=gate)
 
+    @pytest.mark.integration
     def test_the_message_gives_the_refresh_advice_and_not_the_install_advice(
         self, tmp_path, capsys
     ):
@@ -1375,6 +1437,7 @@ class TestAStaleDatabaseIsOneConditionWithTheGateOnOrOff:
         assert "Install the missing" not in out
         assert "exception" not in out
 
+    @pytest.mark.unit
     def test_the_mcp_coverage_check_sees_it(self):
         from automated_security_helper.core.resource_management.scan_tracking import (
             coverage_has_gap,
@@ -1387,6 +1450,7 @@ class TestAStaleDatabaseIsOneConditionWithTheGateOnOrOff:
 # --------------------------------------------------------------------------- two readers
 
 
+@pytest.mark.integration
 class TestEveryScannerThatReadAStaleDatabaseIsNamed:
     """trivy and trivy-repo both read trivy-db. Records were kept one per database, so
     when both read a stale one, only one scanner was named in every report."""
@@ -1477,6 +1541,7 @@ class TestABuildTimeInTheFutureIsNotFresh:
     """``now - built`` is negative for a build time in the future, which every bound
     admits, so a database claiming to be built tomorrow read as fresh indefinitely."""
 
+    @pytest.mark.unit
     def test_is_stale_refuses_a_build_time_past_the_clock_skew_allowance(self):
         entry = cdb.get("trivy-db")
         now = datetime(2026, 10, 11, 12, 0, tzinfo=UTC)
@@ -1486,7 +1551,7 @@ class TestABuildTimeInTheFutureIsNotFresh:
         assert cdb.is_stale(entry, now + timedelta(days=365), now)
         assert not cdb.is_stale(entry, now - timedelta(hours=1), now)
 
-    @pytest.mark.parametrize("name", sorted(CASES))
+    @pytest.mark.parametrize("name", TIERED_CASES)
     def test_it_fails_the_scan_and_says_why(self, tmp_path, name):
         scanner = CASES[name](tmp_path, -timedelta(days=2))
         sarif = _sarif(scanner.config.name)
@@ -1499,6 +1564,7 @@ class TestABuildTimeInTheFutureIsNotFresh:
         assert "cannot be shown to be inside" in message, message
         assert _exit_code(tmp_path, _model(sarif)) == 1
 
+    @pytest.mark.integration
     def test_a_small_skew_is_tolerated(self, tmp_path):
         scanner = _trivy_case(tmp_path, -timedelta(minutes=1))
         (record,) = staleness.assess_scanner(
@@ -1510,6 +1576,7 @@ class TestABuildTimeInTheFutureIsNotFresh:
 # --------------------------------------------------------------------------- spellings
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "value, built",
     [
@@ -1629,6 +1696,7 @@ def _plant_grype(cache: Path, when: datetime) -> None:
     (cache / "6" / "built.txt").write_text(_ts(when), encoding="utf-8")
 
 
+@pytest.mark.integration
 class TestTheProbeReadsNothingTheRepositoryWrote:
     """``cd repo && ash --offline`` with a planted config cannot age a stale database.
 
@@ -1738,6 +1806,7 @@ class TestTheProbeReadsNothingTheRepositoryWrote:
         self._assert_fresh(record, fresh)
 
 
+@pytest.mark.unit
 def test_the_probes_pass_the_same_empty_config_the_refresh_does():
     """One object, from the module both import (utils/content_db_shared.py), so
     no copy can drift; the file it names ships with ASH."""

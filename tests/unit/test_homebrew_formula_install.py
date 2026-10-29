@@ -107,6 +107,7 @@ def _renderer():
     return module
 
 
+@pytest.mark.unit
 class TestTheFormulaInstallsTheLockedDependencies:
     def test_install_syncs_the_lock_without_dev_dependencies(self):
         body = _install_method()
@@ -229,6 +230,7 @@ class TestTheFormulaInstallsTheLockedDependencies:
         assert set(match["names"].split()) == scripts
 
 
+@pytest.mark.unit
 class TestTheCiLegScansWithTheDefaultSelection:
     """homebrew.sh runs `ash scan` with no --scanners, so a default scan is tested.
 
@@ -270,6 +272,7 @@ class TestTheCiLegScansWithTheDefaultSelection:
         }
 
 
+@pytest.mark.unit
 class TestTheBuildBackendSkipsTheUvCache:
     """hatchling walks the whole project root while uv may still be writing into it.
 
@@ -308,6 +311,7 @@ def _status_checker():
     return module
 
 
+@pytest.mark.unit
 class TestTheScannerStatusCheck:
     """check-scanner-statuses.py, which homebrew.sh runs on the default scan."""
 
@@ -358,6 +362,7 @@ class TestTheScannerStatusCheck:
         assert self._run(tmp_path, {}) == 1
 
 
+@pytest.mark.unit
 class TestTheLockAgreesWithPyproject:
     """What `uv lock --check` would say about [project] dependencies, offline."""
 
@@ -413,6 +418,7 @@ class TestTheLockAgreesWithPyproject:
         )
 
 
+@pytest.mark.unit
 class TestTheCiRendererCanRewriteTheFormula:
     def _render(self, formula: str, tarball: Path, version: str = "3.7.0") -> str:
         return _renderer().render(formula, tarball, version, "0" * 64)
@@ -569,6 +575,7 @@ Ash.new(ARGV.fetch(1)).install
 """
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     os.name == "nt" or shutil.which("ruby") is None,
     reason="Homebrew runs on macOS and Linux only",

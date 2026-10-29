@@ -21,6 +21,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from tests.unit.cli.test_merge import build_shards, write_shards
@@ -73,6 +74,7 @@ def _merge_with_config(tmp_path: Path, config_text: str) -> subprocess.Completed
     )
 
 
+@pytest.mark.integration
 def test_the_merge_refusal_shows_a_patch_path_once(tmp_path: Path) -> None:
     """A patch operation of the operator's --config fails at a path holding ESC:
     the refusal names the path, shown once."""
@@ -92,6 +94,7 @@ def test_the_merge_refusal_shows_a_patch_path_once(tmp_path: Path) -> None:
     assert "(add at '/no\\x1bsuch/parent') failed" in " ".join(output.split()), output
 
 
+@pytest.mark.integration
 def test_the_merge_refusal_shows_no_extends_value_twice(tmp_path: Path) -> None:
     """``extends`` holds a list with an entry that is not a path: the refusal
     names what it got without quoting an entry that holds ESC through a repr."""
@@ -109,6 +112,7 @@ def test_the_merge_refusal_shows_no_extends_value_twice(tmp_path: Path) -> None:
     assert ESC not in output, output
 
 
+@pytest.mark.unit
 def test_an_invalid_override_is_shown_once(tmp_path: Path) -> None:
     """A --config-overrides key holding ESC is refused, naming the override as
     written, shown once by the report's sink."""
@@ -138,6 +142,7 @@ def test_an_invalid_override_is_shown_once(tmp_path: Path) -> None:
     _assert_shown_once(result.output)
 
 
+@pytest.mark.unit
 def test_the_lint_symbol_path_is_shown_once(tmp_path: Path) -> None:
     """The linter's warning for a symbol whose path matches no file it has a
     grammar for names the path as written, shown once by the lint sink."""

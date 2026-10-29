@@ -24,6 +24,8 @@ from automated_security_helper.core import metrics_table
 from automated_security_helper.core.unified_metrics import ScannerMetrics
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 #: A closing tag with no opener, and a whole style tag around a word.
 NAMES = ["a[/x]", "[bold]x[/bold]"]
 

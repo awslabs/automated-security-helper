@@ -41,6 +41,8 @@ from automated_security_helper.cli.mcp.session_identity import (
 )
 from automated_security_helper.cli.mcp_tools import mcp_scan_directory
 
+pytestmark = pytest.mark.unit
+
 LIMIT_REFUSED = "session_scan_limit"
 
 

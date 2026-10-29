@@ -55,9 +55,12 @@ from automated_security_helper.utils.sandbox.scope import (
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
 
-pytestmark = pytest.mark.skipif(
-    os.name != "posix", reason="the probes and the planted symlink are POSIX's"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        os.name != "posix", reason="the probes and the planted symlink are POSIX's"
+    ),
+]
 
 
 class _ProbingConfig(ScannerPluginConfigBase):

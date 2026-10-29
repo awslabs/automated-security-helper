@@ -43,6 +43,8 @@ from automated_security_helper.cli.main import app
 from automated_security_helper.cli.mcp_tools import mcp_validate_config
 from automated_security_helper.core.exceptions import ASHConfigSourceError
 
+pytestmark = pytest.mark.unit
+
 INVALID_CONFIG_EXIT = 3
 # What validate prints above its warnings. Asserting on the word "warning"
 # alone would also match a path that validate prints.

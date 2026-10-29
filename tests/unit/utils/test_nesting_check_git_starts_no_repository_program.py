@@ -107,6 +107,7 @@ def home(tmp_path, monkeypatch):
     return home, project, marker
 
 
+@pytest.mark.integration
 def test_plain_git_runs_the_hidden_repositorys_fsmonitor(home):
     """The control: the listings the check needs, run without the options."""
     repo, _project, marker = home
@@ -122,6 +123,7 @@ def test_plain_git_runs_the_hidden_repositorys_fsmonitor(home):
     assert _marks(marker) > 0
 
 
+@pytest.mark.integration
 def test_the_ceiling_check_runs_no_fsmonitor(home):
     repo, project, marker = home
 
@@ -130,6 +132,7 @@ def test_the_ceiling_check_runs_no_fsmonitor(home):
     assert _marks(marker) == 0
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "ask",
     [
@@ -156,6 +159,7 @@ def test_each_git_question_runs_no_fsmonitor(home, ask):
     assert _marks(marker) == 0
 
 
+@pytest.mark.unit
 def test_git_argv_puts_the_options_before_the_subcommand():
     """The options as written, so a git_argv that adds none fails here too."""
     assert git_argv("ls-files", "-z") == [

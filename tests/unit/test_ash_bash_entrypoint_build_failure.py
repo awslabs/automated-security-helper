@@ -32,6 +32,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 ASH_SCRIPT = REPO_ROOT / "ash"
 
 pytestmark = [
+    pytest.mark.integration,
     # Windows users invoke ASH through utils/ash_helpers.ps1, not ./ash, so there
     # is nothing here to cover on Windows. It also cannot work: on a GitHub
     # Windows runner shutil.which("bash") finds C:\Windows\System32\bash.exe,

@@ -107,6 +107,7 @@ def _secret_file(tmp_path: Path, content: bytes, mode: int = 0o600) -> Path:
 # -- the file ---------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_a_private_file_supplies_the_value(tmp_path, built) -> None:
     path = _secret_file(tmp_path, b"from-a-file\n")
 
@@ -116,6 +117,7 @@ def test_a_private_file_supplies_the_value(tmp_path, built) -> None:
     assert built.get("served") is True
 
 
+@pytest.mark.unit
 def test_only_one_trailing_newline_is_dropped(tmp_path, built) -> None:
     path = _secret_file(tmp_path, b"crlf-ended\r\n")
 
@@ -126,6 +128,7 @@ def test_only_one_trailing_newline_is_dropped(tmp_path, built) -> None:
 
 @POSIX
 @pytest.mark.parametrize("mode", [0o640, 0o604, 0o620, 0o644])
+@pytest.mark.unit
 def test_a_file_other_users_can_read_or_write_is_refused(
     tmp_path, built, stderr, mode
 ) -> None:
@@ -140,6 +143,7 @@ def test_a_file_other_users_can_read_or_write_is_refused(
 
 
 @POSIX
+@pytest.mark.unit
 def test_a_symlink_is_refused(tmp_path, built) -> None:
     target = _secret_file(tmp_path, b"behind-a-link\n")
     link = tmp_path / "link"
@@ -153,6 +157,7 @@ def test_a_symlink_is_refused(tmp_path, built) -> None:
 
 
 @POSIX
+@pytest.mark.unit
 def test_a_fifo_is_refused_without_blocking(tmp_path, built) -> None:
     fifo = tmp_path / "fifo"
     os.mkfifo(fifo, 0o600)
@@ -167,6 +172,7 @@ def test_a_fifo_is_refused_without_blocking(tmp_path, built) -> None:
     "case",
     ["missing", "directory", "empty", "only-a-newline", "too-large", "two-lines"],
 )
+@pytest.mark.unit
 def test_a_file_that_holds_no_usable_value_is_refused(tmp_path, built, case) -> None:
     path = tmp_path / "header-value"
     if case == "directory":
@@ -190,6 +196,7 @@ def test_a_file_that_holds_no_usable_value_is_refused(tmp_path, built, case) -> 
 # -- the descriptor ---------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_a_pipe_descriptor_supplies_the_value_and_is_closed(built) -> None:
     read_end, write_end = os.pipe()
     os.write(write_end, b"from-a-pipe\n")
@@ -202,6 +209,7 @@ def test_a_pipe_descriptor_supplies_the_value_and_is_closed(built) -> None:
         os.fstat(read_end)
 
 
+@pytest.mark.unit
 def test_a_file_descriptor_is_read_from_its_start(tmp_path, built) -> None:
     path = tmp_path / "written"
     handle = open(path, "w+b")
@@ -216,6 +224,7 @@ def test_a_file_descriptor_is_read_from_its_start(tmp_path, built) -> None:
 
 
 @pytest.mark.parametrize("fd", [0, 1, 2, -1])
+@pytest.mark.unit
 def test_a_standard_or_negative_descriptor_is_refused(built, fd) -> None:
     with pytest.raises(typer.Exit) as excinfo:
         _start(auth_header_value_fd=fd)
@@ -224,6 +233,7 @@ def test_a_standard_or_negative_descriptor_is_refused(built, fd) -> None:
     assert "served" not in built
 
 
+@pytest.mark.unit
 def test_a_descriptor_that_is_not_open_is_refused(built) -> None:
     read_end, write_end = os.pipe()
     os.close(read_end)
@@ -239,6 +249,7 @@ def test_a_descriptor_that_is_not_open_is_refused(built) -> None:
 
 
 @pytest.mark.parametrize("pair", ["value+file", "value+fd", "file+fd"])
+@pytest.mark.unit
 def test_only_one_form_may_be_given(tmp_path, built, pair) -> None:
     path = _secret_file(tmp_path, b"one\n")
     read_end, write_end = os.pipe()
@@ -266,6 +277,7 @@ def test_only_one_form_may_be_given(tmp_path, built, pair) -> None:
     assert "served" not in built
 
 
+@pytest.mark.unit
 def test_a_name_with_no_value_in_any_form_is_refused(built) -> None:
     with pytest.raises(typer.Exit) as excinfo:
         _start()
@@ -273,6 +285,7 @@ def test_a_name_with_no_value_in_any_form_is_refused(built) -> None:
     assert excinfo.value.exit_code == ASH_EXIT_USAGE_ERROR
 
 
+@pytest.mark.unit
 def test_the_argv_form_still_works_and_warns(built, stderr) -> None:
     _start(auth_header_value="on-the-command-line")
 
@@ -283,6 +296,7 @@ def test_the_argv_form_still_works_and_warns(built, stderr) -> None:
     assert "on-the-command-line" not in message
 
 
+@pytest.mark.unit
 def test_the_file_form_does_not_warn(tmp_path, built, stderr) -> None:
     _start(auth_header_value_file=_secret_file(tmp_path, b"quiet\n"))
 
@@ -419,6 +433,7 @@ def _run(form: str, value: str, tmp_path: Path) -> Dict[str, object]:
 
 @PROC
 @pytest.mark.parametrize("form", ["file", "fd"])
+@pytest.mark.e2e
 def test_a_served_value_is_on_no_command_line_and_still_checked(tmp_path, form) -> None:
     value = "ash-" + secrets.token_hex(16)
 
@@ -429,6 +444,7 @@ def test_a_served_value_is_on_no_command_line_and_still_checked(tmp_path, form) 
 
 
 @PROC
+@pytest.mark.e2e
 def test_the_command_line_check_sees_the_argv_form(tmp_path) -> None:
     """The control: the same scan finds the value when it is passed on argv."""
     value = "ash-" + secrets.token_hex(16)

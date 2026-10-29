@@ -64,6 +64,8 @@ from pathlib import Path
 import yaml
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "run-ash-security-scan.yml"
 GITHUB_DIR = REPO_ROOT / ".github"

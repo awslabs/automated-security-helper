@@ -30,6 +30,8 @@ from typing import List, Tuple
 import pytest
 import yaml
 
+pytestmark = pytest.mark.integration
+
 # Built at runtime so this file holds no secret-shaped literal. AWS's documented
 # example key, which detect-secrets reports.
 PLANTED_KEY = "".join(["AKIA", "IOSFODNN7", "EXAMPLE"])  # noqa: FLY002

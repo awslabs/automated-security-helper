@@ -41,6 +41,8 @@ from tests.utils.stand_in_uv import (
     stand_in_env,
 )
 
+pytestmark = pytest.mark.integration
+
 #: The missing dependency the broken package imports; the control plants it.
 DEPENDENCY = "brokendep_for_import_refusal"
 

@@ -4,10 +4,14 @@
 import warnings
 
 
+import pytest
+
 from automated_security_helper.models.asharp_model import (
     ScannerSeverityCount,
     SummaryStats,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestSummaryStatsNoPydanticWarning:

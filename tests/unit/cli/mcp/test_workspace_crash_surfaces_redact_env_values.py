@@ -30,6 +30,8 @@ from tests.unit.cli.mcp.test_mcp_resource_limits import (
     _workspace_entries,
 )
 
+pytestmark = pytest.mark.unit
+
 SECRET = "ws-crash-canary-h6j1"
 
 

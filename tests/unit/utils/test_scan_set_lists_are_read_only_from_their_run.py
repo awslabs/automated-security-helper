@@ -79,6 +79,7 @@ def _no_walk():
     )
 
 
+@pytest.mark.unit
 def test_a_list_left_in_the_output_dir_does_not_decide_the_scan_set(tmp_path):
     source, output = _tree(tmp_path)
     _plant_lists(output, [source / "app.py"])
@@ -88,6 +89,7 @@ def test_a_list_left_in_the_output_dir_does_not_decide_the_scan_set(tmp_path):
     assert _names(found) == {"app.py", "other.py"}
 
 
+@pytest.mark.unit
 def test_a_list_another_run_wrote_is_not_read(tmp_path):
     source, output = _tree(tmp_path)
     scan_set(source=str(source), output=str(output), run_id=RUN_A)
@@ -99,6 +101,7 @@ def test_a_list_another_run_wrote_is_not_read(tmp_path):
     assert json.loads((output / RUN_RECORD).read_text())["run_id"] == RUN_B
 
 
+@pytest.mark.unit
 def test_the_list_this_run_wrote_is_read_back_without_a_walk(tmp_path):
     source, output = _tree(tmp_path)
     written = scan_set(source=str(source), output=str(output), run_id=RUN_A)
@@ -111,6 +114,7 @@ def test_the_list_this_run_wrote_is_read_back_without_a_walk(tmp_path):
     assert _names(found) == {"app.py", "other.py"}
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("changed", [SCAN_SET_LIST, IGNORE_REPORT])
 def test_a_list_changed_after_this_run_wrote_it_is_not_read(tmp_path, changed):
     source, output = _tree(tmp_path)
@@ -124,6 +128,7 @@ def test_a_list_changed_after_this_run_wrote_it_is_not_read(tmp_path, changed):
     assert _names(found) == {"app.py", "other.py", "new.py"}
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "record",
     [
@@ -144,6 +149,7 @@ def test_a_damaged_run_record_is_not_trusted(tmp_path, record):
     assert "new.py" in _names(found)
 
 
+@pytest.mark.unit
 def test_the_run_record_names_the_run_and_the_digest_of_each_file(tmp_path):
     import hashlib
 
@@ -157,6 +163,7 @@ def test_the_run_record_names_the_run_and_the_digest_of_each_file(tmp_path):
         assert record["sha256"][name] == digest, name
 
 
+@pytest.mark.integration
 def test_a_committed_list_does_not_decide_what_detect_secrets_scans(tmp_path):
     """A repository commits a list naming one file to its default output
     directory; detect-secrets, run on its own, does not read it and walks the
@@ -208,6 +215,7 @@ def test_a_committed_list_does_not_decide_what_detect_secrets_scans(tmp_path):
     assert uris == {"settings.py", "config.py"}, uris
 
 
+@pytest.mark.unit
 def test_a_scanner_reads_back_the_list_its_run_wrote(tmp_path):
     from automated_security_helper.utils.scan_output_dirs import scan_set_of
 
@@ -259,6 +267,7 @@ def _scanned_by_orchestrator(source: Path, output: Path):
     return orchestrator.execution_engine.context
 
 
+@pytest.mark.unit
 def test_each_scan_writes_its_list_under_its_own_run_id(tmp_path, monkeypatch):
     """The ID the plugins get is the one the orchestrator wrote the list under, and
     two scans get two IDs, so neither reads the other's list."""
@@ -278,6 +287,7 @@ def test_each_scan_writes_its_list_under_its_own_run_id(tmp_path, monkeypatch):
         ) == {"app.py", "other.py"}
 
 
+@pytest.mark.unit
 def test_every_call_to_scan_set_in_ash_passes_its_runs_id():
     """A caller that does not pass the ID walks the tree on every call. Each one in
     ASH has the plugin context, or is the orchestrator, so each passes it."""

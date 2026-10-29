@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import re
 
+import pytest
+
 from automated_security_helper.config.config_validator import (
     make_module_form_needle,
 )
@@ -41,6 +43,8 @@ from automated_security_helper.plugins.plugin_manager import (
     masked_module_names,
     without_masked_modules,
 )
+
+pytestmark = pytest.mark.unit
 
 MASK = "<value>"
 NAME = "kqnest_ash_plugins"

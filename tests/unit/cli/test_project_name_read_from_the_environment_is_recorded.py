@@ -70,6 +70,8 @@ from tests.utils import aws_stand_in as stand_in
 from tests.utils.helpers import importing_this_checkout
 from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
 
+pytestmark = pytest.mark.e2e
+
 CANARY = "ash-canary-7f3e-0123456789"
 PREFIX = CANARY[:12]
 REFERENCE = "${ASH_PROBE_VALUE}"

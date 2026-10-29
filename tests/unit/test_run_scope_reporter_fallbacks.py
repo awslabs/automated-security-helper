@@ -18,6 +18,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 class _Recorder:
     def __init__(self):

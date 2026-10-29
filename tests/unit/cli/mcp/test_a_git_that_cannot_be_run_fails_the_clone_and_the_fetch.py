@@ -36,6 +36,8 @@ import pytest
 
 from automated_security_helper.cli.mcp import source_delivery as sd
 
+pytestmark = pytest.mark.integration
+
 #: Not a session id another test delivers to: the record of a delivered source is
 #: kept per process, and these tests read it.
 SESSION = "session-cloneoserr2"

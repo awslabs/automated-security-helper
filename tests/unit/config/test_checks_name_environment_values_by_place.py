@@ -32,6 +32,8 @@ from typer.testing import CliRunner
 
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 #: How a message shows a value read from the environment
 #: (``environment_record.ENVIRONMENT_VALUE_SHOWN``), written out so that the
 #: tests read the same on a tree without it.

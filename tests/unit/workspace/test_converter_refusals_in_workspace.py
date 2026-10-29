@@ -39,6 +39,8 @@ from tests.unit.workspace.test_execution import (
     _sarif,
 )
 
+pytestmark = pytest.mark.unit
+
 OVER_LIMIT_ROW = {
     "converted_paths": [],
     "refused_inputs": [

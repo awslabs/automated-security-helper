@@ -45,6 +45,7 @@ def _cp1252_stream() -> io.TextIOWrapper:
     )
 
 
+@pytest.mark.unit
 class TestSymbolsAreGenuinelyUnencodable:
     """Guard the premise: without the fix these characters really do fail."""
 
@@ -60,6 +61,7 @@ class TestSymbolsAreGenuinelyUnencodable:
             stream.write("❌ Error validating config: boom\n")
 
 
+@pytest.mark.unit
 class TestConfigureWindowsSafeLogging:
     def test_is_a_noop_off_windows(self):
         """Must not touch stdout on Linux or macOS."""
@@ -139,6 +141,7 @@ class TestConfigureWindowsSafeLogging:
             sys.stdout, sys.stderr = original_out, original_err
 
 
+@pytest.mark.unit
 class TestGetLoggerAppliesIt:
     def test_get_logger_configures_the_console(self):
         """get_logger is the entry point every CLI path goes through."""
@@ -238,6 +241,7 @@ def _exceptions_raised_on_threads():
         threading.excepthook = previous
 
 
+@pytest.mark.unit
 class TestTheCaptureHazardIsReal:
     """Guard the premise, in the same spirit as the encode-side control above.
 
@@ -257,6 +261,7 @@ class TestTheCaptureHazardIsReal:
             rounded.encode("utf-8").decode("cp1252")  # must not raise
 
 
+@pytest.mark.integration
 class TestCapturedChildOutputIsDecodedExplicitly:
     """A captured ASH stream must not be decoded with the host code page."""
 

@@ -25,6 +25,7 @@ import logging
 from typing import Any, Dict, List
 from unittest.mock import MagicMock, patch
 
+import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.scanner_plugin import (
@@ -45,6 +46,8 @@ from automated_security_helper.interactions.run_ash_scan import (
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import COULD_NOT_STOP_MARKER
+
+pytestmark = pytest.mark.unit
 
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()

@@ -140,6 +140,7 @@ def _refusal(definition: Path, **given) -> str:
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.unit
 def test_a_root_that_is_not_utf8_is_refused_before_anything_is_read(
     tmp_path, monkeypatch
 ):
@@ -164,6 +165,7 @@ def test_a_root_that_is_not_utf8_is_refused_before_anything_is_read(
     assert not _has_a_surrogate(message), ascii(message)
 
 
+@pytest.mark.unit
 def test_a_folder_that_is_not_utf8_is_refused_and_named(tmp_path):
     root = tmp_path / "cafe"
     odd = os.fsdecode(b"caf\xe9")
@@ -181,6 +183,7 @@ def test_a_folder_that_is_not_utf8_is_refused_and_named(tmp_path):
 
 
 @_NO_NON_UTF8_NAMES
+@pytest.mark.unit
 def test_a_workspace_file_whose_name_is_not_utf8_is_refused(tmp_path):
     root = tmp_path / "cafe"
     definition = _workspace(root, ["api"], name=os.fsdecode(b"caf\xe9.code-workspace"))
@@ -194,6 +197,7 @@ def test_a_workspace_file_whose_name_is_not_utf8_is_refused(tmp_path):
     assert not _has_a_surrogate(message), ascii(message)
 
 
+@pytest.mark.unit
 def test_the_name_is_shown_not_obeyed(tmp_path):
     root = _not_utf8(tmp_path, b"caf\xe9\x1b[31m[red]x\n::error::injected")
     message = _refusal(_workspace(root, ["api"]))
@@ -214,6 +218,7 @@ def test_the_name_is_shown_not_obeyed(tmp_path):
         "config",
     ],
 )
+@pytest.mark.unit
 def test_the_refusal_holds_each_path_as_it_is_on_one_line(tmp_path, where):
     """Raised with raw text, so each sink shows it once; one line, so showing it
     on one line changes only what a name holds."""
@@ -251,6 +256,7 @@ def test_the_refusal_holds_each_path_as_it_is_on_one_line(tmp_path, where):
     assert is_one_line, ascii(message)
 
 
+@pytest.mark.unit
 def test_a_workspace_whose_paths_are_utf8_resolves(tmp_path):
     """The check reads the paths, and leaves a name with non-ASCII letters alone."""
     plan = resolve_workspace(_workspace(tmp_path / "café", ["api", "naïve"]))
@@ -310,6 +316,7 @@ def _ash(tmp_path: Path, args: List[str], cwd: Path) -> subprocess.CompletedProc
     )
 
 
+@pytest.mark.integration
 def test_the_child_imports_the_checkout_under_test(tmp_path):
     """Else the CLI tests below would measure whatever ASH the interpreter finds."""
     home = tmp_path / "home"
@@ -332,6 +339,7 @@ def test_the_child_imports_the_checkout_under_test(tmp_path):
 
 
 @pytest.mark.parametrize("surface", list(_CLI_SURFACES))
+@pytest.mark.integration
 def test_ash_scan_refuses_it_with_exit_4_and_the_message_shown_once(tmp_path, surface):
     root = _not_utf8(tmp_path)
     definition = _workspace(root, ["api"])
@@ -355,6 +363,7 @@ def test_ash_scan_refuses_it_with_exit_4_and_the_message_shown_once(tmp_path, su
     }
 
 
+@pytest.mark.integration
 def test_ash_scan_workspace_auto_refuses_it_too(tmp_path):
     root = _not_utf8(tmp_path)
     _workspace(root, ["api"])
@@ -368,6 +377,7 @@ def test_ash_scan_workspace_auto_refuses_it_too(tmp_path):
     assert _entries(root) == before
 
 
+@pytest.mark.integration
 def test_the_cli_shows_a_name_with_controls_once_and_not_obeyed(tmp_path):
     root = _not_utf8(tmp_path, b"caf\xe9\x1b[31m[red]x\n::error::injected")
     definition = _workspace(root, ["api"])
@@ -391,6 +401,7 @@ def test_the_cli_shows_a_name_with_controls_once_and_not_obeyed(tmp_path):
     [mcp_workspace.mcp_resolve_workspace, mcp_workspace.mcp_scan_workspace],
     ids=["resolve", "scan"],
 )
+@pytest.mark.unit
 def test_the_mcp_tools_answer_exit_4_in_a_response_that_encodes(tmp_path, tool):
     root = _not_utf8(tmp_path)
     definition = _workspace(root, ["api"])
@@ -406,6 +417,7 @@ def test_the_mcp_tools_answer_exit_4_in_a_response_that_encodes(tmp_path, tool):
     assert _entries(tmp_path) == before
 
 
+@pytest.mark.unit
 def test_the_mcp_response_shows_a_name_with_controls_once(tmp_path):
     # A lone ESC: the error text has complete CSI sequences removed in every print.
     root = _not_utf8(tmp_path, b"caf\xe9\x1bc[red]x\n::error::injected")
@@ -422,6 +434,7 @@ def test_the_mcp_response_shows_a_name_with_controls_once(tmp_path):
 
 
 @pytest.mark.parametrize("carried", [True, False], ids=["value-carried", "control"])
+@pytest.mark.unit
 def test_the_mcp_response_hides_a_value_a_complete_code_splits(tmp_path, carried):
     """The response holds a carried environment value neither whole nor in pieces.
 
@@ -465,6 +478,7 @@ def test_the_mcp_response_hides_a_value_a_complete_code_splits(tmp_path, carried
 
 
 @_NO_NON_UTF8_NAMES
+@pytest.mark.unit
 def test_the_workspace_run_shows_the_refusal_once(tmp_path, capsys):
     """run_ash_scan's handler around execute_workspace, given the error as it is
     raised: the whole message shown once, on one line, and exit 4."""
@@ -522,6 +536,7 @@ def _with_an_odd_policy_and_config(tmp_path: Path):
 
 
 @pytest.mark.parametrize("given", ["workspace_config", "default_config"])
+@pytest.mark.unit
 def test_a_policy_or_default_config_path_that_is_not_utf8_is_refused_first(
     tmp_path, monkeypatch, given
 ):
@@ -546,6 +561,7 @@ def test_a_policy_or_default_config_path_that_is_not_utf8_is_refused_first(
     assert not _has_a_surrogate(message), ascii(message)
 
 
+@pytest.mark.unit
 def test_both_are_named_in_one_refusal(tmp_path):
     _root, definition, policy, config = _with_an_odd_policy_and_config(tmp_path)
 
@@ -555,6 +571,7 @@ def test_both_are_named_in_one_refusal(tmp_path):
     assert "caf\\udce9/ash.yaml" in message, ascii(message)
 
 
+@pytest.mark.unit
 def test_a_utf8_link_to_such_a_file_is_refused_too(tmp_path):
     """The plan holds the policy file's resolved path, so a link whose own name is
     UTF-8 does not get around it."""
@@ -570,6 +587,7 @@ def test_a_utf8_link_to_such_a_file_is_refused_too(tmp_path):
     assert "caf\\udce9/ash-workspace.yaml" in message, ascii(message)
 
 
+@pytest.mark.unit
 def test_a_utf8_policy_and_default_config_resolve(tmp_path):
     """The check reads the paths, and leaves a name with non-ASCII letters alone."""
     root = tmp_path / "ws"
@@ -589,6 +607,7 @@ def test_a_utf8_policy_and_default_config_resolve(tmp_path):
 
 @pytest.mark.parametrize("flag", ["--workspace-config", "--config"])
 @pytest.mark.parametrize("surface", ["dry-run", "local"])
+@pytest.mark.integration
 def test_ash_scan_refuses_such_a_policy_or_config_with_exit_4(tmp_path, flag, surface):
     _root, definition, policy, config = _with_an_odd_policy_and_config(tmp_path)
     before = _entries(tmp_path)
@@ -617,6 +636,7 @@ def test_ash_scan_refuses_such_a_policy_or_config_with_exit_4(tmp_path, flag, su
     [mcp_workspace.mcp_resolve_workspace, mcp_workspace.mcp_scan_workspace],
     ids=["resolve", "scan"],
 )
+@pytest.mark.unit
 def test_the_mcp_tools_refuse_such_a_policy_in_a_response_that_encodes(tmp_path, tool):
     _root, definition, policy, _config = _with_an_odd_policy_and_config(tmp_path)
     before = _entries(tmp_path)

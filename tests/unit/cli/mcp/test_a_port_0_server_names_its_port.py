@@ -80,6 +80,7 @@ def _serve(
 @pytest.mark.parametrize("quiet_flag", ["--quiet", "--no-quiet"])
 @pytest.mark.parametrize("transport", ["streamable-http", "sse"])
 @pytest.mark.parametrize("port_asked", ["0", "a free port"])
+@pytest.mark.e2e
 def test_a_server_names_the_port_it_listens_on(
     tmp_path, transport, quiet_flag, port_asked
 ) -> None:
@@ -146,6 +147,7 @@ async def _no_app(scope, receive, send) -> None:
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1"])
+@pytest.mark.unit
 def test_the_line_is_the_one_uvicorn_logs_for_a_socket_it_binds(host) -> None:
     """Message, colored message, logger and level, checked against uvicorn's own."""
     import uvicorn
