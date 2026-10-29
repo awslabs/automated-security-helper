@@ -46,8 +46,8 @@ read once in ``configure``) or has a shard. It acts only when pytest is about to
 item executed when its call phase ran and did not skip, or when its setup failed (an
 error is a result). A run that collected nothing is left to ``admit_empty_shard`` and
 exit 5, so an admitted empty shard stays ``OK``. A plain local ``pytest`` is unaffected,
-and so are ``--collect-only``, ``--setup-plan`` and ``--setup-only``, which run no test
-by design. Under xdist only the controller applies the floor: a worker whose share of
+and so are ``--collect-only``, ``--setup-plan``, ``--setup-only``, ``--fixtures`` and
+``--fixtures-per-test``, which run no test by design. Under xdist only the controller applies the floor: a worker whose share of
 the tests was all skips says nothing, because the controller counts every worker's
 reports.
 
@@ -231,8 +231,9 @@ def fail_a_tier_run_that_executed_no_test(
     skipped (a tool is absent, a gate is off) exits 0 and reads green while it measured
     nothing. It acts only when all of these hold: the run was given a ``-m``
     expression; it is a CI run (``GITHUB_ACTIONS=true`` when ``configure`` ran, or a
-    shard is configured); it is not a ``--collect-only``, ``--setup-plan`` or
-    ``--setup-only`` run, which run no test by design; pytest is about to exit ``OK``;
+    shard is configured); it is not a ``--collect-only``, ``--setup-plan``,
+    ``--setup-only``, ``--fixtures`` or ``--fixtures-per-test`` run, which run no test
+    by design; pytest is about to exit ``OK``;
     at least one item was collected and selected (``session.testscollected``); and
     ``executed`` is zero. ``admit_empty_shard`` is not touched: a shard that collected
     nothing selected nothing, so an admitted empty shard stays ``OK`` here.
@@ -251,7 +252,13 @@ def fail_a_tier_run_that_executed_no_test(
         return False
     if any(
         config.getoption(name, default=False)
-        for name in ("collectonly", "setupplan", "setuponly")
+        for name in (
+            "collectonly",
+            "setupplan",
+            "setuponly",
+            "showfixtures",
+            "show_fixtures_per_test",
+        )
     ):
         return False
     if session.exitstatus != pytest.ExitCode.OK:

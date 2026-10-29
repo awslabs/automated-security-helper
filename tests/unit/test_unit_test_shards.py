@@ -924,7 +924,16 @@ class TestATierRunThatExecutedNoTestFails:
         assert not sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
         assert session.exitstatus == pytest.ExitCode.OK and not written
 
-    @pytest.mark.parametrize("option", ["collectonly", "setupplan", "setuponly"])
+    @pytest.mark.parametrize(
+        "option",
+        [
+            "collectonly",
+            "setupplan",
+            "setuponly",
+            "showfixtures",
+            "show_fixtures_per_test",
+        ],
+    )
     def test_a_run_that_runs_no_test_by_design_is_left_alone(self, option):
         written: list[str] = []
         session = self._session(written, **{option: True})
