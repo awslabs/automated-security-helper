@@ -26,10 +26,15 @@ def reset_refused_tool_version_warnings() -> None:
         _REFUSED_TOOL_VERSIONS.clear()
 
 
-#: A release tag: an optional ``v``, dot-separated numbers, and optional ``-`` or
-#: ``.`` separated alphanumeric parts (``v1.15.1``, ``1.2.0-rc1``). Nothing that can
-#: change the path of the URL the tag is put into.
-_RELEASE_TAG = re.compile(r"v?[0-9]+(\.[0-9]+)*([-.][0-9A-Za-z]+)*")
+#: A release tag: an optional ``v``, a number, then any run of ``-`` or ``.``
+#: separated alphanumeric parts (``v1.15.1``, ``1.2.0-rc1``). Nothing that can
+#: change the path of the URL the tag is put into. ONE repeated group: with a
+#: dot-number group followed by a separator-alphanumeric group, a ``.1`` part
+#: matched under either, and a long string that fails at its end (a value that is
+#: not a tag) backtracked through every split of the two, quadratic in its length,
+#: during config validation. Each part here starts at its separator and runs to the
+#: next, so a failing match is linear.
+_RELEASE_TAG = re.compile(r"v?[0-9]+(?:[-.][0-9A-Za-z]+)*")
 
 
 def release_tag(key: str) -> WrapValidator:
