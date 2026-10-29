@@ -444,6 +444,34 @@ def _build_instance(
         return None
 
 
+def _declared_behaviour(reporter_class: type, name: str) -> ReporterWorkspaceBehaviour:
+    """The behaviour *reporter_class* declares, as a member of the enum.
+
+    ``workspace_behaviour`` is a ClassVar nothing enforces, so a reporter can
+    declare it as a plain string. A string naming a member (``"merged"``, or the
+    member's name in any case) is read as that member. Anything else is read as
+    UNSUPPORTED, with the declaration named in the log: this step never asks a
+    reporter to handle a shape it has not said it handles, and a declaration ASH
+    cannot read says nothing. Before this, a string reached ``behaviour.value``
+    in the manifest entry and took the whole report step down.
+    """
+    declared = getattr(
+        reporter_class, "workspace_behaviour", ReporterWorkspaceBehaviour.PER_PROJECT
+    )
+    if isinstance(declared, ReporterWorkspaceBehaviour):
+        return declared
+    if isinstance(declared, str):
+        for member in ReporterWorkspaceBehaviour:
+            if declared == member.value or declared.lower() == member.name.lower():
+                return member
+    ASH_LOGGER.error(
+        f"Reporter {name} declares workspace_behaviour {declared!r}, which is not "
+        f"a ReporterWorkspaceBehaviour; it is treated as unsupported in workspace "
+        f"mode until the declaration is fixed."
+    )
+    return ReporterWorkspaceBehaviour.UNSUPPORTED
+
+
 def _selected_reporters(
     *,
     context,
@@ -481,11 +509,7 @@ def _selected_reporters(
         if instance is None:
             continue
         name = _reporter_name(instance)
-        behaviour = getattr(
-            reporter_class,
-            "workspace_behaviour",
-            ReporterWorkspaceBehaviour.PER_PROJECT,
-        )
+        behaviour = _declared_behaviour(reporter_class, name)
 
         # Each reason is reported distinctly rather than collapsed into "skipped",
         # because they route the operator to different knobs: disabled means edit
@@ -942,6 +966,17 @@ def emit_workspace_reports(
             entry["error"] = failures[name]
             ASH_LOGGER.error(f"Reporter {name} failed at workspace level: {exc}")
             ASH_LOGGER.debug(f"Reporter traceback: {traceback.format_exc()}")
+            continue
+
+        if content is None:
+            # The contract is a str. None is a reporter that did not return
+            # (a missing return, an early exit), not one with nothing to say, so
+            # it is a failure like a raise: the operator asked for a report and
+            # the reporter produced no answer. Recorded apart from the empty
+            # string below, which several reporters legitimately return.
+            failures[name] = "the reporter returned None instead of a report"
+            entry["error"] = failures[name]
+            ASH_LOGGER.error(f"Reporter {name}: {failures[name]}")
             continue
 
         if not content:

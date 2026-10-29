@@ -274,3 +274,104 @@ class TestThePreScanLinkCheckBuildsTheSameReporterSet:
         )
 
         assert seen["plugin_modules"] == ["my_org.ash_plugins"]
+
+
+class _NoneConfig(ReporterPluginConfigBase):
+    name: str = "fake-none"
+    extension: str = "none.txt"
+    enabled: bool = True
+
+
+class FakeNoneReporter(ReporterPluginBase[_NoneConfig]):
+    """Does not return: the contract says str, and None is not "nothing to say"."""
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = _NoneConfig()
+        return super().model_post_init(context)
+
+    def report(self, model):
+        return None
+
+
+class _StringBehaviourConfig(ReporterPluginConfigBase):
+    name: str = "fake-string-behaviour"
+    extension: str = "strbeh.txt"
+    enabled: bool = True
+
+
+class FakeStringBehaviourReporter(ReporterPluginBase[_StringBehaviourConfig]):
+    """Declares the behaviour as the member's value, a plain string."""
+
+    workspace_behaviour = "merged"  # type: ignore[assignment]
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = _StringBehaviourConfig()
+        return super().model_post_init(context)
+
+    def report(self, model) -> str:
+        return "declared as a string"
+
+
+class _BadBehaviourConfig(ReporterPluginConfigBase):
+    name: str = "fake-bad-behaviour"
+    extension: str = "badbeh.txt"
+    enabled: bool = True
+
+
+class FakeBadBehaviourReporter(ReporterPluginBase[_BadBehaviourConfig]):
+    """Declares a behaviour ASH cannot read."""
+
+    workspace_behaviour = "sideways"  # type: ignore[assignment]
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = _BadBehaviourConfig()
+        return super().model_post_init(context)
+
+    def report(self, model) -> str:  # pragma: no cover - must never be reached
+        raise AssertionError("a reporter with an unreadable declaration ran")
+
+
+class TestAReporterThatReturnsNoneFailed:
+    def test_none_is_a_failure_and_the_empty_string_is_not(self, workspace):
+        _, output_dir, _ = workspace
+
+        outcome = _emit(workspace, FakeNoneReporter, FakeEmptyReporter)
+
+        assert "fake-none" in outcome.failed_reporters
+        assert "None" in outcome.failed_reporters["fake-none"]
+        assert "fake-empty" not in outcome.failed_reporters
+        reporters = _manifest(output_dir)["reporters"]
+        assert "None" in reporters["fake-none"]["error"]
+        assert reporters["fake-empty"]["error"] == "the reporter returned no content"
+        assert outcome.failed
+
+
+class TestADeclarationIsReadAsTheEnum:
+    def test_a_string_naming_a_member_is_that_member(self, workspace):
+        """A plain-string declaration reached ``behaviour.value`` and took the
+        whole report step down with an AttributeError."""
+        _, output_dir, _ = workspace
+
+        outcome = _emit(workspace, FakeStringBehaviourReporter)
+
+        artefact = output_dir / REPORTS_DIR_NAME / "ash.strbeh.txt"
+        assert artefact.is_file()
+        assert outcome.workspace_artifacts == {"fake-string-behaviour": artefact}
+        entry = _manifest(output_dir)["reporters"]["fake-string-behaviour"]
+        assert entry["behaviour"] == ReporterWorkspaceBehaviour.MERGED.value
+
+    def test_an_unreadable_declaration_is_unsupported_not_a_crash(self, workspace):
+        _, output_dir, _ = workspace
+
+        outcome = _emit(workspace, FakeBadBehaviourReporter, FakeMergedReporter)
+
+        assert outcome.manifest_path is not None
+        assert outcome.unsupported_reporters == ("fake-bad-behaviour",)
+        assert (output_dir / REPORTS_DIR_NAME / "ash.merged.txt").is_file()
+        entry = _manifest(output_dir)["reporters"]["fake-bad-behaviour"]
+        assert entry["behaviour"] == ReporterWorkspaceBehaviour.UNSUPPORTED.value
