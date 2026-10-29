@@ -102,6 +102,34 @@ def _server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     reset_path_refusal_warnings()
 
 
+@pytest.fixture
+def opened_in_tree(monkeypatch: pytest.MonkeyPatch) -> List[Path]:
+    """Every path ``open_in_scanned_tree`` handed back a handle for.
+
+    The ignore-file reader opens a delivered config's ignore file through it and
+    nothing else, so a test that says a file "is not read" proves it here: the
+    file never appears, whatever the warnings say. The reader imports the
+    function from its module at call time, so the module attribute is replaced.
+    """
+    from automated_security_helper.utils import scanned_tree
+
+    opened: List[Path] = []
+    real = scanned_tree.open_in_scanned_tree
+
+    def _record(path: Any, root: Any, *args: Any, **kwargs: Any) -> Any:
+        handle = real(path, root, *args, **kwargs)
+        opened.append(Path(path))
+        return handle
+
+    monkeypatch.setattr(scanned_tree, "open_in_scanned_tree", _record)
+    return opened
+
+
+def _never_opened(opened: List[Path], host: Path) -> None:
+    """``host`` got no handle: not read, not only unquoted."""
+    assert host.resolve() not in [path.resolve() for path in opened], opened
+
+
 def _upload(files: Dict[str, str]) -> Path:
     """Deliver ``files`` through the real chunked zip upload; return the source dir."""
     from automated_security_helper.cli.mcp.source_delivery import (
@@ -560,7 +588,7 @@ def _trivy_options(config: Any, scanner: str = "trivy-repo") -> Dict[str, Any]:
 
 @pytest.mark.parametrize("scanner", TRIVY_SCANNERS)
 def test_a_delivered_trivy_ignore_file_is_applied_as_marked_suppressions(
-    tmp_path: Path, scanner: str
+    tmp_path: Path, scanner: str, opened_in_tree: List[Path]
 ) -> None:
     from automated_security_helper.config.ash_config import AshConfig
 
@@ -578,6 +606,11 @@ def test_a_delivered_trivy_ignore_file_is_applied_as_marked_suppressions(
     config = _scan_resolution(source)
     assert isinstance(config, AshConfig), config
     assert not _trivy_options(config, scanner).get("ignore_file")
+    # The control for the "is not read" tests below: the file inside the tree
+    # is the one the recorder sees opened, and nothing else is.
+    assert {path.resolve() for path in opened_in_tree} == {
+        (source / ".trivyignore").resolve()
+    }, opened_in_tree
     assert [
         (item.scanner, item.pattern) for item in config._client_scanner_exclusions
     ] == [(scanner, "CVE-2020-0001"), (scanner, "AVD-AWS-0086")]
@@ -637,7 +670,7 @@ def test_a_delivered_yaml_trivy_ignore_file_keeps_its_paths(
 
 @pytest.mark.parametrize("scanner", TRIVY_SCANNERS)
 def test_a_trivy_ignore_file_outside_what_the_client_delivered_is_not_read(
-    _server, scanner: str
+    _server, scanner: str, opened_in_tree: List[Path]
 ) -> None:
     from automated_security_helper.config.ash_config import AshConfig
 
@@ -652,6 +685,7 @@ def test_a_trivy_ignore_file_outside_what_the_client_delivered_is_not_read(
         "only a regular file inside the scanned tree is read" in warning
         for warning in config._resolution_warnings
     ), config._resolution_warnings
+    _never_opened(opened_in_tree, server_file)
 
 
 HOST_ONLY_LINE = "CVE-2099-0001 host-only-marker-7f3a"
@@ -679,7 +713,7 @@ def _no_trace_of_the_host_file(
 
 @pytest.mark.parametrize("scanner", TRIVY_SCANNERS)
 def test_a_symlinked_trivy_ignore_file_in_the_delivered_tree_is_not_read(
-    _server, tmp_path: Path, scanner: str
+    _server, tmp_path: Path, scanner: str, opened_in_tree: List[Path]
 ) -> None:
     """A link inside the tree that points at a host file is refused, not followed."""
     from automated_security_helper.config.ash_config import AshConfig
@@ -694,10 +728,11 @@ def test_a_symlinked_trivy_ignore_file_in_the_delivered_tree_is_not_read(
         "it is a symbolic link" in warning for warning in config._resolution_warnings
     ), config._resolution_warnings
     _no_trace_of_the_host_file(config, tmp_path, scanner)
+    _never_opened(opened_in_tree, host)
 
 
 def test_a_trivy_ignore_file_above_the_delivered_tree_is_not_read(
-    _server, tmp_path: Path
+    _server, tmp_path: Path, opened_in_tree: List[Path]
 ) -> None:
     """A checkout around the workspace does not widen what may be read."""
     from automated_security_helper.config.ash_config import AshConfig
@@ -717,10 +752,11 @@ def test_a_trivy_ignore_file_above_the_delivered_tree_is_not_read(
     assert isinstance(config, AshConfig), config
     assert not _trivy_options(config).get("ignore_file")
     _no_trace_of_the_host_file(config, tmp_path)
+    _never_opened(opened_in_tree, host)
 
 
 def test_a_trivy_ignore_file_in_another_sessions_source_is_not_read(
-    _server, tmp_path: Path
+    _server, tmp_path: Path, opened_in_tree: List[Path]
 ) -> None:
     """Another session's delivered files are not this scan's tree."""
     from automated_security_helper.config.ash_config import AshConfig
@@ -733,6 +769,7 @@ def test_a_trivy_ignore_file_in_another_sessions_source_is_not_read(
     assert isinstance(config, AshConfig), config
     assert not _trivy_options(config).get("ignore_file")
     _no_trace_of_the_host_file(config, tmp_path)
+    _never_opened(opened_in_tree, other)
 
 
 def test_an_unparsable_trivy_ignore_file_is_not_quoted(tmp_path: Path) -> None:
