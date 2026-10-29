@@ -2212,11 +2212,22 @@ class UVToolMixin:
             return should_install
 
         except Exception as e:
-            self._plugin_log(
-                f"Error determining if tool should be installed: {e}",
-                level=logging.WARNING,
+            # The caller reaches this once the tool was found unavailable, so a
+            # False here read as "already installed" and no install was tried:
+            # the scan then started a tool that was not there. An answer that
+            # cannot be read is not the runner's no; the install is attempted,
+            # and a failure of its own is recorded by the install.
+            message = (
+                f"Could not determine whether {self.command} should be "
+                f"installed via UV ({e}); attempting the installation"
             )
-            return False
+            # The runner's text can quote argv, as on the availability check's
+            # error arm; read guarded, since this is a record line.
+            values = self._guarded_values()
+            if values:
+                message = text_without_values(message, values)
+            self._plugin_log(message, level=logging.WARNING)
+            return True
 
     # ------------------------------------------------------------------
     # Extension points (meant to be overridden by subclasses)

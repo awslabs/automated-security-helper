@@ -1509,14 +1509,16 @@ class TestShouldInstallTool:
             assert plugin._should_install_tool() is True
 
     @pytest.mark.unit
-    def test_returns_false_on_exception(self):
+    def test_an_answer_that_cannot_be_read_means_install(self):
+        """The caller asks only once the tool was found unavailable, so a False
+        here read as "already installed" and no install was tried."""
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
         with patch(
             "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
             side_effect=RuntimeError("broken"),
         ):
-            assert plugin._should_install_tool() is False
+            assert plugin._should_install_tool() is True
 
 
 class TestSetupUvToolInstallCommands:
