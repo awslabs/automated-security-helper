@@ -760,6 +760,23 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                         level=logging.ERROR,
                     )
                     continue
+                except (OSError, UnicodeDecodeError) as e:
+                    # The file could not be opened or decoded, so it is not known to
+                    # be CloudFormation. Named at WARNING on the scanner's error
+                    # stream, as a refused file is, instead of passing through the
+                    # arm below at TRACE: a template ASH could not read vanished
+                    # from the scan uncounted and unnamed. The tool-absent check
+                    # counts an unreadable candidate as a template, so the
+                    # SKIPPED reason says the same here.
+                    self._plugin_log(
+                        f"Skipped {cfn_file}: the file could not be read: "
+                        f"{type(e).__name__}",
+                        target_type=target_type,
+                        level=logging.WARNING,
+                        append_to_stream="stderr",
+                    )
+                    self._nothing_scanned_reason = NO_PARSEABLE_CLOUDFORMATION_TEMPLATE
+                    continue
                 except Exception as e:
                     # Everything else here comes out of the template parser: the file
                     # is not parseable as YAML or JSON, or a value in it could not be

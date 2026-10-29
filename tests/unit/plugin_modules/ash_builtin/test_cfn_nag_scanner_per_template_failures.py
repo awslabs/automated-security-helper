@@ -201,6 +201,28 @@ def test_an_unwritable_results_directory_fails_only_that_template(
     assert any("could not be written" in line for line in scanner.errors)
 
 
+def test_a_template_that_cannot_be_decoded_is_named_not_dropped(
+    scanner, deps_available, subprocess_double
+):
+    """At the base the non-UTF-8 file fell into the parser's except at TRACE."""
+    (scanner.context.work_dir / "latin.yaml").write_bytes(
+        b"Resources:\n  caf\xe9:\n    Type: AWS::SQS::Queue\n"
+    )
+    (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
+
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert subprocess_double.call_count == 1
+    assert [r.ruleId for r in report.runs[0].results] == ["F38"]
+    assert scanner.targets_attempted == 1
+    assert scanner.targets_failed == 0
+    named = [
+        e for e in scanner.errors if "latin.yaml" in e and "could not be read" in e
+    ]
+    assert named, scanner.errors
+    assert "UnicodeDecodeError" in named[0]
+
+
 def test_errors_are_reset_for_each_scan_call(scanner, deps_available):
     scanner.errors = ["the source target's line"]
     empty = scanner.context.work_dir
