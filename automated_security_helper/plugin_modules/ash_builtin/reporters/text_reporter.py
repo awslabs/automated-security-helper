@@ -17,6 +17,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_se
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.terminal_text import (
+    commands_broken,
     shown_not_obeyed,
     shown_on_one_line,
 )
@@ -240,10 +241,15 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 text_parts.append("INPUTS NOT SCANNED")
                 text_parts.append("------------------")
                 # The path is the scanned repository's; its control characters are
-                # escaped so it stays on its line (see utils/display_text.py).
+                # escaped so it stays on its line (see utils/display_text.py) and
+                # its CI command forms are broken, as this report lands in a job
+                # log. The scanner's name and the reason are the results file's
+                # text: each is one shown line.
                 for scanner_name, path, reason in not_scanned:
                     text_parts.append(
-                        f"- {scanner_name}: {escape_controls(path)}: {reason}"
+                        f"- {shown_on_one_line(scanner_name)}: "
+                        f"{commands_broken(escape_controls(path))}: "
+                        f"{shown_on_one_line(reason)}"
                     )
                 text_parts.append("")
 
@@ -363,11 +369,17 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                         text_parts.append("-" * 80)
                         text_parts.append("")
 
-                # Add note if findings were limited
-                if len(emitter.flat_vulns) > self.config.options.max_detailed_findings:
+                # Add note if findings were limited. The list above holds the
+                # ACTIONABLE findings, so the note counts those; counting every
+                # finding (suppressed and below-threshold included) printed a
+                # cut that never happened, with numbers the list did not match.
+                total_actionable = sum(
+                    emitter.is_finding_actionable(vuln) for vuln in emitter.flat_vulns
+                )
+                if total_actionable > len(detailed_findings):
                     text_parts.append(
-                        f"Note: Showing {self.config.options.max_detailed_findings} of {len(emitter.flat_vulns)} "
-                        f"total findings. Configure 'max_detailed_findings' to adjust this limit."
+                        f"Note: Showing {len(detailed_findings)} of {total_actionable} "
+                        f"actionable findings. Configure 'max_detailed_findings' to adjust this limit."
                     )
                     text_parts.append("")
 

@@ -19,9 +19,6 @@ from automated_security_helper.utils.display_text import markdown_code_span
 from automated_security_helper.core.unified_metrics import (
     inputs_not_scanned,
 )
-from automated_security_helper.utils.content_db_staleness import (
-    stale_content_databases,
-)
 from automated_security_helper.utils.converter_refusals import (
     converter_refusals,
     markdown_summary_lines,
@@ -301,33 +298,20 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                 # The path is the scanned repository's: shown in a code span its own
                 # backticks cannot close, with its newlines and other control
                 # characters escaped, so it cannot start a line of its own.
+                # The scanner's name and the reason are the results file's text
+                # too: shown on one line, then kept literal in Markdown.
                 for scanner_name, path, reason in not_scanned:
                     parts.append(
-                        f"- **{scanner_name}**: {markdown_code_span(path)}: {reason}"
+                        f"- **{_text(shown_on_one_line(scanner_name))}**: "
+                        f"{markdown_code_span(path)}: {_text(shown_on_one_line(reason))}"
                     )
                 parts.append("")
 
-            # Same placement and the same reasoning as the coverage section above: no status
-            # value carries "the database this scanner matched against was out of date", the
-            # summary is what gets pasted into a pull request, and compact mode must not hide
-            # it. Under `content_db_staleness: warn` this section is the only place a reader of
-            # the report learns the scan ran against a stale database.
-            stale_dbs = stale_content_databases(model)
-            if stale_dbs:
-                parts.append("### Stale content databases")
-                parts.append("")
-                parts.append(
-                    "These scanners matched against a content database older than its declared "
-                    "bound. A clean result from them is not evidence of a clean target:"
-                )
-                parts.append("")
-                for record in stale_dbs:
-                    verdict = "failed the scan" if record.enforced else "warning only"
-                    parts.append(
-                        f"- **{record.name}** ({record.scanner}, {verdict}): "
-                        f"{record.message()}"
-                    )
-                parts.append("")
+            # The stale-content-database section is written once, by
+            # coverage_markdown above, which every report carries whatever its
+            # detail options and which shows the record's name, scanner and
+            # message as literal text. A second copy here wrote the same records
+            # again, raw.
 
             # Same placement and reasoning again: a converter input that was not read
             # never reaches a scanner, so no scanner row can say it went unscanned.
