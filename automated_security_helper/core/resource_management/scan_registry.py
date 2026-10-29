@@ -1101,10 +1101,17 @@ class ScanRegistry:
                                 entry.mark_completed()
                 elif scan_progress.status == "failed":
                     # The results file exists and cannot be read as results.
-                    entry.mark_failed(
-                        scan_progress.error_message
-                        or f"Aggregated results file {results_path} could not be read"
-                    )
+                    # Only an entry no runner owns (PENDING) takes its status
+                    # from the file. A runner closed a COMPLETED entry on a
+                    # scan that did finish; a file that later reads as
+                    # unusable is reported on the response, with its reason,
+                    # and does not turn a read-only poll into a permanent
+                    # FAILED with a moved end_time.
+                    if entry.status == MCScanStatus.PENDING:
+                        entry.mark_failed(
+                            scan_progress.error_message
+                            or f"Aggregated results file {results_path} could not be read"
+                        )
                 elif scan_progress.results_pending:
                     # A JSON object with neither scanner_results nor sarif is not a
                     # results document. Before anything has closed the entry that
@@ -1196,7 +1203,13 @@ class ScanRegistry:
                     ),
                     "config_path": entry.config_path,
                     "warnings": entry.warnings,
-                    "error_message": entry.error_message,
+                    # The entry's reason when it has one; else, for an ended
+                    # scan, what the file read found, so a finished scan whose
+                    # results file is now unreadable says so without the entry
+                    # being re-closed. A running scan's file is partial by
+                    # nature and carries no such message.
+                    "error_message": entry.error_message
+                    or (scan_progress.error_message if entry.status in ENDED else None),
                     # The CLI's code for a scan ASH ended with an exit, so a client
                     # can branch on why it failed as a script branches on the
                     # CLI's status. None for any other ending.

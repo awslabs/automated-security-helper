@@ -99,7 +99,35 @@ class TestFilterSummaryWithoutSummaryStats:
         assert by_severity["total"] == 5
         assert by_severity["actionable"] == 3
         scan_stats = summary["findings_summary"]["scan_stats"]
-        assert scan_stats == {"passed": 1, "failed": 1, "missing": 1, "skipped": 0}
+        assert scan_stats == {
+            "passed": 1,
+            "failed": 1,
+            "missing": 1,
+            "skipped": 0,
+            "error": 0,
+        }
+
+    def test_the_outcome_counters_include_error_and_sum_to_the_scanner_count(self):
+        """SummaryStats has five outcome counters; scan_stats used to carry four, so
+        the counters did not sum to the scanner count when scanners ERRORed."""
+        results = _results()
+        results["summary_stats"]["error"] = 2
+        results["summary_stats"]["missing"] = 0
+
+        scan_stats = filter_summary(results)["findings_summary"]["scan_stats"]
+
+        assert scan_stats["error"] == 2
+        assert sum(scan_stats.values()) == 4
+
+        results = _results(with_summary_stats=False)
+        results["raw_results"]["scanner_results"]["trivy"] = _scanner(
+            "ERROR", {}, actionable=0
+        )
+
+        scan_stats = filter_summary(results)["findings_summary"]["scan_stats"]
+
+        assert scan_stats["error"] == 1
+        assert sum(scan_stats.values()) == 4
 
     def test_nothing_to_count_from_reads_as_unknown_not_zero(self):
         results = _results(with_summary_stats=False)
@@ -243,3 +271,63 @@ class TestASeveritiesFilterRecountsTheTotal:
         filtered = apply_content_filters(_results(), severities="low")
 
         assert filtered["summary_stats"]["actionable"] == 3
+
+
+class TestActionableOnlyRecountsTheSeverityBuckets:
+    """actionable_only made total the actionable count while the per-severity
+    buckets kept counting findings below the threshold beside it."""
+
+    @staticmethod
+    def _with_sarif(threshold):
+        def result(rule, severity, scanner="bandit"):
+            return {
+                "ruleId": rule,
+                "level": "note",
+                "properties": {"scanner_name": scanner, "issue_severity": severity},
+            }
+
+        results = _results()
+        results["raw_results"]["sarif"] = {
+            "runs": [
+                {
+                    "results": [
+                        result("S-CRIT", "CRITICAL", "semgrep"),
+                        result("B-HIGH", "HIGH"),
+                        result("S-MED", "MEDIUM", "semgrep"),
+                        result("B-LOW-1", "LOW"),
+                        result("B-LOW-2", "LOW"),
+                    ]
+                }
+            ]
+        }
+        results["raw_results"]["severity_thresholds"] = {"": threshold}
+        results["summary_stats"]["actionable"] = 3
+        return results
+
+    def test_the_buckets_follow_the_kept_findings(self):
+        filtered = filter_actionable_only(self._with_sarif("MEDIUM"))
+
+        counts = filtered["summary_stats"]["severity_counts"]
+        assert counts["critical"] == 1
+        assert counts["high"] == 1
+        assert counts["medium"] == 1
+        assert counts["low"] == 0
+        assert counts["suppressed"] == 0
+        assert filtered["summary_stats"]["total"] == 3
+        assert sum(counts.values()) == filtered["summary_stats"]["total"]
+
+    def test_the_summary_view_of_the_actionable_results_agrees(self):
+        summary = filter_summary(filter_actionable_only(self._with_sarif("HIGH")))
+
+        by_severity = summary["findings_summary"]["by_severity"]
+        assert by_severity["critical"] == 1
+        assert by_severity["high"] == 1
+        assert by_severity["medium"] == 0
+        assert by_severity["low"] == 0
+
+    def test_without_the_sarif_the_buckets_stay(self):
+        """The summary level never loads the SARIF; the document carries no
+        per-severity split of the actionable count, so nothing is guessed."""
+        filtered = filter_actionable_only(_results())
+
+        assert filtered["summary_stats"]["severity_counts"]["low"] == 2

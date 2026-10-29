@@ -657,6 +657,12 @@ def get_scanner_progress(
             "targets_completed": list(target_results.keys()),
             "targets_count": len(target_results),
             "findings": [],
+            # What the scanner recorded, for the per-target file ASH writes,
+            # which has finding_count and severity_counts and no findings
+            # array; counted from the array alone, every finished scanner read
+            # as 0 findings while the scan ran.
+            "finding_count": 0,
+            "severity_counts": empty_severity_counts(),
         }
 
         # Parse result files to extract findings
@@ -664,6 +670,20 @@ def get_scanner_progress(
             try:
                 findings = parse_scanner_result_file(result_file)
                 scanner_progress[scanner_name]["findings"].extend(findings)
+                recorded_count, recorded_counts = (
+                    (None, None) if findings else _recorded_scanner_counts(result_file)
+                )
+                count = len(findings) if findings else (recorded_count or 0)
+                scanner_progress[scanner_name]["finding_count"] += count
+                counts = (
+                    extract_findings_summary(findings)
+                    if findings
+                    else (recorded_counts or {})
+                )
+                totals = scanner_progress[scanner_name]["severity_counts"]
+                for severity, value in counts.items():
+                    bucket = severity if severity in totals else UNKNOWN_SEVERITY
+                    totals[bucket] += value
             except Exception as e:
                 _logger.warning(
                     f"Failed to parse result file for scanner {scanner_name}, target {target_type}: {str(e)}"
@@ -1141,6 +1161,18 @@ def create_scan_progress_from_files(
         for scanner_name, target_results in scanner_results.items():
             for target_type, result_file in target_results.items():
                 try:
+                    # A file that is not yet a JSON object (empty, truncated,
+                    # mid-write) is a scanner that has not finished writing,
+                    # not one that PASSED with 0 findings. It is reported as
+                    # running until a later poll reads a document.
+                    if _read_scanner_result_document(result_file) is None:
+                        unfinished = ScannerProgress(
+                            scanner_name=scanner_name, target_type=target_type
+                        )
+                        unfinished.mark_running()
+                        scan_progress.add_scanner_progress(unfinished)
+                        continue
+
                     # Parse scanner result file
                     findings = parse_scanner_result_file(result_file)
 
@@ -1208,8 +1240,13 @@ def get_scan_progress_info(
             # Parse aggregated results for completed scans
             results = parse_aggregated_results(output_dir)
 
-            # Extract key information from results
+            # Extract key information from results. Bound before the branch:
+            # a results document that is an empty object is falsy, and these
+            # used to be assigned inside the branch only, so the return below
+            # raised UnboundLocalError for it.
             findings = []
+            scanners_completed: List[str] = []
+            findings_summary: Dict[str, Any] = {}
 
             if results:
                 # Try to extract findings from SARIF data if available
@@ -1235,7 +1272,6 @@ def get_scan_progress_info(
                 ]
 
                 # Extract severity counts from metadata if available
-                findings_summary = {}
                 if "metadata" in results and "summary_stats" in results["metadata"]:
                     summary_stats = results["metadata"]["summary_stats"]
                     findings_summary = summary_stats
@@ -1273,10 +1309,19 @@ def get_scan_progress_info(
         scanner_progress = get_scanner_progress(output_dir)
         completed_scanners = get_completed_scanners(output_dir)
 
-        # Aggregate findings from all scanners
+        # Aggregate findings from all scanners. The count and the summary come
+        # from what each scanner recorded (get_scanner_progress), so a scanner
+        # whose per-target file carries counts and no findings array is counted
+        # as the scanner counted it, not as 0.
         all_findings = []
+        findings_count = 0
+        findings_summary = empty_severity_counts()
         for scanner_info in scanner_progress.values():
             all_findings.extend(scanner_info.get("findings", []))
+            findings_count += scanner_info.get("finding_count", 0)
+            for severity, value in scanner_info.get("severity_counts", {}).items():
+                bucket = severity if severity in findings_summary else UNKNOWN_SEVERITY
+                findings_summary[bucket] += value
 
         return {
             "status": "in_progress",
@@ -1285,9 +1330,9 @@ def get_scan_progress_info(
             "total_scanners": len(
                 completed_scanners
             ),  # This is an estimate since we don't know the total yet
-            "findings_count": len(all_findings),
+            "findings_count": findings_count,
             "findings": all_findings,
-            "findings_summary": extract_findings_summary(all_findings),
+            "findings_summary": findings_summary,
             "scanner_progress": scanner_progress,
         }
 

@@ -267,6 +267,54 @@ class TestProgressOfASupersededScanReadsNoFiles:
         assert "semgrep" in registry.check_scan_progress(new)["scanners"]
 
 
+class TestAReadOnlyPollDoesNotRecloseACompletedScan:
+    """A COMPLETED entry whose results file later reads as unusable used to be
+    turned FAILED, with a new end_time, by every progress poll: the "failed"
+    file status was applied to any entry but RUNNING, FAILED, CANCELLED and
+    INCOMPLETE. Only an entry no runner owns (PENDING) takes its status from
+    the file; a finished scan keeps its status and reports the file problem."""
+
+    def test_a_completed_entry_keeps_its_status_and_reports_the_file(self, tmp_path):
+        registry = ScanRegistry()
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = project / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        scan_id = _register(registry, project, output)
+        registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
+        entry = registry.get_scan(scan_id)
+        closed_at = entry.end_time
+        results_file = output / "ash_aggregated_results.json"
+        results_file.write_text("{ not json", encoding="utf-8")
+
+        progress = registry.check_scan_progress(scan_id)
+
+        assert progress["status"] == "completed"
+        assert progress["is_complete"] is True
+        assert progress["error_message"]
+        assert str(results_file) in progress["error_message"]
+        assert entry.status is MCScanStatus.COMPLETED
+        assert entry.end_time == closed_at
+        assert entry.error_message is None
+
+    def test_a_pending_entry_still_takes_the_failure_from_the_file(self, tmp_path):
+        """The case the file-decides rule exists for, preserved."""
+        registry = ScanRegistry()
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = project / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        scan_id = _register(registry, project, output)
+        (output / "ash_aggregated_results.json").write_text(
+            "{ not json", encoding="utf-8"
+        )
+
+        progress = registry.check_scan_progress(scan_id)
+
+        assert progress["status"] == "failed"
+        assert registry.get_scan(scan_id).status is MCScanStatus.FAILED
+
+
 class TestCoverageAssessmentFailureDoesNotFailTheProgressCall:
     def test_a_raising_assessment_leaves_coverage_unknown(self, tmp_path):
         registry = ScanRegistry()

@@ -131,6 +131,9 @@ def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
             "failed": _stat("failed"),
             "missing": _stat("missing"),
             "skipped": _stat("skipped"),
+            # SummaryStats has five outcome counters; without this one the four
+            # above did not sum to the scanner count when scanners ERRORed.
+            "error": _stat("error"),
         },
     }
     summary["scanner_summary"] = {
@@ -212,6 +215,7 @@ def filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
             that count would read as "none".
     """
     filtered_results = copy.deepcopy(results)
+    kept_counts: Optional[Dict[str, int]] = None
 
     raw = filtered_results.get("raw_results")
     if isinstance(raw, dict) and "sarif" in raw and raw["sarif"] is None:
@@ -231,6 +235,10 @@ def filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
                     "The scan's SARIF came without raw_results.severity_thresholds, "
                     "so which of its findings are actionable cannot be decided"
                 )
+            # The per-severity buckets of the kept findings. Left at the whole
+            # scan's values, the buckets counted findings below the threshold
+            # beside a total that counted only the actionable ones.
+            kept_counts = dict.fromkeys(_SEVERITY_KEYS, 0)
             for run in sarif["runs"]:
                 if "results" in run and run["results"]:
                     run["results"] = [
@@ -238,6 +246,10 @@ def filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
                         for r in run["results"]
                         if _counts_toward_exit_2(r, _threshold_for(r, thresholds))
                     ]
+                    for r in run["results"]:
+                        bucket = _get_finding_severity(r).lower()
+                        if bucket in kept_counts:
+                            kept_counts[bucket] += 1
 
     if "summary_stats" in filtered_results:
         summary_stats = filtered_results["summary_stats"]
@@ -246,6 +258,18 @@ def filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(summary_stats.get("severity_counts"), dict):
             summary_stats["severity_counts"]["suppressed"] = 0
         summary_stats["total"] = summary_stats.get("actionable", 0)
+        # With the SARIF at hand the buckets follow the kept findings; without
+        # it (the summary and minimal levels never load it) the document has no
+        # per-severity split of the actionable count and the buckets stay.
+        if kept_counts is not None:
+            if isinstance(summary_stats.get("severity_counts"), dict):
+                summary_stats["severity_counts"] = {
+                    **summary_stats["severity_counts"],
+                    **kept_counts,
+                }
+            for bucket, value in kept_counts.items():
+                if bucket in summary_stats:
+                    summary_stats[bucket] = value
 
     if (
         "raw_results" in filtered_results
