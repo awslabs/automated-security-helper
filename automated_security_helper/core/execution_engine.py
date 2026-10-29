@@ -679,6 +679,54 @@ class ScanExecutionEngine:
         )
         self._asharp_model = self._results
 
+    def _apply_final_suppressions(self) -> None:
+        """The aggregated suppression pass, then the metrics that read it.
+
+        Final suppression pass on the merged SARIF before anything reads it: the
+        per-scanner passes can miss findings whose paths only become matchable
+        after merge and normalization in the aggregated context. Run once per
+        execution, at the end of the last phase that shapes the findings: the
+        report arm when the run reports, else the scan arm, so a run without a
+        report phase writes the same suppressed results a full scan does and
+        takes its exit code from them. With --ignore-suppressions the pass lifts
+        suppressions and ignore paths, not the exclusion of ASH's own output
+        directory.
+        """
+        if self._results and self._results.sarif:
+            from automated_security_helper.utils.sarif_utils import (
+                apply_suppressions_to_sarif,
+                exclude_output_dir_results,
+            )
+
+            if not self._context.ignore_suppressions:
+                self._results.sarif = apply_suppressions_to_sarif(
+                    sarif_report=self._results.sarif,
+                    plugin_context=self._context,
+                    used_suppressions=getattr(self._results, "used_suppressions", None),
+                )
+                # After the last suppression pass, once: a suppression path
+                # ending in "/" matches no file.
+                from automated_security_helper.utils.suppression_matcher import (
+                    warn_unmatched_directory_suppressions,
+                )
+
+                warn_unmatched_directory_suppressions(
+                    self._context.config.global_settings.suppressions or [],
+                    getattr(self._results, "used_suppressions", None) or (),
+                )
+            else:
+                self._results.sarif = exclude_output_dir_results(
+                    sarif_report=self._results.sarif,
+                    plugin_context=self._context,
+                )
+
+        # Refresh metrics after the final suppression pass so the exit code
+        # reflects the post-suppression state.
+        self._results = populate_metrics_from_unified_source(
+            aggregated_results=self._results
+        )
+        self._asharp_model = self._results
+
     def execute_phases(
         self,
         phases: List[ExecutionPhaseType] | None = None,
@@ -850,8 +898,16 @@ class ScanExecutionEngine:
                         if scan_phase._shard_assignment is not None:
                             self._results.metadata.shard = scan_phase._shard_assignment
                         # A run without a report phase writes these results and
-                        # takes its verdict from them, so they are narrowed here.
+                        # takes its exit code from them, so they are narrowed here.
                         self._drop_findings_outside_changed_files()
+                        # And given the aggregated suppression pass here, for the
+                        # same reason: the pass used to run only in the report
+                        # arm, so a run whose phases omit report wrote a results
+                        # file and took an exit code that counted findings a full
+                        # scan suppresses. A run that goes on to report takes
+                        # the pass there, once.
+                        if "report" not in ordered_phases:
+                            self._apply_final_suppressions()
 
                     case "report":
                         # Before the counts and the reporters, so that every
@@ -859,49 +915,7 @@ class ScanExecutionEngine:
                         # findings. Also here, not only after "scan", for a report
                         # run over existing results.
                         self._drop_findings_outside_changed_files()
-                        # Final suppression pass on the merged SARIF before reporters read it.
-                        # Per-scanner suppression passes may miss findings whose paths only
-                        # become matchable after merge/normalization in the aggregated context.
-                        if self._results and self._results.sarif:
-                            from automated_security_helper.utils.sarif_utils import (
-                                apply_suppressions_to_sarif,
-                                exclude_output_dir_results,
-                            )
-
-                            if not self._context.ignore_suppressions:
-                                self._results.sarif = apply_suppressions_to_sarif(
-                                    sarif_report=self._results.sarif,
-                                    plugin_context=self._context,
-                                    used_suppressions=getattr(
-                                        self._results, "used_suppressions", None
-                                    ),
-                                )
-                                # After the last suppression pass, once: a
-                                # suppression path ending in "/" matches no file.
-                                from automated_security_helper.utils.suppression_matcher import (
-                                    warn_unmatched_directory_suppressions,
-                                )
-
-                                warn_unmatched_directory_suppressions(
-                                    self._context.config.global_settings.suppressions
-                                    or [],
-                                    getattr(self._results, "used_suppressions", None)
-                                    or (),
-                                )
-                            else:
-                                # The flag lifts suppressions and ignore paths,
-                                # not the exclusion of ASH's own output directory.
-                                self._results.sarif = exclude_output_dir_results(
-                                    sarif_report=self._results.sarif,
-                                    plugin_context=self._context,
-                                )
-
-                        # Refresh metrics after final suppression pass so exit code
-                        # reflects the post-suppression state.
-                        self._results = populate_metrics_from_unified_source(
-                            aggregated_results=self._results
-                        )
-                        self._asharp_model = self._results
+                        self._apply_final_suppressions()
 
                         # Create and execute the Report phase
                         report_phase = ReportPhase(

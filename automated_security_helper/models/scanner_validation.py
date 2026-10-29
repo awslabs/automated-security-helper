@@ -954,10 +954,20 @@ class ValidationCheckpointer:
             f"  Actually queued scanners ({len(queued_scanner_names)}): {', '.join(queued_scanner_names) if queued_scanner_names else 'None'}"
         )
 
+        # An enabled scanner with no task is a recorded discrepancy, as a queued
+        # scanner that did not complete is in validate_execution_completion, so
+        # has_issues() and the discrepancy report say so instead of reading as
+        # clean; handle_queue_validation_errors records the failure reason either
+        # way.
         return self.create_checkpoint(
             checkpoint_name="task_queue_validation",
             expected_scanners=expected_scanners,
             actual_scanners=queued_scanner_names,
+            discrepancies=[
+                f"Scanner '{scanner_name}' was enabled but has no task in the queue"
+                for scanner_name in expected_scanners
+                if scanner_name not in queued_scanner_names
+            ],
             metadata={
                 "expected_count": len(expected_scanners),
                 "queued_count": len(queued_scanner_names),
