@@ -317,6 +317,28 @@ def test_a_rules_name_that_names_a_host_directory_passes_with_no_working_directo
     ]
 
 
+def test_a_path_that_climbs_out_of_its_root_is_refused_with_no_working_directory(
+    tmp_path, monkeypatch
+):
+    """``../bandit.yaml`` normalizes to the same path under any one-deep root,
+    so two placeholder roots agree on it; it is still taken from the working
+    directory and is refused, naming the key and not the value."""
+    from automated_security_helper.config.resolve_config import (
+        _anchored_operator_overrides,
+    )
+
+    _delete_the_working_directory(tmp_path, monkeypatch)
+
+    with pytest.raises(ASHConfigValidationError) as refused:
+        _anchored_operator_overrides(
+            ["scanners.bandit.options.config_file=../zz-climb.yaml"]
+        )
+
+    text = str(refused.value)
+    assert "scanners.bandit.options.config_file" in text, text
+    assert "zz-climb" not in text, text
+
+
 @pytest.mark.parametrize(
     "override",
     [

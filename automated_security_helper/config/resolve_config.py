@@ -275,9 +275,9 @@ def _anchored_operator_overrides(config_overrides: Sequence[str]) -> List[str]:
     return list(config_overrides)
 
 
-#: Two directories no operator ran ASH from. An override anchored at each of
-#: them reads the same unless its value is taken from the directory it is
-#: anchored at.
+#: Two directories no operator ran ASH from. An override anchored at either of
+#: them comes back as written unless its value is taken from the directory it
+#: is anchored at.
 _PLACEHOLDER_ROOTS: Tuple[Path, Path] = (
     Path(os.sep, "ash-no-working-directory-1"),
     Path(os.sep, "ash-no-working-directory-2"),
@@ -289,18 +289,22 @@ def _needs_a_working_directory(override: str) -> bool:
     it is anchored at.
 
     ``anchor_override_paths`` reads each override on its own, so one is probed
-    alone here. It rewrites a relative operator path only: an absolute path, a
-    ``~`` path, a URL and a value holding ``$`` come back as written
-    (``operator_paths.anchored_path``), and so does a rules option (semgrep's
-    and opengrep's ``config``) that names nothing under the directory. Probed
-    at one real root, such a rules value that happens to name a directory of
-    the host (``etc``) read as anchored and was refused; the two placeholder
-    roots agree on every value the directory does not change.
+    alone here, anchored at each placeholder root and compared with the
+    override as written. It rewrites a relative operator path only: an
+    absolute path, a ``~`` path, a URL and a value holding ``$`` come back as
+    written (``operator_paths.anchored_path``), and so does a rules option
+    (semgrep's and opengrep's ``config``) that names nothing under the
+    directory. Probed at the real root, such a rules value that happens to name
+    a directory of the host (``etc``) read as anchored and was refused; under
+    the placeholder roots it names nothing and comes back as written. The two
+    probes are compared with the written override, not with each other: a
+    value that climbs out of its root (``../bandit.yaml``) normalizes to the
+    same path under both roots and still needs the directory.
     """
-    first, second = (
-        anchor_override_paths([override], root) for root in _PLACEHOLDER_ROOTS
+    probe = [override]
+    return any(
+        anchor_override_paths(probe, root) != probe for root in _PLACEHOLDER_ROOTS
     )
-    return first != second
 
 
 def _override_key_as_written(override: str) -> str:
