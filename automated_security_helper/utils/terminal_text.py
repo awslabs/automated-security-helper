@@ -125,11 +125,15 @@ def _reads_as_written_escape(after: str) -> bool:
         return False
     try:
         character = chr(int(match.group()[1:], 16))
-    except ValueError:  # beyond U+10FFFF
+    except (ValueError, OverflowError):
+        # Beyond U+10FFFF; eight hex digits from 80000000 up overflow chr()'s C
+        # int on some Python versions and raise OverflowError, not ValueError.
         return False
+    # Compared with the letter lowercased on both sides: escape_for writes the
+    # letter of an eight-digit escape as "U", and the hex digits in lower case.
     return (
         is_shown_as_escape(character)
-        and escape_for(character) == "\\" + match.group().lower()
+        and escape_for(character).lower() == "\\" + match.group().lower()
     )
 
 
@@ -220,8 +224,11 @@ _LINE_START_COMMAND = re.compile(r"^([^\S\n]*):(?=:)", re.MULTILINE)
 
 #: The first "#" of "##" followed by a name and "[" anywhere in a line ("##[cmd]",
 #: "##vso[", "##teamcity["), with any backslashes just before it, which are
-#: doubled so the "\x23" put in its place reads as one escape.
-NAMED_HASH_COMMAND = re.compile(r"(\\*)#(?=#[A-Za-z]*\[)")
+#: doubled so the "\x23" put in its place reads as one escape. The run is
+#: matched from its first backslash only, as every other run pattern here is:
+#: matched from anywhere in it, a run not followed by "#" was retried from each
+#: of its positions, in time that grew with the square of its length.
+NAMED_HASH_COMMAND = re.compile(r"(?<!\\)(\\*)#(?=#[A-Za-z]*\[)")
 
 
 class ShownText(str):
@@ -420,7 +427,9 @@ def as_written(text: str) -> str:
             return backslashes + escape
         try:
             return backslashes + chr(int(escape[1:], 16))
-        except ValueError:  # beyond U+10FFFF, which no escaper writes
+        except (ValueError, OverflowError):
+            # Beyond U+10FFFF, which no escaper writes; from 80000000 up some
+            # Python versions raise OverflowError for chr() instead.
             return match.group()
 
     return _RUN_BEFORE_ESCAPE.sub(written, str(text))
