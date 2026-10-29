@@ -166,6 +166,59 @@ def test_an_id_only_message_gives_the_suppression_pass_a_title(tmp_path):
     assert _result_message_text(result) == "Message id: rule.default"
 
 
+def _transitive(root_rule: str, root_uri: str = "package-lock.json") -> Result:
+    return _result(
+        uri=root_uri,
+        ruleId="npm-audit-transitive-left-pad",
+        properties={"root_advisories": [{"rule_id": root_rule, "uri": root_uri}]},
+    )
+
+
+def test_a_root_reference_with_an_empty_rule_id_does_not_raise():
+    """extract_root_advisories keeps such a reference but drops its empty key, so
+    ref["rule_id"] raised KeyError out of the whole suppression pass."""
+    from automated_security_helper.utils.sarif_utils import (
+        _suppress_transitive_of_suppressed_roots,
+    )
+
+    root = _result(
+        uri="package-lock.json",
+        ruleId="GHSA-1",
+        suppressions=[Suppression(kind=Kind1.external, justification="x")],
+    )
+    transitive = _transitive(root_rule="")
+    report = _report(root, transitive)
+
+    _suppress_transitive_of_suppressed_roots(report, lambda value, _is_uri: value)
+
+    # A reference naming no rule matches nothing: the transitive finding stays.
+    assert not transitive.suppressions
+
+
+def test_a_transitive_suppressed_through_a_client_root_carries_the_client_mark():
+    """The results show what the client's config hid; a transitive finding hidden
+    only because its root was carried no mark."""
+    from automated_security_helper.utils.sarif_utils import (
+        _add_client_suppression,
+        _suppress_transitive_of_suppressed_roots,
+    )
+
+    root = _result(uri="package-lock.json", ruleId="GHSA-1")
+    _add_client_suppression(root, "(ASH, client-supplied config) hidden")
+    transitive = _transitive(root_rule="GHSA-1")
+    plain_root = _result(uri="other-lock.json", ruleId="GHSA-2")
+    plain_root.suppressions = [Suppression(kind=Kind1.external, justification="x")]
+    plain_transitive = _transitive(root_rule="GHSA-2", root_uri="other-lock.json")
+    report = _report(root, transitive, plain_root, plain_transitive)
+
+    _suppress_transitive_of_suppressed_roots(report, lambda value, _is_uri: value)
+
+    assert transitive.suppressions
+    assert transitive.suppressions[0].properties.clientSupplied is True
+    assert plain_transitive.suppressions
+    assert plain_transitive.suppressions[0].properties is None
+
+
 def test_the_first_location_naming_a_file_is_the_one_the_suppression_reads(tmp_path):
     config = AshConfig(
         project_name="u28",

@@ -899,20 +899,32 @@ def _suppress_transitive_of_suppressed_roots(
             continue
         refs = extract_root_advisories(result.properties)
         described = []
+        # Whether a root was hidden by the client's delivered config: its
+        # suppressions carry the clientSupplied mark, and a transitive finding
+        # suppressed because of it carries the same mark, so the results show what
+        # the client's config hid here too.
+        client_supplied = False
         for ref in refs:
-            if not ref:
+            # extract_root_advisories keeps a reference whose rule_id is the empty
+            # string but drops the empty key, so ref["rule_id"] raised KeyError out
+            # of the whole suppression pass; a reference naming no rule matches
+            # nothing, which leaves the transitive finding visible.
+            rule_id = ref.get("rule_id") if ref else None
+            if not rule_id:
                 break
             if "package_path" in ref:
-                key = (ref["rule_id"], normalize(ref["package_path"], False))
+                key = (rule_id, normalize(ref["package_path"], False))
                 matches = by_path.get(key, [])
                 where = ref["package_path"]
             else:
-                key = (ref["rule_id"], normalize(ref["uri"], True))
+                key = (rule_id, normalize(ref["uri"], True))
                 matches = by_uri.get(key, [])
                 where = ref["uri"]
             if not matches or not all(is_result_suppressed(m) for m in matches):
                 break
-            described.append(f"{ref['rule_id']} at {where}")
+            if any(_has_client_mark(m) for m in matches):
+                client_supplied = True
+            described.append(f"{rule_id} at {where}")
         else:
             roots = ", ".join(described)
             # Text, so nothing is escaped: an escaped value printed its backslash.
@@ -928,8 +940,27 @@ def _suppress_transitive_of_suppressed_roots(
                         f"(ASH) Suppressed because every root advisory is "
                         f"suppressed: {roots}"
                     ),
+                    properties=PropertyBag(clientSupplied=True)
+                    if client_supplied
+                    else None,
                 )
             ]
+
+
+def _has_client_mark(result: Any) -> bool:
+    """Whether any suppression of *result* carries the ``clientSupplied`` mark."""
+    for suppression in getattr(result, "suppressions", None) or []:
+        properties = getattr(suppression, "properties", None)
+        if properties is None:
+            continue
+        marked = (
+            properties.get("clientSupplied")
+            if isinstance(properties, dict)
+            else getattr(properties, "clientSupplied", None)
+        )
+        if marked is True:
+            return True
+    return False
 
 
 def _add_client_suppression(result: Any, justification: str) -> None:
