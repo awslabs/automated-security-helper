@@ -187,12 +187,21 @@ runs:
     # pytest_configure, and removed from the environment there, so a pytest a test starts
     # does not inherit it. xdist workers get the setting through workerinput instead.
     #
-    # ASH_TEST_TIER_FLOOR=1 turns on the executed-test floor (tests/utils/sharding.py,
+    # ASH_TEST_TIER_FLOOR turns on the executed-test floor (tests/utils/sharding.py,
     # fail_a_tier_run_that_executed_no_test): a tier leg that selected tests and executed
     # none of them, because every one was skipped, exits 1 instead of reading green. It
-    # is an explicit opt-in, not a reading of GITHUB_ACTIONS, so that a pytest a test
-    # starts, and a run under act, behave the same everywhere. The variable is read once
-    # and removed from the environment in pytest_configure, like ASH_TEST_SHARD.
+    # is the only trigger. A shard alone does not turn the floor on, and neither does
+    # GITHUB_ACTIONS, so that a pytest a test starts, a run under act, and a developer
+    # who reproduces a shard by hand all behave the same everywhere. The variable is
+    # read once and removed from the environment in pytest_configure, like
+    # ASH_TEST_SHARD.
+    #
+    # The value is 1 on the unit and integration legs, where the floor fails the leg. It
+    # is warn on the e2e legs: the floor prints its line with a warning prefix and the
+    # exit status is left alone. The e2e legs stay in warn mode until the hosted run
+    # shows every e2e leg executing a real test with the scanners installed, and then the
+    # expression below is replaced by 1. A leg whose every skip is a skipif condition
+    # that held is admitted in both modes.
     #
     # --junit-xml names test-results/pytest.junit.xml; the report step's glob matches it.
     #
@@ -214,7 +223,9 @@ runs:
         ASH_REQUIRE_CDK_EXTRA: "1"
         PYTEST_DEBUG_TEMPROOT: ${{ runner.temp }}
         ASH_TEST_SHARD: ${{ inputs.shard }}
-        ASH_TEST_TIER_FLOOR: "1"
+        # 1 on the unit and integration legs, warn on the e2e legs until the hosted run
+        # shows each of them executing a real test; see the comment block above.
+        ASH_TEST_TIER_FLOOR: ${{ inputs.marker == 'e2e' && 'warn' || '1' }}
         MARKER: ${{ inputs.marker }}
       run: |
         args=(-m "$MARKER" --junit-xml=test-results/pytest.junit.xml)

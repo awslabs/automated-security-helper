@@ -1917,10 +1917,27 @@ class TestTheActionRunsATier:
         assert '-m "$MARKER"' in str(step["run"])
 
     def test_the_step_opts_the_run_in_to_the_executed_test_floor(self):
-        """Without the variable the floor never runs, on any leg."""
+        """Without the variable the floor never runs, on any leg.
+
+        The value is read the way GitHub reads ``cond && a || b``: ``warn`` on the e2e
+        legs, until a hosted run shows each of them executing a real test, and ``1``
+        everywhere else. When the e2e legs are flipped, this expectation is the one line
+        that changes with the expression.
+        """
         step = _action_step("Run PyTest")
         assert sharding.FLOOR_ENV_VAR == "ASH_TEST_TIER_FLOOR"
-        assert step["env"][sharding.FLOOR_ENV_VAR] == "1"
+        value = str(step["env"][sharding.FLOOR_ENV_VAR])
+        match = re.fullmatch(
+            r"\$\{\{ inputs\.marker == '(\w+)' && '(\w+)' \|\| '(\w+)' \}\}", value
+        )
+        assert match is not None, value
+        tier, when_true, otherwise = match.groups()
+        by_tier = {
+            marker: when_true if marker == tier else otherwise
+            for marker in ("unit", "integration", "e2e")
+        }
+        assert by_tier == {"unit": "1", "integration": "1", "e2e": "warn"}, value
+        assert sharding.FLOOR_WARN_VALUE == "warn"
 
     def test_the_step_names_no_test_file_on_the_command_line(self):
         """A file named there skips pytest's ignore rules and its python_files match."""

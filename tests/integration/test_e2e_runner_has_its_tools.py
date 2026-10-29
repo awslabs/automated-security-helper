@@ -39,10 +39,13 @@ one skip when it is absent (``_why_it_cannot_run`` in
 tests/integration/scanners/test_links_leaving_the_tree_reach_no_output.py is the
 nearest thing to a shared skip; there is no fixture shared by all e2e modules). The
 executed-test floor in tests/utils/sharding.py
-(``fail_a_tier_run_that_executed_no_test``) is what makes an e2e leg that ran nothing
-fail. This test carries the ``leg_assertion`` marker for that reason: it passes on
-every leg that has its tools, so counted as an executed test it would keep the floor
-from ever firing on an e2e leg whose real tests all skipped.
+(``fail_a_tier_run_that_executed_no_test``) is what catches an e2e leg that ran
+nothing. The run-unit-tests action sets it to ``warn`` on the e2e legs for now, so such
+a leg is reported with a warning line and not failed, until a hosted run shows every e2e
+leg executing a real test; this test still fails a leg that lacks a tool. This test
+carries the ``leg_assertion`` marker for that reason: it passes on every leg that has
+its tools, so counted as an executed test it would keep the floor from ever firing on an
+e2e leg whose real tests all skipped.
 
 The check applies to a CI tier run only, as ``sharding.is_ci_tier_run`` in
 tests/utils/sharding.py defines it, the same test the executed-test floor uses. On a
