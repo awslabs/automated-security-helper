@@ -27,6 +27,7 @@ satisfy it without sharing a base.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import re
 import threading
@@ -120,6 +121,28 @@ OFFLINE_FLAGS = (
     "--skip-java-db-update",
     "--skip-check-update",
 )
+
+
+#: ``trivy --timeout`` when ASH's ``scan_timeout`` is null (unbounded). trivy has no
+#: value that means "no deadline": measured with 0.75.0, ``trivy --timeout=0s`` is a
+#: deadline that has already passed, and a scan that analyzes files one at a time
+#: (secret scanning, OS packages) exits 1 with "context deadline exceeded". This is
+#: the largest whole number of hours a Go duration holds, about 292 years; one hour
+#: more is refused as an invalid duration.
+UNBOUNDED_TRIVY_TIMEOUT = "2562047h"
+
+
+def trivy_timeout(seconds: Optional[float]) -> str:
+    """ASH's scan timeout in seconds, or None for unbounded, as trivy's ``--timeout``.
+
+    Rounded up to a whole second and never below one, so a bound is never ``0s``.
+    trivy's own default deadline is five minutes, and a scan that passes it exits
+    1 with "context deadline exceeded", so ``trivy`` and ``trivy-repo`` both pass
+    the bound the operator set (``scan_timeout``) as trivy's.
+    """
+    if seconds is None:
+        return UNBOUNDED_TRIVY_TIMEOUT
+    return f"{max(1, math.ceil(seconds))}s"
 
 
 #: The trivy misconfiguration scanner that downloads the module sources a .tf file
@@ -705,7 +728,21 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         means trivy failed: ``trivy`` refuses the report of any other run, and
         ``trivy-repo`` records the exit code in its SARIF invocation.
         """
-        flags = self._shared_update_flags(command)
+        # The online or offline flags were chosen when the scanner was built
+        # (_append_trivy_options); the update below reads the mode now. When the
+        # two disagree (ASH_OFFLINE set or cleared between construction and the
+        # scan), the scan-time reading decides both, so an offline scan never
+        # carries --skip-version-check (a trivy too old to know the flag refuses
+        # the command) and never lacks the skip flags, and an online scan does
+        # not skip the update it is about to make. When they agree, as they do
+        # in a normal run, the command is unchanged.
+        if self._offline():
+            stale, wanted = ONLINE_FLAGS, OFFLINE_FLAGS
+        else:
+            stale, wanted = OFFLINE_FLAGS, ONLINE_FLAGS
+        command[:] = [arg for arg in command if arg not in stale]
+        flags = [flag for flag in wanted if flag not in command]
+        flags.extend(self._shared_update_flags(command))
         cache = self._trivy_cache_dir()
         self._content_db_cache_dir = cache
         flags.append(f"--cache-dir={cache.as_posix()}")
@@ -753,7 +790,21 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             return []
         if self.context is None:
             raise ScannerError(f"{self.__class__.__name__} has no plugin context")
-        wants_checks = "misconfig" in self._effective_scanners(command)
+        effective = self._effective_scanners(command)
+        wants_checks = "misconfig" in effective
+        wants_vuln = "vuln" in effective
+        skip_flags = [
+            "--skip-db-update",
+            "--skip-java-db-update",
+            *(["--skip-check-update"] if wants_checks else []),
+        ]
+        if not wants_vuln and not wants_checks:
+            # A scan of secrets or licenses alone opens neither the vulnerability
+            # database nor the checks bundle (trivy initializes its database only
+            # for the vulnerability scanner), so nothing is downloaded for it and
+            # a registry that is unreachable cannot fail it. The skip flags still
+            # go on the command, so trivy makes no update of its own either.
+            return skip_flags
         cache = self._trivy_cache_dir()
         # The operator's trivy.yaml (options.config_file or TRIVY_CONFIG), under the
         # rule the scan's --config follows (_trivy_config_file), so a database
@@ -775,11 +826,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             executable=find_executable(command[0]),
             config_file=operator_config,
         )
-        return [
-            "--skip-db-update",
-            "--skip-java-db-update",
-            *(["--skip-check-update"] if wants_checks else []),
-        ]
+        return skip_flags
 
     def content_database_probe_context(self):  # type: ignore[no-untyped-def]
         """The base's probe context, pointed at the cache the scan read.

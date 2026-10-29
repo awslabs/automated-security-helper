@@ -169,7 +169,6 @@ otherwise carry the worst code from one target into the next (``scan``).
 from __future__ import annotations
 
 import logging
-import math
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
 
@@ -182,11 +181,13 @@ from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.config.tool_config_trust import empty_tool_directory
-from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (  # noqa: F401 -- TRIVY_SEVERITIES and _SARIF_LEVEL are kept importable from here
+from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (  # noqa: F401 -- TRIVY_SEVERITIES, _SARIF_LEVEL, UNBOUNDED_TRIVY_TIMEOUT and trivy_timeout are kept importable from here
     _SARIF_LEVEL,
     TRIVY_SEVERITIES,
+    UNBOUNDED_TRIVY_TIMEOUT,
     TrivyScannerBase,
     skip_dirs_value,
+    trivy_timeout,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.utils.config_trust import (
@@ -197,23 +198,8 @@ from automated_security_helper.utils.config_trust import (
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
-#: ``trivy --timeout`` when ASH's ``scan_timeout`` is null (unbounded). trivy has no
-#: value that means "no deadline": measured with 0.75.0, ``trivy --timeout=0s`` is a deadline
-#: that has already passed, and a scan that analyzes files one at a time (secret
-#: scanning, OS packages) exits 1 with "context deadline exceeded". This is the largest
-#: whole number of hours a Go duration holds, about 292 years; one hour more is refused
-#: as an invalid duration.
-UNBOUNDED_TRIVY_TIMEOUT = "2562047h"
-
-
-def trivy_timeout(seconds: Optional[float]) -> str:
-    """ASH's scan timeout in seconds, or None for unbounded, as trivy's ``--timeout``.
-
-    Rounded up to a whole second and never below one, so a bound is never ``0s``.
-    """
-    if seconds is None:
-        return UNBOUNDED_TRIVY_TIMEOUT
-    return f"{max(1, math.ceil(seconds))}s"
+# UNBOUNDED_TRIVY_TIMEOUT and trivy_timeout live in the shared base since trivy-repo
+# passes the same bound; both names stay importable from this module.
 
 
 class TrivyScannerConfigOptions(ScannerOptionsBase):

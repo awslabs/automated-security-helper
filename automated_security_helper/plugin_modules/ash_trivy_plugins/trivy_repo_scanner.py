@@ -19,6 +19,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanne
     TrivyScannerBase,
     reset_trivy_default_misconfig_scanners as reset_trivy_default_misconfig_scanners,
     trivy_default_misconfig_scanners,
+    trivy_timeout,
 )
 from automated_security_helper.base.scanner_plugin import (
     redacted_command_record,
@@ -357,6 +358,10 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                 len(head) if final_args[: len(head)] == head else len(final_args)
             )
             final_args[insert_at:insert_at] = [
+                # trivy's own deadline is five minutes and fails the scan when it
+                # passes; matched to ASH's scan_timeout, as the builtin trivy scanner
+                # does, so the bound the operator set is the one that applies.
+                f"--timeout={trivy_timeout(self._effective_scan_timeout())}",
                 f"--ignorefile={self._ignore_file()}",
                 f"--secret-config={self._secret_config_file()}",
                 *self._pinned_config_args(),

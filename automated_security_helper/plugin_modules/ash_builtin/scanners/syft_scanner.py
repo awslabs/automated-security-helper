@@ -37,6 +37,10 @@ from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.subprocess_utils import (
+    COULD_NOT_STOP_ENDING,
+    WAS_KILLED_ENDING,
+)
 from automated_security_helper.utils.suppression_matcher import active_ignore_paths
 
 
@@ -307,6 +311,55 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             f"{self.__class__.__name__} overrides scan() directly."
         )
 
+    def _refuse_flagged_response(self, response: object, timeout: float | None) -> None:
+        """Raise for a run the subprocess layer flagged, before its file is read.
+
+        The same four readings ``ScannerPluginBase.scan`` makes for every
+        template scanner, which this override of ``scan()`` left out: a killed
+        tool writes no results file, so the error would otherwise be "No such
+        file or directory" instead of the timeout; a tool that could not start
+        the same; a tool that ran while ASH could not record its output (exit 0,
+        results file possibly complete) is not graded on that file; a tool a
+        signal ASH did not send ended did not finish.
+        """
+        if not isinstance(response, dict):
+            return
+        name = self.__class__.__name__
+        if response.get("timed_out"):
+            limit = self._timeout_limit_token(timeout)
+            if self.scan_could_not_stop is not None:
+                ending = f"{COULD_NOT_STOP_ENDING}. It produced no"
+            else:
+                ending = f"{WAS_KILLED_ENDING}, so it produced no"
+            raise ScannerError(
+                text_without_values(
+                    f"{name} timed out after {limit}{ending} results file. Raise "
+                    f"scanners.{getattr(self.config, 'name', '<scanner>')}.options"
+                    ".scan_timeout if this target legitimately needs longer, or set "
+                    "it to null to leave this scanner unbounded.",
+                    self._values_to_redact(),
+                )
+            )
+        if response.get("spawn_failed"):
+            raise ScannerError(
+                f"{name} could not start its tool, so it produced no results file."
+            )
+        if response.get("post_run_error"):
+            raise ScannerError(
+                text_without_values(
+                    f"{name} ran, but ASH could not record the scanner's output: "
+                    f"{response.get('error')}",
+                    self._values_to_redact(),
+                )
+            )
+        if response.get("signaled"):
+            raise ScannerError(
+                text_without_values(
+                    f"{name} did not finish: {response.get('error')}",
+                    self._values_to_redact(),
+                )
+            )
+
     def scan(
         self,
         target: Path,
@@ -437,18 +490,20 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             subprocess_env = (
                 {**snapshot_environ(), **self.extra_env} if self.extra_env else None
             )
+            effective_timeout = self._effective_scan_timeout()
             response = self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
                 cwd=self._working_directory(target, target_results_dir),
                 env=subprocess_env,
-                timeout=self._effective_scan_timeout(),
+                timeout=effective_timeout,
             )
 
             self._post_scan(
                 target=target,
                 target_type=target_type,
             )
+            self._refuse_flagged_response(response, effective_timeout)
             self._record_target_exit_code(response)
             self._refuse_rejected_exit_code(results_file)
 

@@ -35,6 +35,7 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins import (
 from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
     TrivyRepoScanner,
     TrivyRepoScannerConfig,
+    TrivyRepoScannerConfigOptions,
 )
 
 pytestmark = pytest.mark.unit
@@ -139,6 +140,45 @@ def test_ash_output_directories_inside_the_target_are_skipped(context):
 
     expected = f"--skip-dirs={skip_dirs_value('.ash/ash_output')}"
     assert expected in argv, argv
+
+
+def test_ashs_scan_timeout_is_passed_as_trivys_deadline(context):
+    """trivy's own deadline is five minutes; a scan past it exits 1. The bound
+    the operator set (scan_timeout, 1800 s by default) is the one trivy gets, as
+    the builtin trivy scanner already passed it."""
+    argv, _ = _scan(context, _sarif("Severity: LOW", "note", ["LOW"]))
+
+    assert "--timeout=1800s" in argv, argv
+
+
+def test_an_unbounded_scan_timeout_is_trivys_largest_deadline(context):
+    scanner = TrivyRepoScanner(
+        context=context,
+        config=TrivyRepoScannerConfig(
+            options=TrivyRepoScannerConfigOptions(scan_timeout=None)
+        ),
+    )
+    scanner.dependencies_satisfied = True
+    argv: list[str] = []
+
+    def _run(command, **kwargs):
+        argv[:] = [str(a) for a in command]
+        destination = Path(command[command.index("--output") + 1])
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(
+            json.dumps(_sarif("Severity: LOW", "note", ["LOW"])), encoding="utf-8"
+        )
+        return {"stdout": "", "stderr": "", "returncode": 0}
+
+    with (
+        patch.object(scanner, "_pre_scan", return_value=True),
+        patch.object(scanner, "_post_scan"),
+        patch.object(scanner, "_run_subprocess", side_effect=_run),
+        patch.object(scanner, "_plugin_log"),
+    ):
+        scanner.scan(target=Path(context.source_dir), target_type="source")
+
+    assert [a for a in argv if a.startswith("--timeout=")] == ["--timeout=2562047h"]
 
 
 def test_each_result_carries_trivys_own_severity(context):
