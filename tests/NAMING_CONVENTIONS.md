@@ -36,11 +36,14 @@ is decided by what the test does when it runs, not by the directory it sits in.
   in-process are all unit, as long as the code path they drive spawns nothing real. A
   test that reads files of this repository (a docs page, a workflow YAML, `pyproject.toml`)
   in-process is unit.
-- `integration`: one component with a real dependency. A real external tool or a
+- `integration`: one component with a real dependency. A test is integration when it
+  starts any child process or a real tool: a real external tool or a
   product subprocess is started (a child Python, a child pytest, `git`, the `ash` CLI
   run as a subprocess for one command), a sandbox backend is exercised for real,
-  boto3 or moto stands up an AWS stand-in, or a converter invokes a tool. A test that
-  cannot be classed from its text is integration.
+  boto3 or moto stands up an AWS stand-in, or a converter invokes a tool. A child
+  process counts even when the program it runs is a script the test wrote itself, such
+  as a `#!/bin/sh` fixture the code under test executes. A test that cannot be classed
+  from its text is integration.
 - `e2e`: the whole product, driven as an operator would drive it. The `ash` CLI runs as
   a subprocess against a real target tree with real scanners and its output is
   asserted, the container image is built or run, or the MCP server is started as a
