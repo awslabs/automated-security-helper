@@ -1647,7 +1647,12 @@ def sweep_stale_workspaces(
 
     Entries that are not directories, are symlinks, or do not name a single
     directory are left alone, and so is a name the session registry refuses
-    (``MCPSessionRegistry.session_for``): the sweep goes on to the next entry.
+    (``MCPSessionRegistry.session_for``), or a workspace whose removal raises
+    (an ``OSError``, ``RuntimeError`` or ``ValueError`` out of the registry or
+    the removal): that one is logged with its id and left for the next pass, and
+    the sweep goes on to the next entry rather than ending the pass with every
+    later entry unread. (The registry's refusal of the unidentified sentinel is
+    defensive here: a reserved name is skipped before the registry is asked.)
 
     This is also what removes a session whose end :func:`end_session` deferred
     for a scan in another server: that scan's end is not seen here.
@@ -1706,8 +1711,22 @@ def sweep_stale_workspaces(
         return []
     removed: List[str] = []
     for entry in stale:
-        if _remove_if_still_stale(root, entry.name, entry, cutoff):
-            removed.append(entry.name)
+        try:
+            if _remove_if_still_stale(root, entry.name, entry, cutoff):
+                removed.append(entry.name)
+        except (OSError, RuntimeError, ValueError) as exc:
+            # One workspace's failure (a registry refusal, a removal that
+            # raised past its own handling) is that workspace's: it is named
+            # and left for the next pass, and the sweep goes on to the rest
+            # instead of ending the pass with every later entry unread.
+            from automated_security_helper.utils.log import ASH_LOGGER
+
+            ASH_LOGGER.warning(
+                "The TTL sweep could not remove session %r (%s); its workspace "
+                "stays for the next pass.",
+                entry.name,
+                _describe_os_error(exc) if isinstance(exc, OSError) else exc,
+            )
     return removed
 
 
@@ -1953,7 +1972,20 @@ def _remove_stale_session_state(
                 _remove_session_state(session_id)
                 with contextlib.suppress(OSError):
                     (root / SCAN_PRESENCE_DIR / session_id).rmdir()
-        except OSError:
+        except OSError as exc:
+            # The check for a scan, or the removal, failed after the guard was
+            # taken: the workspace stays for the next pass, and the failure is
+            # named rather than swallowed, because a removal that keeps failing
+            # is the one an operator has to see (a file another account owns,
+            # a filesystem error).
+            from automated_security_helper.utils.log import ASH_LOGGER
+
+            ASH_LOGGER.warning(
+                "The TTL sweep could not remove session %r (%s); its workspace "
+                "stays for the next pass.",
+                session_id,
+                _describe_os_error(exc),
+            )
             return False
         finally:
             session.end_sweep()
