@@ -729,7 +729,8 @@ def _launch_act(prepared: Prepared, session: Session) -> Launched:
             timeout=session.options.launch_timeout,
         )
     )
-    reports.keep_tree(project / ".ash" / "ash_output", out / "ash_output")
+    # Nothing is copied from the project's .ash/ash_output: act's host executor does
+    # not write there, and the run is judged from the artifact store under out.
     return Launched(log=log, code=code, timed_out=timed_out)
 
 
@@ -1418,7 +1419,7 @@ def stub_problems(prepared: Prepared) -> list[str]:
 
 
 def _act_problems(prepared, launched, log, expected) -> list[str]:
-    project, out = prepared.project, prepared.out
+    out = prepared.out
     workflow = reports.load_workflow(prepared.rewritten)
     called = {
         name: reports.load_workflow(text) for name, text in prepared.called.items()
@@ -1457,11 +1458,21 @@ def _act_problems(prepared, launched, log, expected) -> list[str]:
     problems += reports.artifact_problems(
         out / "artifacts", reports.uploaded_artifact_names([workflow, *called.values()])
     )
-    output = project / ".ash" / "ash_output"
-    aggregated = output / reports.AGGREGATED
-    problems += reports.findings_problems(
-        reports.aggregated_results_at(aggregated), expected
+    # act's host executor runs the job in a directory it removes at the job's end and
+    # never writes the project's .ash/ash_output, so the artifact the job uploaded is
+    # the only copy of ASH's output: it is unpacked under out/ash_output, with each
+    # file's own mtime, and the checks below read it there.
+    judged, selection = reports.results_to_judge(
+        reports.results_from_artifact_store(out / "artifacts")
     )
+    problems += selection
+    output = out / "ash_output"
+    if judged is not None:
+        output = reports.unpack_artifact(judged, output)
+        problems += reports.findings_problems(
+            reports.aggregated_results_at(output / reports.AGGREGATED), expected
+        )
+    aggregated = output / reports.AGGREGATED
     started = None
     if merge:
         job, step = merge

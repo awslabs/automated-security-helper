@@ -28,8 +28,10 @@ import importlib
 import importlib.util
 import json
 import os
+import struct
 import subprocess
 import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -387,6 +389,184 @@ def test_a_store_that_does_not_exist_reads_as_none(tmp_path):
     assert read(tmp_path / "absent") is None
     (tmp_path / "a-file").write_text("", encoding="utf-8")
     assert read(tmp_path / "a-file") is None
+
+
+# ---------------------------------------------------------------------------
+# Which artifact the act run is judged on
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_one_artifact_with_results_is_the_one_judged(tmp_path):
+    read = _api("reports", "results_from_artifact_store")
+    judge = _api("reports", "results_to_judge")
+    store = tmp_path / "artifacts"
+    _zip_artifact(store, "ash-output", _aggregated(), SARIF_BYTES)
+    judged, problems = judge(read(store))
+    assert problems == []
+    assert judged is not None and judged.name == "ash-output"
+    assert judged.aggregated == _aggregated()
+    assert judged.sarif == SARIF_BYTES
+
+
+@pytest.mark.unit
+def test_the_merged_artifact_is_judged_over_the_shards(tmp_path):
+    read = _api("reports", "results_from_artifact_store")
+    judge = _api("reports", "results_to_judge")
+    store = tmp_path / "artifacts"
+    for shard in range(4):
+        _zip_artifact(store, f"ash-shard-{shard}", _aggregated(str(shard)))
+    _zip_artifact(store, "ash-merged", _aggregated("MERGED"), SARIF_BYTES)
+    judged, problems = judge(read(store))
+    assert problems == []
+    assert judged is not None and judged.name == "ash-merged"
+    assert judged.aggregated == _aggregated("MERGED")
+    assert judged.sarif == SARIF_BYTES
+
+
+@pytest.mark.unit
+def test_shards_with_no_merged_artifact_are_named_as_a_problem(tmp_path):
+    read = _api("reports", "results_from_artifact_store")
+    judge = _api("reports", "results_to_judge")
+    store = tmp_path / "artifacts"
+    for shard in range(4):
+        _zip_artifact(store, f"ash-shard-{shard}", _aggregated(str(shard)))
+    judged, problems = judge(read(store))
+    assert judged is None
+    assert len(problems) == 1
+    assert all(f"ash-shard-{shard}" in problems[0] for shard in range(4))
+    assert "merged" in problems[0] and "uploaded no artifact" in problems[0]
+    _zip_artifact(store, "ash-unmerged", _aggregated("X"))
+    judged, problems = judge(read(store))
+    assert judged is None, "`unmerged` is not the merged artifact's name"
+    assert "ash-unmerged" in problems[0]
+
+
+@pytest.mark.unit
+def test_two_artifacts_named_as_merged_are_a_problem(tmp_path):
+    read = _api("reports", "results_from_artifact_store")
+    judge = _api("reports", "results_to_judge")
+    store = tmp_path / "artifacts"
+    _zip_artifact(store, "ash-merged", _aggregated("A"))
+    _zip_artifact(store, "ash_merged", _aggregated("B"))
+    judged, problems = judge(read(store))
+    assert judged is None
+    assert len(problems) == 1
+    assert "2 artifacts are named as the merged output" in problems[0]
+    assert "ash-merged" in problems[0] and "ash_merged" in problems[0]
+
+
+@pytest.mark.unit
+def test_a_store_without_results_is_the_missing_results_problem():
+    judge = _api("reports", "results_to_judge")
+    missing = _api("reports", "findings_problems")([], {})
+    assert missing == ["the run kept no ash_aggregated_results.json"], "the control"
+    assert judge(None) == (None, missing)
+    assert judge([]) == (None, missing)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("name", "merged"),
+    [
+        ("ash-merged", True),
+        ("ash_merged", True),
+        ("ash-merged.zip", True),
+        ("ASH-Merged", True),
+        ("merged", True),
+        ("ash-shard-0", False),
+        ("ash-unmerged", False),
+        ("ash-output", False),
+        ("mergedresults", False),
+    ],
+)
+def test_the_merged_output_is_marked_by_the_word_in_its_name(name, merged):
+    assert _api("reports", "is_merged_artifact")(name) is merged
+
+
+#: 2026-10-12T20:30:00Z as a zip entry's local date_time on a host whose clock is UTC,
+#: and the same instant as a POSIX time.
+WRITTEN_AT_DOS = (2026, 10, 12, 20, 30, 0)
+WRITTEN_AT = time.mktime((*WRITTEN_AT_DOS, 0, 0, -1))
+
+
+def _zip_member(archive: zipfile.ZipFile, name: str, data: bytes, mtime: float | None):
+    info = zipfile.ZipInfo(name, date_time=WRITTEN_AT_DOS)
+    if mtime is not None:
+        # The extended-timestamp extra field: tag, size, flags (bit 0 = mtime), mtime.
+        info.extra = struct.pack("<HHBi", 0x5455, 5, 1, int(mtime))
+    archive.writestr(info, data)
+
+
+@pytest.mark.unit
+def test_a_zipped_artifact_is_unpacked_with_its_members_own_mtimes(tmp_path):
+    read = _api("reports", "results_from_artifact_store")
+    unpack = _api("reports", "unpack_artifact")
+    written_after = _api("verdict", "written_after_problems")
+    compare = _api("verdict", "stub_sarif_problems")
+    store = tmp_path / "artifacts"
+    archive = store / "1" / "ash-merged" / "ash-merged.zip"
+    archive.parent.mkdir(parents=True)
+    with zipfile.ZipFile(archive, "w") as zipped:
+        _zip_member(zipped, "out/ash_aggregated_results.json", b"{}", None)
+        _zip_member(zipped, "out/reports/ash.ghas.sarif", SARIF_BYTES, STORED_AT)
+        _zip_member(zipped, "elsewhere/ash_aggregated_results.json", b"{}", None)
+    os.utime(archive, (STORED_AT + 3600, STORED_AT + 3600))
+    found = read(store)
+    assert found is not None and len(found) == 1, "only the shallowest copy is read"
+    (judged,) = found
+    output = unpack(judged, tmp_path / "out" / "ash_output")
+    assert output == tmp_path / "out" / "ash_output" / "out"
+    aggregated = output / "ash_aggregated_results.json"
+    sarif = output / "reports" / "ash.ghas.sarif"
+    assert aggregated.read_bytes() == b"{}"
+    assert sarif.read_bytes() == SARIF_BYTES
+    assert not (tmp_path / "out" / "ash_output" / "elsewhere").exists(), (
+        "members outside the results file's directory are not unpacked"
+    )
+    assert aggregated.stat().st_mtime == pytest.approx(WRITTEN_AT), (
+        "the zip's date_time, read as local time, when there is no extended timestamp"
+    )
+    assert sarif.stat().st_mtime == pytest.approx(STORED_AT), (
+        "the extended timestamp wins over the date_time"
+    )
+    assert written_after(aggregated, started=WRITTEN_AT - 60) == []
+    problems = written_after(aggregated, started=WRITTEN_AT + 60)
+    assert problems and "before the step" in problems[0], "the control"
+    record = tmp_path / "upload-sarif-1.json"
+    digest = hashlib.sha256(SARIF_BYTES).hexdigest()
+    record.write_text(json.dumps({"sha256": digest}), encoding="utf-8")
+    assert compare(sarif, record) == []
+    record.write_text(json.dumps({"sha256": "0" * 64}), encoding="utf-8")
+    assert compare(sarif, record), "the control: another file was uploaded"
+
+
+@pytest.mark.unit
+def test_a_directory_artifact_is_unpacked_with_its_files_mtimes(tmp_path):
+    read = _api("reports", "results_from_artifact_store")
+    unpack = _api("reports", "unpack_artifact")
+    store = tmp_path / "artifacts"
+    artifact = store / "1" / "ash-output"
+    (artifact / "reports").mkdir(parents=True)
+    results = artifact / "ash_aggregated_results.json"
+    results.write_text(json.dumps(_aggregated()), encoding="utf-8")
+    (artifact / "reports" / "ash.ghas.sarif").write_bytes(SARIF_BYTES)
+    for path in (results, artifact / "reports" / "ash.ghas.sarif"):
+        os.utime(path, (STORED_AT, STORED_AT))
+    (tmp_path / "outside.txt").write_text("not the run's", encoding="utf-8")
+    (artifact / "reports" / "link.txt").symlink_to(tmp_path / "outside.txt")
+    (judged,) = read(store)
+    output = unpack(judged, tmp_path / "out" / "ash_output")
+    assert output == tmp_path / "out" / "ash_output"
+    assert json.loads((output / "ash_aggregated_results.json").read_text()) == (
+        _aggregated()
+    )
+    assert (output / "reports" / "ash.ghas.sarif").read_bytes() == SARIF_BYTES
+    assert (output / "ash_aggregated_results.json").stat().st_mtime == pytest.approx(
+        STORED_AT
+    )
+    assert not (output / "reports" / "link.txt").exists(), "links are left behind"
+    assert not (output / "reports" / "link.txt").is_symlink()
 
 
 # ---------------------------------------------------------------------------

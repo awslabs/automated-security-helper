@@ -28,6 +28,8 @@ import json
 import os
 import re
 import shutil
+import struct
+import time
 import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Iterable, Mapping
@@ -592,7 +594,9 @@ class ArtifactResults:
     ``aggregated_results_in`` does (``<zip>!<member>`` for a zipped copy). ``sarif`` is
     the bytes of ``reports/ash.ghas.sarif`` beside the results, or None when the
     artifact holds none. ``mtime`` is when the store entry was written: the zip's, or
-    the stored results file's.
+    the stored results file's. ``source`` is the zip, or the stored results file, and
+    ``member`` the results file's name inside the zip (None for a stored file); the
+    two are what ``unpack_artifact`` reads.
     """
 
     name: str
@@ -600,6 +604,8 @@ class ArtifactResults:
     aggregated: dict[str, Any]
     sarif: bytes | None
     mtime: float
+    source: Path | None = None
+    member: str | None = None
 
 
 def _zipped_results(path: Path, depth: int) -> list[tuple[int, ArtifactResults]]:
@@ -623,6 +629,8 @@ def _zipped_results(path: Path, depth: int) -> list[tuple[int, ArtifactResults]]
                             if sarif_member in members
                             else None,
                             mtime=mtime,
+                            source=path,
+                            member=member,
                         ),
                     )
                 )
@@ -656,6 +664,7 @@ def _stored_results(path: Path, depth: int) -> list[tuple[int, ArtifactResults]]
                 aggregated=data,
                 sarif=sarif,
                 mtime=mtime,
+                source=path,
             ),
         )
     ]
@@ -689,6 +698,110 @@ def results_from_artifact_store(store: Path) -> list[ArtifactResults] | None:
         return None
     top = min(depth for depth, _ in found)
     return [results for depth, results in found if depth == top]
+
+
+#: The word in an artifact's name that marks it as a merge job's output: the sharded
+#: page uploads its merged reports and results as ``ash-merged``, beside the shards'
+#: ``ash-shard-<n>``.
+MERGED_WORD = "merged"
+_NAME_WORDS = re.compile(r"[-_.]")
+
+
+def is_merged_artifact(name: str) -> bool:
+    """Whether an artifact's name marks it as the merged output, by the word
+    ``merged`` between dashes, underscores or dots (``ash-merged``, ``ash_merged.zip``),
+    not by a substring (``unmerged`` is not it)."""
+    return MERGED_WORD in _NAME_WORDS.split(name.lower())
+
+
+def results_to_judge(
+    found: list[ArtifactResults] | None,
+) -> tuple[ArtifactResults | None, list[str]]:
+    """Which of a store's results the run is judged on, and why none when none.
+
+    One artifact with results is the run's output. Several are a sharded run, and
+    the one whose name marks it as the merged output is judged; without one the
+    shards are named, because the findings and the SARIF the merge wrote are then in
+    no artifact. None is the missing-results problem, in ``findings_problems``'s
+    words.
+    """
+    if not found:
+        return None, findings_problems([], {})
+    if len(found) == 1:
+        return found[0], []
+    merged = [results for results in found if is_merged_artifact(results.name)]
+    if len(merged) == 1:
+        return merged[0], []
+    names = ", ".join(results.name for results in found)
+    if merged:
+        return None, [
+            f"{len(merged)} artifacts are named as the merged output: "
+            + ", ".join(results.name for results in merged)
+            + f" (the run kept {len(found)} artifacts with results: {names})"
+        ]
+    return None, [
+        (
+            f"the run kept {len(found)} artifacts with results ({names}) and none "
+            "named as the merged output, so the merge job uploaded no artifact and "
+            "its findings and SARIF are in none"
+        )
+    ]
+
+
+#: The zip "extended timestamp" extra field, which carries a member's mtime to the
+#: second in UTC where the zip's own date_time is local time rounded to 2 seconds.
+_EXTENDED_TIMESTAMP = 0x5455
+
+
+def _zip_mtime(info: zipfile.ZipInfo) -> float:
+    """A zip member's mtime as a POSIX time: the extended timestamp when the entry
+    carries one, else its date_time read as local time, as the writer wrote it."""
+    extra = info.extra
+    while len(extra) >= 4:
+        tag, size = struct.unpack("<HH", extra[:4])
+        data, extra = extra[4 : 4 + size], extra[4 + size :]
+        if tag == _EXTENDED_TIMESTAMP and len(data) >= 5 and data[0] & 1:
+            return float(struct.unpack("<i", data[1:5])[0])
+    return time.mktime((*info.date_time, 0, 0, -1))
+
+
+def unpack_artifact(results: ArtifactResults, target: Path) -> Path:
+    """Unpack the artifact's output under ``target`` and return the directory that
+    holds its ``ash_aggregated_results.json``, with every file's own mtime.
+
+    act's host executor runs each job in a directory it removes at the job's end, so
+    the uploaded artifact is the only copy of ASH's output; the checks that read a
+    path (the SARIF the upload stub was given; whether the results were written after
+    the merge step started) read this copy. A zipped artifact is extracted member by
+    member, those under the results file's own directory in the zip, each with the
+    mtime its entry records; a stored directory is copied with its files' mtimes and
+    without its symbolic links.
+    """
+    target = Path(target)
+    if results.member is None:
+        source = Path(results.source).parent
+        target.mkdir(parents=True, exist_ok=True)
+        for directory, dirs, files in os.walk(source):
+            here = Path(directory)
+            dirs[:] = [d for d in dirs if not (here / d).is_symlink()]
+            (target / here.relative_to(source)).mkdir(parents=True, exist_ok=True)
+            for name in files:
+                path = here / name
+                if not path.is_symlink() and path.is_file():
+                    shutil.copy2(path, target / path.relative_to(source))
+        return target
+    prefix = PurePosixPath(results.member).parent.parts
+    with zipfile.ZipFile(results.source) as archive:
+        for info in archive.infolist():
+            if (
+                info.is_dir()
+                or PurePosixPath(info.filename).parts[: len(prefix)] != prefix
+            ):
+                continue
+            extracted = archive.extract(info, target)
+            mtime = _zip_mtime(info)
+            os.utime(extracted, (mtime, mtime))
+    return target.joinpath(*prefix)
 
 
 _ASH_NAME = r"automated[-_]security[-_]helper"
