@@ -1177,7 +1177,15 @@ def _ci_runner_unselected(item, config) -> bool:
 #: thing the tryfirst hook below does, so it sees every collected item before -k, -m or
 #: any deselection removes one.
 #:
-#: tests/unit/test_every_test_carries_one_tier_marker.py pins this check.
+#: A second refusal, for a test marked both ``unit`` and ``slow``. The unit CI job runs
+#: ``-m unit`` with neither ``--run-integration`` nor ``--run-slow``, so the ``--run-slow``
+#: skip below would skip such a test there, and ``-m integration`` and ``-m e2e`` do not
+#: select it. It would run in no CI job while every job stayed green. It is a usage
+#: error for the same reason as the first: the loss is silent. A slow test belongs to the
+#: integration tier, which runs with ``--run-slow``. This one keys on the markers too,
+#: although the ``--run-slow`` skip also matches a keyword named ``slow``.
+#:
+#: tests/unit/test_every_test_carries_one_tier_marker.py pins both checks.
 _TEST_TIERS = ("unit", "integration", "e2e")
 
 #: How many offenders the refusal names. The count it prints is always the whole count.
@@ -1212,12 +1220,40 @@ def _tier_refusal_message(offenders: List[Tuple[str, List[str]]]) -> str:
     )
 
 
+def _unit_items_marked_slow(items) -> List[str]:
+    """Node ids of the items that carry both the ``unit`` and the ``slow`` marker."""
+    return [
+        item.nodeid
+        for item in items
+        if item.get_closest_marker("unit") is not None
+        and item.get_closest_marker("slow") is not None
+    ]
+
+
+def _unit_slow_refusal_message(nodeids: List[str]) -> str:
+    """The usage error's text for unit tests that are also slow: count, rule, ids."""
+    listed = nodeids[:_TIER_REFUSAL_LISTED]
+    unlisted = len(nodeids) - len(listed)
+    if unlisted:
+        listed.append(f"... and {unlisted} more")
+    return (
+        f"{len(nodeids)} unit test(s) also carry the slow marker: the unit tier runs "
+        "without --run-slow, so such a test would run in no CI job; mark it "
+        "integration (which runs with --run-slow) or drop slow; "
+        "see tests/NAMING_CONVENTIONS.md\n" + "\n".join(listed)
+    )
+
+
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config, items):
     """Modify the collected test items based on command-line options."""
     untiered = _items_without_one_tier(items)
     if untiered:
         raise pytest.UsageError(_tier_refusal_message(untiered))
+
+    unit_and_slow = _unit_items_marked_slow(items)
+    if unit_and_slow:
+        raise pytest.UsageError(_unit_slow_refusal_message(unit_and_slow))
 
     deselected = [
         item
