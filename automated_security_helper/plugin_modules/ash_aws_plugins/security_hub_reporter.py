@@ -966,8 +966,24 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
         directory (``metadata.scan_source``) archive nothing either. A new
         ignore_paths entry or a ruleset change can still make a finding look
         fixed; that is why archiving is opt-in.
+
+        Two more things the results record narrow it. A scanner that reported
+        inputs it found and did not scan (``inputs_not_scanned`` on its target
+        reports) did not look at everything either, so it is left out; inputs
+        ASH itself left out of the scan set (``metadata.inputs_not_scanned``) were
+        read by no scanner, so nothing is archived. And when a converter failed
+        this run (``converter_results``: a ``failure``, or unsatisfied
+        dependencies with inputs to convert) while a scanner scanned the
+        converted tree, the converted tree is missing that converter's outputs
+        and a converted-tree finding the scan no longer reports is not fixed; a
+        stored finding does not say which tree it came from, so nothing is
+        archived from such a scan.
         """
-        from automated_security_helper.core.unified_metrics import target_counts
+        from automated_security_helper.core.unified_metrics import (
+            SCAN_SET_OWNER,
+            inputs_not_scanned,
+            target_counts,
+        )
 
         if not self.config.options.archive_resolved_findings:
             return None, "archive_resolved_findings is false"
@@ -983,7 +999,8 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
                 "the results do not record whether they were filtered to changed "
                 "files (made by an older ASH?)"
             )
-        if self._scan_scope(model) is None:
+        scope = self._scan_scope(model)
+        if scope is None:
             from automated_security_helper.utils.scan_source import (
                 NO_SCAN_SOURCE_CASES,
             )
@@ -993,6 +1010,24 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
                 "so their scope cannot be compared. The scan could not tell which "
                 f"directory of which repository it scanned: {NO_SCAN_SOURCE_CASES}"
             )
+        failed_converters = sorted(
+            name
+            for name, info in (model.converter_results or {}).items()
+            if _converter_lost_inputs(info)
+        )
+        if failed_converters and scope.endswith("converted=yes"):
+            return None, (
+                "a converter failed this run "
+                f"({', '.join(failed_converters)}), so the converted tree is "
+                "missing its outputs and a converted-tree finding the scan no "
+                "longer reports cannot be read as fixed"
+            )
+        not_scanned_by = {owner for owner, _path, _reason in inputs_not_scanned(model)}
+        if SCAN_SET_OWNER in not_scanned_by:
+            return None, (
+                "the scan left inputs out of its scan set (metadata."
+                "inputs_not_scanned), so no scanner looked at everything"
+            )
         completed = frozenset(
             name
             for name, info in (model.scanner_results or {}).items()
@@ -1000,6 +1035,9 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
             and not getattr(info, "excluded", False)
             and getattr(info, "dependencies_satisfied", True)
             and target_counts(model, name)[1] == 0
+            # A scanner that found inputs it did not scan did not look at
+            # everything, whatever its status says.
+            and name not in not_scanned_by
         )
         if not completed:
             return None, "no scanner finished without losing a target"
@@ -1433,6 +1471,20 @@ def _missing_findings_scope_message() -> str:
         "'reporters.aws-security-hub.options.findings_scope=<name>', or a config "
         "file outside the scanned tree."
     )
+
+
+def _converter_lost_inputs(info: Any) -> bool:
+    """Whether a converter's recorded row says the converted tree lacks its
+    outputs: it raised (``failure``), or its dependencies were unavailable while
+    it had inputs to convert (``candidate_inputs`` not 0; None counts, as the
+    completeness gate counts it). An excluded converter never ran by intent."""
+    if getattr(info, "excluded", False):
+        return False
+    if getattr(info, "failure", None):
+        return True
+    if getattr(info, "dependencies_satisfied", True):
+        return False
+    return getattr(info, "candidate_inputs", None) != 0
 
 
 def _target_key(target: str, project: str | None) -> str:
