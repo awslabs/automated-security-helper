@@ -303,21 +303,26 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
             self._metrics_flag = self._should_use_metrics_flag()
         return self._metrics_flag
 
-    def _resolve_arguments(
-        self, target: str | Path, results_file: str | Path | None = None
-    ) -> List[str]:
+    def _resolve_scan_arguments(self, target: Path, results_file: Path) -> List[str]:
         """The arguments, with ``--metrics`` decided on the first call.
 
         Construction built them without ``--metrics``, which is right for the pinned
         version and any 1.7.0 or later. For an older opengrep they are built again,
         the same way, with it.
+
+        Decided here and not inside ``_resolve_arguments``: the base's
+        ``_resolve_scan_arguments`` adds this target's excludes to ``extra_args``
+        around that call and restores the list it saved afterwards, so a rebuild
+        inside it was thrown away (every later target lost ``--metrics``) and the
+        first target's command lost the output-directory excludes the rebuild
+        replaced.
         """
         if self._metrics_decision_pending:
             self._metrics_decision_pending = False
             if self.emit_metrics_flag():
                 self.args.extra_args = []
                 self._process_config_options()
-        return super()._resolve_arguments(target=target, results_file=results_file)
+        return super()._resolve_scan_arguments(target, results_file)
 
     # ---------------------------------------------------------------
     # Dependency resolution
