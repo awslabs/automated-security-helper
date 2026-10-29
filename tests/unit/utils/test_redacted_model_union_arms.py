@@ -99,6 +99,38 @@ def test_a_constrained_str_arm_beside_a_converting_arm_is_refused():
     _assert_named_not_echoed(text, "level")
 
 
+def test_a_constrained_str_arm_keeps_text_that_passes_its_constraint():
+    """The constraint is read: text the pattern accepts is an exact match in
+    pydantic's strict pass, ahead of any lax conversion by a sibling, so the
+    reference is admitted and the text kept whole."""
+
+    class Section(RedactedSection):
+        timeout: Optional[Union[int, Annotated[str, Field(pattern=r"^\d+[smh]$")]]] = (
+            None
+        )
+
+    section = Section.model_validate({"timeout": env_resolved_scalar("30s", VARIABLE)})
+    assert section.timeout == "30s"
+    assert type(section.timeout) is str
+
+
+class _Port(str, enum.Enum):
+    DEFAULT = "0080"
+
+
+def test_an_enum_member_text_an_earlier_converting_arm_takes_is_refused():
+    """A str-to-Enum read is as lax as a str-to-int read, and the earlier arm
+    wins the tie, so "0080" at Union[int, Port] would reach the int arm and
+    print as 80, a spelling the redaction needle never matches."""
+
+    class Section(RedactedSection):
+        port: Optional[Union[int, _Port]] = None
+
+    text = _refusal_text(Section, {"port": env_resolved_scalar("0080", VARIABLE)})
+    assert VARIABLE in text, text
+    assert "0080" not in text.replace("port", ""), text
+
+
 def test_an_unconstrained_annotated_str_arm_beside_a_converting_arm_admits():
     """A Field with no constraint of its own (a description) refuses no text,
     so the str arm keeps every reference, as a bare str arm does."""

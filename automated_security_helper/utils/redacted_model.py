@@ -407,8 +407,21 @@ def _admits_plain_str(annotation: Any, text: Optional[str] = None) -> bool:
         if any(_admits_plain_str(arm, text) for arm in unconditional):
             return True
         conditional = [arm for arm in arms if _admits_conditionally(arm)]
-        if text is not None and any(_keeps_this_text(arm, text) for arm in conditional):
-            return True
+        if text is not None:
+            for index, arm in enumerate(arms):
+                if not (_admits_conditionally(arm) and _keeps_this_text(arm, text)):
+                    continue
+                # A Literal or constrained-str match is exact and wins
+                # whatever the order. pydantic reads a str into an Enum
+                # member laxly, as a sibling reads it into a number, and the
+                # earlier arm wins a tie, so an Enum match counts only when no
+                # converting arm before it takes this text.
+                if _is_enum_arm(arm) and any(
+                    _converts_a_plain_str(earlier) and _arm_accepts(earlier, text)
+                    for earlier in arms[:index]
+                ):
+                    continue
+                return True
         # Every arm counts as a possible converter, a conditional one too: an
         # IntEnum arm converts the text it matches by number.
         return not any(_converts_a_plain_str(arm) for arm in arms) and any(
@@ -485,12 +498,67 @@ def _may_refuse_some_text(item: Any) -> bool:
     return True
 
 
+#: The TypeAdapters that read a text against a union arm (a constrained str's
+#: own constraint, a converting sibling's acceptance), one per annotation,
+#: cleared at 256 as the alias cache is.
+_ARM_ADAPTERS: Dict[Any, Any] = {}
+
+
+def _arm_adapter(annotation: Any) -> Any:
+    """A TypeAdapter for *annotation*, cached by the annotation when it is
+    hashable; None when pydantic cannot build one."""
+    try:
+        adapter = _ARM_ADAPTERS.get(annotation)
+    except TypeError:  # an unhashable annotation is built each time
+        adapter = None
+    if adapter is None:
+        try:
+            adapter = TypeAdapter(annotation)
+        except Exception:  # a shape pydantic cannot build is not read
+            return None
+        if len(_ARM_ADAPTERS) >= 256:
+            _ARM_ADAPTERS.clear()
+        with contextlib.suppress(TypeError):
+            _ARM_ADAPTERS[annotation] = adapter
+    return adapter
+
+
+def _arm_accepts(annotation: Any, text: str) -> bool:
+    """Whether pydantic's lax read of *text* at *annotation* succeeds (an int
+    arm takes "067", not "30s"); False when it raises or cannot be built."""
+    adapter = _arm_adapter(annotation)
+    if adapter is None:
+        return False
+    try:
+        adapter.validate_python(text)
+    except Exception:
+        return False
+    return True
+
+
+def _is_enum_arm(annotation: Any) -> bool:
+    annotation = _unwrap_annotated(annotation)
+    try:
+        return isinstance(annotation, type) and issubclass(annotation, enum.Enum)
+    except TypeError:
+        return False
+
+
 def _keeps_this_text(annotation: Any, text: str) -> bool:
     """Whether a conditional arm (:func:`_admits_conditionally`) is known to
-    keep *text* as it is: a Literal that lists it, or an Enum whose members
-    are all str and one of whose values is exactly *text* (found before any
-    ``_missing_`` hook runs). A constrained str's constraint is not read, so
-    it answers False and the arm admits only when no sibling converts."""
+    keep *text* as it is: a Literal that lists it; an Enum whose members are
+    all str and one of whose values is exactly *text* (found before any
+    ``_missing_`` hook runs); or a constrained str whose strict read of *text*
+    gives *text* back unchanged (a pattern or length it passes; a
+    ``to_lower`` that re-spells it does not count)."""
+    if get_origin(annotation) is Annotated and _unwrap_annotated(annotation) is str:
+        adapter = _arm_adapter(annotation)
+        if adapter is None:
+            return False
+        try:
+            return adapter.validate_python(text, strict=True) == text
+        except Exception:
+            return False
     annotation = _unwrap_annotated(annotation)
     if get_origin(annotation) is Literal:
         return any(isinstance(arg, str) and arg == text for arg in get_args(annotation))
