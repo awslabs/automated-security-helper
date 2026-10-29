@@ -94,6 +94,7 @@ count without knowing the scanner count.
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from itertools import islice
 
 from pydantic import ConfigDict, Field
 
@@ -119,6 +120,12 @@ __all__ = [
     "validate_shard_selection",
     "verify_shard_coverage",
 ]
+
+#: How many missing shard indices a coverage refusal names before "and N more".
+#: The count of missing indices is always exact; only the listing is bounded, so a
+#: shard_count read from a corrupt results file cannot make the refusal itself
+#: unbounded.
+MISSING_SHARD_INDICES_SHOWN = 20
 
 
 def shown_shard_text(value: object) -> str:
@@ -417,14 +424,28 @@ def verify_shard_coverage(assignments: Sequence[ShardAssignment]) -> None:
             f"does not deduplicate."
         )
 
-    missing = sorted(set(range(expected_count)) - set(seen_indices))
-    if missing:
+    # Counted, never materialized. shard_count is read from a results file and has
+    # no upper bound, so set(range(expected_count)) could exhaust memory on a
+    # corrupt or hostile count, and a refusal that listed every missing index
+    # could run to megabytes. The count is exact; the listing stops at
+    # MISSING_SHARD_INDICES_SHOWN.
+    seen_set = set(seen_indices)
+    missing_count = expected_count - len({i for i in seen_set if i < expected_count})
+    if missing_count:
+        shown = list(
+            islice(
+                (i for i in range(expected_count) if i not in seen_set),
+                MISSING_SHARD_INDICES_SHOWN,
+            )
+        )
+        more = missing_count - len(shown)
+        listed = ", ".join(map(str, shown)) + (f" and {more} more" if more else "")
         raise ShardCoverageError(
-            f"Missing shard results for indices {missing} of {expected_count}. "
-            f"Those scanners did not run, or their results were never collected -- "
-            f"check whether the matching CI jobs succeeded and uploaded their "
-            f"artifacts. Refusing to merge a partial scan into a report that would "
-            f"read as complete."
+            f"Missing shard results for {missing_count} of {expected_count} "
+            f"indices ({listed}). Those scanners did not run, or their results "
+            f"were never collected -- check whether the matching CI jobs "
+            f"succeeded and uploaded their artifacts. Refusing to merge a partial "
+            f"scan into a report that would read as complete."
         )
 
     unexpected = sorted(i for i in set(seen_indices) if i >= expected_count)
@@ -453,7 +474,46 @@ def verify_shard_coverage(assignments: Sequence[ShardAssignment]) -> None:
         )
 
     _verify_candidate_agreement(assignments, claimed)
+    _verify_python_only_agreement(assignments)
     _verify_selection_within_assignment(assignments)
+
+
+def _verify_python_only_agreement(assignments: Sequence[ShardAssignment]) -> None:
+    """Check the shards agree on ``--python-only``.
+
+    The flag is a selection: a shard run with it leaves every non-Python scanner
+    it owns unrun and records each one SKIPPED for that reason. When every shard
+    ran with it, that is the operator's choice and the merged rows say so. When
+    some did and some did not, the scanners the flagged shards owned ran nowhere
+    while the other jobs expected them to run, and the merged report would read
+    as a complete scan with those scanners quietly skipped. The module docstring
+    counts a matrix with the flag set on only some jobs among the cases a merge
+    refuses, and the candidate comparison cannot see it: every executor records
+    its candidates before the selection filters apply, so the candidate sets
+    agree whatever the flag. The flag's own record decides it here.
+
+    A shard that recorded no value (a results file written before the field
+    existed) is counted on neither side, so a mixed-version matrix is left to the
+    merge's contribution check, which warns from the statuses it can read.
+
+    Args:
+        assignments: One entry per shard result being merged.
+
+    Raises:
+        ShardCoverageError: If one shard records running with the flag and another
+            records running without it.
+    """
+    with_flag = sorted(a.shard_index for a in assignments if a.python_only is True)
+    without = sorted(a.shard_index for a in assignments if a.python_only is False)
+    if with_flag and without:
+        raise ShardCoverageError(
+            f"The shards disagree on --python-only: shard(s) "
+            f"{', '.join(map(str, with_flag))} ran with it and shard(s) "
+            f"{', '.join(map(str, without))} ran without it. The non-Python "
+            f"scanners owned by the shards that ran with it ran nowhere, so merging "
+            f"would report a scan that never covered them. Re-run the whole matrix "
+            f"with the same flags on every job."
+        )
 
 
 def _verify_selection_within_assignment(
@@ -568,8 +628,8 @@ def _verify_candidate_agreement(
         raise ShardCoverageError(
             f"The shards partitioned different scanner sets: {detail}. Each "
             f"partition is internally valid, so nothing else here can see this: "
-            f"one executor was missing a plugin module, or --python-only or a "
-            f"config override was applied to some jobs and not others. Merging "
+            f"one executor was missing a plugin module, or a config override "
+            f"was applied to some jobs and not others. Merging "
             f"would report a scan that never covered the scanners the smaller set "
             f"omitted."
         )
