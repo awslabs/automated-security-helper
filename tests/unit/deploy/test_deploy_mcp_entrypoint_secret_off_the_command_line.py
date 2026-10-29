@@ -37,10 +37,13 @@ from tests.unit.deploy.buildspec_extraction import (
     templates_with_joined_buildspec_marker,
 )
 
-pytestmark = pytest.mark.skipif(
-    os.name == "nt",
-    reason="executes a POSIX entrypoint destined for a Linux container",
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        os.name == "nt",
+        reason="executes a POSIX entrypoint destined for a Linux container",
+    ),
+]
 
 ENTRYPOINT_DESTINATION = "ash-src/ash-mcp-entrypoint.sh"
 DELIMITER = "ASH_CDK_EOF"

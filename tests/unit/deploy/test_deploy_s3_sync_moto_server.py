@@ -175,6 +175,7 @@ def keys_under(s3, bucket: str, prefix: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 class TestMotoEndpointIsActuallyUsed:
     """Prove the tests reach moto, and reach it BECAUSE of the endpoint variable."""
 
@@ -241,6 +242,7 @@ class TestMotoEndpointIsActuallyUsed:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 class TestRoundTrip:
     def test_upload_then_download_preserves_the_key_hierarchy(
         self,
@@ -323,6 +325,7 @@ class TestRoundTrip:
         assert not (destination / "empty").exists()
 
 
+@pytest.mark.integration
 class TestPagination:
     """ListObjectsV2 returns at most 1000 keys per page."""
 
@@ -355,6 +358,7 @@ class TestPagination:
         assert len(sorted(destination.rglob("*.json"))) == total
 
 
+@pytest.mark.integration
 class TestPathContainment:
     """The guard that refuses a key which would write outside the destination."""
 
@@ -535,6 +539,7 @@ def put_result(
     return key
 
 
+@pytest.mark.integration
 class TestCollect:
     """`collect` downloads each shard action's one succeeded build and refuses anything else.
 
@@ -852,6 +857,7 @@ class TestCollect:
         assert stub.requests == []
 
 
+@pytest.mark.integration
 class TestEmptyAndMissing:
     def test_download_of_a_missing_prefix_writes_nothing_and_succeeds(
         self,
@@ -916,6 +922,7 @@ class TestEmptyAndMissing:
         assert keys_under(s3, bucket, "run/") == []
 
 
+@pytest.mark.integration
 class TestArgumentHandling:
     def test_upload_rejects_a_source_that_is_not_a_directory(
         self,
@@ -1014,6 +1021,7 @@ class TestCommittedBuildspecCommands:
         )
 
     @posix_shell_only
+    @pytest.mark.integration
     def test_shard_post_build_uploads_its_results(
         self, child_env: dict[str, str], bucket: str, s3, tmp_path: pathlib.Path
     ):
@@ -1054,6 +1062,7 @@ class TestCommittedBuildspecCommands:
         ]
 
     @posix_shell_only
+    @pytest.mark.integration
     def test_merge_pre_build_downloads_every_shard(
         self, child_env: dict[str, str], bucket: str, s3, tmp_path: pathlib.Path
     ):
@@ -1116,6 +1125,7 @@ class TestCommittedBuildspecCommands:
             assert json.loads(landed.read_text(encoding="utf-8")) == {"shard": shard}
 
     @posix_shell_only
+    @pytest.mark.integration
     def test_merge_post_build_masks_a_failed_upload(
         self, child_env: dict[str, str], tmp_path: pathlib.Path
     ):
@@ -1172,6 +1182,7 @@ class TestCommittedBuildspecCommands:
             f"{result.stdout!r}"
         )
 
+    @pytest.mark.unit
     def test_every_shard_and_merge_project_materializes_the_helper(self):
         """All five projects write the helper before any phase uses it.
 
@@ -1188,6 +1199,7 @@ class TestCommittedBuildspecCommands:
             materialize = sole_command_containing(spec, "pre_build", "<<'PY'")
             assert "def download(" in heredoc_body(materialize), logical_id
 
+    @pytest.mark.unit
     def test_no_project_shells_out_to_the_absent_aws_cli(self):
         """The regression that started this: `aws` is not in the ASH image.
 

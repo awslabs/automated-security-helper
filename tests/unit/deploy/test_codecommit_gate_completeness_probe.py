@@ -28,6 +28,8 @@ from typing import Any, Dict, List
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 GATE_PATH = (
     REPO_ROOT

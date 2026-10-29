@@ -37,6 +37,8 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 TERRAFORM = REPO_ROOT / "deploy" / "terraform"
 GATE_MODULE = TERRAFORM / "modules" / "codecommit-gate"

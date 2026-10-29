@@ -42,6 +42,8 @@ from tests.unit.deploy.buildspec_extraction import (
     load_template,
 )
 
+pytestmark = pytest.mark.unit
+
 ASH_DOCKERFILE = REPO_ROOT / "Dockerfile"
 GEM_ASSETS = REPO_ROOT / "automated_security_helper" / "assets"
 TERRAFORM_MODULES = REPO_ROOT / "deploy" / "terraform" / "modules"

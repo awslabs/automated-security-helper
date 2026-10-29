@@ -48,6 +48,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CDK = REPO_ROOT / "deploy" / "cdk"
 ASH_CONFIG_TS = CDK / "lib" / "ash-config.ts"

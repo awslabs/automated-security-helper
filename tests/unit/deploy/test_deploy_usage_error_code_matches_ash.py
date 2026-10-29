@@ -46,6 +46,8 @@ import pytest
 
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 
+pytestmark = pytest.mark.unit
+
 REPO = Path(__file__).resolve().parents[3]
 CONTAINER_SCRIPTS = REPO / "deploy" / "cdk" / "lib" / "ash-container-scripts.ts"
 TEMPLATES = REPO / "deploy" / "cdk" / "templates"
