@@ -412,18 +412,15 @@ class TestRuleIdBindingIsTransparent:
             if identifier["type"] == "ash-finding-id"
         ]
 
-    def test_the_finding_id_is_unchanged_by_the_binding(self, reporter):
-        """``rule_id`` must be the same string ``get_finding_id`` used before."""
-        from automated_security_helper.utils.sarif_utils import get_finding_id
-
+    def test_the_finding_id_is_the_one_every_other_report_gives(self, reporter):
+        """The id is the flattened finding's, the same string in every report."""
         result = Result(
             ruleId="B105",
             message=Message(text="hardcoded password string"),
             locations=[_located()],
         )
+        model = _model(result)
 
-        (vuln,) = json.loads(reporter.report(_model(result)))["vulnerabilities"]
+        (vuln,) = json.loads(reporter.report(model))["vulnerabilities"]
 
-        assert vuln["id"] == get_finding_id(
-            rule_id="B105", file="app/main.py", start_line=7, end_line=7
-        )
+        assert vuln["id"] == model.to_flat_vulnerabilities()[0].id

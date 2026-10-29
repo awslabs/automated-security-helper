@@ -121,6 +121,7 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         vulnerabilities: List[Dict[str, Any]] = []
         skipped_results = 0
         if all_results:
+            shared_ids = self._shared_finding_ids(model, all_results)
             ASH_LOGGER.trace("Creating rule dict")
             for index, result in enumerate(all_results):
                 # Scoped to one result so that a result this reporter cannot
@@ -130,7 +131,7 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                 # alternative is enumerating the ways one result can be
                 # malformed, and missing one of them loses the run again.
                 try:
-                    vuln = self._vulnerability_for(result, model)
+                    vuln = self._vulnerability_for(result, model, shared_ids[index])
                 except Exception as e:  # noqa: BLE001 -- see above
                     skipped_results += 1
                     ASH_LOGGER.error(
@@ -149,14 +150,46 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                 model, f"ASH could not assemble the GitLab SAST report: {str(e)}"
             )
 
+    @staticmethod
+    def _shared_finding_ids(
+        model: "AshAggregatedResults", all_results: List[Any]
+    ) -> List[str | None]:
+        """The id every other ASH report gives each result, by position.
+
+        ``to_flat_vulnerabilities`` builds one flattened finding per SARIF result
+        in ``get_all_results`` order, and its id (``utils/finding_identity``)
+        reads the scanner, the rule, the file, the line, the column, the
+        fingerprints and the message, with an occurrence counter for findings
+        that still collide. The legacy ``get_finding_id`` this reporter used
+        hashed the rule, file and line only, so two distinct findings of one rule
+        at one line shared an "unique" id and an ASH finding-id identifier, and
+        the id differed from the one in every other report of the same scan.
+
+        A list of None when the flattening fails or does not line up, so a
+        model this cannot read keeps the legacy id rather than losing the report.
+        """
+        try:
+            flat = model.to_flat_vulnerabilities()
+        except Exception as e:  # noqa: BLE001 -- a fallback, see the docstring
+            ASH_LOGGER.debug(f"Could not derive shared finding ids: {str(e)}")
+            return [None] * len(all_results)
+        ids = [getattr(item, "id", None) for item in flat[: len(all_results)]]
+        if len(ids) != len(all_results) or not all(
+            isinstance(item, str) and item for item in ids
+        ):
+            return [None] * len(all_results)
+        return ids
+
     def _vulnerability_for(
-        self, result, model: "AshAggregatedResults"
+        self, result, model: "AshAggregatedResults", shared_id: str | None = None
     ) -> Dict[str, Any] | None:
         """One SARIF result as a GitLab vulnerability, or None to omit it.
 
         None means "deliberately excluded" -- a suppressed finding under
         ``exclude_suppressed`` -- and is the only omission that is not counted as
-        a skip, because the operator asked for it.
+        a skip, because the operator asked for it. *shared_id* is the finding's
+        id in every other report (:meth:`_shared_finding_ids`); without one the
+        legacy rule-file-line id is used.
         """
         # `ruleId` is optional in SARIF 2.1.0 and defaults to None, so bind it
         # once here and read the binding at every site below. Reading
@@ -251,8 +284,9 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                         scanner_name = tag.replace("tool_name::", "")
                         break
 
-        # Generate finding ID
-        finding_id = get_finding_id(
+        # The finding's id: the one every other report gives it, else the legacy
+        # rule-file-line hash.
+        finding_id = shared_id or get_finding_id(
             rule_id=rule_id,
             file=file_path,
             start_line=start_line,
@@ -431,8 +465,7 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         skipped_results: int,
     ) -> str:
         """The finished document for a transform that ran to completion."""
-        # Get current timestamp
-        report_time_iso = model.metadata.generated_at.split("+")[0]
+        report_time_iso = self._scan_timestamp(model)
 
         # A report that dropped findings must not read as a clean scan. GitLab's
         # SAST widget and any pipeline gate read `status` and nothing else, so
@@ -452,10 +485,19 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                 }
             )
 
+        # The same holds for a scan that ran fewer scanners than it was asked
+        # to: a scanner at ERROR or MISSING produced no findings, so a report
+        # that said "success" with no message was byte-identical to a clean
+        # scan of the same tree.
+        coverage_messages = self._coverage_messages(model)
+        messages.extend(coverage_messages)
+
         # Determine scan status
         scan_status = (
             "success"
-            if model.metadata.summary_stats.actionable == 0 and not skipped_results
+            if model.metadata.summary_stats.actionable == 0
+            and not skipped_results
+            and not coverage_messages
             else "failure"
         )
 
@@ -493,15 +535,69 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         )
 
     @staticmethod
+    def _coverage_messages(model: "AshAggregatedResults") -> List[Dict[str, str]]:
+        """One ``warn`` message per scanner that was selected and did not complete.
+
+        Read through ``scan_incompleteness``, the same question the exit code
+        asks, with the gate on so the facts are reported whatever the operator's
+        ``fail_on_incomplete_scanners`` says: GitLab's widget reads this report,
+        not the exit code. An empty list means every selected scanner reached a
+        verdict. Guarded because a model this cannot read is not a reason to
+        lose the vulnerabilities already transformed.
+        """
+        from automated_security_helper.interactions.run_ash_scan import (
+            scan_incompleteness,
+        )
+
+        try:
+            coverage = scan_incompleteness(model, gate=True)
+            rows = [(str(name), str(status)) for name, status in coverage.scanners]
+            no_scanner_ran = bool(coverage.no_scanner_ran)
+        except Exception as e:  # noqa: BLE001 -- see the docstring
+            ASH_LOGGER.debug(f"Could not read scanner coverage: {str(e)}")
+            return []
+        messages = [
+            {
+                "level": "warn",
+                "value": (
+                    f"Scanner {name} did not complete ({status}); its findings "
+                    "are absent from this report."
+                ),
+            }
+            for name, status in rows
+        ]
+        if no_scanner_ran:
+            messages.append(
+                {
+                    "level": "warn",
+                    "value": (
+                        "No scanner reached a verdict; this report describes a "
+                        "tree that was not scanned."
+                    ),
+                }
+            )
+        return messages
+
+    @staticmethod
     def _scan_timestamp(model: "AshAggregatedResults") -> str:
-        """The scan timestamp, in the format the schema's pattern requires.
+        """The scan timestamp in UTC, in the format the schema's pattern requires.
+
+        The schema documents ``start_time`` and ``end_time`` as UTC values of the
+        form ``yyyy-mm-ddThh:mm:ss``. ``generated_at`` is an ISO 8601 string with
+        an offset; the old ``split("+")[0]`` kept a negative offset (which fails
+        the pattern) and, for a positive one, labelled local wall time as UTC.
+        The value is parsed and converted instead; a naive one is read as UTC.
 
         Guarded because the failure path can be reached *because* the model is
         unreadable, and a fallback report that raises while building itself puts
         the run straight back into the silent-loss case it exists to escape.
         """
         try:
-            return str(model.metadata.generated_at).split("+")[0]
+            raw = str(model.metadata.generated_at).strip()
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
         except Exception:  # noqa: BLE001 -- see the docstring
             return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
 
