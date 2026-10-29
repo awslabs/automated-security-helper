@@ -161,8 +161,35 @@ case "$*" in
     ;;
 esac
 
+# Exit statuses that are never retried, and are passed through as the script's
+# own status. A retry is for a failure the next attempt can cure: a reset
+# connection, a host that did not resolve. install-pinned-tool exits 3 on a
+# SHA256 mismatch against a pinned digest, and its docstring says that status
+# is "never retried" so a caller can tell it from a network failure; this loop
+# retried it five times anyway, on every pinned install in the Dockerfile,
+# and then reported exit 1. One mismatch on a pinned digest is disqualifying,
+# and a second fetch of the same bytes either reproduces it or quietly turns a
+# supply-chain control into a coin flip. Space-separated; the same `case` idiom
+# as the knobs above.
+fatal=${WITH_RETRY_NO_RETRY_EXITS:-3}
+for code in $fatal; do
+  case $code in
+    '' | *[!0-9]*)
+      echo "with-retry: WITH_RETRY_NO_RETRY_EXITS must be space-separated exit statuses, got '$fatal'" >&2
+      exit 2
+      ;;
+  esac
+done
+
 while [ $attempt -le $max ]; do
   bash -o pipefail -c "$*" && exit 0
+  rc=$?
+  for code in $fatal; do
+    if [ "$rc" -eq "$code" ]; then
+      echo "with-retry: exit $rc is not retried (WITH_RETRY_NO_RETRY_EXITS='$fatal'); giving up after attempt $attempt/$max" >&2
+      exit "$rc"
+    fi
+  done
   # Announce and take the backoff only when an attempt actually follows it.
   # Unguarded, the final pass printed "Attempt 3/3 failed, retrying in 20s...",
   # slept the full 20 seconds, left the loop, and then printed "All 3 attempts
