@@ -117,20 +117,25 @@ class VersionBumper:
 
         # Regenerate documentation from templates. A template that fails to
         # render is a failure of the set: generate_from_template reports it and
-        # returns False, so a count short of the templates that exist means a
-        # doc still carries the old version, and saying "successfully updated"
-        # over it is how a half-applied bump reached a release.
-        templates = self.template_manager.list_templates()
+        # returns False, so a count short of the targets means a doc still
+        # carries the old version, and saying "successfully updated" over it is
+        # how a half-applied bump reached a release. The count is compared with
+        # every target the manager lists, not with the templates that exist: a
+        # target whose template is missing is skipped with a warning, and
+        # measured against the templates alone that skip was invisible, so the
+        # set printed success while the target's page kept the release it was
+        # written at.
+        targets = self.template_manager.target_files
         try:
             generated_count = self.template_manager.generate_all_from_templates()
         except Exception as e:
             print(f"Error: Failed to regenerate templates: {e}")
             return False
         print(f"Regenerated {generated_count} documentation files from templates")
-        if generated_count < len(templates):
+        if generated_count < len(targets):
             print(
-                f"Error: {len(templates) - generated_count} of {len(templates)} "
-                "templates were not regenerated; see the messages above"
+                f"Error: {len(targets) - generated_count} of {len(targets)} "
+                "targets were not regenerated; see the messages above"
             )
             return False
 

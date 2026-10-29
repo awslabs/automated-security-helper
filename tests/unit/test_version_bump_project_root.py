@@ -17,7 +17,9 @@ not the one just written.
 Separately, ``set`` printed "Successfully updated" and returned 0 when a template
 failed to render: ``generate_from_template`` reports the error and returns False,
 ``generate_all_from_templates`` only counts, and nothing compared the count with
-the templates that exist.
+the templates that exist. Compared with the templates that exist, a listed target
+whose template was missing still read as success: it is skipped with a warning and
+never counted, so the count is compared with the targets instead.
 
 How the two checkouts are told apart
 ------------------------------------
@@ -164,3 +166,27 @@ class TestAFailedRegenerationFailsTheSet:
         )
         assert bumper.set_version("2.0.0") is False
         assert "Successfully updated" not in capsys.readouterr().out
+
+    def test_a_target_with_no_template_fails_the_set(
+        self, two_checkouts, monkeypatch, capsys
+    ):
+        """A listed target whose template is missing is skipped with a warning.
+
+        Counted against the templates that exist rather than the targets, the
+        skip was invisible: the set printed "Successfully updated" and returned
+        True while the target's page kept the release it was written at.
+        """
+        project, _elsewhere = two_checkouts
+        module = _load_version_bump(monkeypatch)
+        bumper = _bumper(module, project)
+        bumper.template_manager.target_files = ["README.md", "docs/missing.md"]
+        assert bumper.set_version("2.0.0") is False
+        out = capsys.readouterr().out
+        assert "Successfully updated" not in out
+        assert "missing.md.template does not exist" in out
+        assert "1 of 2 targets were not regenerated" in out
+        # The target with a template was still rendered with the new version.
+        assert (
+            project.joinpath("README.md").read_text(encoding="utf-8")
+            == "pip install git+https://example.invalid/ash.git@v2.0.0\n"
+        )
