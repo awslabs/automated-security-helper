@@ -1099,6 +1099,23 @@ class UVToolRunner:
                     errors="replace",
                 )
             except FileNotFoundError:
+                from automated_security_helper.utils.subprocess_utils import (
+                    in_tree_refusal,
+                )
+
+                refusal = in_tree_refusal(executable)
+                if refusal is not None:
+                    # The spawn layer refused this uv for lying inside the
+                    # scanned tree (subprocess_utils._resolve_for_spawn raises
+                    # the FileNotFoundError subprocess raises for a missing
+                    # program). That is this scan's refusal of this copy, not
+                    # uv's absence: remembered as absence it answered False for
+                    # the rest of the process, scans of other trees included.
+                    # Answered for this call only; another scope probes again.
+                    return _failed(
+                        f"the probe's spawn was refused: {refusal}",
+                        "the next call probes again",
+                    )
                 # "Not available" is the whole truth here: nothing to name.
                 self._uv_available_cache = False
                 return _answered(False)
@@ -2885,11 +2902,11 @@ def bundled_uv_executable() -> Optional[str]:
     from, and the uv package ASH imports, located through the same ``sys.path``
     its other imports use. The uv found here is trusted as the interpreter is.
     When that environment is inside the tree being scanned (ASH started from a
-    repository's ``.venv``), the operator chose to run ASH from it and the
-    interpreter already runs code from it on every import, so refusing its uv
-    would protect nothing; a check that refuses programs inside the scanned tree
-    should exempt this uv for the reason it exempts the running interpreter.
-    ``find_uv_bin`` also looks in the base interpreter's scripts directory and in
+    repository's ``.venv``), the spawn layer refuses this uv as it refuses every
+    program inside the tree (only the running interpreter is exempt), so this
+    function's answer is not always one that can run: :func:`find_uv_or_none`
+    applies that rule before choosing it and falls through to a uv outside the
+    tree. ``find_uv_bin`` also looks in the base interpreter's scripts directory and in
     the user's (``~/.local/bin``) whatever the package's own location; those are
     not searched here unless the package itself was installed there (``pip
     install --user``). A uv anywhere else is a program like any other, found by
@@ -2920,6 +2937,33 @@ def _lookup_key(name: str) -> Any:
     )
 
 
+def _refused_inside_scanned_tree(path: str) -> Optional[str]:
+    """The scanned tree ``path`` lies in when the spawn layer would refuse it.
+
+    The same rule ``subprocess_utils._first_usable`` applies to a program it
+    is asked to start: inside one of the active scan's trees, and in-tree tools
+    not allowed. None outside a scan, when the operator allowed in-tree tools,
+    or when ``path`` is outside every tree. Decided here, before a candidate is
+    chosen, so a refusal is never the chosen uv's fate: the spawn of a refused
+    uv raises ``FileNotFoundError`` for every caller, and
+    ``UVToolRunner.uv_availability`` used to remember that as "uv absent" for
+    the rest of the process.
+    """
+    from automated_security_helper.utils.scanned_tree import is_inside_tree
+    from automated_security_helper.utils.subprocess_utils import (
+        in_tree_tools_allowed,
+        scanned_trees,
+    )
+
+    roots = scanned_trees()
+    if not roots or in_tree_tools_allowed():
+        return None
+    for root in roots:
+        if is_inside_tree(path, root):
+            return root
+    return None
+
+
 def find_uv_or_none() -> Optional[str]:
     """Return the path to the ``uv`` binary, or ``None`` if it is missing.
 
@@ -2927,6 +2971,13 @@ def find_uv_or_none() -> Optional[str]:
     ``find_executable``'s search: PATH, the ASH bin directory, /usr/local/bin.
     ASH's own copy is preferred over PATH's because it is the version ASH's
     dependency bounds were resolved against.
+
+    The bundled uv is skipped when it lies inside a tree the active scan is
+    scanning and in-tree tools are not allowed: the spawn layer refuses such a
+    program, so choosing it would make every uv call fail as if uv were absent.
+    The search falls through to a uv outside the tree, and the answer is
+    remembered per scan scope (:func:`_lookup_key`), so a scan of another tree
+    looks again.
     """
     key = _lookup_key("uv")
     with _uv_tool_runner_cache_lock:
@@ -2938,7 +2989,20 @@ def find_uv_or_none() -> Optional[str]:
             find_executable as _find_executable,
         )
 
-        resolved = bundled_uv_executable() or _find_executable("uv")
+        bundled = bundled_uv_executable()
+        if bundled is not None:
+            refused_in = _refused_inside_scanned_tree(bundled)
+            if refused_in is not None:
+                from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+
+                ASH_LOGGER.debug(
+                    f"The uv installed with ASH, {bundled}, lies inside the "
+                    f"scanned tree {refused_in}, where ASH does not run tools; "
+                    "looking for a uv outside the tree instead.",
+                    extra=NO_MARKUP,
+                )
+                bundled = None
+        resolved = bundled or _find_executable("uv")
         _remember_path(_uv_executable_cache, key, resolved)
         return resolved
 
