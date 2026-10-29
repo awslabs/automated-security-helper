@@ -47,7 +47,9 @@ from automated_security_helper.utils.cfn_template_model import (
     NO_PARSEABLE_CLOUDFORMATION_TEMPLATE,
     cloudformation_nothing_to_scan_reason,
     describe_parse_error,
+    get_model_from_template_text,
     holds_cloudformation_template,
+    read_template_text,
     unevaluable_template_reason,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -193,6 +195,11 @@ _CDK_MISSING_DISTRIBUTIONS: List[str] = _missing_cdk_distributions()
 _CDK_AVAILABLE = bool(_CDK_REQUIRED_DISTRIBUTIONS) and not _CDK_MISSING_DISTRIBUTIONS
 _cdk_nag_version = "unavailable"
 run_cdk_nag_against_cfn_template = None  # type: ignore[assignment]
+#: Why the wrapper could not be imported although every CDK distribution is installed
+#: (``ImportError: cfn_tools``, say), or None. Kept so the dependency warning can say
+#: so: with the distributions present, listing them as "unavailable" and pointing at
+#: their installer describes the wrong fault and reinstalls what is already there.
+_CDK_WRAPPER_IMPORT_ERROR: str | None = None
 
 if _CDK_AVAILABLE:
     try:
@@ -206,10 +213,30 @@ if _CDK_AVAILABLE:
         from automated_security_helper.utils.cdk_nag_worker import (
             run_cdk_nag_against_cfn_template,
         )
-    except Exception:
+    except Exception as _wrapper_import_error:
         _CDK_AVAILABLE = False
         _cdk_nag_version = "unavailable"
         run_cdk_nag_against_cfn_template = None  # type: ignore[assignment]
+        _CDK_WRAPPER_IMPORT_ERROR = (
+            f"{type(_wrapper_import_error).__name__}: {_wrapper_import_error}"
+        )
+
+
+def _cdk_unusable_detail() -> str:
+    """What makes cdk-nag unusable, in the words of what was measured.
+
+    The distributions the import-time probe found missing, when it found any; else the
+    wrapper import error, when the probe found every distribution and the wrapper still
+    did not import; else the full list, for a state neither explains.
+    """
+    if _CDK_MISSING_DISTRIBUTIONS:
+        return f"{', '.join(_CDK_MISSING_DISTRIBUTIONS)} unavailable"
+    if _CDK_WRAPPER_IMPORT_ERROR:
+        return (
+            "every CDK distribution is installed, but ASH's cdk-nag wrapper could not "
+            f"be imported: {_CDK_WRAPPER_IMPORT_ERROR}"
+        )
+    return f"{', '.join(_CDK_REQUIRED_DISTRIBUTIONS)} unavailable"
 
 
 # Where cdk-nag documents its own rules, and where the CDK documents everything else that can
@@ -218,6 +245,35 @@ _CDK_NAG_RULES_URL = "https://github.com/cdklabs/cdk-nag/blob/main/RULES.md"
 _CDK_POLICY_VALIDATION_URL = (
     "https://docs.aws.amazon.com/cdk/v2/guide/policy-validation-synthesis.html"
 )
+
+
+def _parses_as_a_document(candidate: "str | Path", scan_root: "Path | str") -> bool:
+    """Whether the template parser reads ``candidate`` as a document, in this process.
+
+    For the scanner's parse-failure arm, which only knows the CLASS of the exception the
+    worker raised: a ``YAMLError`` or ``UnicodeDecodeError`` from the worker is a template
+    that does not parse only if the file does not parse HERE either. True when the parser
+    returns a model or None (not CloudFormation); False when it raises the parse failure
+    the arm names, and False when the file cannot be read at all, which the arm's existing
+    skip covers.
+    """
+    from automated_security_helper.utils.cfn_template_model import (
+        CloudFormationTemplateModelError,
+    )
+
+    try:
+        text = read_template_text(candidate, scan_root)
+        get_model_from_template_text(text, Path(candidate))
+    except (YAMLError, UnicodeDecodeError):
+        return False
+    except CloudFormationTemplateModelError:
+        # The model refusing a parsed document is a parse that succeeded.
+        return True
+    except Exception:
+        # Unreadable, refused by the scanned-tree rule, or something that says
+        # nothing about parsing either way: the arm's existing skip covers it.
+        return False
+    return True
 
 
 def _rule_is_from_pack(rule_id: str, pack: str) -> bool:
@@ -314,10 +370,17 @@ def _unevaluated_rule_notifications(
                 level=Level.error,
                 message=Message(
                     root=Message1(
+                        # The rule and the pack only. ``rule_info`` on a not-evaluated row
+                        # is cdk-nag's exception text, which interpolates values of the
+                        # template it was evaluating (see _rule_scoped_description), and
+                        # this notification is one per RULE: with the text included, the
+                        # first template's exception stood for every template the rule
+                        # raised on. The per-template text stays on each result's message.
                         text=(
                             f"Rule {rule_id} from pack '{pack}' could not be evaluated, so "
-                            "this scan reports nothing about compliance with it. "
-                            f"{finding_props.get('rule_info', '')}".strip()
+                            "this scan reports nothing about compliance with it. The "
+                            "error each template provoked is carried on that template's "
+                            "result."
                         )
                     )
                 ),
@@ -417,6 +480,21 @@ def _rule_scoped_description(finding_props: dict, rule_id: str) -> str:
         return (
             f"cdk-nag threw while evaluating {rule_id}, so this scan reached no verdict on it. "
             "The error text differs per template and is carried on each result's message."
+        )
+    pack = str(finding_props.get("pack", "") or "")
+    if pack and not _rule_is_from_pack(rule_id, pack):
+        # A rule another plugin wrote into the shared report. The rule-scoped reading of
+        # ``rule_info`` above rests on cdk-nag's static ``info`` and ``explanation``
+        # strings; a foreign plugin's description is under no such constraint, and the
+        # CDK's own ``CloudFormation Validate`` writes one per occurrence that names the
+        # resource it found (``F3017`` on a placeholder KMS key identifier). Forwarding it
+        # put one template's occurrence in the definition of a rule that fired on many, so
+        # the descriptor is constructed from the rule-scoped facts instead; the occurrence
+        # text stays on each result's message.
+        return (
+            f"Rule {rule_id} is reported by the validation plugin '{pack}', not by "
+            "cdk-nag. Its description is written per occurrence and is carried on each "
+            "result's message."
         )
     return str(finding_props.get("rule_info") or "").strip()
 
@@ -750,12 +828,18 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             # `--tool cdk-nag` so the hint installs only what is missing here, and
             # the command installs with pip or uv, whichever owns ASH's
             # environment, so it works in a uv tool, uvx or `uv venv` install too.
-            absent = ", ".join(_CDK_MISSING_DISTRIBUTIONS) or ", ".join(
-                _CDK_REQUIRED_DISTRIBUTIONS
-            )
+            # The install hint is offered only when a distribution is missing: when
+            # all three are present and the wrapper itself did not import, the real
+            # error is named instead, and reinstalling would change nothing.
+            if _CDK_MISSING_DISTRIBUTIONS or not _CDK_WRAPPER_IMPORT_ERROR:
+                remedy = "Install them with: ash dependencies install --tool cdk-nag"
+            else:
+                remedy = (
+                    "The CDK packages are installed; the error above names what "
+                    "failed in ASH's own import."
+                )
             reason = (
-                f"CDK dependencies are not usable ({absent} unavailable). "
-                "Install them with: ash dependencies install --tool cdk-nag"
+                f"CDK dependencies are not usable ({_cdk_unusable_detail()}). {remedy}"
             )
             ASH_LOGGER.warning(reason)
             self.dependency_unavailable_reason = reason
@@ -802,11 +886,8 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         ):
             return self.dependency_unavailable_reason
         if not _CDK_AVAILABLE:
-            absent = ", ".join(_CDK_MISSING_DISTRIBUTIONS) or ", ".join(
-                _CDK_REQUIRED_DISTRIBUTIONS
-            )
             return (
-                f"the CDK packages it needs are not usable ({absent} unavailable); "
+                f"the CDK packages it needs are not usable ({_cdk_unusable_detail()}); "
                 "install them with `ash dependencies install`"
             )
         if find_executable("node") is None:
@@ -1079,7 +1160,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             work_root=outdir,
             timeout=self._effective_scan_timeout(),
             values=self._environment_values(),
-        ):
+        ) as worker_batch:
             for cfn_file in scannable:
                 # Refused before it is counted or read: a symlink, or a file outside the
                 # tree, is not known to be CloudFormation, so it is the same expected
@@ -1230,6 +1311,27 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                         )
                         self.errors.append(f"{cfn_file}: {reason}")
                         continue
+                    # The exception's class alone does not say the TEMPLATE failed to
+                    # parse: the same classes reach here from anywhere inside the
+                    # wrapper's evaluation (the snippet dump of a finding, a text read
+                    # elsewhere in the child). So the file is parsed here, in this
+                    # process. One that parses is a template the worker did not
+                    # evaluate for a reason of its own, and is counted as such; the
+                    # "not parseable" skip below is only for a file that does not.
+                    if _parses_as_a_document(cfn_file, scan_root):
+                        self.targets_failed += 1
+                        self.record_unevaluated_target(cfn_file)
+                        described = error_text(e, self._environment_values())
+                        ASH_LOGGER.error(
+                            f"cdk-nag did not evaluate {cfn_file}: the template parses, "
+                            f"but the worker raised {type(e).__name__} while evaluating "
+                            f"it: {described}"
+                        )
+                        self.errors.append(
+                            f"{cfn_file}: the template parses, but the worker raised "
+                            f"{type(e).__name__} while evaluating it: {described}"
+                        )
+                        continue
                     # Every other parse failure: NOT a failed target, and NOT silent
                     # either. Both halves are the point.
                     #
@@ -1332,6 +1434,17 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                         f"cdk-nag failed to scan {cfn_file}: {type(e).__name__}: {described}"
                     )
                     self.errors.append(f"{cfn_file}: {type(e).__name__}: {described}")
+
+        # The worker children are this scanner's tool runs, recorded as every other
+        # scanner's tool run is: a child that died or was killed leaves its exit code on
+        # the plugin, and a timed-out child whose stop failed leaves the could-not-stop
+        # state the run-level gate reads (which fail_on_incomplete_scanners does not
+        # relax). Until this was recorded, a worker child ASH could not stop reached the
+        # results as per-template text only, and the gate never fired for cdk-nag.
+        for child_response in worker_batch.failed_child_responses:
+            self._record_target_exit_code(child_response)
+        if worker_batch.could_not_stop_response is not None:
+            self._record_could_not_stop(worker_batch.could_not_stop_response)
 
         # Every template failed. Say so loudly here as well as through the returned status:
         # this is the one line that distinguishes "your templates are compliant" from "cdk-nag
@@ -1459,8 +1572,12 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         )
         out_path = outdir.joinpath("ash-cdk-nag.sarif")
         outdir.mkdir(parents=True, exist_ok=True)
-        # encoding=None: the locale's, as Path.write_text used.
-        with open_for_write(out_path, encoding=None, errors=None) as handle:
+        # UTF-8, as ASH reads every scanner's SARIF back. The locale's encoding, which
+        # Path.write_text used and this call kept, raised UnicodeEncodeError after every
+        # template was evaluated when a template's text (quoted in a result's snippet)
+        # held a character outside the locale's code page, and read back wrong where
+        # it did not raise.
+        with open_for_write(out_path, encoding="utf-8") as handle:
             handle.write(
                 report.model_dump_json(
                     exclude_none=True,

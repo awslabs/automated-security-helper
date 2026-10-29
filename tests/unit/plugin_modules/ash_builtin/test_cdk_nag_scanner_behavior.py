@@ -40,6 +40,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scann
     CdkNagScannerConfigOptions,
 )
 from automated_security_helper.schemas.sarif_schema_model import (
+    Kind,
     Level,
     Message,
     Message1,
@@ -980,3 +981,269 @@ def test_a_context_missing_the_flag_fails_the_target_rather_than_honoring_suppre
         f"the error has to name the attribute; got {scanner.errors}"
     )
     wrapper_double.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# The dependency warning names what was measured
+# ---------------------------------------------------------------------------
+
+
+def test_a_wrapper_import_failure_with_every_distribution_installed_names_the_error(
+    scanner, monkeypatch, caplog
+):
+    """The probe found every distribution; the wrapper still did not import.
+
+    At the base the warning listed all three distributions as unavailable and offered to
+    reinstall them, and the exception that actually failed was discarded.
+    """
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_AVAILABLE", False)
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_MISSING_DISTRIBUTIONS", [])
+    monkeypatch.setattr(
+        cdk_nag_scanner,
+        "_CDK_WRAPPER_IMPORT_ERROR",
+        "ModuleNotFoundError: No module named 'cfn_tools'",
+    )
+
+    with caplog.at_level(logging.WARNING):
+        assert scanner.validate_plugin_dependencies() is False
+
+    warned = " ".join(caplog.messages)
+    assert "cfn_tools" in warned, warned
+    assert "aws-cdk-lib unavailable" not in warned, warned
+    assert "ash dependencies install" not in warned, warned
+    assert "cfn_tools" in scanner.missing_dependency_reason()
+
+
+def test_a_missing_distribution_still_gets_the_install_hint(
+    scanner, monkeypatch, caplog
+):
+    """The negative control: with a distribution missing, the hint is the remedy."""
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_AVAILABLE", False)
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_MISSING_DISTRIBUTIONS", ["aws-cdk-lib"])
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_WRAPPER_IMPORT_ERROR", None)
+
+    with caplog.at_level(logging.WARNING):
+        assert scanner.validate_plugin_dependencies() is False
+
+    warned = " ".join(caplog.messages)
+    assert "aws-cdk-lib unavailable" in warned, warned
+    assert "ash dependencies install --tool cdk-nag" in warned, warned
+
+
+# ---------------------------------------------------------------------------
+# Rule-scoped text stays rule-scoped: the run-level notification and the foreign
+# plugin's descriptor
+# ---------------------------------------------------------------------------
+
+
+def _unevaluated(rule_id: str, rule_info: str, pack: str = "AwsSolutions") -> Result:
+    from automated_security_helper.utils.cdk_nag_wrapper import NOT_EVALUATED
+
+    return Result(
+        ruleId=rule_id,
+        kind=Kind.notApplicable,
+        level=Level.none,
+        message=Message(root=Message1(text=f"not evaluated: {rule_info}")),
+        properties=PropertyBag(
+            cdk_nag_finding={
+                "pack": pack,
+                "rule_id": rule_id,
+                "compliance": NOT_EVALUATED,
+                "rule_level": "Error",
+                "rule_info": rule_info,
+            },
+            tags=["aws", "cdk", "cdk-nag", pack, rule_id],
+        ),
+    )
+
+
+def test_the_unevaluated_rule_notification_carries_no_templates_exception_text():
+    """One notification per rule; the exception text differs per template.
+
+    At the base the first template's exception text (which interpolates that template's
+    parameter) was embedded in the run-level, rule-deduplicated notification.
+    """
+    first = 'Rule threw an error during validation. non-primitive value "{"Ref":"VolumeEncrypted"}"'
+    second = 'Rule threw an error during validation. non-primitive value "{"Ref":"OtherParam"}"'
+
+    notifications = cdk_nag_scanner._unevaluated_rule_notifications(
+        [
+            _unevaluated("AwsSolutions-EC26", first),
+            _unevaluated("AwsSolutions-EC26", second),
+        ]
+    )
+
+    assert len(notifications) == 1
+    text = notifications[0].message.root.text
+    assert "AwsSolutions-EC26" in text and "AwsSolutions" in text
+    assert "VolumeEncrypted" not in text, text
+    assert "OtherParam" not in text, text
+    assert "could not be evaluated" in text
+
+
+def test_a_foreign_plugins_rule_descriptor_does_not_take_one_occurrences_description():
+    """``CloudFormation Validate`` writes a description per occurrence that names the
+    resource it found. At the base that occurrence became the rule's definition."""
+    occurrence = (
+        "Resource 'MyKeyAlias' has an invalid KMS key identifier 'placeholder-key-id'"
+    )
+
+    descriptor = cdk_nag_scanner._reporting_descriptor_for(
+        nag_result(rule_id="F3017", text=occurrence, pack="CloudFormation Validate"),
+        tool_name="cdk-nag",
+        tool_type="IAC",
+    )
+
+    assert "MyKeyAlias" not in descriptor.shortDescription.text, descriptor
+    assert "F3017" in descriptor.shortDescription.text
+    assert "CloudFormation Validate" in descriptor.shortDescription.text
+    assert descriptor.fullDescription.text == descriptor.shortDescription.text
+    assert (
+        descriptor.properties.model_extra["rule_info"]
+        == descriptor.shortDescription.text
+    )
+
+
+def test_a_cdk_nag_rules_descriptor_keeps_the_rules_own_description():
+    """The negative control: a pack's own rule has a static description, and keeps it."""
+    description = "The S3 Bucket has server access logs disabled."
+
+    descriptor = cdk_nag_scanner._reporting_descriptor_for(
+        nag_result(rule_id="AwsSolutions-S1", text=description, pack="AwsSolutions"),
+        tool_name="cdk-nag",
+        tool_type="IAC",
+    )
+
+    assert descriptor.shortDescription.text == description
+
+
+# ---------------------------------------------------------------------------
+# A parse exception from the worker is a parse failure only when the file does not parse
+# ---------------------------------------------------------------------------
+
+
+def test_a_yaml_error_from_the_worker_on_a_template_that_parses_is_a_failed_target(
+    scanner, cdk_available, wrapper_double, template_in_work_dir
+):
+    """The exception's class alone does not say the template failed to parse.
+
+    At the base any YAMLError out of the worker took the not-parseable skip: the attempt
+    was un-counted and a real template whose evaluation raised elsewhere read as SKIPPED.
+    """
+    from yaml import YAMLError
+
+    wrapper_double.side_effect = YAMLError("snippet dump failed")
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert scanner.targets_attempted == 1
+    assert scanner.targets_failed == 1
+    assert any(
+        "bucket.yaml" in error and "parses" in error for error in scanner.errors
+    ), scanner.errors
+
+
+def test_a_yaml_error_on_a_file_that_does_not_parse_is_still_the_not_parseable_skip(
+    scanner, cdk_available, wrapper_double
+):
+    """The negative control: a file no parser reads stays an un-counted skip."""
+    from yaml import YAMLError
+
+    (scanner.context.work_dir / "broken.yaml").write_text(
+        "Resources: [unclosed\n", encoding="utf-8"
+    )
+    wrapper_double.side_effect = YAMLError("while parsing a flow sequence")
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert scanner.targets_attempted == 0
+    assert scanner.targets_failed == 0
+
+
+# ---------------------------------------------------------------------------
+# The SARIF file is UTF-8, as ASH reads it back
+# ---------------------------------------------------------------------------
+
+
+def test_the_sarif_file_is_written_as_utf8(
+    scanner, cdk_available, wrapper_double, template_in_work_dir, monkeypatch
+):
+    """At the base the file was opened with ``encoding=None``, the locale's."""
+    seen = {}
+    real_open_for_write = cdk_nag_scanner.open_for_write
+
+    def recording(path, *args, **kwargs):
+        if Path(path).name == "ash-cdk-nag.sarif":
+            seen["encoding"] = kwargs.get("encoding", "<default>")
+        return real_open_for_write(path, *args, **kwargs)
+
+    monkeypatch.setattr(cdk_nag_scanner, "open_for_write", recording)
+    wrapper_double.return_value = CdkNagWrapperResponse(
+        results={"AwsSolutions": [nag_result(text="Bucket name: café ☃")]}
+    )
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert seen["encoding"] == "utf-8", seen
+    out_path = Path(scanner.results_dir) / "converted" / "ash-cdk-nag.sarif"
+    assert "☃" in out_path.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# A worker child that died or could not be stopped is recorded on the plugin
+# ---------------------------------------------------------------------------
+
+
+def _batch_double(monkeypatch, failed_child_responses, could_not_stop_response):
+    """Stand in for the worker batch: the children never run here (the wrapper is a
+    double), so the batch's record of them is given."""
+    import contextlib
+
+    class _FakeBatch:
+        def __init__(self):
+            self.failed_child_responses = list(failed_child_responses)
+            self.could_not_stop_response = could_not_stop_response
+
+    @contextlib.contextmanager
+    def fake_batch(*args, **kwargs):
+        yield _FakeBatch()
+
+    monkeypatch.setattr(cdk_nag_scanner, "cdk_nag_worker_batch", fake_batch)
+
+
+def test_a_worker_child_ash_could_not_stop_is_recorded_on_the_plugin(
+    scanner, cdk_available, wrapper_double, template_in_work_dir, monkeypatch
+):
+    """At the base the could-not-stop ending reached the results as per-template text
+    only, so the run-level could-not-stop gate never fired for cdk-nag."""
+    response = {
+        "returncode": None,
+        "timed_out": True,
+        "could_not_stop": True,
+        "could_not_stop_pid": 4242,
+        "error": "the cdk-nag worker timed out; ASH could not stop it",
+    }
+    _batch_double(monkeypatch, [response], response)
+    wrapper_double.side_effect = RuntimeError(
+        "the cdk-nag worker timed out after 5 seconds; ASH could not stop it and it "
+        "may still be running."
+    )
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert scanner.scan_could_not_stop is not None
+    assert scanner.targets_failed == 1
+
+
+def test_a_worker_child_that_died_leaves_its_exit_code_on_the_plugin(
+    scanner, cdk_available, wrapper_double, template_in_work_dir, monkeypatch
+):
+    _batch_double(monkeypatch, [{"returncode": 139, "stderr": ""}], None)
+    wrapper_double.side_effect = RuntimeError(
+        "the cdk-nag worker process exited 139 before answering: no stderr"
+    )
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert scanner.exit_code == 139, scanner.exit_code
+    assert scanner.scan_could_not_stop is None
