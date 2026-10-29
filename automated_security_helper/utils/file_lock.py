@@ -18,7 +18,10 @@ processes on POSIX. On Windows only the thread lock is taken: ``msvcrt.locking``
 gives up after about ten seconds, shorter than a database download, and failing a
 scan for that would be worse than the cross-process race it guards against. The lock
 file is created if missing and never removed: removing it while another process
-waits on it would let a third process lock a new file of the same name.
+waits on it would let a third process lock a new file of the same name. It is
+opened read-only: ``flock`` needs no write access, and a lock file another user
+created (a shared tool cache) is readable where it is not writable, so the second
+user's update is serialized rather than failing with ``PermissionError``.
 
 Failure modes
 -------------
@@ -56,7 +59,9 @@ def exclusive_lock(path: Union[str, Path]) -> Iterator[None]:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with _thread_lock_for(path):
-        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+        # Read-only: flock needs no write access, and a lock file another user
+        # owns is readable (0o644) where opening it for writing is refused.
+        fd = os.open(path, os.O_RDONLY | os.O_CREAT, 0o644)
         try:
             if fcntl is not None:
                 fcntl.flock(fd, fcntl.LOCK_EX)
