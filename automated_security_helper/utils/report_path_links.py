@@ -153,11 +153,18 @@ def _link_kind(path: Path) -> Optional[str]:
 
 
 def is_report_file_name(name: object) -> bool:
-    """Whether ``name`` is a single path component, the only kind of name ASH writes."""
+    """Whether ``name`` is a single path component, the only kind of name ASH writes.
+
+    A colon is refused as well: on NTFS ``report.json:stream`` is the alternate
+    data stream ``stream`` of ``report.json``, so such a name passed every pre-run
+    refusal and collision check while naming another reporter's file, and the
+    write path then wrote into that file. The rule is the same on every platform,
+    so a configuration is accepted or refused alike wherever it is read.
+    """
     return (
         isinstance(name, str)
         and name not in ("", ".", "..")
-        and not any(part in name for part in ("/", "\\", "\x00"))
+        and not any(part in name for part in ("/", "\\", ":", "\x00"))
     )
 
 

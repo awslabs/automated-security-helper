@@ -36,6 +36,13 @@ def test_anything_else_is_not(name):
     assert not is_report_file_name(name)
 
 
+@pytest.mark.parametrize("name", ["ash.sarif:stream", "C:report.md", ":"])
+def test_a_colon_names_an_ntfs_stream_of_another_file_and_is_refused(name):
+    """``report.json:stream`` is the file ``report.json`` on NTFS, so a name with a
+    colon passed the pre-run refusals while naming another reporter's report."""
+    assert not is_report_file_name(name)
+
+
 def test_a_dangling_link_is_a_link(tmp_path):
     (tmp_path / "ash.sarif").symlink_to(tmp_path / "missing")
 
