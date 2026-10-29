@@ -340,6 +340,18 @@ class AvailableModels(List[Dict[str, Any]]):
     #: caller that names the failure again logs it quietly, so one failure is one
     #: warning.
     reported: bool = False
+    #: How the inference profile listing failed while the foundation-model
+    #: listing succeeded: the error code, the botocore class name, or
+    #: ``UNEXPECTED_LISTING_ERROR``; None when it succeeded or when the whole
+    #: listing failed (then ``failed`` says so). The list then holds the
+    #: on-demand models, which the caller can use, and no model reachable only
+    #: through a profile, so a model missing from it may still exist.
+    profile_listing_failure: Optional[str] = None
+    #: ``failure_is_transient`` of the profile listing's error.
+    profile_listing_transient: bool = False
+    #: Whether the profile listing failed on the client side (a botocore error
+    #: with no service answer), as ``ModelCheck.listing_client_side`` reads it.
+    profile_listing_client_side: bool = False
 
     def __init__(
         self,
@@ -349,6 +361,9 @@ class AvailableModels(List[Dict[str, Any]]):
         reported: bool = False,
         transient: Optional[bool] = None,
         failure_label: Optional[str] = None,
+        profile_listing_failure: Optional[str] = None,
+        profile_listing_transient: bool = False,
+        profile_listing_client_side: bool = False,
     ):
         super().__init__(models)
         self.failed = failed
@@ -360,6 +375,9 @@ class AvailableModels(List[Dict[str, Any]]):
             if transient is None
             else transient
         )
+        self.profile_listing_failure = profile_listing_failure
+        self.profile_listing_transient = profile_listing_transient
+        self.profile_listing_client_side = profile_listing_client_side
 
 
 def failure_is_transient(
@@ -529,6 +547,42 @@ class ListingsOnce:
         return listing
 
 
+def _inference_profile_summaries(bedrock_client: Any) -> List[Dict[str, Any]]:
+    """Every inference profile summary the control plane lists, over every page.
+
+    ``ListInferenceProfiles`` pages its answer and hands back ``nextToken`` while
+    more remain; the first call carries no token, so a client double that takes
+    no arguments answers it as before. A page that repeats the token it was
+    asked with ends the walk, so a control plane that answers the same page
+    twice cannot make this loop without end.
+    """
+    summaries: List[Dict[str, Any]] = []
+    kwargs: Dict[str, Any] = {}
+    seen_tokens: Set[str] = set()
+    while True:
+        page = bedrock_client.list_inference_profiles(**kwargs)
+        summaries.extend(page.get("inferenceProfileSummaries", []) or [])
+        token = page.get("nextToken")
+        if not token or token in seen_tokens:
+            return summaries
+        seen_tokens.add(token)
+        kwargs = {"nextToken": token}
+
+
+def _listing_failure_name(error: BaseException) -> str:
+    """How a failed listing is named: its service code, else the class name of a
+    botocore error, else ``UNEXPECTED_LISTING_ERROR``."""
+    kept_code = getattr(error, "failure_code", None)
+    kept_label = getattr(error, "failure_label", None)
+    if isinstance(error, KeptListingFailure):
+        return kept_code or kept_label or UNEXPECTED_LISTING_ERROR
+    return (
+        _service_error_code(error)
+        or _botocore_error_name(error)
+        or UNEXPECTED_LISTING_ERROR
+    )
+
+
 def get_available_models(
     bedrock_client: Any, values: Iterable[str] = ()
 ) -> AvailableModels:
@@ -538,19 +592,38 @@ def get_available_models(
         List of available models with their details, including inference profile ARNs for models
         that only support inference profiles. A listing that failed answers an
         empty list whose ``failed`` flag is set.
+
+    The two listings are asked apart. A failed ``ListInferenceProfiles`` (a
+    principal allowed ``ListFoundationModels`` but not that call, a throttle on
+    that call alone) used to discard the foundation-model list with it, so every
+    on-demand model the caller could list and invoke read as "No available
+    models found in the current region". Now the on-demand models are answered
+    and the profile listing's failure is carried on ``profile_listing_failure``,
+    so a model missing from the list can be told as unchecked rather than as not
+    found. The profile listing is read over every page, and a model routed by
+    more than one profile (a geographic one and a global one, say) is listed
+    once per profile, each entry carrying its profile's ARN.
     """
     values = list(value_tuple(values))
+    profile_failure: Optional[BaseException] = None
     try:
         final_model_list = []
-        inference_profiles = bedrock_client.list_inference_profiles()
-        model_profile_map = {}
-        for profile in inference_profiles.get("inferenceProfileSummaries", []):
-            for model in [
-                item
-                for item in profile.get("models", [])
-                if item.get("modelArn", None) is not None
-            ]:
-                model_profile_map[model["modelArn"]] = profile
+        model_profile_map: Dict[str, List[Dict[str, Any]]] = {}
+        try:
+            for profile in _inference_profile_summaries(bedrock_client):
+                for model in [
+                    item
+                    for item in profile.get("models", [])
+                    if item.get("modelArn", None) is not None
+                ]:
+                    model_profile_map.setdefault(model["modelArn"], []).append(profile)
+        except Exception as error:
+            # Kept for the answer below: the foundation-model listing is still
+            # asked, and only when it answers is this failure the listing's own
+            # news. When both fail, the second failure is the one reported, as
+            # before, so one failed control plane is one warning.
+            profile_failure = error
+            model_profile_map = {}
         ASH_LOGGER.debug("Fetching available foundation models...")
         # Get foundation models
         response = bedrock_client.list_foundation_models()
@@ -574,22 +647,65 @@ def get_available_models(
                     }
                 )
             if "INFERENCE_PROFILE" in model.get("inferenceTypesSupported", []):
-                if model.get("modelArn", "unknown") not in model_profile_map:
-                    # Unable to find the inference profile ID!
-                    continue
-                final_model_list.append(
-                    {
-                        "modelId": model_profile_map[model.get("modelArn", "unknown")][
-                            "inferenceProfileId"
-                        ],
-                        "modelName": model.get("modelName", "unknown"),
-                        "modelArn": model.get("modelArn", "unknown"),
-                        "providerName": model.get("providerName", "unknown"),
-                        "inferenceType": "INFERENCE_PROFILE",
-                    }
-                )
+                # One entry per profile that routes the model: a model under a
+                # geographic profile and a global one is reachable by either
+                # ID, so neither is reported as not found.
+                for profile in model_profile_map.get(
+                    model.get("modelArn", "unknown"), []
+                ):
+                    final_model_list.append(
+                        {
+                            "modelId": profile["inferenceProfileId"],
+                            "modelName": model.get("modelName", "unknown"),
+                            "modelArn": model.get("modelArn", "unknown"),
+                            "inferenceProfileArn": profile.get("inferenceProfileArn"),
+                            "providerName": model.get("providerName", "unknown"),
+                            "inferenceType": "INFERENCE_PROFILE",
+                        }
+                    )
 
-        return AvailableModels(final_model_list)
+        if profile_failure is None:
+            return AvailableModels(final_model_list)
+        failure = _listing_failure_name(profile_failure)
+        # Named with the foundation listing's own words, so a reader of ash.log
+        # finds one shape of line for a failed listing; the suffix says which
+        # call failed and what the list still holds.
+        suffix = (
+            "; the inference profile listing failed, so models reachable only "
+            "through an inference profile are not listed"
+        )
+        if isinstance(profile_failure, KeptListingFailure):
+            # Reported when it first came: this call only reads it.
+            log = ASH_LOGGER.debug
+            transient = profile_failure.transient
+            client_side = profile_failure.failure_code is None and bool(
+                profile_failure.failure_label
+            )
+            described = f"the listing failed earlier in this walk ({failure}){suffix}"
+        elif isinstance(profile_failure, botocore.exceptions.ClientError):
+            log = ASH_LOGGER.warning
+            transient = failure_is_transient(failure, profile_failure)
+            client_side = False
+            message = profile_failure.response.get("Error", {}).get("Message")
+            described = (
+                f"Bedrock API error when getting available models "
+                f"({failure}): {message}{suffix}"
+            )
+        else:
+            log = ASH_LOGGER.warning
+            transient = failure_is_transient(None, profile_failure)
+            client_side = bool(_botocore_error_name(profile_failure))
+            described = (
+                "Unexpected error getting available models: "
+                f"{error_text(profile_failure, values)}{suffix}"
+            )
+        log(text_without_values(described, values))
+        return AvailableModels(
+            final_model_list,
+            profile_listing_failure=failure,
+            profile_listing_transient=transient,
+            profile_listing_client_side=client_side,
+        )
     except KeptListingFailure as kept:
         # The failure was reported when it first came; this call only reads it.
         return AvailableModels(
@@ -790,6 +906,30 @@ def check_listing_client_side(check: Any) -> bool:
     return bool(getattr(check, "listing_client_side", False))
 
 
+def _profile_listing_failed(
+    available_models: Any, shown: str, values: Sequence[str]
+) -> ModelCheck:
+    """The check's answer for a model the on-demand list does not name while
+    the inference profile listing failed: a listing failure about the check
+    (the model may be routed by a profile nobody could list), named by how that
+    listing failed, never "not found in available models"."""
+    failure = getattr(available_models, "profile_listing_failure", None)
+    reason = (
+        f"Model {shown} is not an on-demand model in this region and the "
+        f"inference profile listing failed: {failure}"
+    )
+    ASH_LOGGER.warning(text_without_values(reason, values))
+    return ModelCheck(
+        False,
+        text_without_values(reason, values),
+        transient=bool(getattr(available_models, "profile_listing_transient", False)),
+        listing_failure=failure,
+        listing_client_side=bool(
+            getattr(available_models, "profile_listing_client_side", False)
+        ),
+    )
+
+
 def validate_bedrock_model(
     bedrock_client: Any,
     model_id: str,
@@ -860,6 +1000,10 @@ def validate_bedrock_model(
                     # service answered.
                     listing_client_side=not code and bool(failure_label),
                 )
+            if getattr(available_models, "profile_listing_failure", None):
+                # No on-demand model, and the profile listing failed: the
+                # region may still route the model through a profile.
+                return _profile_listing_failed(available_models, shown, values)
             # An empty list from a listing that succeeded is a region with no
             # models, which is about the model.
             ASH_LOGGER.warning("No available models found in the current region")
@@ -867,9 +1011,17 @@ def validate_bedrock_model(
 
         # Extract model IDs from the available models
         available_model_ids = [model.get("modelId") for model in available_models]
+        # Converse takes a model's ARN and an inference profile's ARN as a model
+        # identifier too, so an ARN the listing carries names a listed model.
+        listed_arns = {
+            arn
+            for model in available_models
+            for arn in (model.get("modelArn"), model.get("inferenceProfileArn"))
+            if arn and arn != "unknown"
+        }
 
         # Check if the requested model is in the available models
-        if model_id in available_model_ids:
+        if model_id in available_model_ids or model_id in listed_arns:
             ASH_LOGGER.debug(text_without_values(f"Model {shown} is available", values))
             return ModelCheck(True)
 
@@ -898,6 +1050,12 @@ def validate_bedrock_model(
                     )
                 )
                 return ModelCheck(True)
+
+        if getattr(available_models, "profile_listing_failure", None):
+            # The on-demand models were listed and this is not one of them; the
+            # profile listing failed, so whether a profile routes it is unknown.
+            # That is a listing failure about the check, not "not found".
+            return _profile_listing_failed(available_models, shown, values)
 
         # Model not found in available models
         ASH_LOGGER.warning(

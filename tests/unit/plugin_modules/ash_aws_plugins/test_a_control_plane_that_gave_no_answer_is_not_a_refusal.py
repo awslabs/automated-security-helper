@@ -60,30 +60,47 @@ def _error(code, message="it failed", operation="ListInferenceProfiles"):
 
 
 class ControlPlane:
-    """A bedrock control-plane client: the inference-profile listing is
-    throttled while ``throttled`` is set (or for its first ``throttle_first``
-    calls), refuses with ``listing_error`` when that is set, and the model
-    listing names ``listed``. ``listings`` counts the profile listings and
-    ``model_listings`` the model listings: the control-plane calls a walk makes."""
+    """A bedrock control-plane client: both listings are throttled while
+    ``throttled`` is set (or for its first ``throttle_first`` profile listings),
+    refuse with ``listing_error`` when that is set, raise ``error`` when one is
+    given, and the model listing names ``listed`` otherwise. A control plane
+    that throttles or refuses one listing does so for the other, and
+    ``get_available_models`` asks the two apart (a failed profile listing alone
+    leaves the on-demand models listed), so a failure here is the whole
+    listing's. ``listings`` counts the profile listings and ``model_listings``
+    the model listings: the control-plane calls a walk makes."""
 
-    def __init__(self, listed, throttled=False, listing_error=None, throttle_first=0):
+    def __init__(
+        self, listed, throttled=False, listing_error=None, throttle_first=0, error=None
+    ):
         self.listed = list(listed)
         self.throttled = throttled
         self.listing_error = listing_error
         self.throttle_first = throttle_first
+        self.error = error
         self.listings = 0
         self.model_listings = 0
 
+    def _failure(self):
+        """The failure both listings share, or None when they answer."""
+        if self.throttled or self.listings <= self.throttle_first:
+            return _error("ThrottlingException", "Rate exceeded")
+        if self.listing_error is not None:
+            return _error(self.listing_error, "the listing was refused")
+        return self.error
+
     def list_inference_profiles(self):
         self.listings += 1
-        if self.throttled or self.listings <= self.throttle_first:
-            raise _error("ThrottlingException", "Rate exceeded")
-        if self.listing_error is not None:
-            raise _error(self.listing_error, "the listing was refused")
+        failure = self._failure()
+        if failure is not None:
+            raise failure
         return {"inferenceProfileSummaries": []}
 
     def list_foundation_models(self):
         self.model_listings += 1
+        failure = self._failure()
+        if failure is not None:
+            raise failure
         return {
             "modelSummaries": [
                 {
@@ -328,8 +345,8 @@ def test_a_listing_that_raised_something_unexpected_is_not_transient_and_has_no_
     and the models are not called not checked."""
 
     class Broken(ControlPlane):
-        def list_inference_profiles(self):
-            raise RuntimeError("it failed")
+        def __init__(self, listed):
+            super().__init__(listed, error=RuntimeError("it failed"))
 
     models = aws_utils.get_available_models(Broken([FALLBACK_ONE]))
     check = validate_bedrock_model(Broken([FALLBACK_ONE]), FALLBACK_ONE)
@@ -347,8 +364,8 @@ def test_a_listing_that_lost_its_connection_is_transient_and_has_no_code(error):
     answers, so they carry no code and are still told apart from the rest."""
 
     class Dropped(ControlPlane):
-        def list_inference_profiles(self):
-            raise error
+        def __init__(self, listed):
+            super().__init__(listed, error=error)
 
     models = aws_utils.get_available_models(Dropped([FALLBACK_ONE]))
     check = validate_bedrock_model(Dropped([FALLBACK_ONE]), FALLBACK_ONE)
@@ -679,7 +696,9 @@ def test_a_walk_names_every_candidate_a_refused_listing_left_unchecked(
         f"*Error: No suitable fallback model found for {PRIMARY_MODEL} "
         f"(called: {PRIMARY_MODEL}; {group})"
     ), out
-    assert (control.listings, control.model_listings) == (1, 0)
+    # Both listings are asked once: the profile listing's refusal alone no longer
+    # stands for the model listing's, so the model listing is asked (and refused).
+    assert (control.listings, control.model_listings) == (1, 1)
     assert runtime.models == [PRIMARY_MODEL], runtime.models
 
 
@@ -691,8 +710,8 @@ def test_a_walk_names_a_listing_that_failed_without_a_code(
     code to name. The group says the listing failed and how little is known."""
 
     class Broken(ControlPlane):
-        def list_inference_profiles(self):
-            raise RuntimeError("it failed")
+        def __init__(self, listed):
+            super().__init__(listed, error=RuntimeError("it failed"))
 
     reporter = _walk_setup(
         context, monkeypatch, Broken([FALLBACK_ONE]), {PRIMARY_MODEL: FALLBACK_ONE}
@@ -720,15 +739,10 @@ BOTOCORE_ERRORS = [
 
 
 class Failing(ControlPlane):
-    """A control plane whose first listing call raises ``error``."""
+    """A control plane whose listing calls raise ``error``."""
 
     def __init__(self, listed, error):
-        super().__init__(listed)
-        self.error = error
-
-    def list_inference_profiles(self):
-        self.listings += 1
-        raise self.error
+        super().__init__(listed, error=error)
 
 
 @pytest.mark.parametrize(
@@ -1018,7 +1032,7 @@ def test_a_listing_throttled_once_is_not_asked_again_by_the_wrapper():
     ]
 
     assert all(check_is_transient(check) for check in checks), checks
-    assert (control.listings, control.model_listings) == (1, 0)
+    assert (control.listings, control.model_listings) == (1, 1)
 
 
 def test_a_listing_throttled_for_good_is_kept_after_one_call():
@@ -1178,12 +1192,15 @@ def test_a_kept_failure_without_a_service_answer_still_reads_as_a_client_error()
     not."""
 
     class Dropped(ControlPlane):
-        def list_inference_profiles(self):
-            raise botocore.exceptions.EndpointConnectionError(endpoint_url=_URL)
+        def __init__(self, listed):
+            super().__init__(
+                listed,
+                error=botocore.exceptions.EndpointConnectionError(endpoint_url=_URL),
+            )
 
     class Broken(ControlPlane):
-        def list_inference_profiles(self):
-            raise RuntimeError("it failed")
+        def __init__(self, listed):
+            super().__init__(listed, error=RuntimeError("it failed"))
 
     for control, transient in ((Dropped([]), True), (Broken([]), False)):
         wrapped = ListingsOnce(control)
@@ -1204,8 +1221,10 @@ def test_a_repeated_failure_keeps_the_kind_of_the_first_for_every_candidate():
     as not checked when the first was."""
 
     class Dropped(ControlPlane):
-        def list_inference_profiles(self):
-            raise botocore.exceptions.ReadTimeoutError(endpoint_url=_URL)
+        def __init__(self, listed):
+            super().__init__(
+                listed, error=botocore.exceptions.ReadTimeoutError(endpoint_url=_URL)
+            )
 
     wrapped = ListingsOnce(Dropped([FALLBACK_ONE]))
 
