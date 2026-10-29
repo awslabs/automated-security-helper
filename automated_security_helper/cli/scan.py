@@ -75,6 +75,7 @@ from automated_security_helper.utils.log import (
     configure_last_resort_level,
     escape_markup,
 )
+from automated_security_helper.utils.output_dir_links import OUTPUT_WORKING_DIRS
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 from automated_security_helper.workspace.plan import WorkspacePlan
 from automated_security_helper.workspace.resolver import resolve_workspace
@@ -255,6 +256,84 @@ def _fail_state(message: str) -> NoReturn:
     """
     echo(message, err=True)
     raise typer.Exit(1)
+
+
+def _settle_output_dir(
+    source_dir: str, output_dir: str | Path | None, use_existing: bool
+) -> tuple[str | Path, str | None]:
+    """The output directory the scan writes to, and the existing results it reads.
+
+    Defaults ``output_dir`` to ``<source_dir>/.ash/ash_output``, moves it there when
+    it is the source directory itself, refuses one the scan would clear the scanned
+    tree through, refuses one that cannot be written into, and resolves
+    ``--use-existing`` to the results file or refuses when it is not there. Every
+    refusal exits, so the caller gets back only a pair the scan can run with.
+
+    Called where the real run settles them, and from the workspace dry run before
+    it prints its plan, so a dry run that exits 0 describes a command line the
+    real run accepts.
+
+    The two directories are compared resolved (``Path.resolve``: ``..`` folded and
+    links followed), not as the absolute spellings given. Compared lexically,
+    ``--output-dir src/../src`` and a link to the source directory read as
+    different from it, and the scan then cleared ``reports/``, ``scanners/``,
+    ``converted/`` and ``analysis/`` inside the tree it was scanning. The same
+    resolved reading refuses a source directory that is one of those cleared
+    directories or inside one (``--source-dir reports --output-dir .``): the scan
+    removes each of them before it starts, so it would delete what it was asked
+    to scan and then report a clean tree.
+    """
+    if output_dir is None:
+        # Default output_dir is relative to source_dir, not CWD.
+        # This ensures that when --source-dir points to a different project,
+        # the output (and config resolution) happens in the correct location.
+        output_dir = Path(source_dir).joinpath(".ash", "ash_output").as_posix()
+
+    source_resolved = Path(source_dir).resolve()
+    if source_resolved == Path(output_dir).resolve():
+        output_dir = Path(output_dir).joinpath(".ash", "ash_output")
+        print(
+            "[bold yellow]output-dir has been adjusted to the following to avoid "
+            "collisions and potential impact to source code: "
+            f"{escape_markup(Path(output_dir).as_posix())}[/bold yellow]"
+        )
+    output_resolved = Path(output_dir).resolve()
+    for working_dir in OUTPUT_WORKING_DIRS:
+        cleared = output_resolved.joinpath(working_dir)
+        if source_resolved == cleared or source_resolved.is_relative_to(cleared):
+            _fail_usage(
+                shown_on_one_line(
+                    f"Source directory {os.fspath(source_dir)} is inside "
+                    f"{cleared.as_posix()}, which the scan removes from the output "
+                    f"directory {os.fspath(output_dir)} before it starts, so the "
+                    "scan would delete the directory it was asked to scan. Point "
+                    "--output-dir at a directory that does not contain the source "
+                    "directory, or scan a directory outside the output directory."
+                )
+            )
+    # A file where the output directory goes ended the run in a FileExistsError
+    # traceback, from the first mkdir of it. A missing one is still made.
+    output_refusal = output_dir_refusal(output_dir)
+    if output_refusal is not None:
+        _fail_usage(shown_on_one_line(output_refusal))
+
+    existing_results = None
+    if use_existing:
+        poss_existing_results = Path(output_dir).joinpath("ash_aggregated_results.json")
+        if poss_existing_results.exists():
+            existing_results = poss_existing_results.as_posix()
+        else:
+            # A clean refusal, not the uncaught ValueError traceback this was, on one
+            # line: the path is the --output-dir as given.
+            _fail_state(
+                shown_on_one_line(
+                    f"--use-existing was given, but there are no existing results to "
+                    f"use: {poss_existing_results.as_posix()} does not exist. Run a "
+                    "scan first, or point --output-dir at the output of a previous "
+                    "one."
+                )
+            )
+    return output_dir, existing_results
 
 
 def _refuse_sandbox_in_container_mode(
@@ -1348,24 +1427,11 @@ def run_ash_scan_cli_command(
     source_refusal = source_dir_refusal(source_dir)
     if source_refusal is not None:
         _fail_usage(shown_on_one_line(source_refusal))
-    if output_dir is None:
-        # Default output_dir is relative to source_dir, not CWD.
-        # This ensures that when --source-dir points to a different project,
-        # the output (and config resolution) happens in the correct location.
-        output_dir = Path(source_dir).joinpath(".ash", "ash_output").as_posix()
-
-    if Path(source_dir).absolute().as_posix() == Path(output_dir).absolute().as_posix():
-        output_dir = Path(output_dir).joinpath(".ash", "ash_output")
-        print(
-            "[bold yellow]output-dir has been adjusted to the following to avoid "
-            "collisions and potential impact to source code: "
-            f"{escape_markup(Path(output_dir).as_posix())}[/bold yellow]"
-        )
-    # A file where the output directory goes ended the run in a FileExistsError
-    # traceback, from the first mkdir of it. A missing one is still made.
-    output_refusal = output_dir_refusal(output_dir)
-    if output_refusal is not None:
-        _fail_usage(shown_on_one_line(output_refusal))
+    # The output directory's default, the collision adjustment, its refusals and
+    # --use-existing, in one place with the workspace dry run's preflight.
+    output_dir, existing_results = _settle_output_dir(
+        source_dir, output_dir, use_existing
+    )
 
     # Apply mode presets if specified (precommit_mode is folded into simple
     # above, before the last-resort gate is set)
@@ -1373,23 +1439,6 @@ def run_ash_scan_cli_command(
         print(
             "[green]-------------- Running ASH in pre-commit mode with minimal output --------------[/green]"
         )
-
-    existing_results = None
-    if use_existing:
-        poss_existing_results = Path(output_dir).joinpath("ash_aggregated_results.json")
-        if poss_existing_results.exists():
-            existing_results = poss_existing_results.as_posix()
-        else:
-            # A clean refusal, not the uncaught ValueError traceback this was, on one
-            # line: the path is the --output-dir as given.
-            _fail_state(
-                shown_on_one_line(
-                    f"--use-existing was given, but there are no existing results to "
-                    f"use: {poss_existing_results.as_posix()} does not exist. Run a "
-                    "scan first, or point --output-dir at the output of a previous "
-                    "one."
-                )
-            )
 
     cli_final_show_progress = (
         progress
