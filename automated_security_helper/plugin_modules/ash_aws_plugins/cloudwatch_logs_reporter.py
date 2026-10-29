@@ -152,8 +152,13 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
     (https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_PutLogEvents.html).
     It is worth naming because it forecloses the obvious alternative -- publishing
     the merged findings instead of the summary -- which would exceed it for any
-    workspace of consequence, and this reporter's error path returns the exception
-    text as its report rather than failing the run.
+    workspace of consequence.
+
+    A publish that fails after the retries returns None, which ``ReportPhase``
+    reports as a reporter that produced nothing. It used to return the exception
+    text, which the phase wrote to ``ash.cwlog.json`` as a successful report and
+    ``ash report --format cloudwatch-logs`` printed with exit 0 (or failed to
+    pretty-print, with a JSON parse error in place of the reason).
     """
 
     workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
@@ -205,8 +210,30 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
             )
         return self.dependencies_satisfied
 
-    def report(self, model: "AshAggregatedResults") -> str:
-        """Publishes AshAggregatedResults as a CloudWatchLogs event"""
+    def report(self, model: "AshAggregatedResults") -> str | None:
+        """Publishes AshAggregatedResults as a CloudWatchLogs event.
+
+        Returns the JSON receipt, or None when a required setting is unset or
+        the publish failed. ``ash report`` never calls
+        ``validate_plugin_dependencies``, so the settings are checked here too:
+        an unset log group used to reach PutLogEvents and come back as a
+        botocore parameter error.
+        """
+        if isinstance(self.config, dict):
+            self.config = CloudWatchLogsReporterConfig.model_validate(self.config)
+        missing = False
+        if self.config.options.aws_region is None:
+            report_missing_setting(
+                self.config.name, "aws_region", ("AWS_REGION", "AWS_DEFAULT_REGION")
+            )
+            missing = True
+        if self.config.options.log_group_name is None:
+            report_missing_setting(
+                self.config.name, "log_group_name", ("ASH_CLOUDWATCH_LOG_GROUP_NAME",)
+            )
+            missing = True
+        if missing:
+            return None
         timestamp = int(
             (
                 datetime.now(timezone.utc)
@@ -216,8 +243,6 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
         )
         output_dict = model.to_simple_dict()
         output = json.dumps(output_dict, default=str)
-        if isinstance(self.config, dict):
-            self.config = CloudWatchLogsReporterConfig.model_validate(self.config)
 
         # Create CloudWatch Logs client. The calls below repeat a failure
         # themselves (retry_with_backoff), so the client makes one attempt per
@@ -258,16 +283,19 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
             )
             return json.dumps({"message": output_dict, "response": resp}, default=str)
         except Exception as e:
-            # Redacted once, for the line and for the text returned as the
-            # report, which ReportPhase writes to a file.
+            # Redacted: the line names the group, stream or region it was given.
             described = error_text(e, self._environment_values())
             self._plugin_log(
                 "Error when publishing results to CloudWatch Logs after retries: "
                 f"{described}",
-                level=logging.WARNING,
+                level=logging.ERROR,
                 append_to_stream="stderr",
             )
-            return described
+            # None, not the message: ReportPhase reports a None result as a
+            # reporter that produced nothing and writes no ash.cwlog.json.
+            # Returning the message wrote it into that file as if it were a
+            # report, and `ash report` printed it with exit 0.
+            return None
 
     def _create_log_stream_with_retry(self, cwlogs_client):
         """Create log stream with retry logic."""
