@@ -77,6 +77,9 @@ from automated_security_helper.utils.output_excerpt import head_and_tail
 _STDERR_EXCERPT_LIMIT = 2000
 #: The largest results file a rejected run's notifications are read from.
 _NOTIFICATIONS_READ_LIMIT = 5 * 1024 * 1024
+#: The most of a tool's results file the template scan reads (``_read_results_file``);
+#: a larger one is refused with its size rather than read without bound.
+_RESULTS_FILE_READ_LIMIT = 1 << 30
 
 
 def _error_notifications(results_file: Path) -> str:
@@ -1188,7 +1191,15 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 arguments=recorded_arguments,
                 startTimeUtc=self.start_time,
                 endTimeUtc=self.end_time,
-                executionSuccessful=self._exit_code_accepted(success_codes),
+                # The graded rule, not the exit code alone: a scanner that
+                # counted a failed target, or whose run was stopped or whose
+                # output ASH could not record, reported executionSuccessful
+                # true whenever its tool's code was an accepted one, and the
+                # unevaluated-rules gate read that as a complete run.
+                executionSuccessful=(
+                    self._exit_code_accepted(success_codes)
+                    and self._sarif_execution_successful()
+                ),
                 exitCode=self.exit_code,
                 exitCodeDescription="\n".join(self.errors) if self.errors else "",
                 workingDirectory=working_dir,
@@ -1250,8 +1261,22 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         Subclasses may override to add their own empty-file detection or
         alternative parsing, but must preserve the missing-file raise.
         """
-        with open(results_file, mode="r", encoding="utf-8") as fh:
-            content = fh.read()
+        # Under fs_guard's reader semantics (``read_bytes_at_most``): no link is
+        # followed at the name, a FIFO left there cannot block the open or the
+        # read, anything but a regular file is refused with OSError, and the read
+        # is bounded. A plain open followed a link to any file on the host and
+        # blocked ASH for good on a FIFO a scanner's process left at the name.
+        from automated_security_helper.utils.sandbox.fs_guard import (
+            read_bytes_at_most,
+        )
+
+        data = read_bytes_at_most(results_file, _RESULTS_FILE_READ_LIMIT + 1)
+        if len(data) > _RESULTS_FILE_READ_LIMIT:
+            raise ScannerError(
+                f"its results file is larger than {_RESULTS_FILE_READ_LIMIT} bytes, "
+                "the most this scanner reads, so it is not graded"
+            )
+        content = data.decode("utf-8")
         if not content or content.strip() == "":
             return None
         return json.loads(content)
@@ -1431,6 +1456,13 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # returned, so without this a target that returns before its tool runs (an
         # empty tree, missing dependencies) reports the previous target's code.
         self.exit_code = 0
+        # The tool lines too: _process_command_response appends every run's
+        # stdout and stderr to these, and the executor records them, and the
+        # failure message quotes them, as THIS target's. Carried over, a failed
+        # converted-target run's record led with the source target's lines, and
+        # the quoted stderr described the wrong run.
+        self.output = []
+        self.errors = []
 
         if not target.exists() or not any(target.iterdir()):
             self._plugin_log(
@@ -1730,12 +1762,14 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             )
             detail += f" (exit code {self.exit_code}: {verdict})"
 
-        stderr_text = "\n".join(self.errors).strip()
-        # The errors lines were redacted at insertion, so this cut cannot
+        # Cut once, at the end, by head_and_tail: the tool says why it failed
+        # in its LAST lines, and a cut to the first 2000 characters here
+        # dropped them before the head-and-tail excerpt ran, so the excerpt's
+        # tail was this cut's marker and its omitted count was wrong. The
+        # errors lines were redacted at insertion, so the later cut cannot
         # split a live value; the log-excerpt branch below does its own
         # bounded cut inside the shared helper.
-        if len(stderr_text) > _STDERR_EXCERPT_LIMIT:
-            stderr_text = stderr_text[:_STDERR_EXCERPT_LIMIT] + " ...[truncated]"
+        stderr_text = "\n".join(self.errors).strip()
         log_path = None
         if results_file is not None:
             log_path = (
