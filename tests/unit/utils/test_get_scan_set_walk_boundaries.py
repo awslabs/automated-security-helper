@@ -15,9 +15,10 @@ meant to keep:
 - a directory the root ``.gitignore`` matches that the scanning user cannot
   search raised ``PermissionError`` out of ``_is_cdk_cloud_assembly`` and aborted
   the scan on 3.10 to 3.12;
-- an ignore file in the tree that cannot be opened, and a pattern the parser
-  refuses, each raised out of the full ignore spec and aborted the scan, while
-  the pruning pre-pass tolerated the same errors;
+- a pattern the parser refuses raised out of the full ignore spec and aborted
+  the scan, while the pruning pre-pass tolerated the same error (an ignore file
+  that cannot be opened still raises, as ``test_tree_readers_scanned_tree.py``
+  pins by design);
 - a negation in the root ``.ignore`` that re-includes a directory the root
   ``.gitignore`` excludes never took effect, because only the ``.gitignore``
   pruned the walk.
@@ -27,7 +28,6 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
 from pathlib import Path
 
 import pytest
@@ -148,28 +148,6 @@ class TestOneBadEntryDoesNotAbortTheScan:
                 raise PermissionError(13, "Permission denied", str(self))
 
         assert gss._is_cdk_cloud_assembly(Refusing(tmp_path / "build")) is False
-
-    @pytest.mark.skipif(
-        sys.platform == "win32" or os.geteuid() == 0,
-        reason="file modes do not refuse the owner on Windows or root",
-    )
-    def test_an_ignore_file_that_cannot_be_opened_is_skipped_and_said(
-        self, tmp_path, ash_warnings
-    ):
-        root = tmp_path / "tree"
-        _write(root, "app.py")
-        _write(root, "sub/kept.py")
-        unreadable = _write(root, "sub/.gitignore", "kept.py\n")
-        unreadable.chmod(0o000)
-        try:
-            found = _names(root, scan_set(source=str(root)))
-        finally:
-            unreadable.chmod(0o644)
-
-        assert {"app.py", "sub/kept.py"} <= found
-        assert any("Skipped ignore file" in message for message in ash_warnings()), (
-            ash_warnings()
-        )
 
     def test_a_pattern_the_parser_refuses_is_skipped_and_said(
         self, tmp_path, monkeypatch, ash_warnings

@@ -199,29 +199,27 @@ def is_inside_tree(path: PathLike, root: PathLike) -> bool:
     ``/var`` for ``/private/var``. Components are compared through
     ``os.path.normcase``.
 
-    The answer as written counts only when no component below the root is
-    ``..``: ``<root>/../elsewhere/tool`` starts with the root's components and
-    leaves the tree in the next one, so it is judged by where it resolves to,
-    like any other spelling, and a tool outside the tree is not refused as an
-    in-tree one.
+    A spelling that holds ``..`` is judged only once resolved: ``<root>/../elsewhere/tool``
+    starts with the root's components and leaves the tree in the next one, and
+    its lexical parents include the root itself, so both the as-written prefix
+    check and the as-written ancestor walk said "inside" for a tool outside the
+    tree, which was then refused as an in-tree one.
     """
-    below = _below(path, root)
-    if below is not None and ".." not in below[1]:
-        return True
     named = _absolute(path)
+    literal = ".." not in named.parts
+    if literal and _below(path, root) is not None:
+        return True
     real_root = Path(os.path.realpath(root))
+    resolved = Path(os.path.realpath(named))
     # As named, with its directory resolved, and fully resolved: a link on PATH
     # whose directory is a link into the tree, and a file in the tree that is
     # itself a link elsewhere, are both in the tree.
-    for spelling in (
-        Path(os.path.realpath(named.parent)) / named.name,
-        Path(os.path.realpath(named)),
-    ):
+    for spelling in (Path(os.path.realpath(named.parent)) / named.name, resolved):
         if _starts_with(spelling, real_root):
             return True
-    return _has_ancestor_file(named, root) or _has_ancestor_file(
-        Path(os.path.realpath(named)), root
-    )
+    if literal and _has_ancestor_file(named, root):
+        return True
+    return _has_ancestor_file(resolved, root)
 
 
 def _has_ancestor_file(path: Path, root: PathLike) -> bool:

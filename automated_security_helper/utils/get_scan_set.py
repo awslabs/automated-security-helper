@@ -1054,24 +1054,8 @@ def get_ash_ignorespec_lines(
                 lines.append("")
                 continue
             except FileNotFoundError:
-                # Gone since the walk: what the isfile() check here used to skip.
-                continue
-            except OSError as error:
-                # Permission denied, an I/O error: one ignore file the scan cannot
-                # read used to raise out of here and abort the whole scan, while
-                # the pruning pre-pass tolerates the same error on the root
-                # .gitignore. Skipped and said, like a refused one; its rules are
-                # not applied, so the scan set is larger, never smaller.
-                reason = error.strerror or type(error).__name__
-                ASH_LOGGER.warning(
-                    f"Skipped ignore file '{clean}': it could not be read "
-                    f"({reason}), so its rules were not applied",
-                    extra=NO_MARKUP,
-                )
-                lines.append(
-                    f"######### SKIPPED: {clean}: could not be read ({reason}) #########"
-                )
-                lines.append("")
+                # Gone since the walk: what the isfile() check here used to skip. Any
+                # other OSError propagates, as it did from the open() this replaced.
                 continue
             # TextIOWrapper with no encoding decodes exactly as open() does.
             with io.TextIOWrapper(
