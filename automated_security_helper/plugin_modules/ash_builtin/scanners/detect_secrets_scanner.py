@@ -1732,9 +1732,13 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # The executor drops what a scanner reports in ASH's own files anyway.
             #
             # The converted branch enumerates ``work_dir``, the converters' output,
-            # which is inside ``output_dir`` and is scanned whole.
+            # which is inside ``output_dir`` and is scanned whole: every regular
+            # file, whatever its name. A ``*.*`` glob took only names holding a
+            # dot, so an archive member named ``id_rsa``, ``credentials`` or
+            # ``config``, or a ``.gz`` decompressed to a dotless name, was never
+            # handed to detect-secrets.
             candidates = (
-                list(self.context.work_dir.glob("**/*.*"))
+                [item for item in self.context.work_dir.rglob("*") if item.is_file()]
                 if target_type == "converted"
                 else scan_set(
                     source=self.context.source_dir,
