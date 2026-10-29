@@ -45,9 +45,7 @@ class TestMonitorScanProgress:
         mock_ctx.error.assert_awaited()
 
     @pytest.mark.asyncio
-    async def test_completes_when_aggregated_results_file_appears(
-        self, mock_ctx, tmp_path
-    ):
+    async def test_completes_when_the_registry_says_completed(self, mock_ctx, tmp_path):
         output_dir = tmp_path / ".ash" / "ash_output"
         output_dir.mkdir(parents=True)
         aggregated = output_dir / "ash_aggregated_results.json"
@@ -62,7 +60,7 @@ class TestMonitorScanProgress:
                 return {"success": True, "directory_path": str(tmp_path)}
             return {
                 "success": True,
-                "status": "running",
+                "status": "completed",
                 "directory_path": str(tmp_path),
             }
 
@@ -182,7 +180,7 @@ class TestMonitorScanProgress:
                 aggregated.write_text("{}")
             return {
                 "success": True,
-                "status": "running",
+                "status": "completed" if call_count >= 3 else "running",
                 "directory_path": str(tmp_path),
             }
 
@@ -232,7 +230,11 @@ async def _completed_scan(mock_ctx, tmp_path, results_reply, **monitor_kwargs):
         patch(
             "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_progress",
             new=AsyncMock(
-                return_value={"success": True, "directory_path": str(tmp_path)}
+                return_value={
+                    "success": True,
+                    "status": "completed",
+                    "directory_path": str(tmp_path),
+                }
             ),
         ),
         patch(
@@ -344,3 +346,258 @@ class TestCompletionSummaryReadsTheResultsReply:
         )
 
         assert "session_id" not in get_results.await_args.kwargs
+
+
+def _progress_sequence(tmp_path, *statuses):
+    """A progress stub answering the scan-info lookup, then ``statuses`` in turn."""
+    answers = iter(statuses)
+
+    async def fake_progress(scan_id, **kwargs):
+        status = next(answers, None)
+        reply = {"success": True, "directory_path": str(tmp_path)}
+        if status is not None:
+            reply["status"] = status
+        return reply
+
+    return fake_progress
+
+
+class TestCompletionFollowsTheRegistryStatus:
+    """The scan is over when the registry says so, not when a results file exists.
+
+    The loop tested for ``ash_aggregated_results.json`` before it read the
+    registry's status. The file is there before the scan ends when the previous
+    scan's results were not set aside, it is put back when a scan fails or is
+    cancelled without results, and the SCAN phase writes it before the REPORT
+    phase has run; each of those was announced as "Scan completed" with the
+    file's findings. Red at the base: the running and failed scans below were
+    announced as completed on their first poll.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_previous_results_file_does_not_complete_a_running_scan(
+        self, mock_ctx, tmp_path
+    ):
+        output_dir = tmp_path / ".ash" / "ash_output"
+        output_dir.mkdir(parents=True)
+        (output_dir / "ash_aggregated_results.json").write_text("{}")
+        get_results = AsyncMock(return_value=_results_reply(total=0))
+
+        with (
+            patch(
+                "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_progress",
+                new=_progress_sequence(tmp_path, "running", "running", "completed"),
+            ),
+            patch(
+                "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_results",
+                new=get_results,
+            ),
+            patch("asyncio.sleep", new=AsyncMock()),
+        ):
+            await monitor_scan_progress(mock_ctx, "scan-prev")
+
+        # Read once, after the registry said completed, never on the first poll.
+        assert get_results.await_count == 1
+        completed = [
+            call.args[0]
+            for call in mock_ctx.info.await_args_list
+            if str(call.args[0]).startswith("Scan completed")
+        ]
+        assert completed == ["Scan completed with no findings."]
+
+    @pytest.mark.asyncio
+    async def test_a_failed_scan_with_results_put_back_is_reported_failed(
+        self, mock_ctx, tmp_path
+    ):
+        output_dir = tmp_path / ".ash" / "ash_output"
+        output_dir.mkdir(parents=True)
+        (output_dir / "ash_aggregated_results.json").write_text("{}")
+        get_results = AsyncMock(return_value=_results_reply(total=0))
+
+        async def fake_progress(scan_id, **kwargs):
+            if "directory_path" not in getattr(fake_progress, "seen", {}):
+                fake_progress.seen = {"directory_path": True}
+                return {"success": True, "directory_path": str(tmp_path)}
+            return {
+                "success": True,
+                "status": "failed",
+                "error_message": "scanner crashed",
+                "directory_path": str(tmp_path),
+            }
+
+        with (
+            patch(
+                "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_progress",
+                new=fake_progress,
+            ),
+            patch(
+                "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_results",
+                new=get_results,
+            ),
+        ):
+            await monitor_scan_progress(mock_ctx, "scan-failed")
+
+        assert get_results.await_count == 0
+        mock_ctx.error.assert_any_await("Scan failed: scanner crashed")
+        completed = [
+            call.args[0]
+            for call in mock_ctx.info.await_args_list
+            if str(call.args[0]).startswith("Scan completed")
+        ]
+        assert completed == []
+
+    @pytest.mark.asyncio
+    async def test_a_completed_status_without_a_results_file_still_completes(
+        self, mock_ctx, tmp_path
+    ):
+        """Control: the status alone ends the loop; the results call answers."""
+        (tmp_path / ".ash" / "ash_output").mkdir(parents=True)
+        get_results = AsyncMock(
+            return_value={"success": False, "error": "no results file"}
+        )
+
+        with (
+            patch(
+                "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_progress",
+                new=_progress_sequence(tmp_path, "completed"),
+            ),
+            patch(
+                "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_results",
+                new=get_results,
+            ),
+        ):
+            await monitor_scan_progress(mock_ctx, "scan-status-only")
+
+        assert get_results.await_count == 1
+
+
+class TestScannerResultsAreReadWithoutFollowingLinks:
+    """A scanner's results file is read only when it is a regular file at its name.
+
+    The directory a scanner writes is one a sandboxed scanner controls. The
+    monitor opened each ``ASH.ScanResults.json`` with a plain ``open()``, which
+    followed a link at the name to any file the server can read and blocked the
+    event loop on a FIFO. Red at the base: the linked file's counts were reported
+    as the scanner's.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_linked_results_file_is_not_read(self, mock_ctx, tmp_path):
+        elsewhere = tmp_path / "elsewhere.json"
+        elsewhere.write_text(json.dumps({"severity_counts": {"critical": 9}}))
+        output_dir = tmp_path / "proj" / ".ash" / "ash_output"
+        scanner_dir = output_dir / "scanners" / "bandit" / "source"
+        scanner_dir.mkdir(parents=True)
+        (scanner_dir / "ASH.ScanResults.json").symlink_to(elsewhere)
+
+        with (
+            patch(
+                "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_progress",
+                new=_progress_sequence(tmp_path / "proj", "running", "completed"),
+            ),
+            patch(
+                "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_results",
+                new=AsyncMock(return_value=_results_reply(total=0)),
+            ),
+            patch("asyncio.sleep", new=AsyncMock()),
+        ):
+            await monitor_scan_progress(mock_ctx, "scan-link")
+
+        messages = [
+            str(call.kwargs.get("message", ""))
+            for call in mock_ctx.report_progress.await_args_list
+        ]
+        assert not any("9 critical" in m for m in messages), messages
+        mock_ctx.warning.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_regular_results_file_is_read(self, mock_ctx, tmp_path):
+        """Control: the scanner's own file is reported as before."""
+        output_dir = tmp_path / ".ash" / "ash_output"
+        scanner_dir = output_dir / "scanners" / "bandit" / "source"
+        scanner_dir.mkdir(parents=True)
+        (scanner_dir / "ASH.ScanResults.json").write_text(
+            json.dumps({"severity_counts": {"high": 2}})
+        )
+
+        with (
+            patch(
+                "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_progress",
+                new=_progress_sequence(tmp_path, "running", "completed"),
+            ),
+            patch(
+                "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_results",
+                new=AsyncMock(return_value=_results_reply(total=2)),
+            ),
+            patch("asyncio.sleep", new=AsyncMock()),
+        ):
+            await monitor_scan_progress(mock_ctx, "scan-regular")
+
+        messages = [
+            str(call.kwargs.get("message", ""))
+            for call in mock_ctx.report_progress.await_args_list
+        ]
+        assert any("bandit completed source scan: 2 high" in m for m in messages)
+
+
+class TestWorkspaceProgressCountsOnlyNewResults:
+    """A project is complete when its results file changed, not when one exists.
+
+    With ``clean_output`` off the previous scan's file is in place from the
+    start, and a failed project's restore puts its previous file back; both
+    were counted as complete. Red at the base: the pre-existing file below was
+    reported complete on the first sweep.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_pre_existing_results_file_is_not_a_completed_project(
+        self, tmp_path
+    ):
+        from automated_security_helper.cli.mcp.progress_monitor import (
+            monitor_workspace_progress,
+        )
+
+        out = tmp_path / "projects" / "a"
+        out.mkdir(parents=True)
+        (out / "ash_aggregated_results.json").write_text("{}")
+        report = AsyncMock()
+
+        task = asyncio.ensure_future(
+            monitor_workspace_progress(report, {"a": out}, poll_interval=0.01)
+        )
+        await asyncio.sleep(0.1)
+        try:
+            messages = [
+                str(call.kwargs.get("message", "")) for call in report.await_args_list
+            ]
+            assert not any("a complete" in m for m in messages), messages
+            assert not task.done()
+        finally:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+    @pytest.mark.asyncio
+    async def test_a_rewritten_results_file_completes_the_project(self, tmp_path):
+        """Control: the scan writing its own results is counted."""
+        from automated_security_helper.cli.mcp.progress_monitor import (
+            monitor_workspace_progress,
+        )
+
+        out = tmp_path / "projects" / "a"
+        out.mkdir(parents=True)
+        results = out / "ash_aggregated_results.json"
+        results.write_text("{}")
+        report = AsyncMock()
+
+        task = asyncio.ensure_future(
+            monitor_workspace_progress(report, {"a": out}, poll_interval=0.01)
+        )
+        await asyncio.sleep(0.05)
+        results.write_text('{"metadata": {}}')
+        await asyncio.wait_for(task, timeout=5)
+
+        messages = [
+            str(call.kwargs.get("message", "")) for call in report.await_args_list
+        ]
+        assert any("a complete (1/1 projects)" in m for m in messages), messages

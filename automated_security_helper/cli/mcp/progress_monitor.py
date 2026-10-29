@@ -7,6 +7,8 @@ Background scan-progress monitor for the ASH MCP server.
 
 import asyncio
 import json
+import os
+import stat
 from pathlib import Path
 from typing import Awaitable, Callable, Dict, Optional, Tuple
 
@@ -235,6 +237,12 @@ async def _handle_terminal_status(
     return connection_alive
 
 
+#: The most of a scanner's ``ASH.ScanResults.json`` the monitor reads for its
+#: severity counts. The file is a few KiB; a sandboxed scanner writes into this
+#: directory, so the read is bounded rather than trusting the size.
+_MAX_SCANNER_RESULTS_BYTES = 16 * 1024 * 1024
+
+
 def _read_scanner_severity(result_path: Path) -> dict:
     """Load a scanner's ASH.ScanResults.json and return its severity_counts dict.
 
@@ -242,10 +250,35 @@ def _read_scanner_severity(result_path: Path) -> dict:
     file as UTF-8, and without an encoding text-mode open() uses the locale one,
     which on Windows is cp1252 and cannot decode a finding that quotes non-ASCII
     source.
+
+    Opened without following a link at the name and without blocking, and read
+    only when what was opened is a regular file, as the results readers in
+    ``mcp_tools`` refuse a linked results file. The directory is one a sandboxed
+    scanner writes; a plain ``open()`` there followed a link to any file the
+    server can read, and blocked the event loop on a FIFO.
     """
-    with open(result_path, "r", encoding="utf-8") as f:
-        scanner_data = json.load(f)
-    return scanner_data.get("severity_counts", {})
+    flags = os.O_RDONLY
+    for name in ("O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC", "O_BINARY"):
+        flags |= getattr(os, name, 0)
+    fd = os.open(result_path, flags)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"{result_path} is not a regular file")
+        with os.fdopen(fd, "rb") as f:
+            fd = -1
+            raw = f.read(_MAX_SCANNER_RESULTS_BYTES + 1)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    if len(raw) > _MAX_SCANNER_RESULTS_BYTES:
+        raise OSError(
+            f"{result_path} is larger than {_MAX_SCANNER_RESULTS_BYTES} bytes"
+        )
+    scanner_data = json.loads(raw.decode("utf-8"))
+    if not isinstance(scanner_data, dict):
+        return {}
+    counts = scanner_data.get("severity_counts", {})
+    return counts if isinstance(counts, dict) else {}
 
 
 def _format_scanner_message(
@@ -400,7 +433,6 @@ async def _run_monitor_loop(
     ctx: Context,
     scan_id: str,
     output_dir: Path,
-    ash_aggregated_results: Path,
     connection_alive: bool,
     session_id: Optional[str] = None,
 ) -> None:
@@ -421,21 +453,22 @@ async def _run_monitor_loop(
             )
             return
 
-        # Blocking stat on the event loop, inside the monitor's polling loop. Deferred
-        # rather than fixed: asyncio.to_thread would move it off the loop but adds a
-        # thread hop per poll iteration, and this loop makes several blocking calls, so
-        # converting one of them buys nothing measurable while changing the loop's
-        # timing. Wants doing as one pass over the whole monitor.
-        if ash_aggregated_results.exists():  # noqa: ASYNC240
+        # The registry's status decides when the scan is over, never the presence
+        # of the aggregated results file. That file is there before the scan ends
+        # when the previous scan's results were not set aside (clean_output off),
+        # it is put back when a scan fails or is cancelled without results, and
+        # the SCAN phase writes it before the REPORT phase has run; each of those
+        # was announced as a completed scan with the file's findings.
+        progress_info = await mcp_get_scan_progress(
+            scan_id=scan_id, **_in_session(session_id)
+        )
+        status = progress_info.get("status")
+        if status == "completed":
             await _handle_scan_completed(
                 ctx, output_dir, connection_alive, session_id=session_id
             )
             return
-
-        progress_info = await mcp_get_scan_progress(
-            scan_id=scan_id, **_in_session(session_id)
-        )
-        if progress_info.get("status") in ["failed", "incomplete", "cancelled"]:
+        if status in ["failed", "incomplete", "cancelled"]:
             await _handle_terminal_status(ctx, progress_info, connection_alive)
             return
 
@@ -470,6 +503,21 @@ async def _run_monitor_loop(
             last_progress_time = current_time
 
         await asyncio.sleep(_sleep_interval_for(len(completed_scanners)))
+
+
+def _results_file_state(output_dir: Path) -> Optional[Tuple[int, int, int, int]]:
+    """Identity and version of a project's aggregated results file, or None.
+
+    Device, inode, modification time in nanoseconds and size: a file that was
+    rewritten, replaced or newly written differs in at least one of them from
+    the same name read earlier. Read with ``lstat`` so a link at the name is
+    the link, not what it points at.
+    """
+    try:
+        st = os.lstat(output_dir / _AGGREGATED_RESULTS_FILENAME)
+    except OSError:
+        return None
+    return (st.st_dev, st.st_ino, st.st_mtime_ns, st.st_size)
 
 
 async def monitor_workspace_progress(
@@ -522,6 +570,12 @@ async def monitor_workspace_progress(
         return
 
     completed: set = set()
+    # What each project's aggregated results file was when the monitor started.
+    # A project is complete when that file is not what it was then: a file the
+    # previous scan left (clean_output off) or that a failed project's restore
+    # put back is the same file, and counted a project that never finished, or
+    # had not started, as complete.
+    before = {key: _results_file_state(out) for key, out in project_outputs.items()}
     connection_alive = await _safe_send(
         True,
         lambda: report_progress(
@@ -538,7 +592,8 @@ async def monitor_workspace_progress(
         for key, output_dir in project_outputs.items():
             if key in completed:
                 continue
-            if not (output_dir / _AGGREGATED_RESULTS_FILENAME).exists():
+            state = _results_file_state(output_dir)
+            if state is None or state == before[key]:
                 continue
             completed.add(key)
             connection_alive = await _safe_send(
@@ -581,7 +636,7 @@ async def monitor_scan_progress(
         scan_info = await _fetch_initial_scan_info(ctx, scan_id, session_id)
         if scan_info is None:
             return
-        _, output_dir, ash_aggregated_results = scan_info
+        _, output_dir, _ = scan_info
 
         connection_alive = await _send_initial_progress(ctx)
 
@@ -589,7 +644,6 @@ async def monitor_scan_progress(
             ctx,
             scan_id,
             output_dir,
-            ash_aggregated_results,
             connection_alive,
             session_id,
         )
