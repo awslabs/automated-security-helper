@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Literal, Sequence, Tuple
+from typing import ClassVar, Literal, Sequence, Tuple
 from unittest.mock import MagicMock
 
 import pytest
@@ -115,7 +115,9 @@ class _ProbeReporterConfig(ReporterPluginConfigBase):
 class _CancellingCompanionReporter(ReporterPluginBase[_ProbeReporterConfig]):
     """Writes a file of its own beside its report, then the scan is cancelled."""
 
-    COMPANION = "ash.cancel-probe.md"
+    # A pydantic model: a plain class attribute needs ClassVar, or the model
+    # reads it as a field with no annotation and refuses to build.
+    COMPANION: ClassVar[str] = "ash.cancel-probe.md"
 
     def model_post_init(self, context):
         if self.config is None:
