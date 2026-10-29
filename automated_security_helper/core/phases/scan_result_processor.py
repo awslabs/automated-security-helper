@@ -76,18 +76,21 @@ class ScanResultProcessor:
         # (utils/undecodable_text.py); the scanner's object is left as it is.
         results = recorded(results)
         scanner_name = results.scanner_name
+        # A container with no target (the scan phase's decision for the whole
+        # scanner, a failure container) is filed under the string "None", the key
+        # it has once the results are written as JSON and read back. Filed under
+        # the Python None, a live run and a rebuild of its saved results read
+        # different keys: ScannerStatisticsCalculator looks the scanner-level
+        # report up under "None", so a crashed scanner read one way live and
+        # another after reload.
+        target_key = results.target_type if results.target_type is not None else "None"
         if scanner_name not in aggregated_results.additional_reports:
             aggregated_results.additional_reports[scanner_name] = {}
 
-        if (
-            results.target_type
-            not in aggregated_results.additional_reports[scanner_name]
-        ):
-            aggregated_results.additional_reports[scanner_name][
-                results.target_type
-            ] = {}
+        if target_key not in aggregated_results.additional_reports[scanner_name]:
+            aggregated_results.additional_reports[scanner_name][target_key] = {}
 
-        aggregated_results.additional_reports[scanner_name][results.target_type] = (
+        aggregated_results.additional_reports[scanner_name][target_key] = (
             results.model_dump(
                 exclude_none=True,
                 exclude_unset=True,
@@ -202,7 +205,7 @@ class ScanResultProcessor:
             if aggregated_results.sarif is not None:
                 aggregated_results.sarif.merge_sarif_report(sanitized_sarif)
             target_report = aggregated_results.additional_reports[scanner_name][
-                results.target_type
+                target_key
             ]
             target_report.pop("raw_results", None)
 
@@ -229,7 +232,7 @@ class ScanResultProcessor:
                 aggregated_results.cyclonedx, results.raw_results
             )
             target_report = aggregated_results.additional_reports[scanner_name][
-                results.target_type
+                target_key
             ]
             target_report.pop("severity_counts", None)
             target_report.pop("raw_results", None)
@@ -245,7 +248,7 @@ class ScanResultProcessor:
             # when the SARIF holds nothing for the scanner
             # (``extract_sarif_counts_for_scanner``). Dropped, the row the
             # executor graded FAILED rolled up PASSED with 0 actionable.
-            aggregated_results.additional_reports[scanner_name][results.target_type][
+            aggregated_results.additional_reports[scanner_name][target_key][
                 "raw_results"
             ] = results.raw_results
 
@@ -254,9 +257,7 @@ class ScanResultProcessor:
         with open_for_write(ash_target_result_path) as handle:
             handle.write(
                 json.dumps(
-                    aggregated_results.additional_reports[scanner_name][
-                        results.target_type
-                    ],
+                    aggregated_results.additional_reports[scanner_name][target_key],
                     default=str,
                 )
             )

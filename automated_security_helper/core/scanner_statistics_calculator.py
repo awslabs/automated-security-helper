@@ -825,6 +825,20 @@ class ScannerStatisticsCalculator:
                 # rather than inventing a severity for it.
                 excluded = True
 
+        # A failure container is ERROR whatever status it carries.
+        # ``ScanResultsContainer.for_failure`` writes FAILED, and the run modes'
+        # handlers give it ``raw_results`` with ``status: "failed"`` (the
+        # executor grades such a dict ERROR on its own path, but these containers
+        # never take it). Read as its status said, a crashed scanner's report
+        # under "None" was a verdict: not ERROR, and with findings it rolled up
+        # FAILED ("ran and found something") instead of ERROR, and the completeness
+        # gate let it through. ``exception`` is the other mark a failure leaves.
+        raw_results = report.get("raw_results")
+        if (
+            isinstance(raw_results, dict) and raw_results.get("status") == "failed"
+        ) or report.get("exception"):
+            error = True
+
         return excluded, dependencies_missing, error
 
     @staticmethod
