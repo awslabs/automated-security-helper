@@ -99,12 +99,17 @@ from automated_security_helper.config.confinement_remedy import (
 )
 from automated_security_helper.utils.display_text import escape_controls
 from automated_security_helper.utils.link_locations import link_locations
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, current_run_log_scope
 
 if TYPE_CHECKING:
     from automated_security_helper.config.sandbox_grants import WalkJudgment
 
-_WARNED: Set[Tuple[str, str]] = set()
+#: The path refusals already logged, as (run log scope, option key, path). Keyed
+#: on the run's log scope so a long-lived process (the MCP server) logs a
+#: refusal again for a later scan run that refuses the same option and path;
+#: within one run the many per-path checks stay deduplicated. None is the scope
+#: outside every run.
+_WARNED: Set[Tuple[Optional[str], str, str]] = set()
 _WARNED_LOCK = threading.Lock()
 
 #: The scan run the derived roots recorded and judged here belong to, set by
@@ -373,12 +378,19 @@ def _checkouts_holding(scan_root: Path) -> List[Path]:
     All of them rather than the nearest: a scanned submodule's superproject chose
     the submodule's commit, so its files are the scanned repository's too.
     """
-    from automated_security_helper.config.sandbox_grants import scan_root_names
+    from automated_security_helper.config.sandbox_grants import (
+        _git_shaped,
+        scan_root_names,
+    )
 
+    # The one checkout definition (sandbox_grants._git_shaped): an empty .git
+    # directory, or one a stranger left in a shared parent, marks no checkout
+    # here either, so this judgment and the sandbox grants' agree on where the
+    # repository ends.
     checkouts: List[Path] = []
     for name in scan_root_names(scan_root):
         for candidate in (name, *name.parents):
-            if os.path.lexists(candidate / ".git") and candidate not in checkouts:
+            if _git_shaped(candidate / ".git") and candidate not in checkouts:
                 checkouts.append(candidate)
     return checkouts
 
@@ -400,7 +412,9 @@ def scanned_checkout_reason(
     code.
     """
     from automated_security_helper.config.sandbox_grants import (
+        UNFINISHED_WALK_REASON,
         _named_within,
+        _walk_links,
         is_within,
         scan_root_names,
     )
@@ -417,6 +431,21 @@ def scanned_checkout_reason(
                 f"it is inside the git checkout at {checkout.as_posix()}, which "
                 f"holds the scanned directory"
             )
+    # A baseline reached through a link that sits in the scanned tree, or in a
+    # checkout holding it, was chosen by whoever placed the link: the
+    # repository's, as the other reason tiers read it (``in_tree_reason``). A
+    # walk that never finished is refused the same way, since the links beyond
+    # the stop were never seen.
+    links, decided = _walk_links(path)
+    for link in links:
+        for tree in (*names, *checkouts):
+            if is_within(link.parent, tree):
+                return (
+                    f"it is reached through {link.as_posix()}, a link inside the "
+                    f"scanned repository at {tree.as_posix()}"
+                )
+    if not decided:
+        return UNFINISHED_WALK_REASON
     return _client_delivered_reason(path)
 
 
@@ -568,10 +597,11 @@ def resolved_path(value: Union[str, Path], source_dir: Union[str, Path]) -> Path
 
 
 def _first_warning(key: str, path: Path) -> bool:
-    """Whether the refusal of ``path`` for ``key`` is not yet logged; records it."""
+    """Whether the refusal of ``path`` for ``key`` is not yet logged in this run; records it."""
+    entry = (current_run_log_scope(), key, path.as_posix())
     with _WARNED_LOCK:
-        first = (key, path.as_posix()) not in _WARNED
-        _WARNED.add((key, path.as_posix()))
+        first = entry not in _WARNED
+        _WARNED.add(entry)
     return first
 
 
@@ -917,7 +947,22 @@ def honored_path(
     """
     if value is None or str(value).strip() == "":
         return None
-    path = resolved_path(value, source_dir)
+    try:
+        path = resolved_path(value, source_dir)
+    except ValueError:
+        # A value holding a NUL names no file (os.path.realpath refuses it); it
+        # is dropped like a refused path instead of raising out of the scanner's
+        # construction. The value is never printed: a repository's baseline can
+        # write it, and an environment variable can hold it.
+        if _first_warning(key, Path(os.fspath(source_dir)) / "<unreadable value>"):
+            ASH_LOGGER.warning(
+                _shown(
+                    f"Ignoring {key}: the value holds a character no file name "
+                    "can hold, so it names no file and is not passed to the tool.",
+                    config,
+                )
+            )
+        return None
     root = getattr(config, "_scanned_root", None) or source_dir
     # Checked as named, not as resolved: scanned_tree_reason checks both, so a link
     # the repository planted is judged by where it sits as well as where it points.
@@ -941,10 +986,7 @@ def honored_path(
         ):
             return None
         return path
-    with _WARNED_LOCK:
-        first = (key, path.as_posix()) not in _WARNED
-        _WARNED.add((key, path.as_posix()))
-    if first:
+    if _first_warning(key, path):
         # Imported here: sandbox_grants imports ash_config, which imports the
         # scanners that import this module.
         from automated_security_helper.config.sandbox_grants import (
