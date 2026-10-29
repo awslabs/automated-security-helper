@@ -125,25 +125,40 @@ class ScannerStatisticsCalculator:
         sarif_scanner_names = ScannerStatisticsCalculator._get_scanner_names_from_sarif(
             asharp_model
         )
-        additional_reports_scanners = (
-            list(asharp_model.additional_reports.keys())
-            if asharp_model.additional_reports
-            else []
-        )
+        # Only an entry shaped as the processor writes one, a mapping of target
+        # reports (each a mapping), names a scanner. additional_reports is a
+        # free-form dictionary a plugin may write to under any key (cli/merge.py
+        # carries such entries through); read as a scanner, a list of findings
+        # or a scalar became a phantom row with no recorded status, ERROR, that
+        # tripped the completeness gate.
+        additional_reports_scanners = [
+            name
+            for name, reports in (asharp_model.additional_reports or {}).items()
+            if isinstance(reports, dict)
+            and any(isinstance(report, dict) for report in reports.values())
+        ]
         scanner_results_scanners = (
             list(asharp_model.scanner_results.keys())
             if asharp_model.scanner_results
             else []
         )
 
-        # Combine all sources
-        scanner_names = list(
-            set(
-                sarif_scanner_names
-                + additional_reports_scanners
-                + scanner_results_scanners
-            )
-        )
+        # Combine all sources. One scanner under two spellings of its name is
+        # one scanner: the counts below match SARIF findings to a name
+        # case-insensitively, so a case-sensitive union counted every finding of
+        # "Bandit" and "bandit" twice, in the per-scanner rows and in every
+        # total. The spelling kept is the first met, scanner_results' first (the
+        # rows the scan phase wrote), then the reports', then the SARIF's.
+        scanner_names: list = []
+        seen_names: set = set()
+        for name in (
+            scanner_results_scanners + additional_reports_scanners + sarif_scanner_names
+        ):
+            folded = name.lower() if isinstance(name, str) else name
+            if folded in seen_names:
+                continue
+            seen_names.add(folded)
+            scanner_names.append(name)
 
         ASH_LOGGER.debug("Scanner Discovery Summary:")
         ASH_LOGGER.debug(
@@ -196,18 +211,28 @@ class ScannerStatisticsCalculator:
             # Calculate duration from additional_reports (where container data is stored)
             duration = 0.0
 
-            # First try to get duration from additional_reports (where full container data is stored)
-            if (
-                scanner_name in asharp_model.additional_reports
-                and "source" in asharp_model.additional_reports[scanner_name]
-            ):
-                container_data = asharp_model.additional_reports[scanner_name]["source"]
-                if isinstance(container_data, dict) and "duration" in container_data:
-                    # Guard against None duration to prevent downstream formatting crashes
-                    duration = container_data["duration"] or 0.0
-                    ASH_LOGGER.debug(
-                        f"Got duration for {scanner_name} from additional_reports: {duration}"
-                    )
+            # First from the per-target reports, summed over every target the
+            # scanner reported under: ScanPhase gives each scanner the source
+            # tree and the converted tree, and reading the source report alone
+            # dropped the converted tree's scan time. Only a mapping is read: a
+            # results file put together by hand, or merged from another, can
+            # hold a value under the scanner's name that is not a container (a
+            # null, a list), and indexing it raised TypeError here, after the
+            # scan ran.
+            reports = asharp_model.additional_reports.get(scanner_name)
+            recorded_durations = [
+                report["duration"]
+                for report in (reports.values() if isinstance(reports, dict) else ())
+                if isinstance(report, dict)
+                and report.get("scanner_name") == scanner_name
+                and isinstance(report.get("duration"), (int, float))
+                and not isinstance(report.get("duration"), bool)
+            ]
+            if recorded_durations:
+                duration = float(sum(recorded_durations))
+                ASH_LOGGER.debug(
+                    f"Got duration for {scanner_name} from additional_reports: {duration}"
+                )
 
             # Fallback to scanner_results if available (for backward compatibility)
             elif scanner_name in asharp_model.scanner_results:
@@ -455,24 +480,34 @@ class ScannerStatisticsCalculator:
         Returns:
             The scanner name if found, or None if the scanner name could not be determined
         """
+        # Only text names a scanner. A property that is present but null, or
+        # not a string, is read from a SARIF file ASH did not write: returned as
+        # it was, a null stopped the fallback chain and a non-string crashed the
+        # sort of the names and the case-insensitive match.
+        properties = getattr(result, "properties", None)
+        if not properties:
+            return None
+
         # First check for scanner_name in properties
-        if result.properties and hasattr(result.properties, "scanner_name"):
-            return result.properties.scanner_name
+        scanner_name = getattr(properties, "scanner_name", None)
+        if isinstance(scanner_name, str) and scanner_name:
+            return scanner_name
 
         # Then check for scanner_details.tool_name
-        if result.properties and hasattr(result.properties, "scanner_details"):
-            scanner_details = result.properties.scanner_details
-            if hasattr(scanner_details, "tool_name"):
-                return scanner_details.tool_name
+        scanner_details = getattr(properties, "scanner_details", None)
+        tool_name = getattr(scanner_details, "tool_name", None)
+        if isinstance(tool_name, str) and tool_name:
+            return tool_name
 
-        # Check for tags that might indicate scanner name
-        if result.properties and hasattr(result.properties, "tags"):
-            for tag in result.properties.tags:
-                # Shared with models/flat_vulnerability.py rather than repeated here.
-                # This list and that one were both written before opengrep shipped and
-                # neither was updated, so the two agreed only by both being wrong.
-                if tag.lower() in SCANNER_TAG_NAMES:
-                    return tag
+        # Check for tags that might indicate scanner name. ``tags: null`` is a
+        # list of none, not a TypeError.
+        tags = getattr(properties, "tags", None)
+        for tag in tags if isinstance(tags, (list, tuple)) else ():
+            # Shared with models/flat_vulnerability.py rather than repeated here.
+            # This list and that one were both written before opengrep shipped and
+            # neither was updated, so the two agreed only by both being wrong.
+            if isinstance(tag, str) and tag.lower() in SCANNER_TAG_NAMES:
+                return tag
 
         # If we can't determine the scanner from the result, return None
         return None
@@ -634,7 +669,10 @@ class ScannerStatisticsCalculator:
         if (
             scanner_config_entry
             and isinstance(scanner_config_entry, dict)
-            and "options" in scanner_config_entry
+            # Only a mapping holds options. A community plugin's section can
+            # write ``options: null`` (or a scalar); read as a mapping it raised
+            # TypeError here and aborted the metrics after the scan had run.
+            and isinstance(scanner_config_entry.get("options"), dict)
         ):
             options = scanner_config_entry["options"]
             if (
@@ -654,6 +692,14 @@ class ScannerStatisticsCalculator:
                 # already plain.
                 raw_threshold = options["severity_threshold"]
                 scanner_threshold = without_env_scalars(raw_threshold)
+                if not isinstance(scanner_threshold, str):
+                    # An external section is never validated, so its threshold
+                    # can be a number or a list. Graded as its text: the ladder
+                    # reads an unrecognised threshold as CRITICAL only, and the
+                    # row shows what the file wrote. The stats row's
+                    # ``threshold`` is a str field that refused the raw value
+                    # and aborted the summary after the scan had run.
+                    scanner_threshold = str(scanner_threshold)
                 if isinstance(raw_threshold, EnvResolvedScalar):
                     # Read from the environment only when the variable was set;
                     # a used default is the file's own level and graded as such.
@@ -763,14 +809,37 @@ class ScannerStatisticsCalculator:
         re-inserts references from); nothing here changes what is recorded or
         its shape. The shown spelling matches the external branch above: the
         variable alone, never a written default's text."""
+        from automated_security_helper.config.ash_config import reduced_plugin_name
         from automated_security_helper.config.environment_record import (
             referenced_name,
         )
 
+        def _same_path(recorded: Tuple[Any, ...], wanted: Tuple[Any, ...]) -> bool:
+            # The scanner's section is matched as get_plugin_config matches it:
+            # the file can spell a built-in scanner's key with another case or
+            # with "_" for "-", and the load records the path as written. Read by
+            # exact equality, such a section's env-read threshold showed its
+            # resolved value with threshold_from_env False.
+            if len(recorded) != len(wanted):
+                return False
+            for position, (left, right) in enumerate(zip(recorded, wanted)):
+                if left == right:
+                    continue
+                if (
+                    position == 1
+                    and wanted[0] == "scanners"
+                    and isinstance(left, str)
+                    and isinstance(right, str)
+                    and reduced_plugin_name(left) == reduced_plugin_name(right)
+                ):
+                    continue
+                return False
+            return True
+
         for reference in getattr(ash_conf, "_environment_references", ()) or ():
             if getattr(reference, "key", False):
                 continue
-            if tuple(getattr(reference, "path", ())) != tuple(path):
+            if not _same_path(tuple(getattr(reference, "path", ())), tuple(path)):
                 continue
             name = referenced_name(getattr(reference, "written", ""))
             if name:
@@ -1410,8 +1479,10 @@ class ScannerStatisticsCalculator:
             - total_scanners: Total number of scanners
             - passed_scanners: Number of scanners that passed
             - failed_scanners: Number of scanners that failed
-            - skipped_scanners: Number of scanners that were skipped
+            - skipped_scanners: Number of scanners that were skipped (excluded, or
+              they ran and evaluated nothing)
             - missing_scanners: Number of scanners with missing dependencies
+            - error_scanners: Number of scanners that produced no usable results
             - total_suppressed: Total number of suppressed findings
             - total_critical: Total number of critical findings
             - total_high: Total number of high findings
@@ -1432,6 +1503,7 @@ class ScannerStatisticsCalculator:
         failed_count = 0
         skipped_count = 0
         missing_count = 0
+        error_count = 0
 
         for scanner_name, stats in scanner_stats.items():
             totals.suppressed += stats["suppressed"]
@@ -1443,12 +1515,22 @@ class ScannerStatisticsCalculator:
             total_findings += stats["total"]
             total_actionable += stats["actionable"]
 
-            if stats["excluded"]:
+            # The order get_scanner_status and unified_metrics decide a status
+            # in: a scanner that produced no usable results is counted as an
+            # error ahead of anything else, findings outrank the did-not-run
+            # statuses, and a tracking scanner that attempted nothing is
+            # skipped, not passed. Read with .get: a stats row from an older
+            # writer may carry neither flag, and absence is "no claim".
+            if stats.get("error", False):
+                error_count += 1
+            elif stats["actionable"] > 0:
+                failed_count += 1
+            elif stats["excluded"]:
                 skipped_count += 1
             elif stats["dependencies_missing"]:
                 missing_count += 1
-            elif stats["actionable"] > 0:
-                failed_count += 1
+            elif stats.get("evaluated_nothing", False):
+                skipped_count += 1
             else:
                 passed_count += 1
 
@@ -1458,6 +1540,7 @@ class ScannerStatisticsCalculator:
             "failed_scanners": failed_count,
             "skipped_scanners": skipped_count,
             "missing_scanners": missing_count,
+            "error_scanners": error_count,
             "total_suppressed": totals.suppressed,
             "total_critical": totals.critical,
             "total_high": totals.high,
