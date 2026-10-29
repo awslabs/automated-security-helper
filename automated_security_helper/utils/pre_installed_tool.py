@@ -231,29 +231,39 @@ def build_requirement(
 
 
 def find_tool_interpreter(executable: str) -> Optional[str]:
-    """The Python interpreter whose environment provides ``executable``, if any."""
-    resolved = Path(os.path.realpath(executable))
-    for name in _INTERPRETER_NAMES:
-        candidate = resolved.parent / name
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            return str(candidate)
+    """The Python interpreter whose environment provides ``executable``, if any.
 
+    A console script names its interpreter on its ``#!`` line, and that is the
+    environment that provides it. The interpreter beside the executable is read
+    only for a file with no ``#!`` line that is a Windows launcher (an ``.exe``
+    entry point, whose shebang is embedded past the file's start): a native
+    binary, or a script another interpreter owns, used to be judged against
+    whatever python sat in its directory, an unrelated environment, and read
+    as unsatisfied.
+    """
+    resolved = Path(os.path.realpath(executable))
     try:
         with open(resolved, "rb") as handle:
             first_line = handle.readline(1024)
     except OSError:
         return None
-    if not first_line.startswith(b"#!"):
+    if first_line.startswith(b"#!"):
+        parts = first_line[2:].decode("utf-8", errors="replace").split()
+        if not parts:
+            return None
+        interpreter = parts[0]
+        if Path(interpreter).name == "env" and len(parts) > 1:
+            interpreter = find_executable(parts[1]) or ""
+        if "python" not in Path(interpreter).name.lower():
+            return None
+        return interpreter if Path(interpreter).is_file() else None
+    if os.name != "nt" and resolved.suffix.lower() != ".exe":
         return None
-    parts = first_line[2:].decode("utf-8", errors="replace").split()
-    if not parts:
-        return None
-    interpreter = parts[0]
-    if Path(interpreter).name == "env" and len(parts) > 1:
-        interpreter = find_executable(parts[1]) or ""
-    if "python" not in Path(interpreter).name.lower():
-        return None
-    return interpreter if Path(interpreter).is_file() else None
+    for name in _INTERPRETER_NAMES:
+        candidate = resolved.parent / name
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
 
 
 def _read_head(path: Path) -> Optional[str]:
@@ -388,6 +398,12 @@ def _probe(
         return None
 
 
+#: uv's warning for an extra the installed package does not declare, as a
+#: substring of its flowed output: "The package `bandit==1.7.0` does not have an
+#: extra named `sarif`".
+_UV_UNKNOWN_EXTRA_MARKER = "does not have an extra named"
+
+
 def _dry_run(
     uv: str,
     interpreter: str,
@@ -431,6 +447,12 @@ def _dry_run(
     # Matched with every run of whitespace as one space, so a message wrapped
     # across lines still matches.
     flowed = " ".join(output.split())
+    if _UV_UNKNOWN_EXTRA_MARKER in flowed:
+        # The installed version declares no extra of a requested name (it
+        # predates the extra): uv warns, installs nothing for it and reports
+        # no changes, so the "satisfied" reading below would run a copy that
+        # never provides what the extra brings.
+        return "unsatisfied", output
     if result.returncode == 0 and "Would make no changes" in flowed:
         return "satisfied", ""
     if result.returncode == 0 or any(m in flowed for m in _UV_UNSATISFIABLE_MARKERS):
@@ -691,31 +713,52 @@ def _verify(
                 summary="no uv was found beside ASH's interpreter or on PATH",
             )
         nix_interpreter, site_dirs = nix_environment
-        with tempfile.TemporaryDirectory(prefix="ash-nix-metadata-") as target:
-            if _stage_nix_metadata(site_dirs, Path(target)) == 0:
-                return PreInstalledToolVerdict(
-                    "unverifiable",
+        from automated_security_helper.utils.sandbox.policy import SandboxUnavailable
+
+        try:
+            with tempfile.TemporaryDirectory(prefix="ash-nix-metadata-") as target:
+                if _stage_nix_metadata(site_dirs, Path(target)) == 0:
+                    return PreInstalledToolVerdict(
+                        "unverifiable",
+                        executable,
+                        requirement,
+                        f"{executable} is a Nix-wrapped Python program, but no "
+                        "distribution metadata was found on its site-packages paths",
+                        from_nix=True,
+                        version=version,
+                        summary="it is a Nix-wrapped Python program with no "
+                        "distribution metadata on its site-packages paths",
+                    )
+                return _judge(
                     executable,
+                    package,
+                    extras,
+                    version_constraint,
                     requirement,
-                    f"{executable} is a Nix-wrapped Python program, but no "
-                    "distribution metadata was found on its site-packages paths",
-                    from_nix=True,
-                    version=version,
-                    summary="it is a Nix-wrapped Python program with no "
-                    "distribution metadata on its site-packages paths",
+                    uv,
+                    nix_interpreter,
+                    target,
+                    f"its Nix environment ({nix_interpreter}, {len(site_dirs)} store paths)",
+                    version,
+                    values=values,
                 )
-            return _judge(
+        except SandboxUnavailable:
+            # The scope's refusal, handled by verify_pre_installed_tool.
+            raise
+        except OSError as error:
+            # The staging (the temporary directory, a mkdir, a copy of one
+            # METADATA) could not be done: a verdict, not an exception out of
+            # the scanner's dependency check.
+            return PreInstalledToolVerdict(
+                "unverifiable",
                 executable,
-                package,
-                extras,
-                version_constraint,
                 requirement,
-                uv,
-                nix_interpreter,
-                target,
-                f"its Nix environment ({nix_interpreter}, {len(site_dirs)} store paths)",
-                version,
-                values=values,
+                f"{executable} is a Nix-wrapped Python program whose distribution "
+                f"metadata could not be staged for uv: {error}",
+                from_nix=True,
+                version=version,
+                summary="its Nix environment's distribution metadata could not "
+                "be staged for uv",
             )
 
     interpreter = find_tool_interpreter(executable)
@@ -801,13 +844,24 @@ def _judge(
     # constraint, only on this failure path. The constraint probe is --no-deps:
     # it asks about the package's own version, and with dependencies included a
     # gap further down the tree would be misreported as a version mismatch.
-    missing = tuple(
-        extra
-        for extra in extras
-        if _dry_run(uv, interpreter, build_requirement(package, [extra], None), target)[
-            0
-        ]
-        == "unsatisfied"
+    # The extras are probed only when the bare package resolves: each extra's
+    # probe resolves the whole tree, so a dependency the environment lacks (or
+    # the package's own absence) read as every requested extra missing, and the
+    # real cause, the resolver's own, was suppressed below.
+    package_resolves = not extras or (
+        _dry_run(uv, interpreter, package, target)[0] != "unsatisfied"
+    )
+    missing = (
+        tuple(
+            extra
+            for extra in extras
+            if _dry_run(
+                uv, interpreter, build_requirement(package, [extra], None), target
+            )[0]
+            == "unsatisfied"
+        )
+        if package_resolves
+        else ()
     )
     reasons = []
     # The summary's parallel parts name no extra, no constraint text and no
