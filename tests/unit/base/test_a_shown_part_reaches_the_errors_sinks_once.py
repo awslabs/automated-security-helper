@@ -29,6 +29,8 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.utils.log import console_text
 from automated_security_helper.utils.terminal_text import shown_not_obeyed
 
+pytestmark = pytest.mark.unit
+
 #: A tool's stderr line holding an ESC, as written.
 TEXT = "a\x1bb"
 

@@ -16,7 +16,10 @@ import pytest
 
 from automated_security_helper.base.plugin_base import log_says
 
-pytestmark = pytest.mark.skipif(os.name == "nt", reason="POSIX file semantics")
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(os.name == "nt", reason="POSIX file semantics"),
+]
 
 
 def test_a_fifo_at_the_log_name_fails_fast_instead_of_blocking(tmp_path):

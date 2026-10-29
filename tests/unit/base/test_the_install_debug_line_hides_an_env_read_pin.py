@@ -27,6 +27,8 @@ from automated_security_helper.utils import uv_tool_runner
 from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 from tests.unit.base.test_uv_tool_mixin import FakePlugin
 
+pytestmark = pytest.mark.unit
+
 _PIN = "9.9.9-RC777"
 
 _RESOLVER_STDERR = (

@@ -8,7 +8,11 @@ and an error carrying no marker text, so only the recorded state can put it on
 the scanner.
 """
 
+import pytest
+
 from base.test_scanner_spawn_failure import _uv_scanner_whose_run_returns
+
+pytestmark = pytest.mark.unit
 
 
 class _PostRunCarrier:

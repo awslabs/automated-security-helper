@@ -33,6 +33,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scann
 from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 PluginContext.model_rebuild()
 AshConfig.model_rebuild()
 

@@ -25,6 +25,8 @@ from automated_security_helper.base.reporter_plugin import (
 )
 from automated_security_helper.config.ash_config import AshConfig
 
+pytestmark = pytest.mark.unit
+
 
 class _OwnOptions(ReporterOptionsBase):
     count: Annotated[int, Field(le=5)] = 1

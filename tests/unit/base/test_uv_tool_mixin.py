@@ -48,10 +48,12 @@ class FakePlugin(UVToolMixin):
 class TestGetUvToolVersion:
     """Tests for _get_uv_tool_version."""
 
+    @pytest.mark.unit
     def test_returns_none_when_use_uv_tool_disabled(self):
         plugin = FakePlugin(use_uv_tool=False)
         assert plugin._get_uv_tool_version("bandit") is None
 
+    @pytest.mark.unit
     def test_returns_version_string(self):
         """Direct test of the method logic with mocked runner."""
         plugin = FakePlugin(use_uv_tool=True)
@@ -68,6 +70,7 @@ class TestGetUvToolVersion:
             version = plugin._get_uv_tool_version("bandit")
             assert version == "1.7.0"
 
+    @pytest.mark.unit
     def test_returns_none_when_uv_not_available(self):
         plugin = FakePlugin(use_uv_tool=True)
 
@@ -82,6 +85,7 @@ class TestGetUvToolVersion:
             version = plugin._get_uv_tool_version("bandit")
             assert version is None
 
+    @pytest.mark.unit
     def test_a_refused_check_is_logged_as_the_sandbox_refusing_uv(self):
         """Not as uv being absent, which sends the operator to install uv."""
         from automated_security_helper.utils.sandbox.scope import (
@@ -107,6 +111,7 @@ class TestGetUvToolVersion:
         assert "jupyter-nbconvert version detection" in message
         assert "UV is not available" not in message
 
+    @pytest.mark.unit
     def test_returns_none_on_import_error(self):
         plugin = FakePlugin(use_uv_tool=True)
 
@@ -118,6 +123,7 @@ class TestGetUvToolVersion:
             version = plugin._get_uv_tool_version("bandit")
             assert version is None
 
+    @pytest.mark.unit
     def test_returns_none_on_runner_error(self):
         plugin = FakePlugin(use_uv_tool=True)
 
@@ -133,6 +139,7 @@ class TestGetUvToolVersion:
             version = plugin._get_uv_tool_version("bandit")
             assert version is None
 
+    @pytest.mark.unit
     def test_returns_none_on_unexpected_exception(self):
         plugin = FakePlugin(use_uv_tool=True)
 
@@ -159,6 +166,7 @@ class TestGetUvToolVersion:
             ),
         ],
     )
+    @pytest.mark.unit
     def test_the_version_error_arms_logs_hide_the_plugins_values(self, arm, marker):
         """The version probe's ImportError and catch-all arms log the error
         text, which can quote a path with an env-read value in it: they pass
@@ -199,6 +207,7 @@ class TestGetUvToolVersion:
 class TestTryUvToolExecution:
     """Tests for _try_uv_tool_execution."""
 
+    @pytest.mark.unit
     def test_successful_execution(self):
         plugin = FakePlugin(command="bandit")
 
@@ -224,6 +233,7 @@ class TestTryUvToolExecution:
             assert result["stdout"] == "output text"
             assert result["returncode"] == 0
 
+    @pytest.mark.unit
     def test_a_raising_inputs_hook_does_not_drop_the_dispatch(self):
         """The pre-dispatch record computes the run's inputs from overridable
         hooks, and a record must never replace the run itself: a hook that
@@ -257,6 +267,7 @@ class TestTryUvToolExecution:
         assert result is not None, "the raising hook dropped the dispatch"
         assert result["returncode"] == 0, result
 
+    @pytest.mark.unit
     def test_returns_none_when_uv_unavailable(self):
         plugin = FakePlugin(command="bandit")
 
@@ -282,6 +293,7 @@ class TestTryUvToolExecution:
             uv_availability=lambda: (False, probe_failure),
         )
 
+    @pytest.mark.unit
     def test_an_unavailable_uvs_reason_names_the_probes_failure(self):
         """When the runner remembers WHY its probe failed, the scan's reason
         and the log line carry it: "uv is not available" alone reads as "uv
@@ -306,6 +318,7 @@ class TestTryUvToolExecution:
         logged = [" ".join(str(part) for part in args) for args in plugin._log_messages]
         assert any(failure in line for line in logged), logged
 
+    @pytest.mark.unit
     def test_an_absent_uvs_reason_stays_the_plain_sentence(self):
         """The control: with no remembered probe failure (uv absent), the
         plain sentence is the whole truth and gains no empty parenthesis."""
@@ -323,6 +336,7 @@ class TestTryUvToolExecution:
         assert result is None
         assert plugin._uv_run_failure == "uv is not available", plugin._uv_run_failure
 
+    @pytest.mark.unit
     def test_returns_none_on_runner_error(self):
         plugin = FakePlugin(command="bandit")
 
@@ -343,6 +357,7 @@ class TestTryUvToolExecution:
             )
             assert result is None
 
+    @pytest.mark.unit
     def test_the_dispatch_log_hides_the_plugins_values(self):
         """The pre-dispatch DEBUG line logs the tool's args, and an argument
         can carry a value the plugin's config read from the environment (a
@@ -382,6 +397,7 @@ class TestTryUvToolExecution:
         assert dispatch, logged
         assert not any(canary in line for line in logged), logged
 
+    @pytest.mark.unit
     def test_the_dispatch_log_hides_a_spec_that_pins_an_env_read_value(self):
         """The pre-dispatch record quotes the command line, and a plugin-built
         spec can PIN a short env-read value ("1.8"), which sits below the
@@ -454,6 +470,7 @@ class TestTryUvToolExecution:
             ),
         ],
     )
+    @pytest.mark.unit
     def test_the_runner_error_log_hides_the_plugins_values(
         self, raising_method, drive, marker, monkeypatch
     ):
@@ -517,6 +534,7 @@ class TestTryUvToolExecution:
             ),
         ],
     )
+    @pytest.mark.unit
     def test_the_other_error_arms_logs_hide_the_plugins_values(
         self, raised, marker, caplog
     ):
@@ -557,6 +575,7 @@ class TestTryUvToolExecution:
         assert not any(canary in line for line in logged), logged
         assert canary not in caplog.text, caplog.text
 
+    @pytest.mark.integration
     def test_the_after_start_debug_hides_the_plugins_values(self, caplog):
         """The failure-after-the-start DEBUG line logs the error that ended the
         wait, which can quote the argv: it passes through the same redaction."""
@@ -600,6 +619,7 @@ class TestTryUvToolExecution:
         assert "failed after its child started" in caplog.text, caplog.text
         assert canary not in caplog.text, caplog.text
 
+    @pytest.mark.unit
     def test_the_response_error_debug_hides_the_plugins_values(self, caplog):
         """When handling a returned run's response raises, the DEBUG line logs
         the error that broke it, which can quote a path with an env-read value
@@ -630,6 +650,7 @@ class TestTryUvToolExecution:
         assert "UV tool response error details" in caplog.text, caplog.text
         assert canary not in caplog.text, caplog.text
 
+    @pytest.mark.unit
     def test_returns_none_on_import_error(self):
         plugin = FakePlugin(command="bandit")
 
@@ -643,6 +664,7 @@ class TestTryUvToolExecution:
             )
             assert result is None
 
+    @pytest.mark.unit
     def test_returns_none_on_unexpected_error(self):
         plugin = FakePlugin(command="bandit")
 
@@ -661,6 +683,7 @@ class TestTryUvToolExecution:
             )
             assert result is None
 
+    @pytest.mark.unit
     def test_passes_env_to_runner(self):
         plugin = FakePlugin(command="bandit")
 
@@ -692,10 +715,12 @@ class TestTryUvToolExecution:
 class TestValidateUvToolAvailability:
     """Tests for _validate_uv_tool_availability."""
 
+    @pytest.mark.unit
     def test_returns_true_when_uv_not_required(self):
         plugin = FakePlugin(use_uv_tool=False)
         assert plugin._validate_uv_tool_availability() is True
 
+    @pytest.mark.unit
     def test_returns_true_when_uv_available(self):
         plugin = FakePlugin(use_uv_tool=True)
 
@@ -709,6 +734,7 @@ class TestValidateUvToolAvailability:
 
             assert plugin._validate_uv_tool_availability() is True
 
+    @pytest.mark.unit
     def test_returns_false_when_uv_unavailable(self):
         plugin = FakePlugin(use_uv_tool=True)
 
@@ -722,6 +748,7 @@ class TestValidateUvToolAvailability:
 
             assert plugin._validate_uv_tool_availability() is False
 
+    @pytest.mark.unit
     def test_returns_false_on_runner_error(self):
         plugin = FakePlugin(use_uv_tool=True)
 
@@ -734,6 +761,7 @@ class TestValidateUvToolAvailability:
 
             assert plugin._validate_uv_tool_availability() is False
 
+    @pytest.mark.unit
     def test_returns_false_on_import_error(self):
         plugin = FakePlugin(use_uv_tool=True)
 
@@ -758,6 +786,7 @@ class TestValidateUvToolAvailability:
             ),
         ],
     )
+    @pytest.mark.unit
     def test_the_validation_error_arms_logs_hide_the_plugins_values(self, arm, marker):
         """The validation's ImportError and catch-all arms log the error text,
         which can quote a path with an env-read value in it: they pass through
@@ -798,12 +827,14 @@ class TestValidateUvToolAvailability:
 class TestValidateToolAvailabilityWithPreInstalled:
     """Tests for _validate_tool_availability_with_pre_installed."""
 
+    @pytest.mark.unit
     def test_no_command_returns_unavailable(self):
         plugin = FakePlugin(command="")
         result = plugin._validate_tool_availability_with_pre_installed()
         assert result["available"] is False
         assert "No command specified" in result["errors"][0]
 
+    @pytest.mark.unit
     def test_returns_available_when_tool_found(self):
         plugin = FakePlugin(command="bandit")
 
@@ -822,6 +853,7 @@ class TestValidateToolAvailabilityWithPreInstalled:
             assert result["available"] is True
             assert result["validation_method"] == "uv"
 
+    @pytest.mark.unit
     def test_returns_available_with_pre_installed(self):
         plugin = FakePlugin(command="bandit")
 
@@ -842,6 +874,7 @@ class TestValidateToolAvailabilityWithPreInstalled:
             assert result["validation_method"] == "pre_installed"
             assert len(result["warnings"]) > 0
 
+    @pytest.mark.unit
     def test_attempts_install_when_not_available(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
@@ -872,6 +905,7 @@ class TestValidateToolAvailabilityWithPreInstalled:
             assert result["available"] is True
             assert result["validation_method"] == "uv_installed"
 
+    @pytest.mark.unit
     def test_fails_when_install_not_possible(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=False)
 
@@ -892,20 +926,24 @@ class TestValidateToolAvailabilityWithPreInstalled:
 class TestInstallUvTool:
     """Tests for _install_uv_tool."""
 
+    @pytest.mark.unit
     def test_returns_false_when_uv_not_required(self):
         plugin = FakePlugin(use_uv_tool=False)
         assert plugin._install_uv_tool() is False
 
+    @pytest.mark.unit
     def test_returns_false_when_no_command(self):
         plugin = FakePlugin(command="")
         assert plugin._install_uv_tool() is False
 
+    @pytest.mark.unit
     def test_returns_false_in_offline_mode(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
         with patch.object(plugin, "_is_offline_mode", return_value=True):
             assert plugin._install_uv_tool() is False
 
+    @pytest.mark.unit
     def test_returns_false_when_uv_unavailable(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
@@ -922,6 +960,7 @@ class TestInstallUvTool:
 
             assert plugin._install_uv_tool() is False
 
+    @pytest.mark.unit
     def test_returns_true_when_already_installed_and_functional(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
@@ -944,6 +983,7 @@ class TestInstallUvTool:
 
             assert plugin._install_uv_tool() is True
 
+    @pytest.mark.unit
     def test_successful_installation(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
@@ -967,6 +1007,7 @@ class TestInstallUvTool:
 
             assert plugin._install_uv_tool() is True
 
+    @pytest.mark.unit
     def test_the_install_record_passes_the_public_anchor_and_hides_a_short_pin(
         self,
     ):
@@ -1024,6 +1065,7 @@ class TestInstallUvTool:
         assert "pkgqz==9.9" not in logged, logged
         assert "==9.9" not in logged, logged
 
+    @pytest.mark.unit
     def test_the_setup_debug_line_hides_the_spec_through_the_install_inputs(self):
         """One builder serves the install's spec and every record about it.
         _setup_uv_tool_install_commands still built its spec by hand and
@@ -1053,6 +1095,7 @@ class TestInstallUvTool:
         assert "==9.9" not in logged, logged
         assert "sarifqz4b" not in logged, logged
 
+    @pytest.mark.unit
     def test_the_install_records_extras_and_retry_lines_hide_glued_values(
         self,
     ):
@@ -1098,6 +1141,7 @@ class TestInstallUvTool:
         ]
         assert extras_lines, logged
 
+    @pytest.mark.unit
     def test_the_pre_installed_verify_carries_the_plugins_values(self, monkeypatch):
         """_select_tool_execution's verify call wires _values_to_redact into
         verify_pre_installed_tool: the verdict's detail embeds the probe's
@@ -1142,6 +1186,7 @@ class TestInstallUvTool:
 
         assert seen == [("qz4b",)], seen
 
+    @pytest.mark.unit
     def test_the_install_call_carries_the_plugins_redaction_values(self):
         """install_tool_with_version redacts uv's stderr for its debug log
         with the caller's values, and the mixin is the caller that holds them:
@@ -1178,6 +1223,7 @@ class TestInstallUvTool:
             kwargs = mock_runner.install_tool_with_version.call_args.kwargs
         assert tuple(kwargs.get("values", ())) == ("VAL-5912",), kwargs
 
+    @pytest.mark.unit
     def test_failed_installation(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
@@ -1197,6 +1243,7 @@ class TestInstallUvTool:
 
             assert plugin._install_uv_tool() is False
 
+    @pytest.mark.unit
     def test_returns_false_on_runner_error(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
@@ -1212,6 +1259,7 @@ class TestInstallUvTool:
 
             assert plugin._install_uv_tool() is False
 
+    @pytest.mark.unit
     def test_returns_false_on_import_error(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
@@ -1224,6 +1272,7 @@ class TestInstallUvTool:
         ):
             assert plugin._install_uv_tool() is False
 
+    @pytest.mark.unit
     def test_returns_false_on_unexpected_error(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
@@ -1252,6 +1301,7 @@ class TestInstallUvTool:
             ),
         ],
     )
+    @pytest.mark.unit
     def test_the_installation_error_arms_logs_hide_the_plugins_values(
         self, arm, marker, caplog
     ):
@@ -1295,6 +1345,7 @@ class TestInstallUvTool:
             assert "UV tool installation error details" in caplog.text, caplog.text
         assert canary not in caplog.text, caplog.text
 
+    @pytest.mark.unit
     def test_with_custom_retry_config(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
@@ -1326,14 +1377,17 @@ class TestInstallUvTool:
 class TestIsUvToolInstalled:
     """Tests for _is_uv_tool_installed."""
 
+    @pytest.mark.unit
     def test_returns_false_when_uv_not_used(self):
         plugin = FakePlugin(use_uv_tool=False)
         assert plugin._is_uv_tool_installed() is False
 
+    @pytest.mark.unit
     def test_returns_false_when_no_command(self):
         plugin = FakePlugin(command="")
         assert plugin._is_uv_tool_installed() is False
 
+    @pytest.mark.unit
     def test_returns_true_when_tool_in_list(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
@@ -1348,6 +1402,7 @@ class TestIsUvToolInstalled:
 
             assert plugin._is_uv_tool_installed() is True
 
+    @pytest.mark.unit
     def test_returns_false_when_tool_not_in_list(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
@@ -1362,6 +1417,7 @@ class TestIsUvToolInstalled:
 
             assert plugin._is_uv_tool_installed() is False
 
+    @pytest.mark.unit
     def test_falls_back_to_version_check_on_list_error(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
@@ -1383,12 +1439,14 @@ class TestIsUvToolInstalled:
 class TestGetToolInstallationInfo:
     """Tests for _get_tool_installation_info."""
 
+    @pytest.mark.unit
     def test_no_command_returns_empty_info(self):
         plugin = FakePlugin(command="")
         info = plugin._get_tool_installation_info()
         assert info["tool_name"] is None
         assert info["available"] is False
 
+    @pytest.mark.unit
     def test_returns_runner_info(self):
         plugin = FakePlugin(command="bandit")
 
@@ -1411,6 +1469,7 @@ class TestGetToolInstallationInfo:
             assert info["tool_name"] == "bandit"
             assert info["available"] is True
 
+    @pytest.mark.unit
     def test_returns_error_info_on_exception(self):
         plugin = FakePlugin(command="bandit")
 
@@ -1426,14 +1485,17 @@ class TestGetToolInstallationInfo:
 class TestShouldInstallTool:
     """Tests for _should_install_tool."""
 
+    @pytest.mark.unit
     def test_returns_false_when_uv_not_used(self):
         plugin = FakePlugin(use_uv_tool=False)
         assert plugin._should_install_tool() is False
 
+    @pytest.mark.unit
     def test_returns_false_when_no_command(self):
         plugin = FakePlugin(command="")
         assert plugin._should_install_tool() is False
 
+    @pytest.mark.unit
     def test_delegates_to_runner(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
@@ -1446,6 +1508,7 @@ class TestShouldInstallTool:
 
             assert plugin._should_install_tool() is True
 
+    @pytest.mark.unit
     def test_returns_false_on_exception(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
@@ -1459,16 +1522,19 @@ class TestShouldInstallTool:
 class TestSetupUvToolInstallCommands:
     """Tests for _setup_uv_tool_install_commands."""
 
+    @pytest.mark.unit
     def test_does_nothing_when_uv_disabled(self):
         plugin = FakePlugin(use_uv_tool=False)
         plugin._setup_uv_tool_install_commands()
         assert plugin.uv_tool_install_commands == []
 
+    @pytest.mark.unit
     def test_does_nothing_when_no_command(self):
         plugin = FakePlugin(command="", use_uv_tool=True)
         plugin._setup_uv_tool_install_commands()
         assert plugin.uv_tool_install_commands == []
 
+    @pytest.mark.unit
     def test_basic_install_command(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
@@ -1478,6 +1544,7 @@ class TestSetupUvToolInstallCommands:
         assert len(plugin.uv_tool_install_commands) == 1
         assert "uv tool install bandit" in plugin.uv_tool_install_commands[0]
 
+    @pytest.mark.unit
     def test_install_with_package_name(self):
         plugin = FakePlugin(
             command="bandit", use_uv_tool=True, uv_tool_package_name="bandit-pkg"
@@ -1488,6 +1555,7 @@ class TestSetupUvToolInstallCommands:
 
         assert "bandit-pkg" in plugin.uv_tool_install_commands[0]
 
+    @pytest.mark.unit
     def test_install_with_version_constraint(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
@@ -1501,6 +1569,7 @@ class TestSetupUvToolInstallCommands:
 
         assert ">=1.7.0" in plugin.uv_tool_install_commands[0]
 
+    @pytest.mark.unit
     def test_install_with_extras(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
@@ -1514,6 +1583,7 @@ class TestSetupUvToolInstallCommands:
 
         assert "bandit[sarif,toml]" in plugin.uv_tool_install_commands[0]
 
+    @pytest.mark.unit
     def test_a_refused_constraint_read_from_the_environment_is_not_logged(self):
         """A constraint the requirement check refuses is logged as refused, and
         the refusal names the tool, never the constraint's text. When the
@@ -1541,6 +1611,7 @@ class TestSetupUvToolInstallCommands:
         assert "bandit" in refusals[0], refusals
         assert not any("9.9.9rc777" in line for line in logged), logged
 
+    @pytest.mark.unit
     def test_a_raising_values_hook_does_not_crash_the_setup(self):
         """The values hook is overridable, and this method runs at plugin
         construction: a hook that raises must cost the two log lines their
@@ -1568,6 +1639,7 @@ class TestSetupUvToolInstallCommands:
         assert "values hook raised RuntimeError" in logged, logged
         assert "==9.9" not in logged, logged
 
+    @pytest.mark.unit
     def test_a_raising_values_hook_does_not_crash_the_spec_refusal(self):
         """The refusal arm reads the same hook for its WARNING line, so a
         raising hook crashed the refusal too. The refusal still stands (no
@@ -1589,6 +1661,7 @@ class TestSetupUvToolInstallCommands:
         assert "values hook raised RuntimeError" in logged, logged
         assert "9.9.9rc777" not in logged, logged
 
+    @pytest.mark.unit
     def test_the_setup_builds_its_inputs_with_the_tools_dependencies(self):
         """The install-input builder accepts the tool's extra dependencies,
         and the install path passes them; this setup did not, so the two
@@ -1617,6 +1690,7 @@ class TestSetupUvToolInstallCommands:
 
         assert seen.get("with_dependencies") == ["depqz"], seen
 
+    @pytest.mark.unit
     def test_an_install_with_a_refused_constraint_logs_no_constraint_text(
         self, monkeypatch
     ):
@@ -1689,15 +1763,18 @@ class TestSetupUvToolInstallCommands:
 class TestExtensionPoints:
     """Tests for extension point default implementations."""
 
+    @pytest.mark.unit
     def test_get_tool_version_constraint_returns_none(self):
         plugin = FakePlugin()
         # The base implementation should return None (passthrough)
         assert UVToolMixin._get_tool_version_constraint(plugin) is None
 
+    @pytest.mark.unit
     def test_get_tool_package_extras_returns_none(self):
         plugin = FakePlugin()
         assert UVToolMixin._get_tool_package_extras(plugin) is None
 
+    @pytest.mark.unit
     def test_get_tool_with_dependencies_returns_none(self):
         plugin = FakePlugin()
         assert UVToolMixin._get_tool_with_dependencies(plugin) is None
@@ -1706,6 +1783,7 @@ class TestExtensionPoints:
 class TestIsOfflineMode:
     """Tests for _is_offline_mode."""
 
+    @pytest.mark.unit
     def test_delegates_to_constants(self):
         plugin = FakePlugin()
 
@@ -1745,15 +1823,18 @@ class TestProbeSharesTheScansEnvironment:
     environments.
     """
 
+    @pytest.mark.unit
     def test_the_spec_matches_what_run_tool_builds(self):
         """Same string the scan path passes as --from, or the guarantee is void."""
         plugin = SpecPlugin(command="bandit")
         assert plugin._uv_from_spec() == "bandit[sarif,toml]>=1.7.0,<2.0.0"
 
+    @pytest.mark.unit
     def test_no_extras_and_no_constraint_means_no_from(self):
         """The scan passes no --from either, so the probe must not invent one."""
         assert FakePlugin(command="bandit")._uv_from_spec() is None
 
+    @pytest.mark.unit
     def test_the_probe_is_given_the_scans_spec_by_default(self):
         plugin = SpecPlugin(command="bandit")
         with patch(
@@ -1771,6 +1852,7 @@ class TestProbeSharesTheScansEnvironment:
                 "bandit", "bandit[sarif,toml]>=1.7.0,<2.0.0", values=()
             )
 
+    @pytest.mark.unit
     def test_an_explicit_package_name_still_wins(self):
         """An explicit package_name is the caller's own spec, handed on as
         given: the default fills in only where the caller named none."""
@@ -1800,6 +1882,7 @@ class TestOfflineResolveMessageIsRedacted:
     redacted with the plugin's own values, the way the install's debug line
     redacts the same stderr."""
 
+    @pytest.mark.unit
     def test_the_offline_resolve_message_holds_no_value(self):
         import types
 
@@ -1830,6 +1913,7 @@ class TestOfflineResolveMessageIsRedacted:
             "9.9.9rc777" not in " ".join(str(part) for part in msg) for msg in logged
         ), logged
 
+    @pytest.mark.unit
     def test_a_non_color_code_inside_the_phrase_does_not_defeat_the_cause_match(
         self,
     ):
@@ -1864,6 +1948,7 @@ class TestOfflineResolveMessageIsRedacted:
         assert "No solution found" in fake.errors[0], fake.errors[0]
         assert "9.9.9rc777" not in fake.errors[0], fake.errors[0]
 
+    @pytest.mark.unit
     def test_an_overflowing_log_read_keeps_no_fake_tail(self, tmp_path):
         """Under the write preference the message's text is a bounded log
         read; when the log is larger than the read, the text's last bytes are
@@ -1904,6 +1989,7 @@ class TestOfflineResolveMessageIsRedacted:
         assert "the log continues beyond this excerpt" in shown, shown[-400:]
         assert "closing hints" not in shown, shown[-400:]
 
+    @pytest.mark.unit
     def test_the_named_log_path_hides_an_env_read_value(self, tmp_path):
         """The composed message is redacted WHOLE: the clause naming the log
         on an overflowing read, and the command interpolations, are added
@@ -1939,6 +2025,7 @@ class TestOfflineResolveMessageIsRedacted:
         assert "the log continues beyond this excerpt" in shown, shown[-400:]
         assert value not in shown, shown[-400:]
 
+    @pytest.mark.unit
     def test_a_code_heavy_log_keeps_the_read_edge_out_of_the_head(self, tmp_path):
         """The read's cut can land inside a value, and a log that is mostly
         escape codes strips to under the 500 kept characters -- so the
@@ -1976,6 +2063,7 @@ class TestOfflineResolveMessageIsRedacted:
         assert value[:kept] not in shown, shown[-400:]
         assert "the log continues beyond this excerpt" in shown, shown[-400:]
 
+    @pytest.mark.unit
     def test_a_with_dependency_pinning_a_value_is_hidden_in_the_message(self):
         """The message gets the run's WHOLE input set, not just the --from
         spec: a --with dependency that PINS a short env-read value ("1.8",
@@ -2011,6 +2099,7 @@ class TestOfflineResolveMessageIsRedacted:
             "bandit==1.8" not in " ".join(str(part) for part in msg) for msg in logged
         ), logged
 
+    @pytest.mark.unit
     def test_a_cut_at_the_excerpt_boundary_cannot_leave_a_value_fragment(self):
         """The quoted stderr used to be sliced BEFORE the redaction, so a cut
         inside the quoted requirement left a live value fragment
@@ -2046,6 +2135,7 @@ class TestOfflineResolveMessageIsRedacted:
         assert "No solution found" in shown, shown
         assert "VALSECRET" not in shown, shown
 
+    @pytest.mark.unit
     def test_a_long_resolver_text_keeps_both_ends_and_marks_the_cut(self):
         """The message's head is the actionable part ("Offline mode: ...
         Install ... or put a ... on PATH"), uv's own error line leads its
@@ -2088,6 +2178,7 @@ class TestOfflineResolveMessageIsRedacted:
         assert marker in shown, (marker, shown[400:700])
         assert len(shown) < 1600, len(shown)
 
+    @pytest.mark.unit
     def test_a_responses_stderr_enters_errors_redacted(self):
         """_uv_response hands the response to _process_command_response, which
         puts the tool's stderr lines into ``errors`` (reports) BEFORE the
@@ -2125,6 +2216,7 @@ class TestOfflineResolveMessageIsRedacted:
         assert any("you require" in line for line in plugin.errors), plugin.errors
         assert all(canary not in line for line in plugin.errors), plugin.errors
 
+    @pytest.mark.unit
     def test_a_responses_stderr_hides_respelled_and_colored_values(self):
         """uv RESPELLS what it quotes back -- "9.9.9-RC777" prints as
         "9.9.9rc777" (PEP 440 canonical) -- and colors it, so a raw-value
@@ -2163,6 +2255,7 @@ class TestOfflineResolveMessageIsRedacted:
         assert all(canary not in line for line in plugin.errors), plugin.errors
         assert all("\x1b[" not in line for line in plugin.errors), plugin.errors
 
+    @pytest.mark.unit
     def test_a_glued_value_in_the_spec_is_hidden_in_the_report_lines(self):
         """The report lines get the SAME hiding arms as the install debug
         record: _process_command_response computes the run's plugin-built
@@ -2199,6 +2292,7 @@ class TestOfflineResolveMessageIsRedacted:
         assert all(spec not in line for line in plugin.errors), plugin.errors
         assert all(value not in line for line in plugin.errors), plugin.errors
 
+    @pytest.mark.unit
     def test_a_resolver_error_past_the_excerpts_read_still_gets_the_cause(
         self, tmp_path
     ):
@@ -2242,6 +2336,7 @@ class TestOfflineResolveMessageIsRedacted:
             )
         assert control.errors == [], control.errors
 
+    @pytest.mark.unit
     def test_an_offline_unsatisfied_reason_hides_the_plugins_values(self, caplog):
         """_select_tool_execution's offline-unsatisfied branch writes the
         requirement and the verdict's detail into dependency_unavailable_reason
@@ -2295,6 +2390,7 @@ class TestOfflineResolveMessageIsRedacted:
         assert canary not in reason, reason
         assert canary not in caplog.text, caplog.text
 
+    @pytest.mark.unit
     def test_an_old_signature_override_still_handles_a_uv_response(self):
         """_process_command_response is PluginBase's documented extension
         seam: a subclass overriding it with the one-argument signature must
@@ -2322,6 +2418,7 @@ class TestOfflineResolveMessageIsRedacted:
         assert response.get("returncode") == 1, response
         assert response.get("post_run_error") is None, response
 
+    @pytest.mark.unit
     def test_the_satisfied_verdict_line_hides_the_plugins_values(self, caplog):
         """_select_tool_execution's satisfied branch logs the requirement
         back ("it satisfies {requirement!r}"), and the requirement is built
@@ -2372,6 +2469,7 @@ class TestOfflineResolveMessageIsRedacted:
         assert any("Using pre-installed" in line for line in logged), logged
         assert all(canary not in line for line in logged), logged
 
+    @pytest.mark.unit
     def test_the_through_uv_verdict_line_hides_the_plugins_values(self, caplog):
         """_select_tool_execution's not-directly branch logs the verdict's
         detail ("through uv, not directly: ..."), which quotes the
@@ -2451,6 +2549,7 @@ class TestWrappedUvTextIsRedactedOnEveryRoute:
         )
         return fake.errors, logged
 
+    @pytest.mark.unit
     def test_the_explainer_hides_an_unwrapped_value(self):
         """Control: the unwrapped spelling was already hidden."""
         stderr = (
@@ -2464,6 +2563,7 @@ class TestWrappedUvTextIsRedactedOnEveryRoute:
         assert "Zq7Kx9Lm" not in errors[0], errors[0]
         assert "Pw4Nv2Rt" not in errors[0], errors[0]
 
+    @pytest.mark.unit
     def test_the_explainer_hides_a_value_uv_wrapped_at_a_space(self):
         """The install explainer quotes uv's stderr through the shared uv
         layer with no unwrap step of its own, so a value wrapped at one of
@@ -2483,6 +2583,7 @@ class TestWrappedUvTextIsRedactedOnEveryRoute:
             "Zq7Kx9Lm" not in line and "Pw4Nv2Rt" not in line for line in logged
         ), logged
 
+    @pytest.mark.unit
     def test_the_through_uv_line_hides_a_wrapped_detail(self):
         """The not-directly WARNING/INFO line prints the verdict's detail. A
         detail that still carries uv's wrap (the unverifiable arm returns

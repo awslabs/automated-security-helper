@@ -65,6 +65,7 @@ def _raises(name: str) -> Exception:
 
 
 @pytest.mark.parametrize("name", sorted(RAISED))
+@pytest.mark.unit
 def test_run_command_with_output_handling_from_subprocess_run(tmp_path, name):
     with patch(_PLAIN_RUNNER, side_effect=_raises(name)):
         response = run_command_with_output_handling(
@@ -78,6 +79,7 @@ def test_run_command_with_output_handling_from_subprocess_run(tmp_path, name):
 
 
 @pytest.mark.parametrize("name", sorted(RAISED))
+@pytest.mark.unit
 def test_run_command_with_output_handling_from_prepare_spawn(
     tmp_path, monkeypatch, name
 ):
@@ -92,6 +94,7 @@ def test_run_command_with_output_handling_from_prepare_spawn(
 
 
 @pytest.mark.parametrize("name", sorted(RAISED))
+@pytest.mark.unit
 def test_run_command(name):
     with patch(_PLAIN_RUNNER, side_effect=_raises(name)):
         result = run_command(["tool", "--version"])
@@ -102,6 +105,7 @@ def test_run_command(name):
 
 
 @pytest.mark.parametrize("name", sorted(RAISED))
+@pytest.mark.unit
 def test_run_command_stream_output(monkeypatch, name):
     monkeypatch.setattr(
         subprocess_utils, "_prepare_spawn", MagicMock(side_effect=_raises(name))
@@ -111,6 +115,7 @@ def test_run_command_stream_output(monkeypatch, name):
 
 
 @pytest.mark.parametrize("name", sorted(RAISED))
+@pytest.mark.unit
 def test_run_command_stream_output_from_popen(name):
     with patch(
         "automated_security_helper.utils.subprocess_utils.subprocess.Popen",
@@ -147,12 +152,14 @@ NOT_STR_ARGUMENTS = {
         ),
     ],
 )
+@pytest.mark.unit
 def test_an_argument_that_is_not_a_str_is_reported(tmp_path, spawn, arguments):
     args = list(NOT_STR_ARGUMENTS[arguments])
 
     assert spawn(args, tmp_path) == SPAWN_FAILURE_RETURNCODE
 
 
+@pytest.mark.integration
 def test_create_process_with_pipes_passes_a_path_argument_to_the_child():
     """create_process_with_pipes joins the command line for its log line too, and
     the join raised TypeError for a Path before Popen was reached."""
@@ -165,6 +172,7 @@ def test_create_process_with_pipes_passes_a_path_argument_to_the_child():
     assert stdout.strip() == "scan-target", stdout
 
 
+@pytest.mark.unit
 def test_create_process_with_pipes_reports_what_popen_refused(caplog):
     """An int Popen refuses reaches Popen, which logs and raises its own error;
     the join raised before anything was logged."""
@@ -175,6 +183,7 @@ def test_create_process_with_pipes_reports_what_popen_refused(caplog):
     assert any("Error creating process with pipes" in m for m in logged), logged
 
 
+@pytest.mark.unit
 def test_run_command_with_check_still_raises():
     with (
         patch(_PLAIN_RUNNER, side_effect=RAISED["RuntimeError"]),
@@ -183,6 +192,7 @@ def test_run_command_with_check_still_raises():
         run_command(["tool", "--version"], check=True)
 
 
+@pytest.mark.unit
 def test_the_uv_tool_runner_carries_the_flag(tmp_path):
     with (
         patch.object(UVToolRunner, "is_uv_available", return_value=True),
@@ -210,6 +220,7 @@ def test_the_uv_tool_runner_carries_the_flag(tmp_path):
         ),
     ],
 )
+@pytest.mark.unit
 def test_the_reason_is_logged_on_one_line(tmp_path, caplog, spawn):
     """The log line goes through shown_on_one_line: one line, the controls as
     escapes. The returned stderr keeps the text as it is, as a tool's own stderr
@@ -288,6 +299,7 @@ def _run(context, scanner):
 
 
 @pytest.mark.parametrize("name", sorted(RAISED))
+@pytest.mark.unit
 def test_a_scanner_that_ignores_the_response_is_an_error(tmp_path, name):
     context = _context(tmp_path)
     scanner = _LenientScanner(config=_Config(), context=context)
@@ -302,6 +314,7 @@ def test_a_scanner_that_ignores_the_response_is_an_error(tmp_path, name):
 
 
 @pytest.mark.parametrize("name", sorted(RAISED))
+@pytest.mark.unit
 def test_run_subprocess_records_an_exception_before_the_run(
     tmp_path, monkeypatch, name
 ):
@@ -323,6 +336,7 @@ def test_run_subprocess_records_an_exception_before_the_run(
     assert "Could not start" in reason, reason
 
 
+@pytest.mark.integration
 def test_control_a_tool_that_ran_is_not_a_spawn_failure(tmp_path):
     context = _context(tmp_path)
     scanner = _LenientScanner(config=_Config(), context=context)
@@ -338,6 +352,7 @@ def test_control_a_tool_that_ran_is_not_a_spawn_failure(tmp_path):
 # keep what happens after the start out of the spawn-failure report.
 
 
+@pytest.mark.unit
 def test_a_streamed_child_whose_cleanup_raises_is_not_a_spawn_failure(caplog):
     """The child started and streamed its output; stopping it then raised."""
     process = MagicMock()
@@ -375,6 +390,7 @@ class _TimeoutBookkeepingFails(_LenientScanner):
     [_ResponseHandlingFails, _TimeoutBookkeepingFails],
     ids=["_process_command_response", "_record_timeout"],
 )
+@pytest.mark.integration
 def test_an_exception_after_a_run_returned_is_not_a_spawn_failure(
     tmp_path, scanner_class
 ):

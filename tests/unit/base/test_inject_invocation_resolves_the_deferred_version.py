@@ -18,6 +18,8 @@ No tool starts: the uv runner's version read is replaced, and only
 
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.uv_tool_mixin import deferred_tool_version_probes
 from automated_security_helper.config.ash_config import AshConfig
@@ -26,6 +28,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scann
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.uv_tool_runner import UVToolRunner
+
+pytestmark = pytest.mark.unit
 
 PluginContext.model_rebuild()
 AshConfig.model_rebuild()

@@ -20,6 +20,8 @@ import pytest
 
 from automated_security_helper.base.uv_tool_mixin import UVToolMixin
 
+pytestmark = pytest.mark.unit
+
 #: The value's visible core: this spelling surviving anywhere is the leak.
 _CORE = "ops-canary-vx52"
 

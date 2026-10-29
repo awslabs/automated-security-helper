@@ -36,6 +36,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 REFUSED = [
     "x/../../escaped-probe.csv",
     "../escaped.csv",

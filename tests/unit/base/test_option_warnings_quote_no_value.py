@@ -24,6 +24,8 @@ from automated_security_helper.base.options import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 VALUE = "SECRETVALUEZQ x"
 
 

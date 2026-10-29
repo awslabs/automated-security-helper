@@ -1,5 +1,7 @@
 """Tests for OfflineStrategy enum and per-scanner declarations."""
 
+import pytest
+
 from automated_security_helper.core.enums import OfflineStrategy
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
@@ -41,6 +43,8 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
 from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner import (
     SnykCodeScanner,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_enum_values():

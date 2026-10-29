@@ -30,6 +30,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scann
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import COULD_NOT_STOP_MARKER
 
+pytestmark = pytest.mark.unit
+
 PluginContext.model_rebuild()
 
 #: The runner's response for a timeout whose stop did not end the child: the

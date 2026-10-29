@@ -30,6 +30,8 @@ from automated_security_helper.utils.subprocess_utils import (
 from tests.unit.base.test_failure_lines_carry_no_environment_value import _context
 from tests.unit.base.test_scanner_plugin_coverage import _scanner
 
+pytestmark = pytest.mark.integration
+
 HEAD = "ASH_CANARY_Zq7Kx9LmHead"
 TAIL = "ASH_CANARY_Pw4Nv2RtTail"
 
