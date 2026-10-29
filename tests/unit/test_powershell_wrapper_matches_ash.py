@@ -659,17 +659,18 @@ def test_the_old_ash_oci_runner_still_works_and_says_it_is_deprecated(tmp_path):
 def test_an_explicit_empty_oci_runner_is_refused_and_ash_oci_runner_is_not_used(
     tmp_path,
 ):
-    # An -OCIRunner given an empty value is refused with exit 3, as ./ash refuses
-    # `--oci-runner ''`; it does not ask for discovery. OCI_RUNNER applies only when
-    # the caller named no runner at all, so it is not used here either. An
-    # -OCIRunner left to default from an empty OCI_RUNNER discovers a runner
+    # An -OCIRunner given an empty value is refused with exit 5, the usage-error code,
+    # as ./ash refuses `--oci-runner ''` and the CLI refuses an option given no
+    # argument; it does not ask for discovery. OCI_RUNNER applies only when the
+    # caller named no runner at all, so it is not used here either. An -OCIRunner
+    # left to default from an empty OCI_RUNNER discovers a runner
     # (test_every_invoke_ash_refusal_exits_with_its_code's accepted cell).
     result, calls = _run_script(
         tmp_path,
         _wrapped("Invoke-ASH -NoBuild -SourceDir src -OutputDir out -OCIRunner ''"),
         ASH_OCI_RUNNER="podman",
     )
-    assert result.returncode == REFUSAL_EXIT, result.stdout + result.stderr
+    assert result.returncode == USAGE_ERROR_EXIT, result.stdout + result.stderr
     assert "-OCIRunnerneedsavalue" in _unwrapped(result.stderr), result.stderr
     assert "ASH_OCI_RUNNER" not in result.stdout + result.stderr
     assert calls == []
@@ -945,8 +946,10 @@ def test_the_wrapped_form_does_not_exit_0_for_an_error_raised_before_invoke_ash_
 
 
 # Every refusal of Invoke-ASH, with the code it leaves: 3, the code ASH uses for input
-# it refuses, for every one but an explicit --sandbox that is not off, which ASH in a
-# container refuses as a usage error with 5. Run as a script runs it, `pwsh -File`
+# it refuses, for every one but the usage errors ASH itself refuses with 5: an explicit
+# --sandbox that is not off, which ASH in a container refuses that way, and a parameter
+# given an empty or blank value, which the CLI refuses as an option that requires an
+# argument. Run as a script runs it, `pwsh -File`
 # with the catch form the help gives, so the process exits with that code. Each cell:
 # the call, what the test directory needs first, the environment, the code, and text
 # found only in the message.
@@ -1141,18 +1144,20 @@ _INVOKE_ASH_SITES = {
         REFUSAL_EXIT,
         "-OutputDir'Env:/x'isinPowerShell'sEnvironmentprovider,notinthefilesystem",
     ),
+    # A parameter given an empty or blank value is a usage error, 5, as ./ash refuses
+    # an option given no value and the CLI an option that requires an argument.
     "source-dir-empty": (
         _INVOKE.replace("-SourceDir src", "-SourceDir ''"),
         {},
         {},
-        REFUSAL_EXIT,
+        USAGE_ERROR_EXIT,
         "-SourceDirneedsavalue",
     ),
     "output-dir-blank": (
         _INVOKE.replace("-OutputDir out", "-OutputDir '  '"),
         {},
         {},
-        REFUSAL_EXIT,
+        USAGE_ERROR_EXIT,
         "-OutputDirneedsavalue",
     ),
     **{
@@ -1160,7 +1165,7 @@ _INVOKE_ASH_SITES = {
             f"{_INVOKE} -{name} ''",
             {},
             {},
-            REFUSAL_EXIT,
+            USAGE_ERROR_EXIT,
             f"-{name}needsavalue",
         )
         for name in _EMPTY_VALUE_PARAMETERS
@@ -1169,21 +1174,21 @@ _INVOKE_ASH_SITES = {
         f"{_INVOKE} -OCIRunner '  '",
         {},
         {},
-        REFUSAL_EXIT,
+        USAGE_ERROR_EXIT,
         "-OCIRunnerneedsavalue",
     ),
     "Scanners-empty-element": (
         f"{_INVOKE} -Scanners ''",
         {},
         {},
-        REFUSAL_EXIT,
+        USAGE_ERROR_EXIT,
         "-Scannersneedsavalue",
     ),
     "ExcludeScanners-empty-element": (
         f"{_INVOKE} -ExcludeScanners bandit,''",
         {},
         {},
-        REFUSAL_EXIT,
+        USAGE_ERROR_EXIT,
         "-ExcludeScannersneedsavalue",
     ),
     "build-target-not-a-stage": (

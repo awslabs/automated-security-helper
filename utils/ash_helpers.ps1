@@ -7,18 +7,19 @@ function Invoke-ASH {
     Provides a PowerShell entrypoint to build and invoke ASH as a container executable.
 
     When Invoke-ASH refuses its input, it sets $LASTEXITCODE to 3, the code ASH uses
-    for input it refuses, and throws, before anything is built or run. That covers a
-    parameter given an empty or blank value, an -OutputDir that is reached through a
-    link, a -BuildTarget other than ci or non-root,
+    for input it refuses, and throws, before anything is built or run. That covers an
+    -OutputDir that is reached through a link, a -BuildTarget other than ci or non-root,
     an image name or ASH_BASE_IMAGE_OVERRIDE that starts with '-' or holds a character
     other than A-Z, a-z, 0-9 and . _ : / @ -, an -AshArgs it cannot read, a
     --workspace or --workspace-config among ASH's arguments (Invoke-ASH scans one
     directory), no OCI runner, and a malformed ASH_BASE_OCI_LAYOUT. The exceptions are
     the usage errors `ash` itself refuses with 5, refused the same way with 5 and its
     text: a --sandbox among ASH's arguments with a mode other than off, because the
-    scanners run unsandboxed inside the container; a -SourceDir that does not exist,
-    is not a directory, or cannot be entered; and an -OutputDir that is a file, cannot
-    be created, cannot be entered, or cannot be written. The throw does
+    scanners run unsandboxed inside the container; a parameter given an empty or blank
+    value, as the CLI refuses an option that requires an argument and got none; a
+    -SourceDir that does not exist, is not a directory, or cannot be entered; and an
+    -OutputDir that is a file, cannot be created, cannot be entered, or cannot be
+    written. The throw does
     not end the caller's session; a script that does not catch it ends with 1, as
     PowerShell ends any script on an uncaught error. A failed build keeps the build's
     exit code.
@@ -346,9 +347,10 @@ function Invoke-ASH {
         # PowerShell's parameter binding, before Invoke-ASH runs, with $LASTEXITCODE
         # unset, so a script would end with 1, or with 0 under `exit $LASTEXITCODE`.
         #
-        # A parameter given an empty or blank value is refused, as ./ash refuses an
-        # option given one, so an empty -OCIRunner does not fall back to whichever
-        # runner is on PATH. Only bound parameters are read, so an -OCIRunner that defaults from an
+        # A parameter given an empty or blank value is refused with 5, ASH's usage-error
+        # code, as ./ash refuses an option given no value and as the CLI refuses an
+        # option that requires an argument and got none, so an empty -OCIRunner does not
+        # fall back to whichever runner is on PATH. Only bound parameters are read, so an -OCIRunner that defaults from an
         # empty OCI_RUNNER still discovers a runner, and an empty -AshArgs is no extra
         # arguments.
         foreach ($name in @('SourceDir', 'OutputDir', 'Config', 'OCIRunner', 'AshImageName', 'ContainerUID', 'ContainerGID', 'OutputFormat', 'BuildTarget', 'OfflineSemgrepRulesets', 'Scanners', 'ExcludeScanners')) {
@@ -357,7 +359,7 @@ function Invoke-ASH {
             }
             $given = @($PSBoundParameters[$name])
             if ($given.Count -eq 0 -or @($given | Where-Object { [string]::IsNullOrWhiteSpace("$_") }).Count -gt 0) {
-                $global:LASTEXITCODE = $refusalExitCode
+                $global:LASTEXITCODE = $usageErrorExitCode
                 throw "-$name needs a value: it was given an empty or blank one."
             }
         }
