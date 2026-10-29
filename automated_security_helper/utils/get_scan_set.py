@@ -47,9 +47,8 @@ from automated_security_helper.utils.scan_output_dirs import (
     warn_about_scanned_output_dir,
 )
 from automated_security_helper.utils.error_text import redact_then_split
-from automated_security_helper.utils.git_command import git_argv
+from automated_security_helper.utils.git_command import git_argv, resolved_git
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
-from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.scanned_tree import (
     REASON_LINK_LEAVES_TREE,
     TreeInputRefused,
@@ -1585,10 +1584,32 @@ def _git_executable() -> Optional[str]:
 
     Not the bare name: on Windows a program started by name is looked for in the
     working directory before PATH, and ASH usually runs from the repository it scans.
+    Every git spawn in this module starts the path this returns
+    (``git_command.resolved_git``), the repository-root lookup and the diff as well
+    as the common-dir, git-dir, worktree and ls-files lookups the nesting check
+    makes; none passes the bare name to ``subprocess``.
     """
-    from automated_security_helper.utils.subprocess_utils import find_executable
+    return resolved_git()
 
-    return find_executable("git")
+
+#: Variables that point git at a repository whatever its working directory is.
+_GIT_LOCATION_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")
+
+
+def _git_environ(*, without: Iterable[str] = ()) -> Dict[str, str]:
+    """The environment every git command in this module is started with.
+
+    ``child_environ`` (a copy, never the live environ; PATH reduced to its anchored
+    entries, so a program git starts by name, a credential helper or a textconv
+    driver, cannot be found through the working directory), less GIT_DIR and its
+    siblings (:data:`_GIT_LOCATION_ENV`), so that git answers about the directory
+    it is started in and not about the repository ASH's own environment names: a
+    scan started from a git hook carries GIT_DIR, and with it the repository root
+    and the diff described the hook's repository, not the scanned path. *without*
+    names more variables to leave out.
+    """
+    dropped = set(_GIT_LOCATION_ENV).union(without)
+    return {key: value for key, value in child_environ().items() if key not in dropped}
 
 
 def git_repository_root(path: Path, *, values: Iterable[str] = ()) -> Optional[Path]:
@@ -1770,7 +1791,7 @@ def _rev_parse_toplevel(
             stdin=subprocess.DEVNULL,
             timeout=30,
             cwd=path,
-            env=child_environ(),
+            env=_git_environ(),
         )
     except FileNotFoundError as error:
         return None, _why_git_did_not_start(error, path)
@@ -1801,10 +1822,6 @@ def _rev_parse_toplevel(
     return Path(top).resolve(), None
 
 
-#: Variables that point git at a repository whatever its working directory is.
-_GIT_LOCATION_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")
-
-
 def git_common_dir(path: Path) -> Optional[Path]:
     """The ``git rev-parse --git-common-dir`` of the repository at *path*, resolved.
 
@@ -1823,19 +1840,17 @@ def git_common_dir(path: Path) -> Optional[Path]:
         command times out, or the path it prints is not a file name here
         (:func:`_git_path_line`).
     """
-    environ = {
-        key: value
-        for key, value in snapshot_environ().items()
-        if key not in _GIT_LOCATION_ENV
-    }
+    git = _git_executable()
+    if git is None:
+        return None
     try:
         result = subprocess.run(
-            git_argv("rev-parse", "--git-common-dir"),  # nosec B603 B607
+            git_argv("rev-parse", "--git-common-dir", program=git),  # nosec B603 B607
             capture_output=True,
             stdin=subprocess.DEVNULL,
             timeout=30,
             cwd=path,
-            env=environ,
+            env=_git_environ(),
         )
         common = _git_path_line(result.stdout)
     except (
@@ -1867,19 +1882,17 @@ def git_absolute_git_dir(path: Path) -> Optional[Path]:
         times out, or the path it prints is not a file name here
         (:func:`_git_path_line`).
     """
-    environ = {
-        key: value
-        for key, value in snapshot_environ().items()
-        if key not in _GIT_LOCATION_ENV
-    }
+    git = _git_executable()
+    if git is None:
+        return None
     try:
         result = subprocess.run(
-            git_argv("rev-parse", "--absolute-git-dir"),  # nosec B603 B607
+            git_argv("rev-parse", "--absolute-git-dir", program=git),  # nosec B603 B607
             capture_output=True,
             stdin=subprocess.DEVNULL,
             timeout=30,
             cwd=path,
-            env=environ,
+            env=_git_environ(),
         )
         git_dir = _git_path_line(result.stdout)
     except (
@@ -1919,19 +1932,19 @@ def git_worktree_paths(path: Path) -> Optional[Set[Path]]:
         repository, git is missing or refuses it (safe.directory), the command
         times out, or its output is not file names here (:func:`_git_paths`).
     """
-    environ = {
-        key: value
-        for key, value in snapshot_environ().items()
-        if key not in _GIT_LOCATION_ENV
-    }
+    git = _git_executable()
+    if git is None:
+        return None
     try:
         result = subprocess.run(
-            git_argv("worktree", "list", "--porcelain", "-z"),  # nosec B603 B607
+            git_argv(  # nosec B603 B607
+                "worktree", "list", "--porcelain", "-z", program=git
+            ),
             capture_output=True,
             stdin=subprocess.DEVNULL,
             timeout=30,
             cwd=path,
-            env=environ,
+            env=_git_environ(),
         )
         fields = _git_paths(result.stdout)
     except (
@@ -1982,18 +1995,15 @@ def _git_listing(
         (safe.directory), fails, times out, or prints something that is not a
         file name here (:func:`_git_paths`).
     """
-    environ = {
-        key: value
-        for key, value in snapshot_environ().items()
-        if key not in _GIT_LOCATION_ENV
-        and key not in _GIT_PATHSPEC_ENV
-        and key != "GIT_INDEX_FILE"
-    }
+    git = _git_executable()
+    if git is None:
+        return None
+    environ = _git_environ(without=(*_GIT_PATHSPEC_ENV, "GIT_INDEX_FILE"))
     if literal:
         environ["GIT_LITERAL_PATHSPECS"] = "1"
     try:
         result = subprocess.run(
-            git_argv("ls-files", "-z", *args),  # nosec B603 B607
+            git_argv("ls-files", "-z", *args, program=git),  # nosec B603 B607
             capture_output=True,
             stdin=subprocess.DEVNULL,
             timeout=30,
@@ -2271,7 +2281,7 @@ def get_changed_files(
             stdin=subprocess.DEVNULL,
             timeout=30,
             cwd=cwd,
-            env=child_environ(),
+            env=_git_environ(),
         )
     except FileNotFoundError as error:
         ASH_LOGGER.warning(
