@@ -82,13 +82,16 @@ _NOTIFICATIONS_READ_LIMIT = 5 * 1024 * 1024
 _RESULTS_FILE_READ_LIMIT = 1 << 30
 
 
-def _error_notifications(results_file: Path) -> str:
+def _error_notifications(results_file: Path, values: Iterable[str] = ()) -> str:
     """The text of the error-level toolExecutionNotifications in a SARIF file.
 
     For a rejected run, to say why it failed; nothing read here is graded. Best
     effort: a file that is missing, not a regular file, larger than
     _NOTIFICATIONS_READ_LIMIT or not SARIF gives "". Opened without following a
-    link at its name. Truncated to _STDERR_EXCERPT_LIMIT, as stderr is.
+    link at its name. The text is the tool's own, so a configured value it
+    echoes (a path it could not read, say) is redacted with *values*, the same
+    values the stderr excerpt is redacted with, BEFORE the cut to
+    _STDERR_EXCERPT_LIMIT: a cut first could leave half a value in the clear.
     """
     import os
     import stat
@@ -130,7 +133,7 @@ def _error_notifications(results_file: Path) -> str:
                 text = message.get("text") if isinstance(message, dict) else None
                 if isinstance(text, str) and text.strip():
                     texts.append(text.strip())
-    joined = " | ".join(texts)
+    joined = text_without_values(" | ".join(texts), values)
     if len(joined) > _STDERR_EXCERPT_LIMIT:
         joined = joined[:_STDERR_EXCERPT_LIMIT] + " ...[truncated]"
     return joined
@@ -1897,7 +1900,15 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # error-level SARIF notification and writes nothing on stderr.
         if not accepted and results_file is not None:
             results_path = Path(results_file)
-            reported = _error_notifications(results_path)
+            # The notifications are quoted only with the values to hide in
+            # hand: a hook that raised or gave no usable answer leaves the
+            # text unquoted and the file named below, as the stderr path does.
+            notification_values = guarded_values(self)
+            reported = (
+                _error_notifications(results_path, notification_values)
+                if notification_values is not None
+                else ""
+            )
             if reported:
                 detail += f". {results_path.as_posix()} reports: {reported}"
             elif not stderr_text:
