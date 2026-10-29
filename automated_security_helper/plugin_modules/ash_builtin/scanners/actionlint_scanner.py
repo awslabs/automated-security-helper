@@ -23,10 +23,10 @@ Decisions, and why
    for the nearest ``.github/workflows`` from its working directory and ignores ASH's
    ignore rules. ASH instead takes every ``*.yml``/``*.yaml`` file whose parent
    directory is ``.github/workflows`` from the scan set, which applies ``.gitignore``
-   and ``.ignore`` files, then drops ``global_settings.ignore_paths`` matches,
-   anything under ASH's own output directory, and anything under a
-   ``KNOWN_IGNORE_PATHS`` directory (``node_modules``, ``.venv``, ``venv``), so it
-   lints the workflows zizmor audits. The scan root's own name counts, so a source
+   and ``.ignore`` files and leaves ASH's own output directory out (keeping the
+   files git tracks there), then drops ``global_settings.ignore_paths`` matches
+   and anything under a ``KNOWN_IGNORE_PATHS`` directory (``node_modules``,
+   ``.venv``, ``venv``), so it lints the workflows zizmor audits. The scan root's own name counts, so a source
    directory that is ``.github`` or ``.github/workflows`` has its workflows linted.
    A workflow that is a symlink resolving outside the scan root is skipped with a
    warning, because actionlint follows it and copies its lines into the report, and
@@ -866,7 +866,6 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 run_id=getattr(self.context, "run_id", None),
             )
 
-        output_abs = self._output_dir().absolute()
         relative: List[str] = []
         for item in candidates:
             # The scan set spells each path from the source directory as it was
@@ -877,8 +876,9 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             path = Path(item).absolute()
             if not path.is_relative_to(target_abs):
                 continue
-            if target_type != "converted" and path.is_relative_to(output_abs):
-                continue
+            # ASH's own output directory is left out by the scan set, which keeps
+            # the files git tracks there (a repository can commit files at that
+            # path); no second filter here, or those are never linted.
             rel = path.relative_to(target_abs).as_posix()
             if not is_workflow_file(rel, scan_root=target_abs):
                 continue

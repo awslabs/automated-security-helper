@@ -589,6 +589,32 @@ def test_non_workflow_yaml_and_ash_output_are_not_passed(repo, monkeypatch, on_p
 
 
 @pytest.mark.unit
+def test_a_workflow_git_tracks_under_the_output_directory_is_linted(
+    repo, monkeypatch, on_path
+):
+    """The scan set leaves ASH's output directory out but keeps the files git
+    tracks there, since a repository can commit files at that path. The scanner
+    must not drop them a second time."""
+    output = repo / ".ash" / "ash_output"
+    committed = output / "sample" / ".github" / "workflows" / "committed.yml"
+    committed.parent.mkdir(parents=True)
+    committed.write_text("on: push\n")
+    kept_by_the_scan_set = [
+        str(repo / ".github" / "workflows" / "clean.yml"),
+        str(committed),
+    ]
+    monkeypatch.setattr(module, "scan_set", lambda **_: list(kept_by_the_scan_set))
+    scanner = _scanner(repo, output=output)
+
+    workflows = scanner._workflow_files(repo, "source", [])
+
+    assert workflows == [
+        ".ash/ash_output/sample/.github/workflows/committed.yml",
+        ".github/workflows/clean.yml",
+    ]
+
+
+@pytest.mark.unit
 def test_global_ignore_paths_are_respected(repo, monkeypatch, on_path):
     scanner = _scanner(repo)
     fake = _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
