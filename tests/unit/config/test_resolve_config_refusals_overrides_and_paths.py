@@ -146,6 +146,14 @@ def test_an_override_can_set_a_string_field_to_digit_text():
     assert config.project_name == "007"
 
 
+def test_digit_text_an_override_set_joins_the_hidden_override_values():
+    """The retyped text is an override's string value like any other, so a
+    section's debug line hides it (an account id is one shape of it)."""
+    config = apply_config_overrides(AshConfig(), ["project_name=007"])
+
+    assert "007" in config._override_values, config._override_values
+
+
 def test_an_override_that_does_not_apply_is_still_refused():
     with pytest.raises(ASHConfigValidationError):
         apply_config_overrides(AshConfig(), ["fail_on_findings=notabool"])

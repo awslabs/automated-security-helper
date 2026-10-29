@@ -479,7 +479,7 @@ def _parse_config_value(value: str) -> Any:
 
 def _validated_with_overrides(
     config_dict: Dict[str, Any],
-    applied: Sequence[Tuple[List[str], Any, bool]],
+    applied: List[Tuple[List[str], Any, bool]],
     raw_values: Sequence[str],
 ) -> AshConfig:
     """``config_dict`` validated as an AshConfig, with a string field's refusal
@@ -490,8 +490,13 @@ def _validated_with_overrides(
     tool version). Where the model refuses such a value as not a string at
     the place the override landed (``applied``, with the text of each override
     in ``raw_values``), the value is set back to the text the operator wrote
-    and the document is validated once more. Any other refusal, and a refusal
-    the retyping does not cure, is raised as it is.
+    and the document is validated once more. The retyped text is written back
+    into ``applied`` too, in place: the values a section's lines hide
+    (AshConfig._override_values) are the string leaves of ``applied``, and
+    the number the parse produced is not one, so the text the model now holds
+    (an account id among the shapes) would otherwise print in clear. Any
+    other refusal, and a refusal the retyping does not cure, is raised as it
+    is.
     """
     try:
         return AshConfig.model_validate(config_dict)
@@ -501,7 +506,9 @@ def _validated_with_overrides(
             if item.get("type") != "string_type":
                 continue
             place = tuple(str(part) for part in item.get("loc", ()))
-            for (segments, parsed, appended), raw in zip(applied, raw_values):
+            for index, ((segments, parsed, appended), raw) in enumerate(
+                zip(applied, raw_values)
+            ):
                 if (
                     appended
                     or isinstance(parsed, bool)
@@ -519,6 +526,7 @@ def _validated_with_overrides(
                     and container.get(segments[-1]) == parsed
                 ):
                     container[segments[-1]] = raw
+                    applied[index] = (segments, raw, appended)
                     retyped = True
         if not retyped:
             raise
@@ -3745,9 +3753,13 @@ def _with_reporter_overrides(
     is left as written. A section no file spells, such as one the reporter
     never reads, still absorbs an override as written -- naming a section is
     the operator's own choice, and nothing here can tell a decoy from a
-    section a future plugin reads. Overrides that fail to apply for any other
-    reason are dropped with one warning, and the off-host reporters then keep
-    the base's settings, off unless the base turns them on.
+    section a future plugin reads. The overrides are applied together first;
+    when one of them does not apply to the trusted base, they are applied
+    again one at a time, so the ones that do apply (a disable of an off-host
+    reporter among them) still reach the view and only the ones that do not
+    are dropped, each with its own warning; for a dropped override the
+    off-host reporter keeps the base's setting, off unless the base turns it
+    on.
     """
     reporter_overrides = [
         override

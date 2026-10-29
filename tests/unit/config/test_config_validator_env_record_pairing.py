@@ -26,14 +26,18 @@ from pathlib import Path
 
 import pytest
 
+from automated_security_helper.config.ash_config import resolve_env_references
 from automated_security_helper.config.config_validator import (
     ConfigValidator,
+    _environment_part,
     _interpolated_pairs,
+    _quietly_resolved,
     _written_rewrites,
     environment_record_read,
     path_pattern_advice,
     recorded_value_at,
 )
+from automated_security_helper.core.exceptions import ASHConfigUnsetVariableError
 
 pytestmark = pytest.mark.unit
 
@@ -117,6 +121,116 @@ class TestReferencedKeyPairing:
         assert ("a", f"${{{KEY_VARIABLE}}}") in pairs, pairs
         assert not [pair for pair in pairs if pair[0] == "1"], pairs
 
+    def test_a_plain_key_written_last_gets_no_key_rewrite(self):
+        """The overwritten referenced entry's key must not rename the plain
+        entry that survived it."""
+        written = {f"${{{KEY_VARIABLE}}}": f"${{{VALUE_VARIABLE}}}", "a": "1"}
+        resolved = {"a": "1"}
+
+        rewrites = _written_rewrites(written, resolved)
+
+        assert [rewrite for rewrite in rewrites if rewrite.kind == "key"] == [], (
+            rewrites
+        )
+
+    def test_a_key_the_loader_kept_literal_pairs_with_itself(self):
+        """A JSON or TOML file resolves no key, and a quoted YAML key is not
+        read by the implicit resolver, so the loader keeps the key as written;
+        the value under it is still paired."""
+        written = {f"${{{KEY_VARIABLE}}}": f"${{{VALUE_VARIABLE}}}"}
+        resolved = {f"${{{KEY_VARIABLE}}}": MERGED_VALUE}
+
+        pairs = _interpolated_pairs(written, resolved)
+
+        assert (MERGED_VALUE, f"${{{VALUE_VARIABLE}}}") in pairs, pairs
+        assert not [pair for pair in pairs if pair[0] == f"${{{KEY_VARIABLE}}}"], pairs
+
+    def test_a_key_that_resolves_to_no_key_pairs_by_position(self, monkeypatch):
+        """A referenced key whose resolved key cannot be told still pairs, in
+        order, with the resolved key no other entry claims, as every referenced
+        key once did, so the value under it is redacted and recorded."""
+        monkeypatch.delenv("ASH_PAIRING_UNSET", raising=False)
+        written = {"a": "1", "${ASH_PAIRING_UNSET}": f"${{{VALUE_VARIABLE}}}"}
+        resolved = {"a": "1", "b": MERGED_VALUE}
+
+        pairs = _interpolated_pairs(written, resolved)
+
+        assert (MERGED_VALUE, f"${{{VALUE_VARIABLE}}}") in pairs, pairs
+
+    def test_a_plugin_section_key_the_fold_respelled_is_paired(self, monkeypatch):
+        """environment_record_read folds the resolved mapping's plugin sections
+        onto their canonical spelling, so the key a reference resolved to can
+        differ from the section's key by '-' for '_'."""
+        monkeypatch.setenv(KEY_VARIABLE, "cloudwatch_logs")
+        written = {
+            "reporters": {f"${{{KEY_VARIABLE}}}": {"token": f"${{{VALUE_VARIABLE}}}"}}
+        }
+        resolved = {"reporters": {"cloudwatch-logs": {"token": MERGED_VALUE}}}
+
+        pairs = _interpolated_pairs(written, resolved)
+
+        assert (MERGED_VALUE, f"${{{VALUE_VARIABLE}}}") in pairs, pairs
+
+
+class TestQuietKeyResolution:
+    """Building the record resolves a referenced key by the loader's rule
+    without logging the load's warnings again or reading what it did not."""
+
+    @pytest.mark.parametrize(
+        "written_key",
+        ["${HOME}", "${ASH_PAIRING_KEY}", "${ASH_PAIRING_UNSET:dflt}"],
+    )
+    def test_pairing_logs_no_env_warning(self, caplog, monkeypatch, written_key):
+        monkeypatch.delenv("ASH_PAIRING_UNSET", raising=False)
+        monkeypatch.setenv("ASH_PAIRING_KEY", "a")
+        written = {written_key: "x"}
+        resolved = {"${HOME}": "x", "${ASH_PAIRING_KEY}": "x", "dflt": "x"}
+
+        with caplog.at_level("WARNING", logger="ash"):
+            _interpolated_pairs(written, resolved)
+            _written_rewrites(written, resolved)
+
+        assert caplog.records == [], [record.getMessage() for record in caplog.records]
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "plain",
+            "${ASH_PAIRING_NAME}",
+            "${ASH_PAIRING_NAME} tail",
+            "${ASH_PAIRING_UNSET:dflt}",
+            "${ASH_PAIRING_UNSET:None}",
+            "${ASH_PAIRING_UNSET:-dflt}",
+            "${ASH_PAIRING_KEY}",
+            "${HOME}",
+            "${ASH_PAIRING_NAME}x}",
+        ],
+    )
+    def test_the_quiet_resolution_agrees_with_the_loader(self, monkeypatch, text):
+        monkeypatch.setenv("ASH_PAIRING_NAME", "a")
+        monkeypatch.setenv("ASH_PAIRING_KEY", "a")
+        monkeypatch.delenv("ASH_PAIRING_UNSET", raising=False)
+
+        assert _quietly_resolved(text) == resolve_env_references(text)
+
+    def test_an_unset_variable_with_no_default_is_none_where_the_loader_raises(
+        self, monkeypatch
+    ):
+        monkeypatch.delenv("ASH_PAIRING_UNSET", raising=False)
+
+        with pytest.raises(ASHConfigUnsetVariableError):
+            resolve_env_references("${ASH_PAIRING_UNSET}")
+        assert _quietly_resolved("${ASH_PAIRING_UNSET}") is None
+
+
+def test_the_environment_part_drops_a_tails_trailing_blank():
+    """A quoted ``"${VAR} tail "`` is stripped by the loader, so the tail as
+    written is never a suffix of the value; matched without its trailing
+    blanks, the part is the value, not the value plus a blank."""
+    assert _environment_part("val tail", " tail ") == "val"
+    assert _environment_part("val tail", " tail") == "val"
+    assert _environment_part("val", "") == "val"
+
 
 def test_the_environment_part_keeps_no_blank_from_the_rest(tmp_path, monkeypatch):
     """``!ENV ${VAR} tail``: the part the variable gave is the value, not the
@@ -181,17 +295,57 @@ def test_path_pattern_advice_survives_a_stat_that_raises(tmp_path, monkeypatch):
     assert path_pattern_advice("./some/dir", tmp_path, ignore_path=True) is not None
 
 
-def test_a_respelled_top_level_field_is_named_as_folded(tmp_path):
+def test_a_case_only_match_survives_a_stat_that_raises(tmp_path, monkeypatch):
+    """A directory that can be listed but whose entries cannot be stat'ed: the
+    case-only spelling is still advised, without its trailing slash, and the
+    check does not abort."""
+    (tmp_path / "Some").mkdir()
+    is_dir = Path.is_dir
+
+    def refused(self):
+        if self == tmp_path or tmp_path in self.parents:
+            raise PermissionError(13, "Permission denied", str(self))
+        return is_dir(self)
+
+    monkeypatch.setattr(Path, "is_dir", refused)
+
+    advice = path_pattern_advice("some", tmp_path, ignore_path=True)
+
+    assert advice is not None and "Some" in advice, advice
+
+
+def test_a_respelled_top_level_field_alone_is_unknown_with_the_fix_named(tmp_path):
+    """A file read on its own does not read 'fail-on-findings' as the declared
+    field, so the warning keeps the unknown-field prefix `ash config lint`
+    files it under and names the spelling that is read."""
     cfg = tmp_path / ".ash.yaml"
     cfg.write_text("project_name: demo\nfail-on-findings: true\n", encoding="utf-8")
 
     check = ConfigValidator.check_config_file(cfg)
 
-    folded = [w for w in check.warnings if "folds it onto 'fail_on_findings'" in w]
+    unknown = [
+        w for w in check.warnings if w.startswith("Unknown top-level field 'fail-on-")
+    ]
+    assert unknown, check.warnings
+    assert "write 'fail_on_findings'" in unknown[0], unknown
+    assert "folds it onto" not in unknown[0], unknown
+
+
+def test_a_respelled_top_level_field_a_chain_applies_is_named_as_folded(tmp_path):
+    """A child whose base sets the declared spelling: the extends merge folds
+    the child's respelled key onto it and applies the child's value."""
+    base = tmp_path / "base.yaml"
+    base.write_text("project_name: demo\nfail_on_findings: false\n", encoding="utf-8")
+    child = tmp_path / ".ash.yaml"
+    child.write_text("extends: base.yaml\nfail-on-findings: true\n", encoding="utf-8")
+
+    check = ConfigValidator.check_config_file(child)
+
+    folded = [
+        w for w in check.warnings if w.startswith("Unknown top-level field 'fail-on-")
+    ]
     assert folded, check.warnings
-    assert "'fail-on-findings'" in folded[0], folded
-    unknown = [w for w in check.warnings if w.startswith("Unknown top-level field")]
-    assert unknown == [], check.warnings
+    assert "folds it onto 'fail_on_findings' and applies its value" in folded[0], folded
 
 
 def test_an_unknown_top_level_field_is_still_unknown(tmp_path):

@@ -37,6 +37,8 @@ from pydantic_core import core_schema as _core_schema
 
 from automated_security_helper.config.ash_config import (
     ENV_REFERENCE_PATTERN,
+    config_env_var_is_interpolatable,
+    config_env_var_is_secret_shaped,
     plugin_key_lookup_names,
     resolve_env_references,
 )
@@ -168,7 +170,7 @@ def _case_only_spelling(pattern: str, project_root: Path) -> Optional[str]:
         current = current / name
     if not differs:
         return None
-    return "/".join(spelled) + ("/" if current.is_dir() else "")
+    return "/".join(spelled) + ("/" if _names_a_directory(current) else "")
 
 
 def _names_a_directory(path: Path) -> bool:
@@ -2281,16 +2283,66 @@ def _has_reference_key(key: Any) -> bool:
     return isinstance(key, str) and "${" in key
 
 
+def _quietly_resolved(text: str) -> Optional[str]:
+    """``text``, a scalar holding a ``${VAR}`` or ``${VAR:default}`` reference
+    at its start, as the loader resolves it (``resolve_env_references``), with
+    nothing logged and nothing raised.
+
+    The loader's resolver logs a warning for a default taken, a name a file may
+    not read, a credential-shaped name and the shell's ``:-`` form, and raises
+    for a variable unset with no default. Building the record runs after the
+    load, over the same text, and its contract is that nothing is read from
+    the environment that the load did not read and no ``!ENV`` warning is
+    logged again (environment_record_read), so the rule is applied here
+    without its reporting: a name the loader does not read comes back as
+    written, a variable unset with no default comes back None (the load raised
+    there), and the rest resolves as the loader did. This mirrors the loader's
+    rule rather than calling it; the pairing tests read both against the same
+    shapes so the two cannot drift apart unnoticed."""
+    match = ENV_REFERENCE_PATTERN.match(text)
+    if not match:
+        return text
+    var_name, colon, default_text = match.group(1), match.group(2), match.group(3)
+    default_text = default_text or ""
+    if config_env_var_is_secret_shaped(var_name):
+        return text.strip()
+    if not config_env_var_is_interpolatable(var_name):
+        return text.strip()
+    if not colon and default_text:
+        return text.strip()
+    value = os.environ.get(var_name)
+    if value is None:
+        if not colon:
+            return None
+        value = "" if default_text == "None" else default_text
+    full_value = value + text[match.end() :]
+    return None if full_value.strip() == "" else full_value.strip()
+
+
 def _resolved_reference_key(written_key: str, resolved: Dict[Any, Any]) -> Any:
     """The key of ``resolved`` that ``written_key``, a mapping key written as a
-    reference, came to by the loader's own rule (resolve_env_references), or
-    None when it came to none of them (the variable unset with no default, a
-    name the loader does not read)."""
-    try:
-        key = resolve_env_references(_without_env_tag(written_key))
-    except Exception:  # noqa: BLE001 - a key that does not resolve came to none
+    reference, came to, or None when none of them can be told.
+
+    The loader keeps a key as written where it resolves no key at all (a JSON
+    or TOML file) or where the key is a quoted scalar (the implicit ``!ENV``
+    resolver reads plain scalars only), so a written key that is itself a key
+    of ``resolved`` came to itself. Otherwise the key is resolved by the
+    loader's own rule, read quietly (_quietly_resolved), and looked up as the
+    merge spells keys (_record_key: ``-`` for ``_``, and a plugin section's
+    other spelling, since environment_record_read folds the resolved mapping's
+    plugin sections onto their canonical spelling). A key that still names no
+    key of ``resolved`` (the variable unset, or set to a name the mapping does
+    not hold) is None, and _paired_keys pairs it by position."""
+    text = _without_env_tag(written_key)
+    if text in resolved:
+        return text
+    key = _quietly_resolved(text)
+    if key is None:
         return None
-    return key if key is not None and key in resolved else None
+    if key in resolved:
+        return key
+    found = _record_key(resolved, key)
+    return found if found in resolved else None
 
 
 def _paired_keys(
@@ -2310,13 +2362,25 @@ def _paired_keys(
     to one name, the one written last holds the value there: only that entry's
     value is paired (``kept``). Returns the plain entries whose value is kept,
     as ``(key, value)``, and every referenced entry as ``(written key, written
-    value, resolved key, kept)``; a referenced key that came to no key of
-    ``resolved`` is left out.
+    value, resolved key, kept)``.
+
+    A referenced key whose resolved key cannot be told (_resolved_reference_key
+    is None: the variable is set to a name the mapping does not hold, or
+    unset) is paired by position with the keys of ``resolved`` no other entry
+    claims, in writing order, as every referenced key once was. Dropping such
+    an entry instead left the value under it neither redacted nor recorded, so
+    the results file and an off-host payload carried it in clear; one that
+    still finds no partner is left out.
     """
     order = {key: index for index, key in enumerate(written)}
     plain_keys = [key for key in written if not _has_reference_key(key)]
     referenced_keys = [key for key in written if _has_reference_key(key)]
     names = {key: _resolved_reference_key(key, resolved) for key in referenced_keys}
+    claimed = set(plain_keys) | {name for name in names.values() if name is not None}
+    unclaimed = [key for key in resolved if key not in claimed]
+    for key in referenced_keys:
+        if names[key] is None and unclaimed:
+            names[key] = unclaimed.pop(0)
     kept: Dict[Any, int] = {key: order[key] for key in plain_keys}
     for key in referenced_keys:
         name = names[key]
@@ -2345,8 +2409,10 @@ def _interpolated_pairs(literal: Any, resolved: Any) -> List[Tuple[str, str]]:
     Mapping entries are paired by key, not position: an interpolated key that
     resolves to another key of the mapping merges the two, and pairing by
     position would then compare every later value with the wrong one. A key
-    written without a reference pairs with the same key; the keys holding a
-    reference pair, in order, with the resolved keys the file does not write.
+    written without a reference pairs with the same key; a key holding a
+    reference pairs with the key it resolves to, and only one whose resolved
+    key cannot be told pairs, in order, with the resolved keys no other entry
+    claims (_paired_keys).
     """
     found: List[Tuple[str, str]] = []
     if isinstance(literal, dict) and isinstance(resolved, dict):
@@ -2442,14 +2508,15 @@ def _environment_part(resolved: str, rest: str) -> str:
     """The part of ``resolved`` the variable gave, for a reference the file
     follows with ``rest`` (``${VAR}rest`` or ``${VAR} rest``).
 
-    The loader keeps what follows the reference as written, blanks included,
-    so the part ends where ``rest`` begins in ``resolved``. A tail that is not
-    there as written (a value a model normalized) is matched stripped, and one
-    found neither way leaves the whole value as the part. Stripping the tail
-    first folded the blank between the reference and the rest into the part,
-    so the record's reference text and the redaction needle each carried a
-    trailing blank the value never had."""
-    for tail in (rest, rest.strip()):
+    The loader keeps what follows the reference as written up to the value's
+    end, which it strips, so the part ends where ``rest`` begins in
+    ``resolved``: the tail is matched as written, then without its trailing
+    blanks (a quoted ``"${VAR} tail "``), then stripped (a value a model
+    normalized), and one found no way leaves the whole value as the part.
+    Stripping the tail first folded the blank between the reference and the
+    rest into the part, so the record's reference text and the redaction
+    needle each carried a trailing blank the value never had."""
+    for tail in (rest, rest.rstrip(), rest.strip()):
         if tail and resolved.endswith(tail):
             return resolved[: len(resolved) - len(tail)]
     return resolved
@@ -2464,7 +2531,11 @@ def _written_rewrites(
     The same pairing as _interpolated_pairs, so a default a reference fell
     back to is not one. A value under a key read from the environment is found
     at the resolved key: the key's own rewrite renames it afterwards
-    (record_of_config).
+    (record_of_config). That rename is emitted only for the entry whose value
+    the loader kept: a referenced key a later plain key overwrote, or one of
+    two references to one name, renamed the surviving entry after the
+    overwritten one, so the record named the wrong variable for the value it
+    shows (its key text is still paired for redaction).
     """
     found: List[EnvironmentRewrite] = []
     if isinstance(written, dict) and isinstance(resolved, dict):
@@ -2473,7 +2544,7 @@ def _written_rewrites(
             if key in resolved:
                 found += _written_rewrites(written_value, resolved[key], (*path, key))
         for written_key, written_value, key, kept in referenced:
-            if _interpolated_pairs(written_key, key):
+            if kept and _interpolated_pairs(written_key, key):
                 found.append(_rewrite_for("key", path, written_key, key))
             if kept:
                 found += _written_rewrites(written_value, resolved[key], (*path, key))
@@ -4395,22 +4466,35 @@ class ConfigValidator:
                 )
             elif field_name not in cls.VALID_TOP_LEVEL_FIELDS:
                 declared = cls._declared_spelling_of(field_name)
-                if declared is not None:
-                    # A '-'/'_' respelling of a declared field. A file read on
-                    # its own does not read it as that field, but the extends
-                    # merge and an operator overlay fold it onto the base's
-                    # spelling (config_sources.deep_merge) and the scan then
-                    # applies it, so "a scan ignores it" was wrong for a chain.
-                    warnings.append(
-                        f"Top-level field '{shown_field}' is spelled "
-                        f"'{declared}' by a scan: on its own it is not read as "
-                        f"'{declared}', and an extends merge or an operator "
-                        f"overlay folds it onto '{declared}' and applies it. "
-                        f"Write '{declared}'."
-                    )
-                else:
+                if declared is None:
                     warnings.append(
                         f"Unknown top-level field '{shown_field}' - a scan ignores it"
+                    )
+                elif (
+                    declared not in config_data
+                    and isinstance(resolved_data, dict)
+                    and declared in resolved_data
+                    and resolved_data.get(declared) == config_data.get(field_name)
+                ):
+                    # A '-'/'_' respelling of a declared field that the chain
+                    # applied: this file does not set the declared spelling, a
+                    # base does, and the extends merge or the operator overlay
+                    # folded this file's value onto it (config_sources.deep_merge,
+                    # Spellings), so "a scan ignores it" was wrong here. The
+                    # message keeps the unknown-field prefix `ash config lint`
+                    # files it under.
+                    warnings.append(
+                        f"Unknown top-level field '{shown_field}' - a scan ignores "
+                        f"it on its own, but this chain folds it onto '{declared}' "
+                        f"and applies its value. Write '{declared}'."
+                    )
+                else:
+                    # A file alone, a base, or a file that also sets the
+                    # declared spelling: the respelled key is ignored as any
+                    # unknown field, and the declared spelling is the fix.
+                    warnings.append(
+                        f"Unknown top-level field '{shown_field}' - a scan ignores "
+                        f"it; write '{declared}'."
                     )
         warnings.extend(cls._both_spellings_warnings(config_data))
 
