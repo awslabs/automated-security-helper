@@ -420,7 +420,7 @@ _STR_HELPER = "_text"
 #: The markup-reading calls and assignments the package holds, the app's
 #: ``self.title = _text(title)`` included. Change it with each one added or removed; any
 #: other change means a call left the guard's view.
-CHECKED_CALLS = 60
+CHECKED_CALLS = 61
 
 
 def _safe(node: ast.AST, *, str_ok: bool = False) -> bool:

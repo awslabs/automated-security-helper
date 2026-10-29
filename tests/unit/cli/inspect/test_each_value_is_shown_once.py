@@ -44,6 +44,10 @@ pytestmark = pytest.mark.unit
 VALUE = "p\x1bcq out\\x64\\Release"
 ONCE = controls_shown(VALUE)
 TWICE = controls_shown(ONCE)
+# A file value a suppression can name: the dialog refuses to save one whose path
+# holds a backslash (no suppression path names such a file alone), so the test that
+# reaches the writer gives its finding a file with the ESC but with slashes.
+SAVABLE_FILE = "p\x1bcq out/x64/Release"
 SCREEN = (220, 60)
 
 
@@ -157,15 +161,20 @@ async def test_the_suppress_dialog_and_a_failed_save(tmp_path, monkeypatch):
         raise RuntimeError(f"cannot write {VALUE}")
 
     monkeypatch.setattr(tui, "add_suppression_to_config", refuse)
-    app = tui.FindingsExplorerApp([_finding()], config_path=tmp_path / ".ash.yaml")
+    # The dialog saves only a suppression that names its finding, so the file is
+    # one a suppression path can name (SAVABLE_FILE); the writer is then reached.
+    finding = _finding(file=f"file {SAVABLE_FILE}")
+    app = tui.FindingsExplorerApp([finding], config_path=tmp_path / ".ash.yaml")
     with _records() as records:
         async with app.run_test(size=SCREEN, notifications=True) as pilot:
             await _settle(pilot)
-            await app.push_screen(tui.SuppressDialog(_finding()))
+            await app.push_screen(tui.SuppressDialog(finding))
             await _settle(pilot)
             # The dialog names the finding without label prefixes: the values
-            # themselves ("rule {VALUE}", "file {VALUE}") are shown once.
-            _assert_once(_drawn(app), "rule", "file")
+            # themselves ("rule {VALUE}", "file {SAVABLE_FILE}") are shown once.
+            drawn = _drawn(app)
+            _assert_once(drawn, "rule")
+            _assert_once(drawn, "file", value=SAVABLE_FILE)
 
             app.screen.query_one("#reason_input", Input).value = "because"
             app.screen.query_one("#btn_suppress", Button).press()
