@@ -38,19 +38,37 @@ def no_reservations(monkeypatch):
 
 @pytest.fixture
 def recorded_os(monkeypatch):
-    """os.open of the null device, os.dup2 and os.close as records, not actions."""
+    """The entry point's os calls on the null device as records, not actions.
+
+    Only those: pytest's own capture moves descriptors 1 and 2 with ``os.dup2``
+    around the test body, and those calls must still happen and are not the
+    entry point's. A call that names NULL_FD, the descriptor the stand-in null
+    device "opens", is the entry point's; every other call is passed through.
+    """
     calls: list[tuple] = []
-    real_open = os.open
+    real_open, real_dup2, real_close = os.open, os.dup2, os.close
 
     def fake_open(path, flags, *args, **kwargs):
-        if path == os.devnull:
+        if path == os.devnull and flags == os.O_WRONLY:
             calls.append(("open", path, flags))
             return NULL_FD
         return real_open(path, flags, *args, **kwargs)
 
+    def fake_dup2(src, dst, *args, **kwargs):
+        if src == NULL_FD:
+            calls.append(("dup2", src, dst))
+            return dst
+        return real_dup2(src, dst, *args, **kwargs)
+
+    def fake_close(fd):
+        if fd == NULL_FD:
+            calls.append(("close", fd))
+            return None
+        return real_close(fd)
+
     monkeypatch.setattr(os, "open", fake_open)
-    monkeypatch.setattr(os, "dup2", lambda src, dst: calls.append(("dup2", src, dst)))
-    monkeypatch.setattr(os, "close", lambda fd: calls.append(("close", fd)))
+    monkeypatch.setattr(os, "dup2", fake_dup2)
+    monkeypatch.setattr(os, "close", fake_close)
     return calls
 
 
@@ -90,7 +108,14 @@ def test_the_null_device_handed_the_descriptor_itself_stays_open(
     monkeypatch, no_reservations, recorded_os
 ):
     """When the closed number is the lowest free one, os.open returns it."""
-    monkeypatch.setattr(os, "open", lambda path, flags, *a, **k: 2)
+    real_open = os.open
+    monkeypatch.setattr(
+        os,
+        "open",
+        lambda path, flags, *a, **k: (
+            2 if path == os.devnull else real_open(path, flags, *a, **k)
+        ),
+    )
 
     assert entrypoint._reserve_descriptor(2) is True
     assert recorded_os == [], recorded_os

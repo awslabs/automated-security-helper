@@ -62,8 +62,11 @@ def _home(monkeypatch, value: str) -> None:
 
 
 def _install(bin_path: str):
+    # Wide, so the panel does not fold a long temporary path across lines.
     return CliRunner().invoke(
-        dependencies_app, ["--tool", "sarif", "--bin-path", bin_path]
+        dependencies_app,
+        ["--tool", "sarif", "--bin-path", bin_path],
+        env={"COLUMNS": "300"},
     )
 
 
