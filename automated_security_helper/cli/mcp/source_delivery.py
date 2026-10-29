@@ -101,6 +101,8 @@ _MAX_ZIP_BYTES: int = 100 * 1024 * 1024  # 100 MiB on-disk zip
 _MAX_EXTRACTED_BYTES: int = 500 * 1024 * 1024  # 500 MiB uncompressed
 _MAX_FILES: int = 50_000  # entry count
 _MAX_CHUNK_BYTES: int = 1 * 1024 * 1024  # 1 MiB per chunked b64 upload (decoded)
+#: How much of a refused symlink entry's content a refusal quotes as its target.
+_SYMLINK_TARGET_EXCERPT_BYTES: int = 256
 
 # A zip extraction and a git clone build here, and the result is renamed onto
 # "source" only once it has succeeded, so a refused or failed re-delivery cannot
@@ -2471,7 +2473,21 @@ def _finalize_zip_upload(
                     # Source tree shipping over MCP does not need symlinks.
                     # Refusing them outright eliminates the pre/post-write
                     # divergence, as an earlier review noted.
-                    link_target = zf.read(info).decode("utf-8", errors="replace")
+                    #
+                    # Only the first bytes of the entry are shown. A link entry's
+                    # content is whatever the archive says it is, up to the
+                    # uncompressed total this loop admits, and the refusal text
+                    # is carried through every per-character pass the error path
+                    # makes on the event loop; the whole of it in the message
+                    # was that many bytes read, held and re-processed for one
+                    # line nobody reads past its first few words.
+                    with zf.open(info) as member:
+                        head = member.read(_SYMLINK_TARGET_EXCERPT_BYTES + 1)
+                    link_target = head[:_SYMLINK_TARGET_EXCERPT_BYTES].decode(
+                        "utf-8", errors="replace"
+                    )
+                    if len(head) > _SYMLINK_TARGET_EXCERPT_BYTES:
+                        link_target += "..."
                     raise ValueError(
                         f"symlink {info.filename!r} -> {link_target!r}: "
                         f"symlinks are not allowed in MCP source delivery zips"

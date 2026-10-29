@@ -390,3 +390,49 @@ class TestFailedRedeliveryKeepsThePreviousTree:
 
         leftovers = [p.name for p in (tmp_path / _SESSION).iterdir() if p.is_dir()]
         assert leftovers == ["incoming"], leftovers
+
+
+class TestASymlinkRefusalQuotesABoundedExcerpt:
+    """The refusal of a symlink entry quotes the first bytes of it, not all of it.
+
+    A link entry's content is whatever the archive says it is, up to the
+    uncompressed total the validation admits. The refusal read the whole entry
+    and embedded its ``repr`` in the message, which every per-character pass on
+    the error path (the control-character rendering, the redaction) then walked
+    on the event loop. Red at the base: the message carried the entire content.
+    """
+
+    def _refusal_for(self, link_target: bytes, tmp_path: Path) -> str:
+        hostile = _zip_with_symlink("evil", link_target)
+        sd.set_source_zip_chunk(
+            upload_id="link",
+            sequence=0,
+            data_b64=_b64(hostile),
+            last=True,
+            workspace_root=tmp_path,
+            session_id=_SESSION,
+        )
+        with pytest.raises(ValueError, match="symlinks are not allowed") as excinfo:
+            sd.set_source_zip_finalize(
+                upload_id="link",
+                expected_sha256=hashlib.sha256(hostile).hexdigest(),
+                workspace_root=tmp_path,
+                session_id=_SESSION,
+            )
+        return str(excinfo.value)
+
+    def test_a_long_link_target_is_cut_to_a_bounded_prefix(self, tmp_path):
+        # Stored uncompressed, so the archive stays within one upload chunk.
+        content = b"/" + b"a" * (512 * 1024)
+        message = self._refusal_for(content, tmp_path)
+
+        assert len(message) < 2 * sd._SYMLINK_TARGET_EXCERPT_BYTES, len(message)
+        assert "..." in message
+        assert "'evil'" in message
+
+    def test_a_short_link_target_is_quoted_whole(self, tmp_path):
+        """Control: a target within the bound is shown as it is, unmarked."""
+        message = self._refusal_for(b"/etc/passwd", tmp_path)
+
+        assert "'/etc/passwd'" in message
+        assert "..." not in message
