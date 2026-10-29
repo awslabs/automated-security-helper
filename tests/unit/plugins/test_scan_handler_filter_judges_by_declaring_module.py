@@ -68,11 +68,14 @@ class _ModuleHiding:
 
 
 def test_a_partial_is_judged_by_the_function_it_wraps():
+    """The scan names the module that defines ``mine`` exactly: the plugin
+    filter selects a module by its own name, never a submodule of a named
+    package (tests/unit/plugins/test_plugin_module_name_rules.py pins that)."""
     theirs = functools.partial(_handler_in("zz_their_ash_plugins.events"), 1)
     mine = functools.partial(_handler_in("zz_mine_ash_plugins.events"), 1)
     program = functools.partial(_handler_in("zz_program.hooks"), 1)
 
-    admits = scan_handler_filter(["zz_mine_ash_plugins"], manager=_manager())
+    admits = scan_handler_filter(["zz_mine_ash_plugins.events"], manager=_manager())
 
     assert not admits(theirs), "a partial of another module's handler fired"
     assert admits(mine)
