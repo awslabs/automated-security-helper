@@ -105,6 +105,65 @@ _SEVERITY_LEVEL = {
     "info": "note",
 }
 
+# Advisory severity to the ASH severity a result declares (``issue_severity``,
+# which utils/severity_ladder.result_severity reads first) when no CVSS score
+# backs its rule. Without it the SARIF level decided, and the ladder reads
+# ``error`` as CRITICAL and ``note`` as LOW, so an unscored high advisory was
+# graded CRITICAL and an info one LOW. With a usable score the rule's
+# security_severity is copied onto the result instead (sarif_utils).
+_SEVERITY_GRADE = {
+    "critical": "CRITICAL",
+    "high": "HIGH",
+    "moderate": "MEDIUM",
+    "low": "LOW",
+    "info": "INFO",
+}
+
+
+def _usable_cvss_score(cvss: Any) -> float | None:
+    """The CVSS score in an advisory's ``cvss`` object, or None when it has none.
+
+    npm writes ``{"score": 0, "vectorString": null}`` for an advisory with no
+    CVSS vector, and may write ``null`` for the object itself; pnpm's and yarn's
+    v1 advisories may carry no object. A missing object raised on ``.get``, and
+    a 0 was attached to the rule as its security-severity, which GHAS forwards
+    as "0", below its Low bucket, and which the normalizer skips as no score.
+    A score counts when it is a number in (0, 10].
+    """
+    if not isinstance(cvss, dict):
+        return None
+    score = cvss.get("score")
+    if isinstance(score, bool) or not isinstance(score, (int, float)):
+        return None
+    if not 0 < score <= 10:
+        return None
+    return float(score)
+
+
+def _grade_properties(severity: str) -> Dict[str, str]:
+    """The ``issue_severity`` a result declares from its advisory's severity word,
+    for an advisory with no usable CVSS score; empty for a word not in the table,
+    which leaves the SARIF level to decide as before."""
+    grade = _SEVERITY_GRADE.get(str(severity).lower())
+    return {"issue_severity": grade} if grade else {}
+
+
+def _ndjson_lines(text: str) -> List[str]:
+    """The lines of NDJSON output, split at line feeds only, terminators kept.
+
+    ``str.splitlines`` also splits at U+2028, U+2029, U+0085, U+000B, U+000C
+    and the other separators Unicode names, which a JSON string may hold as it
+    is (``JSON.stringify`` writes them unescaped), so an advisory title holding
+    one broke its event line in two: neither half parsed, and a yarn 1 advisory
+    was dropped while a yarn 4 report was read as an error.
+    """
+    pieces = text.split("\n")
+    lines = [piece + "\n" for piece in pieces[:-1]]
+    if pieces[-1]:
+        lines.append(pieces[-1])
+    return lines
+
+
 # Where a yarn audit's advisories sit in the per-lockfile document, after
 # _parse_yarn_audit has put all three yarn output formats into one shape.
 _YARN_ADVISORIES_KEY = "yarn_advisories"
@@ -410,6 +469,26 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             pkg_name,
             entry.version if entry is not None else None,
             install_path(lock_rel, str(node_path)),
+        )
+
+    def _node_place(
+        self,
+        pkg_name: str,
+        node_path: str | None,
+        lock_rel: str | None,
+        lock_index: NpmLockIndex | None,
+    ) -> tuple[str, Dict[str, str]]:
+        """The result URI's package location and the identity of one node.
+
+        For a vulnerability entry that lists no node, the package by name alone:
+        npm counted the advisory, so it is reported against
+        ``node_modules/<name>/package.json`` with no installed version or path.
+        """
+        if node_path is None:
+            return pkg_name, identity_properties(pkg_name, None, None)
+        return (
+            str(node_path).replace("node_modules/", ""),
+            self._node_identity(pkg_name, node_path, lock_rel, lock_index),
         )
 
     @staticmethod
@@ -842,7 +921,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         # of yarn's on their own.
         saw_problem = False
         if yarn_major < 2:
-            for raw in stdout.splitlines(keepends=True):
+            for raw in _ndjson_lines(stdout):
                 line = raw.strip()
                 if not line:
                     problems.append(raw)
@@ -910,7 +989,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         }
             else:
                 advisory_lines = 0
-                for raw in stdout.splitlines(keepends=True):
+                for raw in _ndjson_lines(stdout):
                     line = raw.strip()
                     if not line:
                         problems.append(raw)
@@ -1042,7 +1121,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     ) -> None:
         """Rules and results for yarn and pnpm advisories, in the shape npm's take.
 
-        One result per installed version of the advisory's package. The URI is
+        One result per installed version of the advisory's package, and one for
+        the package by name when the record lists no version (the tool counted
+        the advisory, so it is a finding, not a rule with no result). The URI is
         the one the npm path gives a hoisted package, so path-based
         suppressions read the same; neither yarn nor pnpm says where a copy is
         installed, so ``package_path`` is left out.
@@ -1053,6 +1134,8 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             level = _SEVERITY_LEVEL.get(severity, "warning")
             vuln_id = self._advisory_id(pkg_name, {"url": record["url"]})
             title = record["title"] or f"Vulnerability in {pkg_name}"
+            score = _usable_cvss_score(record["cvss"])
+            grade = {} if score is not None else _grade_properties(severity)
             if vuln_id not in rules_dict:
                 rule_props: Dict[str, Any] = {
                     "tags": [
@@ -1063,9 +1146,8 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         f"tool_type::{self.tool_type or 'UNKNOWN'}",
                     ],
                 }
-                cvss_score = record["cvss"].get("score")
-                if cvss_score is not None:
-                    rule_props["security_severity"] = cvss_score
+                if score is not None:
+                    rule_props["security_severity"] = score
                 rules_dict[vuln_id] = ReportingDescriptor(
                     id=vuln_id,
                     name=f"npm-audit-{vuln_id}",
@@ -1081,7 +1163,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             if patched is not None:
                 extra["patched_versions"] = patched
                 extra["fix_available"] = bool(patched) and patched != "<0.0.0"
-            for version, paths in sorted(record["versions"].items()):
+            # A record with no versions map (an advisory the tool listed with
+            # no finding entries) is still the tool's finding: one result for
+            # the package by name, its installed version unknown.
+            copies = sorted(record["versions"].items()) or [(None, [])]
+            for version, paths in copies:
                 per_copy = dict(extra)
                 if paths:
                     per_copy[record["paths_key"]] = paths
@@ -1104,13 +1190,18 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         ],
                         properties=PropertyBag(
                             **identity_properties(pkg_name, version, None),
-                            installed_version=version,
+                            installed_version=(
+                                version
+                                if version is not None
+                                else record["vulnerable_versions"]
+                            ),
                             vulnerable_versions=record["vulnerable_versions"],
                             recommendation=f"Update {pkg_name} to a non-vulnerable version",
                             severity=severity,
                             cwe=record["cwe"],
                             cvss=record["cvss"],
                             **per_copy,
+                            **grade,
                         ),
                     )
                 )
@@ -1269,6 +1360,18 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     vuln_id = self._advisory_id(pkg_name, via)
                     title = via.get("title", f"Vulnerability in {pkg_name}")
                     description = f"Vulnerability in {pkg_name}: {title}"
+                    # The advisory's own severity and range where it gives
+                    # them. The package entry carries the highest severity of
+                    # its advisories and the union of their ranges, so grading
+                    # every result of the package at the package's severity
+                    # read an unscored low or moderate advisory as the
+                    # package's highest.
+                    via_severity = str(via.get("severity") or severity)
+                    via_level = _SEVERITY_LEVEL.get(via_severity, "warning")
+                    via_range = via.get("range") or vuln_info.get("range", "*")
+                    cvss = via.get("cvss") if isinstance(via.get("cvss"), dict) else {}
+                    score = _usable_cvss_score(cvss)
+                    grade = {} if score is not None else _grade_properties(via_severity)
 
                     # Create a rule for this vulnerability if it doesn't exist
                     if vuln_id not in rules_dict:
@@ -1276,20 +1379,22 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             "tags": [
                                 "security",
                                 "npm-audit",
-                                severity,
+                                via_severity,
                                 f"tool_name::{self.config.name}",
                                 f"tool_type::{self.tool_type or 'UNKNOWN'}",
                             ],
                         }
-                        # Only attach security-severity when npm actually reported a
-                        # CVSS score. It used to default to 0, which the SARIF severity
-                        # normalizer reads as CVSS 0.0 and maps to INFO — downgrading a
-                        # critical/high advisory that ships no CVSS number below the
-                        # severity threshold (fail-open). Omitting it leaves the
-                        # level-based severity in place.
-                        cvss_score = via.get("cvss", {}).get("score")
-                        if cvss_score is not None:
-                            rule_props["security_severity"] = cvss_score
+                        # Only attach security-severity when npm reported a
+                        # usable CVSS score (_usable_cvss_score). It used to
+                        # default to 0, which the SARIF severity normalizer
+                        # reads as CVSS 0.0 and maps to INFO, downgrading a
+                        # critical/high advisory that ships no CVSS number
+                        # below the severity threshold (fail-open), and npm's
+                        # own 0 for an advisory with no vector reached GHAS
+                        # as security-severity "0". Without a score the
+                        # result declares its grade from the severity word.
+                        if score is not None:
+                            rule_props["security_severity"] = score
                         rule = ReportingDescriptor(
                             id=vuln_id,
                             name=f"npm-audit-{vuln_id}",
@@ -1300,20 +1405,22 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         )
                         rules_dict[vuln_id] = rule
 
-                    # Create a result for each installed copy (node)
-                    for node_path in vuln_info.get("nodes", []):
+                    # Create a result for each installed copy (node), or one
+                    # for the package by name when npm lists no node: the
+                    # advisory is counted in the report's metadata, so a rule
+                    # with no result silently dropped a finding.
+                    for node_path in vuln_info.get("nodes") or [None]:
                         # The URI keeps its historical shape, which existing
                         # path-based suppressions match; package_path holds
                         # the real install path.
-                        pkg_location = str(node_path).replace("node_modules/", "")
-                        identity = self._node_identity(
+                        pkg_location, identity = self._node_place(
                             pkg_name, node_path, lock_rel, lock_index
                         )
                         result = Result(
                             ruleId=vuln_id,
-                            level=level,
+                            level=via_level,
                             message=Message(
-                                text=f"{title} in {pkg_name} {vuln_info.get('range', '*')}. {via.get('url', '')}"
+                                text=f"{title} in {pkg_name} {via_range}. {via.get('url', '')}"
                             ),
                             locations=[
                                 Location(
@@ -1330,12 +1437,13 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                 installed_version=identity.get(
                                     PACKAGE_VERSION_KEY, vuln_info.get("range", "*")
                                 ),
-                                vulnerable_versions=vuln_info.get("range", "*"),
+                                vulnerable_versions=via_range,
                                 recommendation=f"Update {pkg_name} to a non-vulnerable version",
-                                severity=severity,
+                                severity=via_severity,
                                 cwe=via.get("cwe", []),
-                                cvss=via.get("cvss", {}),
+                                cvss=cvss,
                                 fix_available=vuln_info.get("fixAvailable", False),
+                                **grade,
                             ),
                         )
                         results.append(result)
@@ -1379,9 +1487,8 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         lock_rel,
                         lock_index,
                     )
-                    for node_path in vuln_info.get("nodes", []):
-                        pkg_location = str(node_path).replace("node_modules/", "")
-                        identity = self._node_identity(
+                    for node_path in vuln_info.get("nodes") or [None]:
+                        pkg_location, identity = self._node_place(
                             pkg_name, node_path, lock_rel, lock_index
                         )
                         # Any-valued: root_advisories is a list of refs, unlike
@@ -1414,6 +1521,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                 recommendation=f"Update {pkg_name} to a non-vulnerable version",
                                 severity=severity,
                                 fix_available=vuln_info.get("fixAvailable", False),
+                                # No CVSS score here, so the grade comes from
+                                # the package's severity word.
+                                **_grade_properties(severity),
                             ),
                         )
                         results.append(result)
