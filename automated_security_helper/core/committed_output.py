@@ -103,6 +103,18 @@ PREVIOUS_RUN_FILE_NAMES: Tuple[str, ...] = (
 WORKSPACE_ROOT_FILES: Tuple[str, ...] = (RESULTS_FILE_NAME,)
 WORKSPACE_ROOT_DIRECTORIES: Tuple[str, ...] = ("reports",)
 
+#: Where a workspace scan writes each project's output, ``projects/<key>/``,
+#: under the workspace's output directory. The same spelling as
+#: ``workspace/execution.PROJECTS_DIR_NAME`` and ``workspace/reporting
+#: .PROJECTS_DIR_NAME``, repeated here rather than imported: those modules
+#: import the orchestrator, which imports this one. A test holds the three equal.
+#: Checked as an entry of its own (:func:`_found_tracked_entry`): the per-project
+#: checks look inside each project's directory, and the per-project orchestrators
+#: refuse a linked output directory of their own, but nothing looked at
+#: ``projects`` itself, so a committed link there let a workspace scan clear and
+#: write every project's output through it.
+WORKSPACE_PROJECTS_DIR_NAME = "projects"
+
 #: Where a workspace scan spools each project's run, at the root of its output
 #: directory, until it writes the unified results file; it then removes the
 #: directory (workspace/aggregation.py). Not one of the results paths
@@ -245,6 +257,26 @@ def _found_under(output_dir: str | Path, names: Collection[str]) -> _Found:
     return _Found(sorted(found), [], None)
 
 
+def _found_tracked_entry(output_dir: str | Path, name: str) -> _Found:
+    """Whether git tracks ``output_dir/<name>`` ITSELF, which for a directory name
+    means a link (git tracks no directories). Nothing under it is counted here;
+    :func:`_found_under` is for that. Where git could not answer and a link is on
+    disk at the name, the link is the unverified entry."""
+    answer = git_index_below(output_dir)
+    path = _absolute(output_dir) / name
+    if answer.unanswered:
+        on_disk = [path] if os.path.islink(path) else []
+        return _Found([], on_disk, answer)
+    if answer.names is None:
+        return _Found([], [], None)
+    wanted = output_name_key(name)
+    for entry in answer.names:
+        parts = [part for part in entry.split("/") if part]
+        if len(parts) == 1 and output_name_key(parts[0]) == wanted:
+            return _Found([path], [], None)
+    return _Found([], [], None)
+
+
 def _combined(found: Iterable[_Found]) -> _Found:
     committed: List[Path] = []
     unverified: List[Path] = []
@@ -359,6 +391,9 @@ def committed_entries_in_a_workspace_output(
         [
             root,
             _found_under(output_dir, (WORKSPACE_SPOOL_DIR_NAME,)),
+            # The projects directory itself: a committed link there would have
+            # every project's output cleared and written through it.
+            _found_tracked_entry(output_dir, WORKSPACE_PROJECTS_DIR_NAME),
             *(
                 _found_in_the_way(directory, None, None, ())
                 for directory in project_output_dirs
