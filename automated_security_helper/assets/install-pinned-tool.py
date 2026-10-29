@@ -122,6 +122,10 @@ _EXCEPTIONS_MODULE = ("core", "exceptions.py")
 # connection.
 _EXIT_USAGE = 2
 _EXIT_INTEGRITY = 3
+# Seconds a download socket may stay silent before the attempt fails. Per read,
+# not for the whole transfer, so a slow but moving download is never cut, while
+# a stalled one ends and with-retry gets its next attempt.
+_DOWNLOAD_TIMEOUT = 60
 
 # platform.machine() spellings mapped onto the arch vocabulary tool_downloads.py
 # uses. Both x86 spellings appear in the wild; arm64 is what macOS reports and
@@ -247,14 +251,31 @@ def download(url: str, target: Path) -> str:
     Hashed while streaming rather than by re-reading the file, so the digest
     describes the bytes that were written and not whatever is at the path
     afterwards.
+
+    A socket that stops answering raises after ``_DOWNLOAD_TIMEOUT`` seconds
+    instead of hanging: urlopen with no timeout waits forever, and with-retry
+    cannot retry an attempt that never ends. A response cut short of its
+    Content-Length is a network failure too, and is raised as one: written to
+    the file and returned, the short body was reported as a SHA256 mismatch and
+    took the integrity exit that with-retry must never retry, for a cause that
+    a retry is exactly the cure for.
     """
     digest = hashlib.sha256()
+    written = 0
     # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-    with urllib.request.urlopen(url) as response:  # nosec B310 - https enforced below
+    with urllib.request.urlopen(url, timeout=_DOWNLOAD_TIMEOUT) as response:  # nosec B310 - https enforced below
+        expected = response.headers.get("Content-Length")
         with target.open("wb") as handle:
             for chunk in iter(lambda: response.read(1024 * 256), b""):
                 digest.update(chunk)
                 handle.write(chunk)
+                written += len(chunk)
+    if expected is not None and expected.strip().isdigit():
+        if written != int(expected):
+            raise ConnectionError(
+                f"short read from {url}: {written} of {expected} bytes arrived "
+                "before the connection closed"
+            )
     return digest.hexdigest()
 
 
@@ -350,12 +371,25 @@ def install(
         and os.access(final, os.X_OK)
     ):
         if _sha256_file(final) == executable_digest.lower():
+            # Not reinstalling is right only when everything this call would
+            # install is in place. The license files come from the same archive,
+            # so a matching binary with a missing or incomplete license directory
+            # (an image layer rebuilt without ASH_THIRD_PARTY_DIR, an entry that
+            # gained a file) used to return here and leave the directory as it was,
+            # with no mode that repaired it.
+            if entry is None or _third_party_installed(entry, third_party_dir):
+                print(
+                    f"{asset.tool} {asset.version} is already at {final} and matches "
+                    f"the pinned SHA256 {executable_digest.lower()}; not reinstalling",
+                    flush=True,
+                )
+                return final
             print(
-                f"{asset.tool} {asset.version} is already at {final} and matches "
-                f"the pinned SHA256 {executable_digest.lower()}; not reinstalling",
+                f"{asset.tool} {asset.version} is already at {final}, but its "
+                f"license files under {third_party_dir} are missing or incomplete; "
+                "reinstalling from the release archive to restore them",
                 flush=True,
             )
-            return final
 
     with tempfile.TemporaryDirectory(prefix="ash-pinned-tool-") as staging_name:
         staging = Path(staging_name)
@@ -668,6 +702,21 @@ def _plain_name(name: str, what: str) -> str:
     if not name or name in (".", "..") or "/" in name or "\\" in name:
         raise SystemExit(f"refusing {what} {name!r}: not a plain file name")
     return name
+
+
+def _third_party_installed(entry, third_party_dir: Path) -> bool:
+    """Whether ``third_party_dir`` holds every file ``entry`` installs for its tool.
+
+    The directory ``publish_third_party`` writes: one file per entry in
+    ``entry.files`` plus the SOURCE notice. An empty file counts as missing,
+    the same way ``stage_third_party`` refuses to stage one.
+    """
+    installed = third_party_dir / entry.tool
+    names = [license_file.name for license_file in entry.files] + [_SOURCE_FILE]
+    return all(
+        (installed / name).is_file() and (installed / name).stat().st_size > 0
+        for name in names
+    )
 
 
 def _third_party_entry(pins, tool: str, version: "str | None" = None):
