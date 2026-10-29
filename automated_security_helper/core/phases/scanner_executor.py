@@ -126,6 +126,46 @@ def _completed_result_status(status: Any) -> bool:
     return isinstance(status, str) and status.lower() in _COMPLETED_RESULT_STATUSES
 
 
+#: The fields of ScannerSeverityCount a returned dict's ``severity_counts`` can set.
+_SEVERITY_COUNT_FIELDS = ("suppressed", "critical", "high", "medium", "low", "info")
+
+
+def _severity_counts_from_dict(raw_counts: Any) -> ScannerSeverityCount:
+    """``raw_counts``, a scanner's own ``severity_counts``, as a ScannerSeverityCount.
+
+    Keys are matched to the model's fields by name whatever their case, so a
+    count a tool writes under ``HIGH`` or ``High`` reaches the severity gate.
+    Validated as before, such a key was kept as a pydantic extra and the field
+    stayed 0, and a result with high findings graded PASSED. A key that names no
+    field is left out. A value that is not a count (not a whole number, or
+    negative) raises ValueError: the caller refuses to grade the row rather
+    than inventing a count.
+    """
+    if isinstance(raw_counts, ScannerSeverityCount):
+        return raw_counts
+    if not isinstance(raw_counts, dict):
+        raise ValueError(
+            f"severity_counts is a {type(raw_counts).__name__}, not a mapping"
+        )
+    counts: Dict[str, int] = {}
+    for key, value in raw_counts.items():
+        name = key.strip().lower() if isinstance(key, str) else ""
+        if name not in _SEVERITY_COUNT_FIELDS:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+            raise ValueError(f"severity_counts[{key!r}] is not a count: {value!r}")
+        try:
+            count = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"severity_counts[{key!r}] is not a count: {value!r}"
+            ) from exc
+        if count < 0:
+            raise ValueError(f"severity_counts[{key!r}] is negative: {value!r}")
+        counts[name] = counts.get(name, 0) + count
+    return ScannerSeverityCount(**counts)
+
+
 # How often a running scanner announces that it is still running. Long enough that
 # a normal scan logs nothing extra (most scanners finish inside a minute), short
 # enough that a hung one is named well before a CI job timeout kills the run.
@@ -1110,123 +1150,159 @@ class ScannerExecutor:
                         SarifReport,
                     )
 
-                    if isinstance(raw_results, SarifReport):
-                        if not raw_results.runs:
-                            # Every field of a SARIF log is optional, so `{}`
-                            # validates. The template refuses it before grading; a
-                            # scan() override can return it as it is, and zero
-                            # findings from no run reads as a clean scan.
-                            _refuse_to_grade(
-                                container,
-                                f"{scanner_config_name} returned a result on "
-                                f"{target_type} that holds no SARIF run, so there is "
-                                "nothing to grade",
-                            )
-                        raw_results = sanitize_sarif_paths(
-                            raw_results, self.plugin_context.source_dir
-                        )
-                        # Before suppressions, and whatever --ignore-suppressions
-                        # says: ASH's own output is not part of the scanned tree.
-                        # Most scanners are told to skip it; this catches the ones
-                        # whose tool has no such option (snyk-code) or was not
-                        # told (bandit, and any third-party scanner).
-                        drop_results_in_ash_output_dirs(
-                            raw_results,
-                            self.plugin_context,
-                            scanner_name=scanner_config_name,
-                        )
-                        # So a converted file's finding keeps its id wherever the
-                        # output directory is.
-                        mark_converted_results(raw_results, self.plugin_context)
-                        if not self.plugin_context.ignore_suppressions:
-                            raw_results = apply_suppressions_to_sarif(
-                                sarif_report=raw_results,
-                                plugin_context=self.plugin_context,
-                            )
-                        else:
-                            # The flag lifts suppressions and ignore paths, not
-                            # the exclusion of ASH's own output directory.
-                            raw_results = exclude_output_dir_results(
-                                sarif_report=raw_results,
-                                plugin_context=self.plugin_context,
-                            )
-                        severity_counts, finding_count = (
-                            self._extract_metrics_from_sarif(raw_results)
-                        )
-                        container.severity_counts = severity_counts
-                        container.finding_count = finding_count
-                    elif isinstance(raw_results, dict):
-                        if "status" in raw_results and not _completed_result_status(
-                            raw_results["status"]
-                        ):
-                            container.status = ScannerStatus.ERROR
-                            # "failed" dicts carry their own errors: the template's
-                            # and the scan phase's failure responses.
-                            if raw_results["status"] != "failed":
+                    # Reading the result is the one step here that runs on what the
+                    # scanner returned, and a result ASH cannot read (a count that
+                    # is not a number, a finding that is not a mapping) must not
+                    # raise out of this finally: the raise left _execute_scanner
+                    # through its outer handler, and _safe_execute_scanner then
+                    # replaced every container this scanner had already built for
+                    # its earlier targets with one failure container. A result that
+                    # cannot be read makes this target's row ERROR, with the reason
+                    # on the row, and the scanner's other targets keep theirs.
+                    try:
+                        if isinstance(raw_results, SarifReport):
+                            if not raw_results.runs:
+                                # Every field of a SARIF log is optional, so `{}`
+                                # validates. The template refuses it before grading; a
+                                # scan() override can return it as it is, and zero
+                                # findings from no run reads as a clean scan.
                                 _refuse_to_grade(
                                     container,
                                     f"{scanner_config_name} returned a result on "
-                                    f"{target_type} with status "
-                                    f"{raw_results['status']!r}, which does not say "
-                                    "its tool completed, so it was not graded",
+                                    f"{target_type} that holds no SARIF run, so there is "
+                                    "nothing to grade",
                                 )
-                        elif not (
-                            "status" in raw_results
-                            or "severity_counts" in raw_results
-                            or isinstance(raw_results.get("findings"), list)
-                        ):
-                            # Nothing here to grade: a tool's own JSON that a scanner
-                            # returned because it did not parse. Graded on its zero
-                            # findings it read as a clean scan.
-                            _refuse_to_grade(
-                                container,
-                                f"{scanner_config_name} returned a result on "
-                                f"{target_type} that could not be graded: it is not "
-                                "SARIF and carries no status, severity_counts or "
-                                "findings",
+                            raw_results = sanitize_sarif_paths(
+                                raw_results, self.plugin_context.source_dir
                             )
-                        else:
-                            if "severity_counts" in raw_results:
-                                raw_counts = raw_results["severity_counts"]
-                                if isinstance(raw_counts, ScannerSeverityCount):
-                                    container.severity_counts = raw_counts
-                                else:
-                                    container.severity_counts = (
-                                        ScannerSeverityCount.model_validate(raw_counts)
-                                    )
-                                container.finding_count = sum(
-                                    int(v)
-                                    for v in (
-                                        raw_counts.values()
-                                        if isinstance(raw_counts, dict)
-                                        else raw_counts.model_dump().values()
-                                    )
+                            # Before suppressions, and whatever --ignore-suppressions
+                            # says: ASH's own output is not part of the scanned tree.
+                            # Most scanners are told to skip it; this catches the ones
+                            # whose tool has no such option (snyk-code) or was not
+                            # told (bandit, and any third-party scanner).
+                            drop_results_in_ash_output_dirs(
+                                raw_results,
+                                self.plugin_context,
+                                scanner_name=scanner_config_name,
+                            )
+                            # So a converted file's finding keeps its id wherever the
+                            # output directory is.
+                            mark_converted_results(raw_results, self.plugin_context)
+                            if not self.plugin_context.ignore_suppressions:
+                                raw_results = apply_suppressions_to_sarif(
+                                    sarif_report=raw_results,
+                                    plugin_context=self.plugin_context,
                                 )
-                            elif "findings" in raw_results and isinstance(
-                                raw_results["findings"], list
+                            else:
+                                # The flag lifts suppressions and ignore paths, not
+                                # the exclusion of ASH's own output directory.
+                                raw_results = exclude_output_dir_results(
+                                    sarif_report=raw_results,
+                                    plugin_context=self.plugin_context,
+                                )
+                            severity_counts, finding_count = (
+                                self._extract_metrics_from_sarif(raw_results)
+                            )
+                            container.severity_counts = severity_counts
+                            container.finding_count = finding_count
+                        elif isinstance(raw_results, dict):
+                            if "status" in raw_results and not _completed_result_status(
+                                raw_results["status"]
                             ):
-                                for finding in raw_results["findings"]:
-                                    if "severity" in finding:
-                                        severity = finding["severity"].lower()
+                                container.status = ScannerStatus.ERROR
+                                # "failed" dicts carry their own errors: the template's
+                                # and the scan phase's failure responses.
+                                if raw_results["status"] != "failed":
+                                    _refuse_to_grade(
+                                        container,
+                                        f"{scanner_config_name} returned a result on "
+                                        f"{target_type} with status "
+                                        f"{raw_results['status']!r}, which does not say "
+                                        "its tool completed, so it was not graded",
+                                    )
+                            elif not (
+                                "status" in raw_results
+                                or "severity_counts" in raw_results
+                                or isinstance(raw_results.get("findings"), list)
+                            ):
+                                # Nothing here to grade: a tool's own JSON that a scanner
+                                # returned because it did not parse. Graded on its zero
+                                # findings it read as a clean scan.
+                                _refuse_to_grade(
+                                    container,
+                                    f"{scanner_config_name} returned a result on "
+                                    f"{target_type} that could not be graded: it is not "
+                                    "SARIF and carries no status, severity_counts or "
+                                    "findings",
+                                )
+                            else:
+                                if "severity_counts" in raw_results:
+                                    # Keys matched by name whatever their case: a
+                                    # count under "HIGH" validated as a pydantic
+                                    # extra, never reached the gate, and the row
+                                    # graded PASSED over high findings. A value that
+                                    # is not a count raises, and the guard around
+                                    # this chain makes the row ERROR for it.
+                                    container.severity_counts = (
+                                        _severity_counts_from_dict(
+                                            raw_results["severity_counts"]
+                                        )
+                                    )
+                                    container.finding_count = (
+                                        container.severity_counts.total
+                                        + container.severity_counts.suppressed
+                                    )
+                                elif isinstance(raw_results.get("findings"), list):
+                                    for finding in raw_results["findings"]:
+                                        # A finding that is not a mapping, or whose
+                                        # severity is missing, is counted and grades
+                                        # nothing; one whose severity is not a known
+                                        # name (or not text) counts as info.
+                                        # increment raises ValueError for both.
+                                        severity = (
+                                            finding.get("severity")
+                                            if isinstance(finding, dict)
+                                            else None
+                                        )
+                                        if severity is None:
+                                            continue
                                         try:
                                             container.severity_counts.increment(
                                                 severity
                                             )
                                         except ValueError:
                                             container.severity_counts.increment("info")
-                                container.finding_count = len(raw_results["findings"])
-                    elif raw_results and not (
-                        raw_results is True or isinstance(raw_results, CycloneDXReport)
-                    ):
-                        # Nothing the executor reads: a scan() override's own list,
-                        # string or number. Graded on its zero findings it read as a
-                        # clean scan. A falsy result is MISSING, above.
+                                    container.finding_count = len(
+                                        raw_results["findings"]
+                                    )
+                        elif raw_results and not (
+                            raw_results is True
+                            or isinstance(raw_results, CycloneDXReport)
+                        ):
+                            # Nothing the executor reads: a scan() override's own list,
+                            # string or number. Graded on its zero findings it read as a
+                            # clean scan. A falsy result is MISSING, above.
+                            _refuse_to_grade(
+                                container,
+                                f"{scanner_config_name} returned a result on "
+                                f"{target_type} that could not be graded: a "
+                                f"{type(raw_results).__name__}, not SARIF, CycloneDX or "
+                                "a dict",
+                            )
+                    except Exception as grading_error:
+                        # Redacted as the per-target handler redacts: the text
+                        # can quote a value from the scanner's own result.
+                        environment_values = self._plugin_environment_values(
+                            scanner_plugin
+                        )
                         _refuse_to_grade(
                             container,
-                            f"{scanner_config_name} returned a result on "
-                            f"{target_type} that could not be graded: a "
-                            f"{type(raw_results).__name__}, not SARIF, CycloneDX or "
-                            "a dict",
+                            text_without_values(
+                                f"{scanner_config_name} returned a result on "
+                                f"{target_type} that could not be graded: "
+                                f"{error_text(grading_error, environment_values)}",
+                                environment_values,
+                            ),
                         )
 
                     # Not for a target scan() never ran on (disabled, or refused by
@@ -1476,7 +1552,13 @@ class ScannerExecutor:
                                 f"{target_type} files: {container.skipped_reason}",
                                 extra=NO_MARKUP,
                             )
-                    if isinstance(raw_results, dict) and "metadata" in raw_results:
+                    # Only a mapping is metadata. A tool's own JSON can carry
+                    # ``"metadata": null`` (or a list); read as a mapping it raised
+                    # here, after the row was graded, and the raise discarded the
+                    # scanner's other targets' containers with this one.
+                    if isinstance(raw_results, dict) and isinstance(
+                        raw_results.get("metadata"), dict
+                    ):
                         for key, value in raw_results["metadata"].items():
                             container.add_metadata(key, value)
 
