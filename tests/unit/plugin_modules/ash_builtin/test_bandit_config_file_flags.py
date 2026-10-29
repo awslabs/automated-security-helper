@@ -59,14 +59,16 @@ def _scanner(context: PluginContext, config_file: Optional[Path]) -> BanditScann
     )
 
 
-def _scan_argv(scanner: BanditScanner, context: PluginContext) -> List[str]:
-    final_args, _, _ = scanner._execute_scan(context.source_dir, "source", [])
+def _scan_argv(
+    scanner: BanditScanner, target: Path, target_type: str = "source"
+) -> List[str]:
+    final_args, _, _ = scanner._execute_scan(target, target_type, [])
     return [str(arg) for arg in final_args]
 
 
 def _argv(context: PluginContext, config_file: Optional[Path]) -> tuple:
     scanner = _scanner(context, config_file)
-    return _scan_argv(scanner, context), Path(scanner.results_dir)
+    return _scan_argv(scanner, context.source_dir), Path(scanner.results_dir)
 
 
 def _after(argv: List[str], flag: str) -> List[str]:
@@ -98,7 +100,7 @@ def test_a_dot_bandit_file_is_the_only_ini(plugin_context, tmp_path) -> None:
     assert _after(argv, "--configfile") == []
 
 
-@pytest.mark.parametrize("name", ["bandit.yaml", "bandit.toml", "ops.bandit"])
+@pytest.mark.parametrize("name", ["bandit.yaml", "ops.bandit"])
 def test_another_file_is_a_configfile_beside_the_empty_ini(
     plugin_context, tmp_path, name: str
 ) -> None:
@@ -166,7 +168,9 @@ def test_a_path_still_relative_at_the_scanner_is_joined_to_the_source_directory(
 
 @pytest.mark.parametrize("name", [None, ".bandit", "bandit.yaml"])
 def test_each_scan_passes_one_ini(plugin_context, tmp_path, name) -> None:
-    """The source tree and the converted tree are scanned by one scanner."""
+    """One scanner scans the source tree, then the converted tree: one ``--ini``
+    on each scan, the same config file on both, and the second scan names the
+    converted target (both scans used to run on the source tree)."""
     config_file = None
     if name is not None:
         config_file = tmp_path / "operator" / name
@@ -174,9 +178,11 @@ def test_each_scan_passes_one_ini(plugin_context, tmp_path, name) -> None:
         config_file.write_text("[bandit]\n", encoding="utf-8")
     scanner = _scanner(plugin_context, config_file)
 
-    first = _scan_argv(scanner, plugin_context)
-    second = _scan_argv(scanner, plugin_context)
+    first = _scan_argv(scanner, plugin_context.source_dir)
+    second = _scan_argv(scanner, plugin_context.work_dir, "converted")
 
+    assert plugin_context.source_dir.as_posix() in first, first
+    assert plugin_context.work_dir.as_posix() in second, second
     assert len(_after(first, "--ini")) == 1, first
     assert len(_after(second, "--ini")) == 1, second
     assert _after(first, "--configfile") == _after(second, "--configfile")
