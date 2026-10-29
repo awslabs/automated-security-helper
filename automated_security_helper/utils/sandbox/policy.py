@@ -1168,6 +1168,7 @@ def build_scanner_policy(
     env_scanners: Sequence[str] = (),
     tool_config_dir: Optional[Path] = None,
     also_runs: Sequence[str] = (),
+    scanned_trees: Sequence[Path] = (),
 ) -> SandboxPolicy:
     """The policy one scanner gets for one spawn.
 
@@ -1188,6 +1189,14 @@ def build_scanner_policy(
         also_runs: Programs the spawn starts besides argv0, named by ASH's own
             code (``scope.also_runs``). Each is granted as argv0 is, through
             ``_executable_prefix`` and its breadth filter.
+        scanned_trees: The roots of the active scan
+            (``subprocess_utils.scanned_trees()``), which the scanned repository
+            writes: data, like ``source_dir``, and never a grant. Each root joins
+            ``scan_data``, so a backend that limits where programs run from runs
+            none from it; an import entry of ASH's interpreter inside one is read
+            as source, not run from; and a tool given a staged copy does not read
+            one. A root is not added to ``read_only``: what a spawn may read is
+            decided by the other arguments.
     """
     real_home = Path.home()
     read_granted = not requirements.read_paths_require_grant or scanner_name in set(
@@ -1222,9 +1231,11 @@ def build_scanner_policy(
     # Data the tool reads, like the scan's own: readable, never executable.
     env_named_reads = _env_named_read_paths(requirements.read_path_env)
     # A tool given a staged copy reads that copy (the scan target), not the scan's
-    # tree or its output.
+    # tree, its output, or any other root of the scan.
     unread = (
-        _existing([source_dir, output_dir]) if requirements.staged_input_only else []
+        _existing([source_dir, output_dir, *scanned_trees])
+        if requirements.staged_input_only
+        else []
     )
     scan_tree = [] if requirements.staged_input_only else [source_dir, output_dir]
     ash_paths, ash_import_entries = _ash_paths()
@@ -1272,6 +1283,7 @@ def build_scanner_policy(
     # The offline rule cache too: data the tool reads, which sandbox-exec then
     # denies exec in even where an executable root (/opt, /usr/local) contains it.
     # And the directory of config files ASH wrote for this run's tool.
+    # And every root of the active scan: the repository's, like source_dir.
     scan_data = _existing(
         [
             source_dir,
@@ -1280,18 +1292,21 @@ def build_scanner_policy(
             _readable_cwd(cwd),
             *env_named_reads,
             tool_config_dir,
+            *scanned_trees,
         ]
     )
-    # An import entry of ASH's interpreter inside the scanned tree or the output
-    # directory (PYTHONPATH=src) is the repository's to write and is read as Python
-    # source, not run from: readable, and never executable, like the tree. ASH's
-    # interpreter and link directories stay executable wherever they are.
+    # An import entry of ASH's interpreter inside the scanned tree, the output
+    # directory or another root of the scan (PYTHONPATH=src) is the repository's
+    # to write and is read as Python source, not run from: readable, and never
+    # executable, like the tree. ASH's interpreter and link directories stay
+    # executable wherever they are.
     from automated_security_helper.utils.scanned_tree import is_inside_tree
 
+    trees = (source_dir, output_dir, *scanned_trees)
     in_tree_imports = [
         entry
         for entry in ash_import_entries
-        if any(is_inside_tree(entry, tree) for tree in (source_dir, output_dir))
+        if any(is_inside_tree(entry, tree) for tree in trees)
     ]
     not_programs = {
         os.path.realpath(p) for p in [*scan_data, *_DATA_SYSTEM_PATHS, *in_tree_imports]

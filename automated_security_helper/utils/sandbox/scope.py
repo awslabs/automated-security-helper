@@ -52,6 +52,19 @@ from automated_security_helper.utils.sandbox.policy import (
 from automated_security_helper.utils.tool_config_dir import active_tool_config_dir
 
 
+def _active_scanned_trees() -> Tuple[Path, ...]:
+    """The roots of the active scan when a scope is built (``scanned_trees()``).
+
+    Read once, where the scope is made: the scanner threads run with a copy of
+    the scan's context, so a scope built in one of them sees the roots the scan
+    opened (``subprocess_utils.scanning_tree``), and a scope built outside any
+    scan carries none.
+    """
+    from automated_security_helper.utils.subprocess_utils import scanned_trees
+
+    return tuple(Path(root) for root in scanned_trees())
+
+
 @dataclass
 class SandboxScope:
     """Everything needed to build a policy for any spawn one scanner makes."""
@@ -96,6 +109,11 @@ class SandboxScope:
     #: replaced here and kept there. Empty for a pre-construction scope; the
     #: records fall back to ``scanner_name``.
     command: str = ""
+    #: The roots of the active scan, the repository's own directories: the policy
+    #: takes them as data it may read as source and never run from, like
+    #: ``source_dir``, so a tool installed in a scanned tree is not made
+    #: executable by a path that happens to reach it. Not a read grant.
+    scanned_trees: Tuple[Path, ...] = field(default_factory=_active_scanned_trees)
 
 
 @dataclass
@@ -862,6 +880,7 @@ def _plan_spawn(
         # This thread's scanner run's own config files, and no other run's.
         tool_config_dir=active_tool_config_dir(),
         also_runs=_ALSO_RUNS.get(),
+        scanned_trees=scope.scanned_trees,
     )
     plan = scope.backend.plan(list(argv), base_env, policy)
     # First in line once the process has exited: nothing ASH writes into the
