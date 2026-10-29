@@ -238,12 +238,16 @@ class ScanResultProcessor:
             ASH_LOGGER.verbose(
                 f"{scanner_name}: Processing as additional report (type: {type(results.raw_results)})"
             )
+            # The counts stay on the report, beside the dict they were read from.
+            # A dict result (``severity_counts`` or a ``findings`` list) has no
+            # result in the merged SARIF, so these counts are the only record of
+            # what the executor graded; the statistics calculator reads them
+            # when the SARIF holds nothing for the scanner
+            # (``extract_sarif_counts_for_scanner``). Dropped, the row the
+            # executor graded FAILED rolled up PASSED with 0 actionable.
             aggregated_results.additional_reports[scanner_name][results.target_type][
                 "raw_results"
             ] = results.raw_results
-            aggregated_results.additional_reports[scanner_name][
-                results.target_type
-            ].pop("severity_counts", None)
 
         # Without following a symlink: this is the scanner's own results directory,
         # which a sandboxed scanner could write. See utils/sandbox/fs_guard.py.

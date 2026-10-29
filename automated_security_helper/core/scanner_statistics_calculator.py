@@ -380,6 +380,21 @@ class ScannerStatisticsCalculator:
                 else:
                     counts.increment(_resolve_result_severity(result))
 
+        if counts.total + counts.suppressed == 0:
+            # Nothing in the SARIF for this scanner. A scanner that returned a
+            # dict (``severity_counts`` or a ``findings`` list) instead of SARIF
+            # has findings the merged SARIF never holds: the executor graded its
+            # row from the counts it read, and ScanResultProcessor keeps those
+            # counts on the per-target report beside the dict. Read them here,
+            # so the summary, the scanner row and the exit code see the findings
+            # the row was graded on instead of rebuilding it PASSED with 0
+            # actionable. Only a report that still carries a dict ``raw_results``
+            # is read: the processor drops ``raw_results`` from a SARIF report's
+            # entry, and that report's findings are in the SARIF above.
+            counts = ScannerStatisticsCalculator._dict_result_counts(
+                asharp_model, scanner_name
+            )
+
         return (
             counts.suppressed,
             counts.critical,
@@ -388,6 +403,38 @@ class ScannerStatisticsCalculator:
             counts.low,
             counts.info,
         )
+
+    @staticmethod
+    def _dict_result_counts(
+        asharp_model: AshAggregatedResults, scanner_name: str
+    ) -> ScannerSeverityCount:
+        """The severity counts recorded on *scanner_name*'s non-SARIF target reports.
+
+        Summed over every per-target report of the scanner (``_recorded_report``'s
+        shape) whose ``raw_results`` is a dict: the executor read the counts from
+        that dict and the processor left both on the report. A report whose counts
+        do not validate, or whose result was SARIF (``raw_results`` dropped), adds
+        nothing. All zero when the scanner has no such report.
+        """
+        total = ScannerSeverityCount()
+        reports = asharp_model.additional_reports.get(scanner_name)
+        if not isinstance(reports, dict):
+            return total
+        for report in reports.values():
+            if (
+                not isinstance(report, dict)
+                or report.get("scanner_name") != scanner_name
+                or not isinstance(report.get("raw_results"), dict)
+                or not isinstance(report.get("severity_counts"), dict)
+            ):
+                continue
+            try:
+                counts = ScannerSeverityCount.model_validate(report["severity_counts"])
+            except ValueError:
+                continue
+            for field in ("suppressed", "critical", "high", "medium", "low", "info"):
+                setattr(total, field, getattr(total, field) + getattr(counts, field))
+        return total
 
     @staticmethod
     def _get_scanner_name_from_result(result: Any) -> Optional[str]:
