@@ -1169,6 +1169,7 @@ def build_scanner_policy(
     tool_config_dir: Optional[Path] = None,
     also_runs: Sequence[str] = (),
     scanned_trees: Sequence[Path] = (),
+    read_grants: Sequence[Path] = (),
 ) -> SandboxPolicy:
     """The policy one scanner gets for one spawn.
 
@@ -1197,6 +1198,10 @@ def build_scanner_policy(
             as source, not run from; and a tool given a staged copy does not read
             one. A root is not added to ``read_only``: what a spawn may read is
             decided by the other arguments.
+        read_grants: Directories ASH's own code granted this spawn for reading
+            (``scope.reads_directory``): each is readable and joins ``scan_data``,
+            so nothing in it is executable. The pre-installed tool check's staged
+            Nix metadata under TMPDIR is the one such directory.
     """
     real_home = Path.home()
     read_granted = not requirements.read_paths_require_grant or scanner_name in set(
@@ -1251,6 +1256,7 @@ def build_scanner_policy(
         + env_named_reads
         + [_expand(p) for p in extra_read_paths]
         + [*scan_tree, scan_target, _readable_cwd(cwd), tool_config_dir]
+        + list(read_grants)
     )
 
     uv_cache = _screened_uv_directory(
@@ -1284,6 +1290,7 @@ def build_scanner_policy(
     # denies exec in even where an executable root (/opt, /usr/local) contains it.
     # And the directory of config files ASH wrote for this run's tool.
     # And every root of the active scan: the repository's, like source_dir.
+    # And a directory ASH granted this spawn for reading: data, never programs.
     scan_data = _existing(
         [
             source_dir,
@@ -1293,6 +1300,7 @@ def build_scanner_policy(
             *env_named_reads,
             tool_config_dir,
             *scanned_trees,
+            *read_grants,
         ]
     )
     # An import entry of ASH's interpreter inside the scanned tree, the output

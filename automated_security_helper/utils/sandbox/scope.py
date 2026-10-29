@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import contextvars
 import logging
+import os
 import platform
 import shlex
 import threading
@@ -831,6 +832,42 @@ def also_runs(*executables: str) -> Iterator[None]:
         _ALSO_RUNS.reset(token)
 
 
+#: Directories spawns in a ``reads_directory`` block may read besides the policy's.
+_READ_GRANTS: contextvars.ContextVar[Tuple[Path, ...]] = contextvars.ContextVar(
+    "ash_sandbox_read_grants", default=()
+)
+
+
+@contextmanager
+def reads_directory(directory: "str | Path") -> Iterator[None]:
+    """Spawns in the block may read ``directory``: one existing directory, as data.
+
+    For ASH's own checks that hand a tool a directory ASH made for the check. The
+    pre-installed tool check stages a Nix program's distribution metadata under
+    TMPDIR and asks ``uv pip install --dry-run --target <directory>`` about it;
+    a policy grants argv0's paths and the interpreter's (``also_runs``), none of
+    which reach a directory under TMPDIR, so under every backend the dry run
+    could not read what it was asked about. The grant is the one directory as
+    named, read-only and never executable (it joins the policy's ``scan_data``),
+    for the spawns of this block alone. One directory per call: no pattern, no
+    expansion, no parent; a path that is not an existing directory is refused
+    (``NotADirectoryError``), and a filesystem root is refused (``ValueError``).
+    Only ASH's own code names it; nothing a scanner's options say reaches this.
+    """
+    path = Path(os.path.abspath(directory))
+    if path == Path(path.anchor):
+        raise ValueError(f"refusing to grant a filesystem root for reading: {path}")
+    if not path.is_dir():
+        raise NotADirectoryError(
+            f"a read grant names a directory that does not exist: {path}"
+        )
+    token = _READ_GRANTS.set(_READ_GRANTS.get() + (path,))
+    try:
+        yield
+    finally:
+        _READ_GRANTS.reset(token)
+
+
 def prepare_spawn(
     argv: Sequence[str],
     env: Optional[Mapping[str, str]],
@@ -881,6 +918,7 @@ def _plan_spawn(
         tool_config_dir=active_tool_config_dir(),
         also_runs=_ALSO_RUNS.get(),
         scanned_trees=scope.scanned_trees,
+        read_grants=_READ_GRANTS.get(),
     )
     plan = scope.backend.plan(list(argv), base_env, policy)
     # First in line once the process has exited: nothing ASH writes into the

@@ -85,6 +85,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Sequence, Tuple, Union
@@ -464,11 +465,19 @@ def _dry_run(
         command += ["--target", target]
     if no_deps:
         command.append("--no-deps")
-    from automated_security_helper.utils.sandbox.scope import also_runs
+    from automated_security_helper.utils.sandbox.scope import (
+        also_runs,
+        reads_directory,
+    )
 
     # uv runs the interpreter to inspect it, so under --sandbox the spawn needs the
-    # interpreter's environment as well as uv's own directory.
-    with also_runs(interpreter):
+    # interpreter's environment as well as uv's own directory. With --target it
+    # reads what is installed in that directory, the staged Nix metadata under
+    # TMPDIR, which neither grant reaches: that one directory is granted too.
+    with ExitStack() as grants:
+        grants.enter_context(also_runs(interpreter))
+        if target is not None:
+            grants.enter_context(reads_directory(target))
         result = _run(command + [requirement], _UV_DRY_RUN_TIMEOUT)
     if _did_not_run(result):
         return (

@@ -15,6 +15,13 @@ back to ``uv tool run``, and an offline scan with an empty uv cache found nothin
 These tests plan the dry run under a recording backend, with no tool started, and
 check the grants: the tool's environment and the uv-managed Python it runs on are
 readable, and nothing broader in the home is.
+
+A Nix-wrapped program's check stages its distribution metadata into a directory
+under TMPDIR and hands uv ``--target <that directory>``. Neither uv's grant nor the
+interpreter's reaches it, so under every backend the dry run could not read what
+it was asked about. The dry run grants that one directory for its own spawn
+(``scope.reads_directory``), as data: readable, never executable, and gone once
+the dry run returns.
 """
 
 from __future__ import annotations
@@ -183,6 +190,62 @@ def test_the_grant_ends_with_the_dry_run(homes, tool, recorded):
     _plan([str(uv), "--version"])
 
     assert Path(os.path.realpath(venv)) not in _real(recorded.policies[-1].read_only)
+
+
+@pytest.fixture
+def staged_metadata(tmp_path):
+    """The staging directory a Nix program's check hands uv as ``--target``."""
+    staging = tmp_path / "ash-nix-metadata-x"
+    dist_info = staging / "faketool-1.0.dist-info"
+    dist_info.mkdir(parents=True)
+    (dist_info / "METADATA").write_text("Name: faketool\nVersion: 1.0\n")
+    return staging
+
+
+def test_the_nix_dry_run_sees_its_staging_directory(
+    homes, tool, recorded, staged_metadata
+):
+    """With --target, the staged metadata is readable and never executable."""
+    uv, interpreter, _venv, _python_root = tool
+
+    status, _output = pre_installed_tool._dry_run(
+        str(uv), str(interpreter), "faketool", str(staged_metadata)
+    )
+
+    assert status == "satisfied"
+    policy = recorded.policies[-1]
+    staged = Path(os.path.realpath(staged_metadata))
+    assert staged in _real(policy.read_only)
+    assert staged in _real(policy.scan_data)
+    assert staged not in _real(policy.executable)
+
+
+def test_the_staging_grant_ends_with_the_dry_run(
+    homes, tool, recorded, staged_metadata
+):
+    """A later spawn of uv alone does not see the staging directory."""
+    uv, interpreter, _venv, _python_root = tool
+
+    pre_installed_tool._dry_run(
+        str(uv), str(interpreter), "faketool", str(staged_metadata)
+    )
+    _plan([str(uv), "--version"])
+
+    readable = _real(recorded.policies[-1].read_only)
+    assert Path(os.path.realpath(staged_metadata)) not in readable
+
+
+def test_a_dry_run_without_a_target_grants_no_directory(homes, tool, recorded):
+    """The control: the plain dry run's reads are the interpreter's and uv's."""
+    uv, interpreter, venv, _python_root = tool
+
+    pre_installed_tool._dry_run(str(uv), str(interpreter), "faketool")
+
+    policy = recorded.policies[-1]
+    assert Path(os.path.realpath(venv)) in _real(policy.read_only)
+    assert not any(
+        Path(p).name.startswith("ash-nix-metadata-") for p in policy.read_only
+    )
 
 
 def test_a_named_executable_gets_argv0s_breadth_filter(homes, recorded, tmp_path):
