@@ -110,23 +110,36 @@ global_settings:
   severity_threshold: {threshold}
 """
 
+#: For a project whose config declares no project_name, so its label falls back.
+CONFIG_TEMPLATE_WITHOUT_NAME = """global_settings:
+  severity_threshold: {threshold}
+"""
+
 
 @dataclass(frozen=True)
 class FixtureProject:
     key: str
-    #: What lands in the project's own ``project_name``. When it equals the key,
-    #: the label falls back to the key -- the common case.
-    declared_name: str
+    #: What the project's own config declares as ``project_name``, or None for a
+    #: config that declares none, so the label falls back to the key -- the common
+    #: case, and the one that used to produce ``Project: ASH`` everywhere. The
+    #: fixture used to write a project_name for every project, so that fallback
+    #: path was documented as covered and never exercised.
+    declared_name: str | None
     #: What the reports should call it.
     expected_label: str
     #: Python that trips exactly one bandit rule no other project trips.
     source: str
 
+    @property
+    def expected_project_name(self) -> str:
+        """What the per-project ``metadata.project_name`` must read."""
+        return self.declared_name if self.declared_name is not None else self.key
+
 
 FIXTURE_PROJECTS = (
     FixtureProject(
         key="api",
-        declared_name="api",
+        declared_name=None,
         expected_label="api",
         # B602: subprocess with shell=True.
         source='import subprocess\nsubprocess.call("ls -la", shell=True)\n',
@@ -179,10 +192,13 @@ def build_workspace(root: Path) -> Path:
 
         config_dir = root / project.key / ".ash"
         config_dir.mkdir(parents=True, exist_ok=True)
-        (config_dir / "ash.yaml").write_text(
-            CONFIG_TEMPLATE.format(name=project.declared_name, threshold="LOW"),
-            encoding="utf-8",
-        )
+        if project.declared_name is None:
+            content = CONFIG_TEMPLATE_WITHOUT_NAME.format(threshold="LOW")
+        else:
+            content = CONFIG_TEMPLATE.format(
+                name=project.declared_name, threshold="LOW"
+            )
+        (config_dir / "ash.yaml").write_text(content, encoding="utf-8")
 
     definition = root / WORKSPACE_FILENAME
     definition.write_text(
@@ -329,24 +345,36 @@ def check_manifest(output_dir: Path) -> List[str]:
     return problems
 
 
+def csv_problems(csv_text: str, keys: set) -> List[str]:
+    """What the merged CSV says about the projects; empty means it names them all.
+
+    An empty file, or one whose first row is blank, is a problem to record, not
+    an IndexError: the old ``rows[0][0]`` read raised on both and took every
+    problem the earlier checks had collected down with it.
+    """
+    rows = list(csv.reader(StringIO(csv_text)))
+    if not rows or not rows[0]:
+        return [
+            "csv: ash.csv is empty or starts with a blank row, so it names no project"
+        ]
+    if rows[0][0] != "workspace_project":
+        return [f"csv: first column is {rows[0][0]!r}, expected workspace_project"]
+    index = rows[0].index("workspace_project")
+    present = {row[index] for row in rows[1:] if row}
+    if present != keys:
+        return [f"csv: projects in rows are {sorted(present)}, expected {sorted(keys)}"]
+    return []
+
+
 def check_merged_content(output_dir: Path) -> List[str]:
     """Each merged artefact names every project, in its own format's place."""
     problems: List[str] = []
     reports = output_dir / REPORTS_DIR_NAME
     keys = {project.key for project in FIXTURE_PROJECTS}
 
-    rows = list(csv.reader(StringIO((reports / "ash.csv").read_text(encoding="utf-8"))))
-    if not rows or rows[0][0] != "workspace_project":
-        problems.append(
-            f"csv: first column is {rows[0][0]!r}, expected workspace_project"
-        )
-    else:
-        index = rows[0].index("workspace_project")
-        present = {row[index] for row in rows[1:] if row}
-        if present != keys:
-            problems.append(
-                f"csv: projects in rows are {sorted(present)}, expected {sorted(keys)}"
-            )
+    problems.extend(
+        csv_problems((reports / "ash.csv").read_text(encoding="utf-8"), keys)
+    )
 
     flat = _read_json(reports / "ash.flat.json")
     attributed = {finding.get("workspace_project") for finding in flat["findings"]}
@@ -445,10 +473,16 @@ def check_per_project_identity(output_dir: Path) -> List[str]:
         results = _read_json(output_dir / "projects" / project.key / RESULTS_FILENAME)
         metadata = results.get("metadata") or {}
         seen[project.key] = metadata.get("project_name")
-        if metadata.get("project_name") != project.declared_name:
+        if metadata.get("project_name") != project.expected_project_name:
             problems.append(
                 f"{project.key}: per-project metadata.project_name is "
-                f"{metadata.get('project_name')!r}, expected {project.declared_name!r}"
+                f"{metadata.get('project_name')!r}, expected "
+                f"{project.expected_project_name!r}"
+                + (
+                    " (the key, because its config declares no project_name)"
+                    if project.declared_name is None
+                    else ""
+                )
             )
         if metadata.get("workspace_project") != project.key:
             problems.append(
@@ -460,6 +494,39 @@ def check_per_project_identity(output_dir: Path) -> List[str]:
             f"two projects share a project_name: {seen} -- per-project artefacts "
             f"published to a shared destination would be indistinguishable"
         )
+    return problems
+
+
+#: What a check raises when an artefact it reads is missing or shaped wrong.
+#: Recorded as that check's problem; every other check still runs.
+CHECK_FAILURES = (
+    GateFailure,
+    OSError,
+    KeyError,
+    IndexError,
+    TypeError,
+    ValueError,
+    json.JSONDecodeError,
+)
+
+
+def run_checks(output_dir: Path, checks) -> List[str]:
+    """Run every check, recording a check that raised as its own problem.
+
+    A GateFailure, FileNotFoundError or KeyError raised inside one check used to
+    abort the gate with a traceback, discarding every problem the earlier checks
+    had collected and the evidence directory with them. A missing artefact is a
+    finding about the report tree, so it is recorded against the check that met
+    it and the remaining checks still report theirs.
+    """
+    problems: List[str] = []
+    for check in checks:
+        try:
+            problems.extend(check(output_dir))
+        except CHECK_FAILURES as exc:  # noqa: PERF203 -- one check per iteration
+            problems.append(
+                f"{check.__name__}: could not finish; {type(exc).__name__}: {exc}"
+            )
     return problems
 
 
@@ -506,13 +573,17 @@ def main(argv: Iterable[str] | None = None) -> int:
                 f"\nstderr:\n{completed.stderr[-4000:]}"
             )
         else:
-            for check in (
-                check_manifest,
-                check_merged_content,
-                check_labels,
-                check_per_project_identity,
-            ):
-                problems.extend(check(output_dir))
+            problems.extend(
+                run_checks(
+                    output_dir,
+                    (
+                        check_manifest,
+                        check_merged_content,
+                        check_labels,
+                        check_per_project_identity,
+                    ),
+                )
+            )
 
         if problems:
             print("\nFAILED:")
