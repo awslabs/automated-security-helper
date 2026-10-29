@@ -23,11 +23,53 @@ import typer
 
 from automated_security_helper.utils.sandbox.fs_guard import OutputLinkRefused
 from automated_security_helper.utils.sarif_field_analysis import (
+    _flatten_object,
     analyze_sarif_fields,
     get_scanner_name_from_path,
 )
 
 pytestmark = pytest.mark.unit
+
+
+def test_a_list_of_scalars_and_an_empty_container_are_recorded_fields():
+    """Both fell through every branch of _flatten_object, so their loss in
+    aggregation was never reported."""
+    from unittest.mock import patch
+
+    result: dict = {}
+    with patch(
+        "automated_security_helper.utils.sarif_field_analysis.should_include_field",
+        return_value=True,
+    ):
+        _flatten_object(
+            {"tags": ["a", "b"], "empty": {}, "none": [], "nested": [{"k": 1}]},
+            "runs[].results[]",
+            result,
+            None,
+        )
+
+    assert "runs[].results[].tags[]" in result
+    assert "runs[].results[].empty" in result
+    assert "runs[].results[].none" in result
+    assert "runs[].results[].nested[].k" in result
+    assert "runs[].results[].nested[]" not in result
+
+
+def test_a_run_that_could_read_none_of_its_files_exits_one(tmp_path, monkeypatch):
+    """Every file failing to load printed an error and the run exited 0 with empty
+    outputs, which reads as a clean analysis."""
+    monkeypatch.setenv("COLUMNS", "200")
+    sarif_dir = tmp_path / "ash_output"
+    (sarif_dir / "reports").mkdir(parents=True)
+    (sarif_dir / "reports" / "ash.sarif").write_text("{not json", encoding="utf-8")
+    output_dir = tmp_path / "out"
+
+    with pytest.raises(typer.Exit) as raised:
+        analyze_sarif_fields(sarif_dir=str(sarif_dir), output_dir=str(output_dir))
+
+    assert raised.value.exit_code == 1
+    # The outputs are still written, so a reader sees what was analyzed.
+    assert (output_dir / "sarif_fields.json").read_text(encoding="utf-8") == "{}"
 
 
 def _sarif(rule_id: str = "R1", **extra) -> str:

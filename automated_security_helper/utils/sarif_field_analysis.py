@@ -95,7 +95,11 @@ def _flatten_object(
                 result[new_prefix] = True
                 continue
 
-            if isinstance(value, (dict, list)):
+            # A non-empty container is walked; a scalar, an empty container, or a
+            # list of scalars is a field in its own right and is recorded, so its
+            # loss in aggregation is reported. (An empty container and a list of
+            # scalars used to fall through both branches and were never recorded.)
+            if isinstance(value, (dict, list)) and value:
                 _flatten_object(value, new_prefix, result, excluded_result)
             else:
                 result[new_prefix] = True
@@ -104,7 +108,10 @@ def _flatten_object(
         if obj and len(obj) > 0:
             # Process the first item as representative
             new_prefix = f"{prefix}[]" if not prefix.endswith("[]") else prefix
-            _flatten_object(obj[0], new_prefix, result, excluded_result)
+            if isinstance(obj[0], (dict, list)):
+                _flatten_object(obj[0], new_prefix, result, excluded_result)
+            else:
+                result[new_prefix] = True
 
 
 def get_scanner_name_from_path(file_path: str) -> str:
@@ -219,6 +226,11 @@ def analyze_sarif_fields(
     scanners_files = [f for f in all_sarif_files if _relative_parts(f)[0] == "scanners"]
     sarif_files.extend(scanners_files)
 
+    # Files that could not be loaded. Their errors are printed as they happen, and
+    # the run fails at the end: a run that read none of its inputs used to exit 0
+    # with empty outputs, which reads as a clean analysis.
+    failed_files: list[str] = []
+
     # Process each SARIF file
     with console.status("[bold green]Analyzing SARIF files..."):
         for file_path in sarif_files:
@@ -259,6 +271,7 @@ def analyze_sarif_fields(
                         excluded_dict[field_name][scanner_name] = True
 
             except Exception as e:
+                failed_files.append(file_path)
                 console.print(
                     f"[bold red]Error processing {escape_markup(file_path)}: "
                     f"{escape_markup(str(e))}[/bold red]"
@@ -506,6 +519,16 @@ def analyze_sarif_fields(
     if has_unexpected_missing_fields:
         console.print(
             "[bold red]WARNING: Some fields are unexpectedly missing from the aggregate report[/bold red]"
+        )
+        raise typer.Exit(code=1)
+
+    # A file that could not be read is not part of the analysis above, so its
+    # fields are neither counted nor compared; the outputs are written, and the
+    # run fails so the gap is not read as a clean result.
+    if failed_files:
+        console.print(
+            f"[bold red]WARNING: {len(failed_files)} of {len(sarif_files)} SARIF "
+            "file(s) could not be read and are not part of this analysis[/bold red]"
         )
         raise typer.Exit(code=1)
 
