@@ -144,7 +144,14 @@ _SETTINGS_FILE_LISTS: Tuple[str, ...] = ("plugins_used", "filters_used")
 #: whether it sends usage data to its vendor, each with its default, which is
 #: what applies when the operator sets nothing.
 SCANNER_CONFIG_CHOICE_OPTIONS: Dict[str, Dict[str, Any]] = {
-    "ferret-scan": {"profile": None, "use_default_config": True},
+    # respect_gitignore has ferret-scan skip the files the tree's own .gitignore
+    # names, so a repository's config could choose which of its files the scan
+    # reads; off by default, as the scanner declares it.
+    "ferret-scan": {
+        "profile": None,
+        "use_default_config": True,
+        "respect_gitignore": False,
+    },
     "snyk-code": {"honor_tree_exclusions": False},
     "trivy-repo": {"disable_telemetry": True},
     "trivy": {"disable_telemetry": True},
@@ -264,6 +271,18 @@ def confine_scanner_config_files(
         == "scanners"
     ]
     if scanner_overrides:
+        # An override the scan's own apply resolved under the repository's
+        # spelling of a section the trusted base spells another way is folded
+        # onto the trusted base's key first (the lockout fold the scanner view
+        # replay uses); without it the replay refuses the only spelling the
+        # scan's apply accepted, and the scan cannot run.
+        from automated_security_helper.config.resolve_config import (
+            _folded_onto_trusted,
+        )
+
+        scanner_overrides = _folded_onto_trusted(
+            trusted_config, scanner_overrides, config, section="scanners"
+        )
         trusted_config = apply_config_overrides(trusted_config, scanner_overrides)
 
     ignored: List[str] = []
@@ -390,6 +409,17 @@ def confine_tool_versions(
         in sections
     ]
     if replayed:
+        # The scanners entries are folded onto the trusted base's own section
+        # spellings as confine_scanner_config_files folds them; the converters
+        # entries are replayed as written (the fold keeps a record for the
+        # reporters and scanners segments only).
+        from automated_security_helper.config.resolve_config import (
+            _folded_onto_trusted,
+        )
+
+        replayed = _folded_onto_trusted(
+            trusted_config, replayed, config, section="scanners"
+        )
         trusted_config = apply_config_overrides(trusted_config, replayed)
 
     ignored: List[str] = []
