@@ -1748,9 +1748,15 @@ if os.supports_bytes_environ:
     def test_a_set_of_an_imported_environb():
         assert b"ASH_TEST_UNSET_VARIABLE" in set(imported_environb)
 
+import warnings
+
 import pytest
 
-pytestmark = pytest.mark.unit
+# The suite collection hook requires one tier per test. Under its own rootdir
+# this child does not know the mark and would warn, so the warning is dropped.
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    pytestmark = pytest.mark.unit
 """
 
 #: The child's first cell, which passes: the ASH the child imported is this

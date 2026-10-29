@@ -55,6 +55,7 @@ def test_that_leaks_a_scope():
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -97,6 +98,7 @@ def test_zz_the_following_test_runs_in_no_scope():
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -141,6 +143,7 @@ def test_zz_uses_nothing():
     pass
 
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -199,6 +202,7 @@ def test_zz_only_the_scope_whose_close_raised_is_left():
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -244,6 +248,7 @@ def test_zz_uses_nothing():
     pass
 
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -289,6 +294,7 @@ def test_zz_would_run_next():
     pass
 
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -364,6 +370,7 @@ def test_zz_would_run_next():
     pass
 
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -404,6 +411,7 @@ def test_zz_uses_nothing():
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -449,6 +457,7 @@ def test_zz_uses_nothing():
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -533,6 +542,7 @@ def test_zz_runs_after_the_leak():
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -646,6 +656,7 @@ def test_zz_uses_nothing():
     pass
 
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -702,6 +713,7 @@ def test_aa_inside_the_package():
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -722,6 +734,7 @@ def test_zz_runs_after_the_package_ended():
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -736,7 +749,9 @@ def test_a_scope_a_package_fixture_leaks_fails_the_run(tmp_path: Path) -> None:
         "pkg",
         (
             "def test_zz_outside_the_package():\n    pass\n"
-            "\n\nimport pytest\n\npytestmark = pytest.mark.unit\n"
+            "\n\nimport pytest\n\n"
+            "# The collection hook of the suite requires one tier per test.\n"
+            "pytestmark = pytest.mark.unit\n"
         ),
         extra_files={
             "aa_pkg/__init__.py": "",

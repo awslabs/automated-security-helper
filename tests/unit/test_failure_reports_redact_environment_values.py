@@ -414,6 +414,7 @@ def test_a_failure_after_its_variable_is_removed(monkeypatch):
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -494,6 +495,7 @@ class TestShortened(unittest.TestCase):
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -537,6 +539,7 @@ def test_a_passing_test_that_logs_an_environment_value():
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -629,6 +632,7 @@ def test_a_failure_recording_properties(record_property, record_testsuite_proper
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -683,6 +687,7 @@ def test_a_passing_test_recording_both_property_kinds(
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -739,6 +744,7 @@ def test_a_property_appended_directly(request):
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -800,6 +806,7 @@ def test_x(request):
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -894,6 +901,7 @@ def test_b(request):
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -960,6 +968,7 @@ def test_a_warning_holding_a_path():
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -982,6 +991,7 @@ def test_a_warning_with_its_own_str():
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -997,6 +1007,7 @@ def test_a_test_after_the_collection_warning():
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -1019,6 +1030,7 @@ def test_a_warning_built_with_no_args():
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -1126,6 +1138,7 @@ def test_a_warning_that_prints_an_environment_value():
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -1163,6 +1176,7 @@ def test_the_runs_containment_names_are_kept():
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -1234,6 +1248,7 @@ def test_the_childs_aws_file_settings():
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
@@ -1288,6 +1303,7 @@ def test_nothing():
 
 import pytest
 
+# The collection hook of the suite requires one tier per test.
 pytestmark = pytest.mark.unit
 """
 
