@@ -119,6 +119,40 @@ runs:
         echo "hw.logicalcpu: $(sysctl -n hw.logicalcpu || true)"
         echo "processes owned by $(id -un): $(ps -U "$(id -un)" -o pid= | wc -l || true)"
 
+    # The e2e tier runs the product against real tools: `ash` as a child process over a
+    # target tree, and the docs pages' commands in a shell. Without the scanners installed,
+    # a page that scans with bandit exits 1 with bandit MISSING where it documents exit 2,
+    # and the links-leaving-the-tree scan records cfn-lint MISSING. This step installs them
+    # with the installer users run, before any test starts, the way the integration-test
+    # job in ash-unified-ci.yml does for its own suite. Pinned binaries land in ASH's bin
+    # directory and the uv tools in uv's tool bin directory;
+    # tests/integration/test_e2e_runner_has_its_tools.py asserts both lists, so keep the
+    # two in step.
+    #
+    # The second command completes the cfn-lint that `uv sync` already put in the
+    # environment. It arrives through moto without the `sarif` extra, `uv run` puts
+    # .venv/bin ahead of every other PATH entry so the scanner finds that copy before the
+    # uv tool installed above, and its pre-installed check wants the extra: offline, a
+    # copy without it is MISSING. The added packages survive `uv run`'s inexact sync.
+    #
+    # Windows gets bandit and checkov only. They are the two scanners the external-target
+    # and multi-project gates install on windows-latest, and semgrep publishes no Windows
+    # build (semgrep_scanner.py), so it cannot be in that list.
+    #
+    # The unit tier runs no real scanner. The integration tier is left as it is: its
+    # real-tool tests skip when the tool is absent, and the integration-test job in
+    # ash-unified-ci.yml is the one that installs them and requires them.
+    - name: Install the scanners the e2e tier runs for real
+      if: inputs.marker == 'e2e'
+      shell: bash
+      run: |
+        if [ "$RUNNER_OS" = Windows ]; then
+          uv run ash dependencies install --tool bandit --tool checkov
+        else
+          uv run ash dependencies install --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks --tool checkov --tool semgrep --tool zizmor
+        fi
+        uv pip install 'cfn-lint[sarif]>=1.43.3,<2.0.0'
+
     # ASH_REQUIRE_SYMBOLS_EXTRA and ASH_REQUIRE_CDK_EXTRA turn the skip-when-absent of the
     # tests that need each extra into a hard failure, so a leg that stops installing an extra
     # cannot pass by skipping them. A plain `uv sync` on a contributor's machine sets neither,
