@@ -424,16 +424,36 @@ def confine_tool_versions(
 
     ignored: List[str] = []
     for segment, kind in _PLUGIN_SEGMENTS:
-        for key, section in _plugin_sections(getattr(config, segment)):
+        config_segment = getattr(config, segment)
+        seen: set[str] = set()
+        for key, section in _plugin_sections(config_segment):
+            seen.add(key)
             options = _options_of(section)
-            if options is None:
-                continue
             trusted_section = trusted_config.get_plugin_config(kind, key)
             trusted_options = (trusted_section or {}).get("options") or {}
+            if options is None:
+                # A plugin section with no options mapping (or one that is not
+                # a mapping): the operator's pin still applies, so the mapping
+                # is made for it.
+                if isinstance(section, dict):
+                    for name in OPERATOR_ONLY_PLUGIN_OPTIONS:
+                        wanted = _trusted_option(trusted_options, name)
+                        if wanted is not _MISSING and wanted is not None:
+                            section.setdefault("options", {})
+                            if isinstance(section["options"], dict):
+                                section["options"][name] = wanted
+                continue
             for name in OPERATOR_ONLY_PLUGIN_OPTIONS:
                 default = _field_default(options, name)
                 wanted = _trusted_option(trusted_options, name)
-                for spelling in _spellings_in(options, name):
+                spellings = _spellings_in(options, name)
+                if not spellings and wanted is not _MISSING and wanted is not None:
+                    # A plugin section's dict holds only what was written: an
+                    # omitted tool_version left the plugin on its default
+                    # constraint in place of the operator's pin.
+                    _set(options, name, wanted, default)
+                    continue
+                for spelling in spellings:
                     written = _get(options, spelling)
                     current = _or_default(written, default)
                     if current == _or_default(wanted, default):
@@ -443,6 +463,24 @@ def confine_tool_versions(
                     if current != default:
                         ignored.append(f"{segment}.{key}.options.{name}")
                     _set(options, spelling, wanted, default)
+        # A plugin section the trusted base pins that the config does not hold
+        # at all: the plugin still runs (its module is loaded whatever the
+        # config says), so the pin is written into a section made for it.
+        extra = getattr(config_segment, "__pydantic_extra__", None)
+        if isinstance(extra, dict):
+            for key, trusted_section in _plugin_sections(
+                getattr(trusted_config, segment)
+            ):
+                if key in seen or not isinstance(trusted_section, dict):
+                    continue
+                trusted_options = _options_of(trusted_section) or {}
+                pins: Dict[str, Any] = {}
+                for name in OPERATOR_ONLY_PLUGIN_OPTIONS:
+                    wanted = _trusted_option(trusted_options, name)
+                    if wanted is not _MISSING and wanted is not None:
+                        pins[name] = wanted
+                if pins:
+                    extra[key] = {"options": pins}
     if ignored:
         from automated_security_helper.config.config_sources import (
             describe_config_path,

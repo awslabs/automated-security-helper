@@ -26,11 +26,53 @@ from typing import List
 
 import pytest
 
+from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.config.tool_config_trust import confine_tool_versions
 from automated_security_helper.utils.log import ASH_LOGGER
 from tests.utils.helpers import mark_git_checkout
 
 pytestmark = pytest.mark.unit
+
+PLUGIN = "my-plugin-scanner"
+
+
+def _trusted_pin() -> AshConfig:
+    return AshConfig.model_validate(
+        {"scanners": {PLUGIN: {"options": {"tool_version": "==1.2.3"}}}}
+    )
+
+
+def _pin_of(config: AshConfig) -> object:
+    section = config.get_plugin_config("scanner", PLUGIN) or {}
+    return (section.get("options") or {}).get("tool_version")
+
+
+def test_the_operators_pin_is_restored_when_the_section_omits_it(tmp_path):
+    """A plugin section's dict holds only what was written; a repository
+    config that leaves tool_version out left the plugin on its default
+    constraint in place of the operator's pin."""
+    config = AshConfig.model_validate({"scanners": {PLUGIN: {"options": {}}}})
+
+    confine_tool_versions(config, _trusted_pin(), [], [tmp_path / ".ash.yaml"])
+
+    assert _pin_of(config) == "==1.2.3"
+
+
+def test_the_operators_pin_is_restored_when_the_section_has_no_options(tmp_path):
+    config = AshConfig.model_validate({"scanners": {PLUGIN: {"enabled": True}}})
+
+    confine_tool_versions(config, _trusted_pin(), [], [tmp_path / ".ash.yaml"])
+
+    assert _pin_of(config) == "==1.2.3"
+
+
+def test_the_operators_pin_is_restored_when_the_section_is_absent(tmp_path):
+    config = AshConfig.model_validate({"project_name": "repo"})
+
+    confine_tool_versions(config, _trusted_pin(), [], [tmp_path / ".ash.yaml"])
+
+    assert _pin_of(config) == "==1.2.3"
 
 
 @pytest.fixture(autouse=True)
