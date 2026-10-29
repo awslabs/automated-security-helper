@@ -47,9 +47,12 @@ as a general normalizer.
 
 from __future__ import annotations
 
+import contextlib
+import os
 import re
 import uuid
 from pathlib import Path
+from typing import List
 
 #: The characters a validated id may hold: ASCII letters, digits, and
 #: ``. _ ~ + = -``. Anchored with ``fullmatch`` at the call site rather than with
@@ -176,9 +179,25 @@ SESSION_MARKER = ".ash-mcp-session"
 
 
 def mark_session_workspace(directory: Path) -> Path:
-    """Create ``directory`` as a session workspace, with its marker, and return it."""
+    """Create ``directory`` as a session workspace, with its marker, and return it.
 
+    The directory, and every ancestor this call creates (the workspace root among
+    them), is readable and searchable by its owner alone (``0o700``), whatever
+    the process umask: a session's directory holds a client's delivered source,
+    and the root's listing is the set of live session ids. A directory that
+    already exists keeps the mode it has; a mode that cannot be set is left as
+    the filesystem made it.
+    """
+
+    created: List[Path] = []
+    for ancestor in (directory, *directory.parents):
+        if ancestor.exists():
+            break
+        created.append(ancestor)
     directory.mkdir(parents=True, exist_ok=True)
+    for made in created:
+        with contextlib.suppress(OSError):
+            os.chmod(made, 0o700)
     (directory / SESSION_MARKER).touch(exist_ok=True)
     return directory
 
