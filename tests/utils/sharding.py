@@ -302,11 +302,14 @@ def fail_a_tier_run_that_executed_no_test(
 WORKEROUTPUT_KEY = "ash_shard_deselected"
 #: The marker of a leg assertion: a test that checks what a CI leg is provisioned with.
 #: It carries the tier of the leg it asserts, and the floor does not count it as a test
-#: that executed, because a pass there says nothing about the product.
+#: that executed, because a pass there says nothing about the product. The controller
+#: of an xdist run receives reports and never items, and pytest puts the item's marker
+#: names in ``TestReport.keywords``, which xdist sends along with the rest of the
+#: report, so the name is read from there. Nothing is added to the report: a user
+#: property would be published in the JUnit XML as a ``<property>`` inside the
+#: ``<testcase>``, which pytest's documentation says breaks validation against the
+#: xunit2 schema.
 LEG_ASSERTION_MARKER = "leg_assertion"
-#: The user property the plugin puts on a leg assertion's reports. A report is all the
-#: controller of an xdist run receives, and user properties travel with it.
-LEG_ASSERTION_PROPERTY = "ash_leg_assertion"
 
 
 class _TierRunOutcome:
@@ -326,17 +329,6 @@ class _TierRunOutcome:
     def pytest_deselected(self, items: Sequence[Any]) -> None:
         self.deselected += len(items)
 
-    @pytest.hookimpl(hookwrapper=True)
-    def pytest_runtest_makereport(self, item: Any, call: Any) -> Any:
-        """Mark the reports of a leg assertion, in the process that ran the test.
-
-        The controller of an xdist run never sees the item, only the report, so the
-        mark has to be on the report.
-        """
-        outcome = yield
-        if item.get_closest_marker(LEG_ASSERTION_MARKER) is not None:
-            outcome.get_result().user_properties.append((LEG_ASSERTION_PROPERTY, True))
-
     def pytest_runtest_logreport(self, report: Any) -> None:
         """Count executed and skipped tests from the reports this process receives.
 
@@ -346,10 +338,10 @@ class _TierRunOutcome:
         without skipping, or when its setup failed (an error is a result). A skip
         in setup, or ``pytest.skip`` in the body, is skipped; an expected failure
         (``wasxfail``) ran its body and is executed. A leg assertion is neither: it
-        is left out of both counts.
+        is left out of both counts, and it is recognized by its marker name in
+        ``report.keywords``, which reaches an xdist controller with the report.
         """
-        properties = getattr(report, "user_properties", None) or []
-        if any(name == LEG_ASSERTION_PROPERTY for name, _ in properties):
+        if LEG_ASSERTION_MARKER in (getattr(report, "keywords", None) or {}):
             return
         if report.when == "setup":
             if report.failed:

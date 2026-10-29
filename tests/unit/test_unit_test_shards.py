@@ -734,7 +734,7 @@ class TestATierRunThatRanNothingInARealPytest:
     def test_a_passing_leg_assertion_does_not_hide_an_all_skipped_leg_under_xdist(
         self, tmp_path
     ):
-        """The mark travels on the report, which is all the controller receives."""
+        """The marker name travels in ``report.keywords``, which xdist sends along."""
         import xdist  # noqa: F401 - the run below needs the plugin
 
         self._plant(tmp_path, leg_assertion=True)
@@ -1086,49 +1086,51 @@ class TestATierRunThatExecutedNoTestFails:
         assert (plugin.executed, plugin.skipped) == (3, 2)
 
     def test_a_leg_assertion_report_is_left_out_of_both_counts(self):
+        """The marker name in ``report.keywords`` is all the controller has."""
         plugin = sharding._TierRunOutcome()
-        marked = [(sharding.LEG_ASSERTION_PROPERTY, True)]
+        marked = {"unit": 1, "e2e": 1, sharding.LEG_ASSERTION_MARKER: 1}
         for when, outcome in (("setup", "passed"), ("call", "passed")):
             plugin.pytest_runtest_logreport(
-                self._report(when, outcome, user_properties=marked)
+                self._report(when, outcome, keywords=marked)
             )
         plugin.pytest_runtest_logreport(
-            self._report("call", "skipped", user_properties=marked)
+            self._report("call", "skipped", keywords=marked)
         )
         assert (plugin.executed, plugin.skipped) == (0, 0)
+        # The control: the same reports without the marker name are counted.
         plugin.pytest_runtest_logreport(self._report("call", "passed"))
         assert (plugin.executed, plugin.skipped) == (1, 0)
 
-    @pytest.mark.parametrize(
-        ("marker_name", "marked"), [("leg_assertion", True), ("unit", False)]
-    )
-    def test_the_report_of_a_leg_assertion_is_marked_where_the_test_ran(
-        self, marker_name, marked
-    ):
-        """Only the report reaches an xdist controller, so the mark is put on it."""
-        item = SimpleNamespace(
-            get_closest_marker=lambda name: object() if name == marker_name else None
-        )
-        report = SimpleNamespace(user_properties=[])
+    def test_a_report_whose_keywords_hold_other_markers_is_counted(self):
+        """Only the leg assertion's own name leaves a report out of the counts."""
         plugin = sharding._TierRunOutcome()
-        wrapper = plugin.pytest_runtest_makereport(item, None)
-        next(wrapper)
-        with pytest.raises(StopIteration):
-            wrapper.send(SimpleNamespace(get_result=lambda: report))
-        assert (
-            (sharding.LEG_ASSERTION_PROPERTY, True) in report.user_properties
-        ) is marked
+        others = {"unit": 1, "slow": 1, "skipif": 1, "not_a_leg_assertion": 1}
+        plugin.pytest_runtest_logreport(self._report("call", "passed", keywords=others))
+        plugin.pytest_runtest_logreport(
+            self._report("call", "skipped", keywords=others)
+        )
+        assert (plugin.executed, plugin.skipped) == (1, 1)
+
+    def test_the_plugin_adds_nothing_to_a_report(self):
+        """A user property would be published in the JUnit XML inside the testcase."""
+        plugin = sharding._TierRunOutcome()
+        assert not hasattr(plugin, "pytest_runtest_makereport")
+        assert not hasattr(sharding, "LEG_ASSERTION_PROPERTY")
+        report = self._report(
+            "call", "passed", keywords={sharding.LEG_ASSERTION_MARKER: 1}
+        )
+        report.user_properties = []
+        plugin.pytest_runtest_logreport(report)
+        assert report.user_properties == []
 
     def test_a_leg_whose_only_pass_is_a_leg_assertion_still_fails_the_floor(self):
         written: list[str] = []
         session = self._session(written)
         plugin = sharding._TierRunOutcome()
-        marked = [(sharding.LEG_ASSERTION_PROPERTY, True)]
+        marked = {sharding.LEG_ASSERTION_MARKER: 1}
         plugin.pytest_runtest_logreport(self._report("setup", "skipped"))
         plugin.pytest_runtest_logreport(self._report("setup", "skipped"))
-        plugin.pytest_runtest_logreport(
-            self._report("call", "passed", user_properties=marked)
-        )
+        plugin.pytest_runtest_logreport(self._report("call", "passed", keywords=marked))
         plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
         assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
         assert "2 skipped, 0 executed" in written[0], written
