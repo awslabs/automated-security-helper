@@ -290,6 +290,106 @@ def test_an_artifact_the_run_did_not_keep_is_reported(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# ASH's results, read from the artifact act's store holds
+# ---------------------------------------------------------------------------
+
+SARIF_BYTES = b'{"version": "2.1.0", "runs": []}'
+#: 2026-10-12T21:00:00Z, far from any file's write time in a test run.
+STORED_AT = 1791838800.0
+
+
+def _zip_artifact(
+    store: Path, name: str, data: dict, sarif: bytes | None = None, prefix: str = ""
+) -> Path:
+    """An artifact as act's artifact server stores one: ``<store>/1/<name>/<name>.zip``."""
+    archive = store / "1" / name / f"{name}.zip"
+    archive.parent.mkdir(parents=True)
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr(f"{prefix}ash_aggregated_results.json", json.dumps(data))
+        if sarif is not None:
+            zipped.writestr(f"{prefix}reports/ash.ghas.sarif", sarif)
+    os.utime(archive, (STORED_AT, STORED_AT))
+    return archive
+
+
+@pytest.mark.unit
+def test_results_are_read_from_a_zipped_artifact_in_act_s_store(tmp_path):
+    read = _api("reports", "results_from_artifact_store")
+    store = tmp_path / "artifacts"
+    archive = _zip_artifact(store, "ash-output", _aggregated(), SARIF_BYTES, "out/")
+    found = read(store)
+    assert found is not None and len(found) == 1
+    (result,) = found
+    assert result.name == "ash-output"
+    assert result.aggregated == _aggregated()
+    assert result.sarif == SARIF_BYTES
+    assert result.mtime == pytest.approx(STORED_AT), "the mtime is the zip's"
+    assert result.where == f"{archive}!out/ash_aggregated_results.json"
+    (store / "1" / "ash-output" / "bad.zip").write_bytes(b"not a zip")
+    assert len(read(store)) == 1, "a file that is not a zip is passed over"
+
+
+@pytest.mark.unit
+def test_results_are_read_from_a_directory_artifact_in_act_s_store(tmp_path):
+    read = _api("reports", "results_from_artifact_store")
+    store = tmp_path / "artifacts"
+    artifact = store / "1" / "ash_output"
+    artifact.mkdir(parents=True)
+    results = artifact / "ash_aggregated_results.json"
+    results.write_text(json.dumps(_aggregated("LOW")), encoding="utf-8")
+    os.utime(results, (STORED_AT, STORED_AT))
+    found = read(store)
+    assert found is not None and len(found) == 1
+    (result,) = found
+    assert result.name == "ash_output"
+    assert result.aggregated == _aggregated("LOW")
+    assert result.sarif is None, "no reports/ash.ghas.sarif was uploaded"
+    assert result.mtime == pytest.approx(STORED_AT), "the mtime is the stored file's"
+    assert result.where == str(results)
+    (artifact / "reports").mkdir()
+    (artifact / "reports" / "ash.ghas.sarif").write_bytes(SARIF_BYTES)
+    assert read(store)[0].sarif == SARIF_BYTES
+
+
+@pytest.mark.unit
+def test_every_shard_s_results_come_back_in_order(tmp_path):
+    read = _api("reports", "results_from_artifact_store")
+    store = tmp_path / "artifacts"
+    for shard in (3, 1, 0, 2):
+        _zip_artifact(store, f"ash-shard-{shard}", _aggregated(str(shard)))
+    found = read(store)
+    assert found is not None
+    assert [result.name for result in found] == [f"ash-shard-{n}" for n in range(4)]
+    assert [
+        result.aggregated["ash_config"]["global_settings"]["severity_threshold"]
+        for result in found
+    ] == ["0", "1", "2", "3"]
+    assert all(result.sarif is None for result in found)
+
+
+@pytest.mark.unit
+def test_a_store_whose_artifacts_hold_no_results_reads_as_none(tmp_path):
+    read = _api("reports", "results_from_artifact_store")
+    store = tmp_path / "artifacts"
+    (store / "1" / "ash-output").mkdir(parents=True)
+    with zipfile.ZipFile(store / "1" / "ash-output" / "ash-output.zip", "w") as zipped:
+        zipped.writestr("reports/ash.ghas.sarif", SARIF_BYTES)
+    (store / "1" / "ash_output").mkdir()
+    (store / "1" / "ash_output" / "ash.summary.txt").write_text("", encoding="utf-8")
+    assert read(store) is None
+    _zip_artifact(store, "ash-scan", _aggregated())
+    assert read(store) is not None, "the control: results in the same store are found"
+
+
+@pytest.mark.unit
+def test_a_store_that_does_not_exist_reads_as_none(tmp_path):
+    read = _api("reports", "results_from_artifact_store")
+    assert read(tmp_path / "absent") is None
+    (tmp_path / "a-file").write_text("", encoding="utf-8")
+    assert read(tmp_path / "a-file") is None
+
+
+# ---------------------------------------------------------------------------
 # When a step started, from act's --json log
 # ---------------------------------------------------------------------------
 

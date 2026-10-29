@@ -579,6 +579,118 @@ def artifact_problems(artifact_dir: Path, names: Iterable[str]) -> list[str]:
     return problems
 
 
+#: The SARIF report ASH writes beside its aggregated results, for code scanning.
+GHAS_SARIF = PurePosixPath("reports") / "ash.ghas.sarif"
+
+
+@dataclass(frozen=True)
+class ArtifactResults:
+    """ASH's aggregated results as one artifact in act's store holds them.
+
+    ``name`` is the artifact's name in the store: the stem of its ``.zip``, or the
+    directory holding the results file. ``where`` names the results themselves, as
+    ``aggregated_results_in`` does (``<zip>!<member>`` for a zipped copy). ``sarif`` is
+    the bytes of ``reports/ash.ghas.sarif`` beside the results, or None when the
+    artifact holds none. ``mtime`` is when the store entry was written: the zip's, or
+    the stored results file's.
+    """
+
+    name: str
+    where: str
+    aggregated: dict[str, Any]
+    sarif: bytes | None
+    mtime: float
+
+
+def _zipped_results(path: Path, depth: int) -> list[tuple[int, ArtifactResults]]:
+    found: list[tuple[int, ArtifactResults]] = []
+    try:
+        mtime = path.stat().st_mtime
+        with zipfile.ZipFile(path) as archive:
+            members = archive.namelist()
+            for member in members:
+                if PurePosixPath(member).name != AGGREGATED:
+                    continue
+                sarif_member = str(PurePosixPath(member).parent / GHAS_SARIF)
+                found.append(
+                    (
+                        depth + len(PurePosixPath(member).parts),
+                        ArtifactResults(
+                            name=path.stem,
+                            where=f"{path}!{member}",
+                            aggregated=json.loads(archive.read(member)),
+                            sarif=archive.read(sarif_member)
+                            if sarif_member in members
+                            else None,
+                            mtime=mtime,
+                        ),
+                    )
+                )
+    except (OSError, ValueError, zipfile.BadZipFile):
+        return []
+    return found
+
+
+def _stored_results(path: Path, depth: int) -> list[tuple[int, ArtifactResults]]:
+    aggregated = aggregated_results_at(path)
+    if not aggregated:
+        return []
+    where, data = aggregated[0]
+    sarif_path = path.parent / Path(*GHAS_SARIF.parts)
+    sarif = None
+    if not sarif_path.is_symlink() and sarif_path.is_file():
+        try:
+            sarif = sarif_path.read_bytes()
+        except OSError:
+            sarif = None
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return []
+    return [
+        (
+            depth,
+            ArtifactResults(
+                name=path.parent.name,
+                where=where,
+                aggregated=data,
+                sarif=sarif,
+                mtime=mtime,
+            ),
+        )
+    ]
+
+
+def results_from_artifact_store(store: Path) -> list[ArtifactResults] | None:
+    """The aggregated results the artifacts in act's store hold, or None if none does.
+
+    act's host executor writes the scan's output under a cache copy of the project,
+    not under the project's ``.ash/ash_output``, so what a run produced is read from
+    the artifact the job uploaded, which the store keeps under the artifact's name as
+    a directory or a ``.zip`` (the walk ``artifact_problems`` makes). As in
+    ``aggregated_results_in``, the copies nearest the top of the store are the
+    artifacts' own, and all of them at that depth are returned, in path order, so a
+    sharded page's ``ash-shard-0`` to ``ash-shard-3`` come back as four entries and
+    the caller judges them. A store that does not exist holds no results.
+    """
+    store = Path(store)
+    if not store.is_dir():
+        return None
+    found: list[tuple[int, ArtifactResults]] = []
+    for path in sorted(store.rglob("*")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        depth = len(path.relative_to(store).parts)
+        if path.name == AGGREGATED:
+            found += _stored_results(path, depth)
+        elif path.suffix == ".zip":
+            found += _zipped_results(path, depth)
+    if not found:
+        return None
+    top = min(depth for depth, _ in found)
+    return [results for depth, results in found if depth == top]
+
+
 _ASH_NAME = r"automated[-_]security[-_]helper"
 #: A download of ASH from a package index: its URL, pip's ``Downloading <file>`` and
 #: uv's ``Downloading <name> (<size>)``.
