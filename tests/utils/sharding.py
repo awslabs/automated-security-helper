@@ -47,7 +47,9 @@ item executed when its call phase ran and did not skip, or when its setup failed
 error is a result). A run that collected nothing is left to ``admit_empty_shard`` and
 exit 5, so an admitted empty shard stays ``OK``. A plain local ``pytest`` is unaffected,
 and so are ``--collect-only``, ``--setup-plan`` and ``--setup-only``, which run no test
-by design.
+by design. Under xdist only the controller applies the floor: a worker whose share of
+the tests was all skips says nothing, because the controller counts every worker's
+reports.
 
 The deselected items are counted by a ``pytest_deselected`` hook on a plugin object that
 ``configure`` registers. Under xdist the controller never collects, so each worker counts
@@ -235,9 +237,14 @@ def fail_a_tier_run_that_executed_no_test(
     ``executed`` is zero. ``admit_empty_shard`` is not touched: a shard that collected
     nothing selected nothing, so an admitted empty shard stays ``OK`` here.
 
-    The status becomes ``TESTS_FAILED`` and one line says what the run did.
+    The status becomes ``TESTS_FAILED`` and one line says what the run did. It does
+    nothing in an xdist worker, whose share of the tests may be all skips while the run
+    executed hundreds; the controller counts every worker's reports and decides.
     """
     config = session.config
+    # Only the controller decides. A worker has ``workerinput``; the controller does not.
+    if hasattr(config, "workerinput"):
+        return False
     if not config.getoption("markexpr", default=""):
         return False
     if not (config.stash.get(_TEXT_KEY, "") or config.stash.get(_CI_KEY, False)):

@@ -910,6 +910,14 @@ class TestATierRunThatExecutedNoTestFails:
         assert sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
         assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
 
+    def test_an_xdist_worker_never_applies_the_floor(self):
+        """A worker's share can be all skips while the run executed hundreds."""
+        written: list[str] = []
+        session = self._session(written)
+        session.config.workerinput = {}
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
+        assert session.exitstatus == pytest.ExitCode.OK and not written
+
     def test_a_run_without_a_marker_expression_is_left_alone(self):
         written: list[str] = []
         session = self._session(written, expression="")
