@@ -33,9 +33,11 @@ def locations_match(loc1: Dict, loc2: Dict) -> bool:
     if not has_common_fields:
         return True
 
-    # If both have file paths, they must match
+    # If both have file paths, they must name the same file. Aggregation rewrites
+    # URIs (a file:// URI or an absolute path becomes a path relative to the scan
+    # root), so the two spellings are compared as paths, not as text.
     if file1 and file2:
-        if file1 != file2:
+        if not _file_paths_match(file1, file2):
             return False
     # If one has a file path and the other doesn't, they don't match
     elif file1 or file2:
@@ -133,18 +135,52 @@ def _line_ranges_compatible(start1, end1, start2, end2) -> bool:
             # If no end lines, start lines must match exactly for compatibility
             return False
 
-    # Start lines match, now check end lines
-    if end1 is None and end2 is None:
-        # Both have no end line, that's fine if start lines match
-        return True
-    elif end1 is None or end2 is None:
-        # One has end line, other doesn't - this is compatible (partial match)
-        return True
-    elif end1 != end2:
-        # Both have end lines but they're different - not compatible for exact matching
-        return False
-
+    # Start lines match: the ranges overlap whatever their end lines are, so they
+    # are compatible. Ranges whose start lines differ by up to 5 are accepted
+    # above; two with the same start and different ends (one scanner reports the
+    # statement, another the whole block) are closer than that, not further.
     return True
+
+
+def _normalize_file_path(path: str) -> str:
+    """*path* as aggregation would write it: a POSIX path without a ``file://``
+    scheme, ``./`` prefix or trailing separator."""
+    text = str(path).replace("\\", "/")
+    if text.startswith("file://"):
+        text = text[len("file://") :]
+        # file:///C:/x -> C:/x
+        if len(text) > 2 and text[0] == "/" and text[2] == ":":
+            text = text[1:]
+    while text.startswith("./"):
+        text = text[2:]
+    return text.rstrip("/")
+
+
+def _file_paths_match(file1: str, file2: str) -> bool:
+    """Whether two location URIs name the same file.
+
+    Equal once normalized, or one is absolute and the other, relative, is its
+    tail at a component boundary: ``/work/app/src/a.py`` and ``src/a.py`` are one
+    file. Two relative paths are compared whole, so ``src/a.py`` and
+    ``other/src/a.py`` stay two files.
+    """
+    norm1 = _normalize_file_path(file1)
+    norm2 = _normalize_file_path(file2)
+    if norm1 == norm2:
+        return True
+    for longer, shorter in ((norm1, norm2), (norm2, norm1)):
+        if (
+            shorter
+            and _is_absolute(longer)
+            and not _is_absolute(shorter)
+            and longer.endswith("/" + shorter)
+        ):
+            return True
+    return False
+
+
+def _is_absolute(path: str) -> bool:
+    return path.startswith("/") or (len(path) > 1 and path[1] == ":")
 
 
 def _extract_file_path(location: Dict) -> str:
