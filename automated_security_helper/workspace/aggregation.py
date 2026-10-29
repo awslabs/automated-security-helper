@@ -441,9 +441,14 @@ def rebase_run_for_project(
     """
     rebased: Dict[str, Any] = copy.deepcopy(dict(run))
 
-    rebased["originalUriBaseIds"] = {
-        PROJECT_ROOT_URI_BASE_ID: {"uri": project_root_uri(project.path)}
-    }
+    # The project root joins the run's base-id table rather than replacing it. A
+    # scanner that anchored its own locations (`uriBaseId: "%SRCROOT%"`) declared
+    # that id here; dropping the table left those references dangling, and a
+    # consumer resolving them found no base at all.
+    base_ids = rebased.get("originalUriBaseIds")
+    table: Dict[str, Any] = dict(base_ids) if isinstance(base_ids, Mapping) else {}
+    table[PROJECT_ROOT_URI_BASE_ID] = {"uri": project_root_uri(project.path)}
+    rebased["originalUriBaseIds"] = table
 
     run_properties = rebased.get("properties")
     if not isinstance(run_properties, dict):
@@ -478,6 +483,7 @@ def rebase_run_for_project(
             had_locatable_uri = True
 
             reduced = project_relative_uri(str(uri), project.path)
+            rewritten = False
             if reduced is NOT_ABSOLUTE:
                 placed: Optional[str] = str(uri)
             elif reduced is None:
@@ -489,16 +495,29 @@ def rebase_run_for_project(
             else:
                 placed = reduced
                 artifact["uri"] = reduced
+                rewritten = True
 
-            if placed is not None:
+            if placed is None:
+                continue
+            converted = to_workspace_uri(placed, project.relative_path, project.path)
+            if converted is None:
+                # Relative, and still not placeable inside the project (a ".."
+                # component, a shape the pattern converter refuses). Keeps its
+                # text, gets no uriBaseId, and is counted below: anchoring it to
+                # the project root would assert a location inside the project
+                # for a path that escapes it.
+                continue
+            if rewritten:
+                # The uri is now in the project root's coordinates, whatever
+                # base the scanner wrote for the absolute form it replaced.
+                artifact["uriBaseId"] = PROJECT_ROOT_URI_BASE_ID
+            else:
                 # Anchor to the project root so the run stays coherent with
                 # exactly one root. A scanner that already anchored its own
-                # output knows something we do not, so leave that alone.
+                # relative output knows something we do not, so leave that alone.
                 artifact.setdefault("uriBaseId", PROJECT_ROOT_URI_BASE_ID)
-                if workspace_uri is None:
-                    workspace_uri = to_workspace_uri(
-                        placed, project.relative_path, project.path
-                    )
+            if workspace_uri is None:
+                workspace_uri = converted
 
         if workspace_uri is not None:
             properties["workspace_uri"] = workspace_uri
