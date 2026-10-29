@@ -15,11 +15,15 @@ to never prints as a number.
 
 from __future__ import annotations
 
+import pytest
+
 from automated_security_helper.cli.mcp_tools import _scan_timeout_reason
 from automated_security_helper.utils.error_text import (
     timeout_limit_phrase,
     timeout_limit_token,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_a_typed_limit_names_the_servers_own_option():

@@ -44,6 +44,8 @@ from automated_security_helper.core.resource_management.scan_registry import (
 )
 from tests.utils.tasks import drain
 
+pytestmark = pytest.mark.unit
+
 _LAUNCHER = "automated_security_helper.interactions.run_ash_scan.run_ash_scan"
 
 

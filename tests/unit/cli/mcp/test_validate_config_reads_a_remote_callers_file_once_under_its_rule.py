@@ -47,6 +47,8 @@ from automated_security_helper.cli.mcp.profile_registry import (
 from automated_security_helper.cli.mcp_tools import mcp_validate_config
 from automated_security_helper.config.config_validator import ConfigValidator
 
+pytestmark = pytest.mark.unit
+
 REMOTE = "client-1"
 UNSET_VAR = "ASH_ONE_READ_UNSET_PROBE"
 CLEAN = "project_name: clean-text\n"

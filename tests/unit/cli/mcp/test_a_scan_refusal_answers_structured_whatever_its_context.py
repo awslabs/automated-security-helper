@@ -20,6 +20,8 @@ from typing import Any, Dict, NamedTuple, Tuple
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 SESSION = "client-one"
 SECRET = "/opt/qz4b/config"
 

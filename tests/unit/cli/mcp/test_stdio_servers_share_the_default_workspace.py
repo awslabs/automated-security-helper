@@ -25,6 +25,7 @@ import zipfile
 from pathlib import Path
 from typing import Dict
 
+import pytest
 
 from automated_security_helper.cli.mcp import sessions
 from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, KillAfter
@@ -87,6 +88,7 @@ def _close(proc: subprocess.Popen) -> int:
     return proc.wait(timeout=120)
 
 
+@pytest.mark.e2e
 def test_a_second_stdio_server_exiting_leaves_the_first_ones_tree(tmp_path) -> None:
     root = tmp_path / "ws"
     data = _zip()
@@ -146,6 +148,7 @@ def test_a_second_stdio_server_exiting_leaves_the_first_ones_tree(tmp_path) -> N
     assert not (root / "__default__").exists(), "the last server's exit left the tree"
 
 
+@pytest.mark.unit
 def test_a_server_that_died_does_not_keep_the_tree(tmp_path, monkeypatch) -> None:
     root = tmp_path / "ws"
     monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(root))
@@ -161,6 +164,7 @@ def test_a_server_that_died_does_not_keep_the_tree(tmp_path, monkeypatch) -> Non
     assert not (root / "__default__").exists()
 
 
+@pytest.mark.unit
 def test_presence_entries_never_count_as_session_workspaces(
     tmp_path, monkeypatch
 ) -> None:

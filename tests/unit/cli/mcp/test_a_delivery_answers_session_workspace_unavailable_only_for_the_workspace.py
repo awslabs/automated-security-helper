@@ -42,6 +42,8 @@ from automated_security_helper.cli.mcp_tools import (
     mcp_set_source_zip_finalize,
 )
 
+pytestmark = pytest.mark.unit
+
 SESSION = "zip-oserror"
 
 

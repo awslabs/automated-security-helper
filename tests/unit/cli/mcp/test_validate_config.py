@@ -10,6 +10,8 @@ import yaml
 
 from automated_security_helper.cli.mcp_tools import mcp_validate_config
 
+pytestmark = pytest.mark.unit
+
 
 def _write_yaml(path: Path, data: dict) -> None:
     path.write_text(yaml.dump(data))

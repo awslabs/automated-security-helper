@@ -34,6 +34,7 @@ UNKNOWN = ["http", "streamable_http", "stdi0", "tcp", "stream able-http", "sse,s
 @pytest.mark.parametrize(
     "value", ["Streamable-HTTP", " sse ", "SSE", "STREAMABLE-HTTP\n"]
 )
+@pytest.mark.unit
 def test_a_network_transport_in_any_case_or_spacing_makes_callers_remote(
     monkeypatch, value
 ) -> None:
@@ -44,6 +45,7 @@ def test_a_network_transport_in_any_case_or_spacing_makes_callers_remote(
 
 
 @pytest.mark.parametrize("value", UNKNOWN)
+@pytest.mark.unit
 def test_an_unknown_value_fails_closed(monkeypatch, value) -> None:
     monkeypatch.setenv("ASH_MCP_TRANSPORT", value)
 
@@ -51,6 +53,7 @@ def test_an_unknown_value_fails_closed(monkeypatch, value) -> None:
 
 
 @pytest.mark.parametrize("value", ["stdio", " STDIO ", "", "   ", "\n"])
+@pytest.mark.unit
 def test_stdio_or_unset_keeps_the_local_default(monkeypatch, value) -> None:
     monkeypatch.setenv("ASH_MCP_TRANSPORT", value)
 
@@ -88,6 +91,7 @@ def started(monkeypatch) -> dict:
 
 @pytest.mark.parametrize("transport", ["stdio", "streamable-http", "sse"])
 @pytest.mark.parametrize("value", UNKNOWN)
+@pytest.mark.unit
 def test_the_server_refuses_to_start_with_an_unknown_value(
     monkeypatch, stderr, started, value, transport
 ) -> None:
@@ -102,6 +106,7 @@ def test_the_server_refuses_to_start_with_an_unknown_value(
     assert "ASH_MCP_TRANSPORT" in message and repr(value) in message, message
 
 
+@pytest.mark.unit
 def test_the_variable_is_reported_when_it_is_also_the_transport_flag(
     monkeypatch, stderr, started
 ) -> None:
@@ -131,6 +136,7 @@ def test_the_variable_is_reported_when_it_is_also_the_transport_flag(
         "   ",
     ],
 )
+@pytest.mark.unit
 def test_a_known_or_empty_value_starts(monkeypatch, started, value) -> None:
     monkeypatch.setenv("ASH_MCP_TRANSPORT", value)
 
@@ -140,6 +146,7 @@ def test_a_known_or_empty_value_starts(monkeypatch, started, value) -> None:
 
 
 @pytest.mark.parametrize("value", ["http", "Stdio-HTTP"])
+@pytest.mark.integration
 def test_the_server_module_refuses_an_unknown_value_too(tmp_path, value) -> None:
     env = {k: v for k, v in os.environ.items() if not k.startswith("ASH_MCP_")}
     env.pop("ASH_CONFIG", None)

@@ -45,6 +45,8 @@ from tests.unit.test_committed_output_when_git_cannot_answer import (
     _no_orchestrator,
 )
 
+pytestmark = pytest.mark.unit
+
 #: Rich markup, a terminal control and a CI command, in text the scan quotes.
 #: The control is a lone ESC plus "c" (reset), not a complete CSI or OSC
 #: sequence: error text has those removed whether or not values exist, so

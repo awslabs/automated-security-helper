@@ -20,6 +20,8 @@ import pytest
 
 from automated_security_helper.cli import mcp_tools
 
+pytestmark = pytest.mark.unit
+
 #: A scan id as the writer spells one (``str(uuid.uuid4())``): the copy's name
 #: must parse as a scan copy's (config_sources.parse_scan_copy_name), and only
 #: the UUID spelling does.

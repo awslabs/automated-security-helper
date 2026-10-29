@@ -48,6 +48,8 @@ from typing import Any, Dict, List, Optional
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _isolated_session_state(monkeypatch, tmp_path):

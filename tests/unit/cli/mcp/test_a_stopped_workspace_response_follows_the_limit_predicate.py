@@ -16,8 +16,12 @@ option, so a substring probe on the whole response finds the name there and
 says nothing about the context.
 """
 
+import pytest
+
 from automated_security_helper.cli.mcp import workspace
 from automated_security_helper.utils import error_text
+
+pytestmark = pytest.mark.unit
 
 
 def _stopped(timeout_seconds, environment_values, reason="the scan stopped"):

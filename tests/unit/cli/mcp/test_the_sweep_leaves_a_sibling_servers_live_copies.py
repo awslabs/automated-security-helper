@@ -112,6 +112,7 @@ def gone_pid():
     return child.pid
 
 
+@pytest.mark.integration
 def test_a_copy_an_unknown_scan_wrote_in_a_running_process_survives(tmp_path, sibling):
     profile = _profile(tmp_path)
     live = _copy_beside(profile, uuid.uuid4(), f"-p{sibling}{_here()}")
@@ -121,6 +122,7 @@ def test_a_copy_an_unknown_scan_wrote_in_a_running_process_survives(tmp_path, si
     assert live.is_file(), "a sibling server's live copy was swept"
 
 
+@pytest.mark.integration
 def test_a_copy_whose_writer_is_gone_is_swept(tmp_path, gone_pid):
     profile = _profile(tmp_path)
     dead = _copy_beside(profile, uuid.uuid4(), f"-p{gone_pid}{_here()}")
@@ -130,6 +132,7 @@ def test_a_copy_whose_writer_is_gone_is_swept(tmp_path, gone_pid):
     assert not dead.exists(), "a dead writer's leftover survived the sweep"
 
 
+@pytest.mark.unit
 def test_a_copy_this_process_wrote_and_does_not_hold_is_swept(tmp_path):
     """This process's own pid is no shelter: its registry is the authority
     on its own scans."""
@@ -141,6 +144,7 @@ def test_a_copy_this_process_wrote_and_does_not_hold_is_swept(tmp_path):
     assert not mine.exists()
 
 
+@pytest.mark.unit
 def test_a_copy_with_no_pid_has_no_identity_and_is_judged_by_age(tmp_path):
     """An older writer's name: no pid and no identity, so it matches no host."""
     profile = _profile(tmp_path)
@@ -151,6 +155,7 @@ def test_a_copy_with_no_pid_has_no_identity_and_is_judged_by_age(tmp_path):
     assert legacy.exists(), "a copy with no identity was swept before it was old"
 
 
+@pytest.mark.unit
 def test_the_writers_own_names_carry_its_pid(tmp_path):
     profile = _profile(tmp_path)
     scan_id = str(uuid.uuid4())
@@ -175,6 +180,7 @@ def test_the_writers_own_names_carry_its_pid(tmp_path):
     "pid_part",
     ["-p0", "-p01", "-p-5", "-p", "-pabc", "-p1234567890", "-q42"],
 )
+@pytest.mark.unit
 def test_a_malformed_pid_segment_is_no_scan_copys_name(tmp_path, pid_part):
     scan_id = uuid.uuid4()
     name = f".ash-scan-{scan_id}{pid_part}.ash.yaml"
@@ -183,6 +189,7 @@ def test_a_malformed_pid_segment_is_no_scan_copys_name(tmp_path, pid_part):
     assert scan_copy_writer_pid(name) is None
 
 
+@pytest.mark.unit
 def test_the_pid_segment_does_not_change_what_a_name_parses_to():
     scan_id = str(uuid.uuid4())
     assert parse_scan_copy_name(f".ash-scan-{scan_id}.ash.yaml") == (
@@ -196,6 +203,7 @@ def test_the_pid_segment_does_not_change_what_a_name_parses_to():
     assert scan_copy_writer_pid(f".ash-scan-{scan_id}.ash.yaml") is None
 
 
+@pytest.mark.unit
 def test_a_registered_copy_with_a_pid_is_still_described_as_its_profile(tmp_path):
     """The registered-copy mapping the messages use survives the longer name."""
     profile = _profile(tmp_path)
@@ -207,6 +215,7 @@ def test_a_registered_copy_with_a_pid_is_still_described_as_its_profile(tmp_path
         config_sources.discard_scan_copy(copy)
 
 
+@pytest.mark.integration
 def test_a_probe_failure_reads_as_running(tmp_path, monkeypatch, sibling):
     """The sweep deletes only what it can prove abandoned: a pid it cannot
     ask about (PermissionError, or any other OSError) is treated as alive."""

@@ -20,6 +20,8 @@ import pytest
 from automated_security_helper.cli.mcp import profile_registry, sessions
 from automated_security_helper.config.ash_config import AshConfig
 
+pytestmark = pytest.mark.unit
+
 
 def test_the_session_id_has_no_default() -> None:
     parameter = inspect.signature(profile_registry.clear_session_state).parameters[

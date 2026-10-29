@@ -254,6 +254,7 @@ def _start_scan(target: Path, session_id: Optional[str] = SESSION) -> Dict[str, 
 
 @pytest.mark.usefixtures("host_set_aside")
 @follows_a_link
+@pytest.mark.integration
 def test_a_linked_config_setting_a_denied_field_is_refused(_server) -> None:
     from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
 
@@ -267,6 +268,7 @@ def test_a_linked_config_setting_a_denied_field_is_refused(_server) -> None:
 
 @pytest.mark.usefixtures("host_set_aside")
 @follows_a_link
+@pytest.mark.integration
 def test_the_scan_tool_refuses_a_linked_config_up_front(_server) -> None:
     source = _linked_tree(_server, DENIED)
 
@@ -279,6 +281,7 @@ def test_the_scan_tool_refuses_a_linked_config_up_front(_server) -> None:
 
 @pytest.mark.usefixtures("host_set_aside")
 @follows_a_link
+@pytest.mark.integration
 def test_a_linked_config_widening_the_sandbox_is_refused(_server) -> None:
     from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
 
@@ -300,6 +303,7 @@ def test_a_linked_config_widening_the_sandbox_is_refused(_server) -> None:
 
 @pytest.mark.skipif(sys.platform != "win32", reason="the Windows rule for links")
 @pytest.mark.usefixtures("host_set_aside")
+@pytest.mark.integration
 def test_on_windows_a_linked_config_is_refused_even_in_an_allowed_root(
     _server,
 ) -> None:
@@ -319,6 +323,7 @@ def test_on_windows_a_linked_config_is_refused_even_in_an_allowed_root(
     assert "fail_on_findings" not in repr(result)
 
 
+@pytest.mark.unit
 def test_positive_control_the_same_file_named_by_the_operator_is_not_refused(
     _server,
 ) -> None:
@@ -341,6 +346,7 @@ def test_positive_control_the_same_file_named_by_the_operator_is_not_refused(
 
 @pytest.mark.usefixtures("host_set_aside")
 @follows_a_link
+@pytest.mark.integration
 def test_a_linked_configs_suppressions_and_ignore_paths_are_marked(_server) -> None:
     source = _linked_tree(_server, SUPPRESSIONS)
 
@@ -357,6 +363,7 @@ def test_a_linked_configs_suppressions_and_ignore_paths_are_marked(_server) -> N
 
 @pytest.mark.usefixtures("host_set_aside")
 @follows_a_link
+@pytest.mark.integration
 def test_a_linked_configs_scanner_exclusion_is_moved_out_of_the_options(
     _server,
 ) -> None:
@@ -377,6 +384,7 @@ def test_a_linked_configs_scanner_exclusion_is_moved_out_of_the_options(
     ] == [("bandit", "excluded_paths", "client-dir")]
 
 
+@pytest.mark.integration
 def test_a_linked_config_directory_is_judged_by_the_link(_server) -> None:
     """A symlinked ``.ash`` directory: the file sits in the host directory.
 
@@ -404,6 +412,7 @@ def test_a_linked_config_directory_is_judged_by_the_link(_server) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_a_file_reached_through_a_delivered_link_is_the_clients(
     _server, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -438,6 +447,7 @@ def test_a_file_reached_through_a_delivered_link_is_the_clients(
 
 @pytest.mark.usefixtures("host_set_aside")
 @follows_a_link
+@pytest.mark.integration
 def test_a_linked_file_that_is_not_a_config_is_not_quoted(_server) -> None:
     from automated_security_helper.core.exceptions import ASHConfigValidationError
 
@@ -453,6 +463,7 @@ def test_a_linked_file_that_is_not_a_config_is_not_quoted(_server) -> None:
 
 @pytest.mark.usefixtures("host_set_aside")
 @follows_a_link
+@pytest.mark.integration
 def test_a_linked_file_that_does_not_parse_is_not_quoted(_server) -> None:
     """The parser's message quotes the line it stopped at; the refusal does not."""
     from automated_security_helper.core.exceptions import ASHConfigSourceError
@@ -470,6 +481,7 @@ def test_a_linked_file_that_does_not_parse_is_not_quoted(_server) -> None:
 
 
 @pytest.mark.usefixtures("host_set_aside")
+@pytest.mark.integration
 def test_the_log_line_for_it_does_not_quote_it_either(_server, caplog) -> None:
     from automated_security_helper.config.resolve_config import resolve_config
     from automated_security_helper.core.exceptions import ASHConfigSourceError
@@ -492,6 +504,7 @@ def test_the_log_line_for_it_does_not_quote_it_either(_server, caplog) -> None:
 
 
 @pytest.mark.usefixtures("host_set_aside")
+@pytest.mark.integration
 def test_the_scan_tool_does_not_quote_it_either(_server) -> None:
     source = _linked_tree(_server, NOT_A_CONFIG)
 
@@ -516,6 +529,7 @@ BAD_EXPIRY = (
 
 @pytest.mark.usefixtures("host_set_aside")
 @follows_a_link
+@pytest.mark.integration
 def test_a_validators_own_message_is_reported_by_its_type(_server) -> None:
     from automated_security_helper.core.exceptions import ASHConfigValidationError
 
@@ -534,6 +548,7 @@ KEY_CANARY = "canary-key-9d1e"
 
 @pytest.mark.usefixtures("host_set_aside")
 @follows_a_link
+@pytest.mark.integration
 def test_a_key_the_schema_does_not_have_is_not_named(_server) -> None:
     from automated_security_helper.core.exceptions import ASHConfigValidationError
 
@@ -554,6 +569,7 @@ def test_a_key_the_schema_does_not_have_is_not_named(_server) -> None:
     assert "NOT-A-SEVERITY" not in message
 
 
+@pytest.mark.unit
 def test_the_validators_message_names_the_rule_not_the_value(_server) -> None:
     """The operator's own file gets the validator's message, which names the rule
     and not the value: a value can be one read from the environment."""
@@ -572,6 +588,7 @@ def test_the_validators_message_names_the_rule_not_the_value(_server) -> None:
     assert EXPIRY_CANARY not in message, message
 
 
+@pytest.mark.unit
 def test_positive_control_an_operator_file_keeps_the_detailed_error(
     _server,
 ) -> None:
@@ -629,6 +646,7 @@ def _reads(during: Callable[[], Any]) -> List[Path]:
     return read
 
 
+@pytest.mark.integration
 def test_a_remote_scan_refuses_a_discovered_config_linking_out(_server) -> None:
     source = _linked_tree(_server, LINK_OUT)
     host_file = _server["host"] / "ash.yaml"
@@ -645,6 +663,7 @@ def test_a_remote_scan_refuses_a_discovered_config_linking_out(_server) -> None:
     assert host_file.resolve() not in read
 
 
+@pytest.mark.integration
 def test_the_scan_itself_refuses_it_without_reading_it(_server) -> None:
     """The scan's own resolution refuses it too, should the file change after the check."""
     from automated_security_helper.cli import mcp_tools
@@ -704,6 +723,7 @@ def _remote_options(source: Path, output: Path) -> Any:
     )
 
 
+@pytest.mark.integration
 def test_the_output_dir_check_does_not_read_it(_server) -> None:
     """The host file turns the sandbox off; read, it would let the linked output through."""
     from automated_security_helper.interactions.run_ash_scan import (
@@ -731,6 +751,7 @@ def test_the_output_dir_check_does_not_read_it(_server) -> None:
     assert (_server["host"] / "ash.yaml").resolve() not in read
 
 
+@pytest.mark.integration
 def test_the_workspace_knobs_reader_does_not_read_it(_server) -> None:
     from automated_security_helper.interactions.run_ash_scan import (
         _resolve_workspace_execution_config,
@@ -761,6 +782,7 @@ def test_the_workspace_knobs_reader_does_not_read_it(_server) -> None:
     assert (_server["host"] / "ash.yaml").resolve() not in read
 
 
+@pytest.mark.integration
 def test_get_config_refuses_the_same_layout_as_before(_server) -> None:
     from automated_security_helper.cli.mcp_tools import mcp_get_config
 
@@ -773,6 +795,7 @@ def test_get_config_refuses_the_same_layout_as_before(_server) -> None:
 
 
 @follows_a_link
+@pytest.mark.unit
 def test_stdio_keeps_a_local_repositorys_linked_config(_server) -> None:
     """Over stdio only the system-directory net applies, as before."""
     host_file = _write(_server["host"] / "ash.yaml", LINK_OUT)
@@ -790,6 +813,7 @@ def test_stdio_keeps_a_local_repositorys_linked_config(_server) -> None:
 
 @pytest.mark.parametrize("where", ["in the delivered tree", "in a config root"])
 @follows_a_link
+@pytest.mark.integration
 def test_a_link_that_stays_inside_the_allowed_roots_is_followed(
     _server, monkeypatch: pytest.MonkeyPatch, where: str
 ) -> None:

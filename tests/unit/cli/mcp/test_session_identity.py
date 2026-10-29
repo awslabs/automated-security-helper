@@ -27,6 +27,8 @@ from automated_security_helper.cli.mcp.session_identity import (
     resolve_session_id,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestNoSessionSupplied:
     """What a caller that names no session resolves to.

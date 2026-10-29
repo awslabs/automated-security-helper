@@ -26,6 +26,8 @@ import pytest
 from automated_security_helper.cli.mcp import workspace as workspace_module
 from automated_security_helper.utils import log as ash_log
 
+pytestmark = pytest.mark.unit
+
 _PROJECTS = ("api", "web")
 
 

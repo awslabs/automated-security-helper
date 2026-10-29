@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 # conftest.py in this directory stubs out mcp.server.mcpserver before collection.
 from automated_security_helper.cli.mcp.progress_monitor import monitor_scan_progress
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def mock_ctx():

@@ -19,6 +19,8 @@ import pytest
 from automated_security_helper.cli.mcp import source_delivery as sd
 from automated_security_helper.utils.git_command import GIT_SAFETY_OPTIONS
 
+pytestmark = pytest.mark.unit
+
 
 _SESSION = "session-test"
 

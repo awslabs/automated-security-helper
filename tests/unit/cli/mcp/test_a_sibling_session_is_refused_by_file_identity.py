@@ -35,6 +35,8 @@ from automated_security_helper.cli.mcp.sandbox import (
     validate_scan_target_in_sandbox,
 )
 
+pytestmark = pytest.mark.unit
+
 OWN = "session-a"
 SIBLING = "session-b"
 

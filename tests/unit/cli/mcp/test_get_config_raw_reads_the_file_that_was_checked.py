@@ -35,6 +35,8 @@ from automated_security_helper.cli.mcp import sandbox
 from automated_security_helper.cli.mcp_tools import mcp_get_config
 from automated_security_helper.config import config_sources, resolve_config
 
+pytestmark = pytest.mark.unit
+
 #: (file name, text when checked, text of the file that replaces it).
 FORMATS = {
     "yaml": ("config.yaml", "project_name: checked\n", "project_name: swapped\n"),

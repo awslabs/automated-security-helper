@@ -121,6 +121,7 @@ def _nothing_was_started(delivery: Dict[str, Any]) -> None:
 
 
 @pytest.mark.parametrize("ref", REFS)
+@pytest.mark.unit
 def test_a_ref_with_an_unprintable_character_is_refused_before_anything_runs(
     delivery, ref
 ) -> None:
@@ -133,6 +134,7 @@ def test_a_ref_with_an_unprintable_character_is_refused_before_anything_runs(
 
 
 @pytest.mark.parametrize("ref", REFS)
+@pytest.mark.unit
 def test_set_source_git_refuses_the_same_ref_before_it_makes_the_session(
     delivery, ref
 ) -> None:
@@ -143,6 +145,7 @@ def test_set_source_git_refuses_the_same_ref_before_it_makes_the_session(
 
 
 @pytest.mark.parametrize("url", URLS_NOT_REFUSED_BEFORE)
+@pytest.mark.unit
 def test_a_url_with_an_unprintable_character_is_refused_before_anything_runs(
     delivery, url
 ) -> None:
@@ -154,6 +157,7 @@ def test_a_url_with_an_unprintable_character_is_refused_before_anything_runs(
 
 
 @pytest.mark.parametrize("url", URLS_NOT_REFUSED_BEFORE)
+@pytest.mark.unit
 def test_set_source_git_refuses_the_same_url_before_it_makes_the_session(
     delivery, url
 ) -> None:
@@ -164,6 +168,7 @@ def test_set_source_git_refuses_the_same_url_before_it_makes_the_session(
 
 
 @pytest.mark.parametrize("url", URLS_ALREADY_REFUSED)
+@pytest.mark.unit
 def test_a_url_with_a_nul_or_a_c0_control_stays_refused(delivery, url) -> None:
     """Control: ``remote_clone_host`` refused these before. They stay refused, and
     git does not run for them."""
@@ -174,6 +179,7 @@ def test_a_url_with_a_nul_or_a_c0_control_stays_refused(delivery, url) -> None:
     _nothing_was_started(delivery)
 
 
+@pytest.mark.unit
 def test_the_refusal_does_not_quote_the_value(delivery) -> None:
     """The text names the parameter and the kind of character, not the value, so a
     control character or a surrogate does not reach the client's terminal or log."""
@@ -184,6 +190,7 @@ def test_the_refusal_does_not_quote_the_value(delivery) -> None:
     assert "[31m" not in result["error"], result
 
 
+@pytest.mark.integration
 def test_a_plain_ref_is_still_delivered(delivery) -> None:
     """Control for the stand-in and for the new check: a ref with the characters git
     accepts in a name (a slash, a plus, an at sign, a dot) is cloned and checked out."""
@@ -201,6 +208,7 @@ def test_a_plain_ref_is_still_delivered(delivery) -> None:
         pytest.param({"url": URL + "\x7f"}, id="url-with-a-delete-character"),
     ],
 )
+@pytest.mark.integration
 def test_a_refused_value_leaves_the_previous_clone_delivered(delivery, refused) -> None:
     """The refusal comes before anything is created, so a clone that was delivered
     earlier keeps its tree and its record. ``_nothing_was_started`` cannot say so: it

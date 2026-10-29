@@ -35,6 +35,8 @@ from tests.unit.test_committed_results_paths_are_never_deleted import (
     _snapshot,
 )
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def mcp_ctx():

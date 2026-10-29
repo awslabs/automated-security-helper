@@ -41,6 +41,8 @@ from automated_security_helper.models.workspace import (
     workspace_exit_code,
 )
 
+pytestmark = pytest.mark.unit
+
 #: How both docstrings introduce a code: "3 when ...", "1 for ...".
 _CODE = re.compile(r"(?<![\w.`])([0-9])\s+(?:when|for)\b")
 

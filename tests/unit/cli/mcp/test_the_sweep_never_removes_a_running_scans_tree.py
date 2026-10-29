@@ -62,6 +62,7 @@ def _sandbox(root: Path, session_id: str, age: float = 400 * DAY) -> Path:
 
 
 @pytest.mark.parametrize("hold", ["claim", "lock"])
+@pytest.mark.unit
 def test_a_session_whose_scan_runs_is_skipped_not_queued(root, hold) -> None:
     sandbox = _sandbox(root, "busy")
     session = sessions.get_default_registry().session_for("busy")
@@ -82,6 +83,7 @@ def test_a_session_whose_scan_runs_is_skipped_not_queued(root, hold) -> None:
     )
 
 
+@pytest.mark.unit
 def test_a_delivery_that_starts_during_the_sweep_keeps_its_tree(
     root, monkeypatch
 ) -> None:
@@ -105,6 +107,7 @@ def test_a_delivery_that_starts_during_the_sweep_keeps_its_tree(
     assert (sandbox / "source" / "app.py").is_file()
 
 
+@pytest.mark.unit
 def test_a_session_used_after_the_sweep_read_its_age_is_kept(root, monkeypatch) -> None:
     """The age is read again while the sweep holds the session."""
     sandbox = _sandbox(root, "touched")
@@ -126,6 +129,7 @@ def test_a_session_used_after_the_sweep_read_its_age_is_kept(root, monkeypatch) 
     assert (sandbox / "source" / "app.py").is_file()
 
 
+@pytest.mark.unit
 def test_a_stale_session_nobody_holds_is_still_removed(root) -> None:
     sandbox = _sandbox(root, "stale")
 
@@ -171,6 +175,7 @@ def _scan_in_another_process(root: Path, session_id: str):
             raise
 
 
+@pytest.mark.integration
 def test_a_scan_in_another_server_keeps_its_tree(root) -> None:
     sandbox = _sandbox(root, "elsewhere")
 
@@ -185,6 +190,7 @@ def test_a_scan_in_another_server_keeps_its_tree(root) -> None:
     assert not sandbox.exists()
 
 
+@pytest.mark.unit
 def test_a_presence_left_by_a_server_that_died_does_not_hold(root) -> None:
     sandbox = _sandbox(root, "orphaned")
     holder = root / sessions.SCAN_PRESENCE_DIR / "orphaned"
@@ -195,6 +201,7 @@ def test_a_presence_left_by_a_server_that_died_does_not_hold(root) -> None:
     assert not sandbox.exists()
 
 
+@pytest.mark.unit
 def test_a_presence_is_registered_only_for_a_session_with_a_workspace(root) -> None:
     with sessions.ScanPresence("nothing-delivered"):
         made = sorted(p.name for p in root.iterdir())
@@ -202,6 +209,7 @@ def test_a_presence_is_registered_only_for_a_session_with_a_workspace(root) -> N
     assert made == []
 
 
+@pytest.mark.unit
 def test_the_presence_directory_is_no_session(root) -> None:
     from automated_security_helper.cli.mcp.session_identity import (
         is_reserved_session_id,
@@ -211,6 +219,7 @@ def test_the_presence_directory_is_no_session(root) -> None:
     assert is_reserved_session_id(sessions.SCAN_PRESENCE_DIR.upper())
 
 
+@pytest.mark.unit
 def test_run_ash_scan_holds_a_presence_while_its_scan_runs(
     root, tmp_path, monkeypatch
 ) -> None:

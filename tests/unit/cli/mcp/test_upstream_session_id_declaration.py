@@ -45,6 +45,8 @@ from tests.utils.mcp_transport_harness import (
     tool_payload,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def workspace(tmp_path, monkeypatch) -> Path:

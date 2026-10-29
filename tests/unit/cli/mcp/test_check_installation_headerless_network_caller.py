@@ -46,6 +46,8 @@ from automated_security_helper.cli.mcp.http_sessions import (
 from automated_security_helper.cli.mcp.profile_registry import DEFAULT_SESSION_ID
 from automated_security_helper.cli.mcp.session_identity import serving_local_client
 
+pytestmark = pytest.mark.unit
+
 #: Where the server's ash executable is, which a remote client must not learn.
 HIDDEN_ASH = "/opt/operator-only/bin/ash"
 

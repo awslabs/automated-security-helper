@@ -42,6 +42,8 @@ from automated_security_helper.cli.mcp.sessions import (
 )
 from automated_security_helper.config import config_sources
 
+pytestmark = pytest.mark.unit
+
 SESSION = "start-failures-session"
 
 

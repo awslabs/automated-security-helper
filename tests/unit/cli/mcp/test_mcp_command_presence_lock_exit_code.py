@@ -22,6 +22,8 @@ import typer
 from automated_security_helper.cli.mcp import mcp_command
 from automated_security_helper.cli.mcp.sessions import PresenceLockError
 
+pytestmark = pytest.mark.unit
+
 _RUN = "automated_security_helper.cli.mcp_server.run_mcp_server"
 _DEPS = "automated_security_helper.cli.mcp.validate_mcp_dependencies"
 

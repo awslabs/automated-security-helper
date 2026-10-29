@@ -35,6 +35,8 @@ from typing import Dict, Iterator, List
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 #: Calls whose answer differs from one process to the next.
 _PER_PROCESS_CALLS = frozenset(
     {

@@ -25,6 +25,8 @@ from typing import Any, Dict
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 SESSION = "client-one"
 MARKER = "OTHER-TREE-MARKER"
 SCANNER_RESULTS = Path("scanners", "bandit", "source", "ASH.ScanResults.json")

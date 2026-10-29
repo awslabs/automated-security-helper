@@ -149,6 +149,7 @@ async def _stop_and_measure(ctx, scan_id: str) -> float:
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_cancelling_during_a_scanner_stops_its_child_and_the_scan(
     tmp_path, monkeypatch
 ):
@@ -188,6 +189,7 @@ async def test_cancelling_during_a_scanner_stops_its_child_and_the_scan(
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_cancelling_between_scanners_starts_no_further_child(
     tmp_path, monkeypatch
 ):
@@ -221,6 +223,7 @@ async def test_cancelling_between_scanners_starts_no_further_child(
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_cancelling_a_finished_scan_reports_that_it_was_not_running(
     tmp_path, monkeypatch
 ):
@@ -236,6 +239,7 @@ async def test_cancelling_a_finished_scan_reports_that_it_was_not_running(
     assert result["status"] == "completed", result
 
 
+@pytest.mark.integration
 def test_outside_a_scan_a_command_is_not_polled():
     """With no cancel scope, the CLI's spawns are not polled or stopped."""
     from automated_security_helper.utils.subprocess_utils import run_command

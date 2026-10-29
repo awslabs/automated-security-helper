@@ -42,6 +42,8 @@ from automated_security_helper.cli.mcp.profile_registry import (
     clear_all_session_state,
 )
 
+pytestmark = pytest.mark.unit
+
 SESSION = "client-1"
 PROBE_VAR = "ASH_ENV_PROBE"
 PROBE = "probe-value-91c4"

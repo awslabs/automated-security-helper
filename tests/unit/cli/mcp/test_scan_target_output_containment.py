@@ -51,6 +51,8 @@ from tests.utils.scan_task_stubs import (
     completed_task_create,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def mock_ctx():

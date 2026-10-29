@@ -12,6 +12,8 @@ import yaml
 from automated_security_helper.cli.mcp_tools import ENV_VALUE_PREFIX, mcp_get_config
 from automated_security_helper.config.default_config import get_default_config
 
+pytestmark = pytest.mark.unit
+
 
 def _write_config(path: Path, data: dict) -> None:
     path.write_text(yaml.dump(data))

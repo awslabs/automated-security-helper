@@ -20,7 +20,11 @@ import asyncio
 import re
 from typing import List
 
+import pytest
+
 from automated_security_helper.cli.mcp_server import mcp
+
+pytestmark = pytest.mark.unit
 
 OPENING_WORDS = 8
 

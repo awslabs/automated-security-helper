@@ -46,6 +46,8 @@ from automated_security_helper.cli.mcp import sandbox
 from automated_security_helper.cli.mcp_tools import mcp_get_config
 from automated_security_helper.config import config_sources, resolve_config
 
+pytestmark = pytest.mark.unit
+
 CANARY = "swapped-in-canary-5d1f"
 
 #: Per suffix: the checked file's text, the document it reads as, and the text of

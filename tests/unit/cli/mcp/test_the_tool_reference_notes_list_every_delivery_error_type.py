@@ -42,6 +42,8 @@ from automated_security_helper.cli import mcp_tools
 from automated_security_helper.cli.mcp import sessions
 from automated_security_helper.cli.mcp import source_delivery as sd
 
+pytestmark = pytest.mark.unit
+
 SCRIPT = (
     Path(__file__).resolve().parents[4] / "scripts" / "generate_mcp_tool_reference.py"
 )

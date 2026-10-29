@@ -20,7 +20,11 @@ type (``invalid_field`` for a bad value), and nothing that is only a warning.
 
 from __future__ import annotations
 
+import pytest
+
 from automated_security_helper.cli.mcp_tools import mcp_validate_config
+
+pytestmark = pytest.mark.unit
 
 
 def test_a_valid_config_with_warnings_has_no_errors():

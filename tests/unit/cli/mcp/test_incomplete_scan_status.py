@@ -47,6 +47,8 @@ from automated_security_helper.models.asharp_model import (
     ScannerTargetStatusInfo,
 )
 
+pytestmark = pytest.mark.unit
+
 #: Scanners the roster declares, so the set-level arm reads these results the way
 #: it reads a real run of the built-in scanners.
 ROSTER = ["bandit", "detect-secrets", "grype", "semgrep", "syft"]

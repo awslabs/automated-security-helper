@@ -40,6 +40,8 @@ from automated_security_helper.cli.mcp.sessions import (
 )
 from automated_security_helper.cli import mcp_server
 
+pytestmark = pytest.mark.unit
+
 if sys.version_info < (3, 11):
     # What anyio raises there; the built-in group types arrived in 3.11.
     from exceptiongroup import BaseExceptionGroup, ExceptionGroup

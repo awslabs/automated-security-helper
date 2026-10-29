@@ -31,6 +31,8 @@ import pytest
 
 from automated_security_helper.cli.mcp_tools import mcp_get_config
 
+pytestmark = pytest.mark.unit
+
 #: Long enough that no other text of the response holds it by chance.
 VALUE = "value-from-the-servers-environment"
 POINTER = "/global_settings/ignore_paths"

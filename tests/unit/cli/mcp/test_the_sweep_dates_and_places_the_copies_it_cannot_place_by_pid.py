@@ -88,6 +88,7 @@ def _written_copy(profile):
     )
 
 
+@pytest.mark.integration
 def test_where_this_host_has_no_identity_its_own_unnamed_copy_goes_at_once(
     tmp_path, monkeypatch, gone_pid, said
 ):
@@ -102,6 +103,7 @@ def test_where_this_host_has_no_identity_its_own_unnamed_copy_goes_at_once(
     assert another_process_with_no_identity.exists(), "a foreign copy went young"
 
 
+@pytest.mark.unit
 def test_the_record_not_the_pid_or_the_identity_places_a_copy_with_no_token(
     tmp_path, monkeypatch, said
 ):
@@ -120,6 +122,7 @@ def test_the_record_not_the_pid_or_the_identity_places_a_copy_with_no_token(
     assert planted.exists(), "a copy with no token was taken for this process's own"
 
 
+@pytest.mark.unit
 def test_the_sweep_says_once_that_it_judges_by_age_only(tmp_path, monkeypatch, said):
     profile = _profile(tmp_path)
     monkeypatch.setattr(mcp_tools, "_this_host_token", lambda: None)
@@ -131,6 +134,7 @@ def test_the_sweep_says_once_that_it_judges_by_age_only(tmp_path, monkeypatch, s
     assert "identity cannot be read" in said[0]
 
 
+@pytest.mark.unit
 def test_a_host_that_reads_its_identity_has_nothing_to_say(tmp_path, said):
     profile = _profile(tmp_path)
 
@@ -144,6 +148,7 @@ def _at_a_clock_ahead_by(monkeypatch, seconds):
     monkeypatch.setattr(mcp_tools.time, "time", lambda: real() + seconds)
 
 
+@pytest.mark.integration
 def test_a_copy_dated_far_ahead_goes_once_its_change_time_is_old(
     tmp_path, monkeypatch, gone_pid, said
 ):
@@ -161,6 +166,7 @@ def test_a_copy_dated_far_ahead_goes_once_its_change_time_is_old(
     assert len(said) == 1 and ahead.name in said[0], said
 
 
+@pytest.mark.integration
 def test_a_copy_dated_far_ahead_stays_while_its_change_time_is_young(
     tmp_path, monkeypatch, gone_pid, said
 ):
@@ -177,6 +183,7 @@ def test_a_copy_dated_far_ahead_stays_while_its_change_time_is_young(
     assert len(said) == 1, said
 
 
+@pytest.mark.integration
 def test_a_copy_dated_slightly_ahead_is_a_clock_skew_not_a_report(
     tmp_path, gone_pid, said
 ):
@@ -191,6 +198,7 @@ def test_a_copy_dated_slightly_ahead_is_a_clock_skew_not_a_report(
     assert said == []
 
 
+@pytest.mark.integration
 def test_the_age_bound_is_the_container_sweeps_bound(tmp_path, monkeypatch, gone_pid):
     """The bound is read from the container sweep's public name each time: moving
     that number moves the line between a kept copy and a removed one."""

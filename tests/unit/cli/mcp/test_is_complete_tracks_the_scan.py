@@ -36,6 +36,8 @@ from automated_security_helper.core.resource_management.scan_registry import (
     get_scan_registry,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _allowed(tmp_path, monkeypatch):

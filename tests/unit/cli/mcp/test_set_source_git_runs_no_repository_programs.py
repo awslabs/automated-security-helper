@@ -37,6 +37,8 @@ import pytest
 from automated_security_helper.cli.mcp import source_delivery as sd
 from automated_security_helper.utils import git_command
 
+pytestmark = pytest.mark.integration
+
 FSMONITOR = ("-c", "core.fsmonitor=false")
 HOOKS_PATH = ("-c", "core.hooksPath=/dev/null")
 

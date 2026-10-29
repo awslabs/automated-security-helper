@@ -44,6 +44,8 @@ from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
 
+pytestmark = pytest.mark.unit
+
 MODULE_UNDER_TEST = "automated_security_helper.cli.mcp.workspace"
 
 

@@ -27,6 +27,8 @@ if sys.version_info >= (3, 11):
 else:  # pyproject.toml declares tomli for Python below 3.11
     import tomli as tomllib
 
+import pytest
+
 pytest_plugins = ["pytester"]
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -39,6 +41,7 @@ PROBE = Path(__file__).resolve().parent / "list_scanners_import_order_probe.py"
 PROBE_CELLS = 10
 
 
+@pytest.mark.integration
 def test_the_probe_passes_in_its_own_interpreter(pytester, monkeypatch):
     monkeypatch.setenv(
         "PYTHONPATH",
@@ -114,6 +117,7 @@ def _configured_python_files() -> list[str]:
     return list(_DEFAULT_PYTHON_FILES)
 
 
+@pytest.mark.unit
 def test_the_probe_is_not_collected_by_the_main_run():
     """The isolation holds only while the probe stays out of normal collection:
     a rename back to a test module's name would re-poison the worker, and so
@@ -127,12 +131,14 @@ def test_the_probe_is_not_collected_by_the_main_run():
     assert not matching, (PROBE.name, matching, patterns)
 
 
+@pytest.mark.unit
 def test_a_pattern_of_the_configured_shape_would_catch_the_probe():
     """The control: the matcher flags a pattern that does match the probe."""
     assert fnmatch.fnmatch(PROBE.name, "*_probe.py")
     assert fnmatch.fnmatch(PROBE.name, "list_scanners_*.py")
 
 
+@pytest.mark.unit
 def test_the_vendored_list_is_every_in_tree_community_module():
     """A new community module that is not listed here is missing from list_scanners."""
     from automated_security_helper.cli.mcp_tools import (

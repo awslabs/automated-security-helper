@@ -83,6 +83,8 @@ from typing import Set
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DOCS_DIR = REPO_ROOT / "docs"
 README = REPO_ROOT / "README.md"

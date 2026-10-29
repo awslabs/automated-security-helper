@@ -43,6 +43,8 @@ from automated_security_helper.cli.mcp_tools import mcp_get_config, mcp_select_p
 from automated_security_helper.config import config_sources
 from automated_security_helper.core.exceptions import ASHConfigSourceError
 
+pytestmark = pytest.mark.unit
+
 LOWERED_BOUND = 50
 
 

@@ -37,6 +37,8 @@ from automated_security_helper.cli.mcp_tools import (
     mcp_suggest_suppression,
 )
 
+pytestmark = pytest.mark.unit
+
 TOKEN = "tok-0123456789abcdef"
 assert len(TOKEN) == 20
 

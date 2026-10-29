@@ -152,6 +152,7 @@ def _assert_no_command(text: str) -> None:
 
 
 @pytest.mark.parametrize("sink", sorted(SINKS))
+@pytest.mark.integration
 def test_a_raw_sinks_line_on_stderr_has_its_commands_broken(sink, tmp_path):
     child = _run_child(_CHILD, tmp_path, sink)
 
@@ -174,6 +175,7 @@ sys.stdout.write(f"STDOUT {isinstance(sys.stdout, CommandSafeStream)}\\n")
 """
 
 
+@pytest.mark.integration
 def test_importing_the_server_leaves_the_std_streams_as_they_are(tmp_path):
     """A program that imports the server for its tool registry, or a test, keeps
     its own sys.stderr and sys.stdout: the server wraps them when it starts."""
@@ -223,6 +225,7 @@ else:
 
 
 @pytest.mark.parametrize("transport", ["http", "stdio"])
+@pytest.mark.integration
 def test_each_transports_start_checks_stderr_and_stdout(transport, tmp_path):
     """run_mcp_server (stdio) and _run_uvicorn (the HTTP transports) wrap both
     streams before they serve."""
@@ -261,6 +264,7 @@ cli_mcp._run_uvicorn(None, host="127.0.0.1", port=0, log_level=AshLogLevel.INFO)
 """
 
 
+@pytest.mark.integration
 def test_uvicorns_log_lines_and_stderr_writes_share_one_line_state(tmp_path):
     """uvicorn's handlers take sys.stderr when uvicorn.Config sets up logging, so
     stderr is wrapped before that: their lines and the process's other stderr
@@ -296,6 +300,7 @@ server.run_mcp_server()
 """
 
 
+@pytest.mark.integration
 def test_a_raw_stdout_write_while_serving_has_its_commands_broken(tmp_path):
     """The stdio server writes its frames through its own copy of fd 1 and points
     fd 1 at stderr, so a stray stdout write reaches stderr, which a CI step reads."""
@@ -334,6 +339,7 @@ logging.getLogger("somelib.client").warning(
 _TIME_COLUMN = re.compile(r"\[\d\d/\d\d/\d\d \d\d:\d\d:\d\d\]")
 
 
+@pytest.mark.integration
 def test_a_routed_handlers_line_is_byte_identical_through_the_stderr_wrap(tmp_path):
     """The SDK's routed handler writes through its own wrap and, with the stderr
     wrap, through that one too; the second check finds nothing to break again."""
@@ -391,6 +397,7 @@ sys.stdout.write(f"OUTCOME {outcome}\\n")
 
 
 @pytest.mark.parametrize("call", ["library-logger", "print", "warnings"])
+@pytest.mark.integration
 def test_a_server_started_with_no_stderr_writes_as_python_does(call, tmp_path):
     """With sys.stderr None there is no stream to check, and each call does what
     Python does with no stderr, instead of raising from a wrap around None:
@@ -404,6 +411,7 @@ def test_a_server_started_with_no_stderr_writes_as_python_does(call, tmp_path):
     assert ("note" in lines) == (call == "print"), (child.stdout, child.stderr)
 
 
+@pytest.mark.unit
 def test_two_threads_on_one_wrap_put_no_command_at_a_line_start():
     """Thread B's write decides that its text does not start a line, and is held
     in the stream below until thread A has ended the line or a second has gone
@@ -454,6 +462,7 @@ def test_two_threads_on_one_wrap_put_no_command_at_a_line_start():
     _assert_no_command(text)
 
 
+@pytest.mark.unit
 def test_a_checked_buffer_outliving_its_stream_closes_quietly(monkeypatch):
     """The buffer view belongs to the wrapped stream, not the other way around:
     closing the view flushes it and marks it closed without closing the stream
@@ -510,6 +519,7 @@ def _pipe_text():
         pytest.param(_pipe_text, id="pipe"),
     ],
 )
+@pytest.mark.unit
 def test_the_wrap_reports_its_streams_attributes(make):
     """What the stream's readers ask of it: its encoding and errors (click), whether
     it is a terminal (Rich's color), and its buffer and fd (the SDK's claim of fd
@@ -546,6 +556,7 @@ def _stream_in_place(monkeypatch, name: str, encoding: str, errors: str = "stric
 @pytest.mark.parametrize("encoding", ["ascii", "utf-8"])
 @pytest.mark.parametrize("err", [False, True], ids=["stdout", "stderr"])
 @pytest.mark.parametrize("writer", ["click", "typer"])
+@pytest.mark.unit
 def test_echo_through_a_checked_stream_has_its_commands_broken(
     writer, err, encoding, monkeypatch
 ):
@@ -574,6 +585,7 @@ def test_echo_through_a_checked_stream_has_its_commands_broken(
     _assert_no_command(text)
 
 
+@pytest.mark.unit
 def test_control_click_writes_past_a_bare_wrap_of_an_ascii_stream(monkeypatch):
     """The hazard the start's check of an ASCII stream guards against: click
     finds the stream misconfigured, and writes UTF-8 to its binary buffer through
@@ -591,6 +603,7 @@ def test_control_click_writes_past_a_bare_wrap_of_an_ascii_stream(monkeypatch):
     assert raw.getvalue().startswith(b"::add-mask::CANECHO"), raw.getvalue()
 
 
+@pytest.mark.unit
 def test_a_write_to_stderrs_buffer_has_its_commands_broken(monkeypatch):
     """click's own writer on a misconfigured stream, and any code that writes
     bytes, reach stderr through sys.stderr.buffer: the buffer the wrap hands
@@ -628,6 +641,7 @@ sys.stderr.flush()
 """
 
 
+@pytest.mark.integration
 def test_bytes_after_text_ending_mid_line_land_after_that_text(tmp_path):
     """Python's own stderr is line buffered, not write-through: a text write that
     ends mid-line waits in the text layer. A byte write after it lands after it,
@@ -667,6 +681,7 @@ _EMIT_TRIGGERS = {
 
 @pytest.mark.parametrize("trigger", sorted(_EMIT_TRIGGERS))
 @pytest.mark.parametrize("lead", sorted(_SPLIT_LEADS))
+@pytest.mark.unit
 def test_a_line_lead_split_across_byte_writes_still_breaks_the_command(
     lead, trigger, monkeypatch
 ):
@@ -692,6 +707,7 @@ def test_a_line_lead_split_across_byte_writes_still_breaks_the_command(
     _assert_no_command(text)
 
 
+@pytest.mark.unit
 def test_held_buffer_bytes_land_before_a_text_write(monkeypatch):
     """A buffer write can end inside a multi-byte character, whose first bytes
     the check holds for the character's rest. A text write emits them first, so
@@ -722,6 +738,7 @@ os._exit(0)
 """
 
 
+@pytest.mark.integration
 def test_held_buffer_bytes_survive_a_flush_before_exit(tmp_path):
     """A process that flushes and exits at once (os._exit after a stop signal)
     still writes the bytes a buffer write left held: flush emits them."""
@@ -737,6 +754,7 @@ def test_held_buffer_bytes_survive_a_flush_before_exit(tmp_path):
     assert child.stderr == b"held:caf\xc3", child.stderr
 
 
+@pytest.mark.unit
 def test_a_non_utf8_stderr_keeps_writing_the_bytes_it_wrote(monkeypatch):
     """Python's own stderr on a console that cannot encode a character writes it
     as a backslash escape. The check changes no stream's encoding on stderr, so
@@ -753,6 +771,7 @@ def test_a_non_utf8_stderr_keeps_writing_the_bytes_it_wrote(monkeypatch):
 
 
 @pytest.mark.skipif(not hasattr(signal, "SIGUSR1"), reason="no SIGUSR1 here")
+@pytest.mark.unit
 def test_a_signal_handlers_write_during_a_write_is_checked():
     """A signal handler runs on the same thread, inside an outer write. Its
     write is deferred until the outer text has landed and is checked from the
@@ -799,6 +818,7 @@ def test_a_signal_handlers_write_during_a_write_is_checked():
 
 
 @pytest.mark.skipif(not hasattr(signal, "SIGUSR1"), reason="no SIGUSR1 here")
+@pytest.mark.unit
 def test_a_signal_handlers_write_during_the_targets_write_starts_no_command_line():
     """The target's write can run Python code before the outer bytes land (a
     test double, pytest's tee capture, any Python wrapper), so a signal
@@ -844,6 +864,7 @@ def test_a_signal_handlers_write_during_the_targets_write_starts_no_command_line
     _assert_no_command(text)
 
 
+@pytest.mark.unit
 def test_a_write_in_the_held_tail_emits_window_leaves_the_tail_with_its_line():
     """Emitting a held tail takes the bytes out of the decoder and only then
     writes them. A write in between (a signal handler's; the target lookup is
@@ -878,6 +899,7 @@ def test_a_write_in_the_held_tail_emits_window_leaves_the_tail_with_its_line():
     assert b"caf\xc3" in value, value
 
 
+@pytest.mark.unit
 def test_a_deferred_write_that_fails_does_not_strand_the_writes_after_it():
     """A deferred write whose landing raises must not strand the writes
     deferred after it: the drain writes past it, the rest land in order,
@@ -918,6 +940,7 @@ def test_a_deferred_write_that_fails_does_not_strand_the_writes_after_it():
     _assert_no_command("".join(written))
 
 
+@pytest.mark.unit
 def test_the_outer_writes_error_is_the_one_its_caller_sees():
     """When the outer text's own write raises and a deferred write's landing
     raises too, the caller gets the outer error: that is the write it made.
@@ -958,6 +981,7 @@ def test_the_outer_writes_error_is_the_one_its_caller_sees():
 
 @pytest.mark.skipif(not hasattr(signal, "SIGUSR1"), reason="no SIGUSR1 here")
 @pytest.mark.parametrize("side", ["text", "bytes"])
+@pytest.mark.unit
 def test_a_signal_handlers_write_while_a_write_is_checked_is_checked(side, monkeypatch):
     """A signal can run its handler while an outer write is still checking its
     text, before any of it reaches the stream. The handler's write is deferred,
@@ -1004,6 +1028,7 @@ def test_a_signal_handlers_write_while_a_write_is_checked_is_checked(side, monke
 
 @pytest.mark.skipif(not hasattr(signal, "SIGUSR1"), reason="no SIGUSR1 here")
 @pytest.mark.parametrize("side", ["text", "bytes"])
+@pytest.mark.unit
 def test_a_signal_handlers_write_before_the_check_reads_the_line_state(
     side, monkeypatch
 ):
@@ -1051,6 +1076,7 @@ def test_a_signal_handlers_write_before_the_check_reads_the_line_state(
 
 
 @pytest.mark.skipif(not hasattr(signal, "SIGUSR1"), reason="no SIGUSR1 here")
+@pytest.mark.unit
 def test_a_signal_handlers_write_during_a_byte_writes_encode_is_checked(monkeypatch):
     """A byte write encodes its checked text back to bytes before they reach
     the stream, so a signal there runs its handler after the check has read
@@ -1096,6 +1122,7 @@ def test_a_signal_handlers_write_during_a_byte_writes_encode_is_checked(monkeypa
 
 
 @pytest.mark.skipif(not hasattr(signal, "SIGUSR1"), reason="no SIGUSR1 here")
+@pytest.mark.unit
 def test_a_storm_of_signal_handlers_writes_lands_every_line_checked_once(monkeypatch):
     """A handler's write arriving during every check must not keep the stream
     checking or recursing for as long as signals come: each handler write is
@@ -1139,6 +1166,7 @@ def test_a_storm_of_signal_handlers_writes_lands_every_line_checked_once(monkeyp
 
 @pytest.mark.skipif(not hasattr(signal, "SIGUSR1"), reason="no SIGUSR1 here")
 @pytest.mark.parametrize("side", ["text", "bytes"])
+@pytest.mark.unit
 def test_the_write_after_a_signal_handlers_line_landed_last_starts_a_line(side):
     """A signal that arrives during the write call runs its handler right after
     the outer text has reached the stream. The handler's line is then the
@@ -1196,6 +1224,7 @@ def test_the_write_after_a_signal_handlers_line_landed_last_starts_a_line(side):
 
 
 @pytest.mark.skipif(not hasattr(signal, "SIGUSR1"), reason="no SIGUSR1 here")
+@pytest.mark.unit
 def test_a_signal_handlers_byte_write_leaves_a_byte_writes_held_tail_in_place(
     monkeypatch,
 ):
@@ -1237,6 +1266,7 @@ def test_a_signal_handlers_byte_write_leaves_a_byte_writes_held_tail_in_place(
 
 
 @pytest.mark.skipif(not hasattr(signal, "SIGUSR1"), reason="no SIGUSR1 here")
+@pytest.mark.unit
 def test_a_nested_byte_write_keeps_a_split_character_whole(monkeypatch):
     """A nested byte write between an outer byte write's decode and its
     landing leaves the outer write's split multi-byte character whole, and
@@ -1280,6 +1310,7 @@ def test_a_nested_byte_write_keeps_a_split_character_whole(monkeypatch):
 
 
 @pytest.mark.skipif(not hasattr(signal, "SIGUSR1"), reason="no SIGUSR1 here")
+@pytest.mark.unit
 def test_a_signal_handlers_write_leaves_a_byte_writes_held_tail_in_place(monkeypatch):
     """A byte write that ends inside a character holds the character's first
     bytes. A signal handler's text write while that byte write is still being
@@ -1319,6 +1350,7 @@ def test_a_signal_handlers_write_leaves_a_byte_writes_held_tail_in_place(monkeyp
 
 
 @pytest.mark.skipif(not hasattr(signal, "SIGUSR1"), reason="no SIGUSR1 here")
+@pytest.mark.unit
 def test_a_deferred_byte_write_leaves_no_tail_in_the_shared_decoder(monkeypatch):
     """A deferred byte write that ends inside a character rides those bytes
     through as they are, decoded on their own: it must neither take the tail
@@ -1357,6 +1389,7 @@ def test_a_deferred_byte_write_leaves_no_tail_in_the_shared_decoder(monkeypatch)
     assert raw.getvalue() == b"hiok\xe2\xc3\xa9\n", raw.getvalue()
 
 
+@pytest.mark.unit
 def test_the_wrap_of_a_stream_with_no_buffer_has_none(monkeypatch):
     """A probe like click's getattr(stream, "buffer", None) falls back to text
     on a stream with no buffer (a StringIO, an IDE console), and must do the
@@ -1384,6 +1417,7 @@ def test_the_wrap_of_a_stream_with_no_buffer_has_none(monkeypatch):
 
 
 @pytest.mark.parametrize("data", [5, [1, 2]], ids=["int", "list"])
+@pytest.mark.unit
 def test_the_checked_buffer_rejects_what_a_buffered_writer_rejects(data, monkeypatch):
     """bytes(5) is five NUL bytes and bytes([1, 2]) two bytes, but a buffered
     writer raises TypeError for both: the view keeps that contract, so a wrong
@@ -1399,6 +1433,7 @@ def test_the_checked_buffer_rejects_what_a_buffered_writer_rejects(data, monkeyp
     assert raw.getvalue() == b"", raw.getvalue()
 
 
+@pytest.mark.unit
 def test_closing_the_view_writes_the_bytes_it_holds_to_a_live_target():
     """close flushes first, as any buffered file's close does: bytes a byte
     write left held reach a target that is still open, instead of being
@@ -1417,6 +1452,7 @@ def test_closing_the_view_writes_the_bytes_it_holds_to_a_live_target():
     assert raw.getvalue() == b"caf\xc3", raw.getvalue()
 
 
+@pytest.mark.unit
 def test_the_view_is_quiet_about_a_target_detached_under_it():
     """The Windows UTF-8 fallback detaches the stream it replaces, and a reader
     of the old wrap's view can still flush or close it afterwards: both stay
@@ -1436,6 +1472,7 @@ def test_the_view_is_quiet_about_a_target_detached_under_it():
     assert view.closed
 
 
+@pytest.mark.unit
 def test_retargeted_writes_held_bytes_and_checks_through_the_new_target():
     """retargeted puts what the replacement makes of the old target under a new
     wrap with the same buffer rule: bytes the old wrap's buffer held are
@@ -1467,6 +1504,7 @@ def test_retargeted_writes_held_bytes_and_checks_through_the_new_target():
     _assert_no_command(text)
 
 
+@pytest.mark.unit
 def test_retargeted_replaces_the_target_only_after_a_write_in_flight_lands():
     """The replacement can detach the old target, so it runs under the wrap's
     lock: a write in flight on another thread lands on the old stream first,
@@ -1512,6 +1550,7 @@ def test_retargeted_replaces_the_target_only_after_a_write_in_flight_lands():
     assert order == [("landed", "inflight\n"), ("replaced", below)], order
 
 
+@pytest.mark.unit
 def test_retargeted_holds_the_lock_while_the_replacement_runs():
     """The lock is held across the replacement, not only the held-bytes emit
     before it: a write started on another thread while the replacement runs
@@ -1555,6 +1594,7 @@ class _CannotReconfigure(io.TextIOWrapper):
         raise OSError("this stream cannot be reconfigured")
 
 
+@pytest.mark.unit
 def test_the_windows_utf8_fallback_keeps_both_streams_checked(monkeypatch):
     """configure_windows_safe_logging, on a Windows console whose code page is
     cp1252, cannot reconfigure the streams and puts a UTF-8 writer on each one's
@@ -1591,6 +1631,7 @@ def test_the_windows_utf8_fallback_keeps_both_streams_checked(monkeypatch):
         _assert_no_command(text)
 
 
+@pytest.mark.unit
 def test_the_windows_utf8_fallback_writes_the_bytes_stderr_held(monkeypatch):
     """A byte write that ended inside a character, before the fallback replaced
     stderr, has its held bytes written ahead of what follows, not dropped."""
@@ -1620,6 +1661,7 @@ def test_the_windows_utf8_fallback_writes_the_bytes_stderr_held(monkeypatch):
     assert raw.getvalue() == b"caf\xc3\xa9\n", raw.getvalue()
 
 
+@pytest.mark.unit
 def test_the_windows_utf8_fallback_keeps_stderrs_buffer_checked(monkeypatch):
     """The writer the fallback puts in stderr's place still hands out a checked
     buffer, so click's own writer and a direct byte write stay checked there."""

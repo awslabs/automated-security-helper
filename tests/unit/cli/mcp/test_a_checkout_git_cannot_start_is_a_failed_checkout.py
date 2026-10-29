@@ -31,6 +31,8 @@ import pytest
 
 from automated_security_helper.cli.mcp import source_delivery as sd
 
+pytestmark = pytest.mark.integration
+
 SESSION = "checkout-cannot-start"
 
 #: What starting a program can raise: it is gone, it is not executable, the host

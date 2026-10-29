@@ -37,6 +37,8 @@ from automated_security_helper.cli.mcp_server import mcp as shared_server
 from automated_security_helper.core.exceptions import ASHValidationError
 from tests.utils.mcp_transport_harness import LOOPBACK_PORT
 
+pytestmark = pytest.mark.unit
+
 HEADER = "X-Ash-Token"
 
 #: The refusal's wording, the same for every form that carries the value.

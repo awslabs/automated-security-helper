@@ -49,6 +49,8 @@ from automated_security_helper.models.asharp_model import (
 )
 from tests.utils.drop_window import TheDropWindow
 
+pytestmark = pytest.mark.unit
+
 _TOOLS = "automated_security_helper.cli.mcp_tools"
 #: How long a held drop waits before it gives up: far past any cell, so a cell
 #: that fails early cannot leave a thread behind for long.

@@ -29,6 +29,8 @@ from automated_security_helper.cli.mcp.profile_registry import (
     clear_all_session_state,
 )
 
+pytestmark = pytest.mark.unit
+
 REMOTE = "client-1"
 NOT_A_LIST = "project_name: x\nfail_on_findings: false\nash_plugin_modules: 5\n"
 DENIED = "project_name: x\nfail_on_findings: false\n"

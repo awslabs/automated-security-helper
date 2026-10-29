@@ -40,6 +40,8 @@ from automated_security_helper.cli.mcp.profile_registry import (
     clear_all_session_state,
 )
 
+pytestmark = pytest.mark.unit
+
 REMOTE = "client-1"
 PROBE_VAR = "ASH_ENV_PROBE"
 DENIED = "project_name: whose\nfail_on_findings: false\n"

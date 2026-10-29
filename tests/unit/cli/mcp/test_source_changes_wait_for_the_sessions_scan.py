@@ -35,6 +35,8 @@ from automated_security_helper.cli.mcp.sessions import (
     reset_default_registry_for_tests,
 )
 
+pytestmark = pytest.mark.unit
+
 SESSION = "scanning-session"
 
 

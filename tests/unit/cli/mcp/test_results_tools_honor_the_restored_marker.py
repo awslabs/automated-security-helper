@@ -32,6 +32,8 @@ from mcp.server.mcpserver import Context
 from automated_security_helper.cli import mcp_server
 from automated_security_helper.core.previous_results import RESTORED_MARKER_NAME
 
+pytestmark = pytest.mark.unit
+
 
 def _results_document() -> str:
     from automated_security_helper.config.ash_config import AshConfig

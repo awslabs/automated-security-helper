@@ -43,6 +43,8 @@ from automated_security_helper.models.workspace import (
     WorkspaceResults,
 )
 
+pytestmark = pytest.mark.unit
+
 MODULE_UNDER_TEST = "automated_security_helper.cli.mcp.workspace"
 
 #: Declared fields deliberately kept out of the MCP response. Empty on purpose:

@@ -34,6 +34,8 @@ from automated_security_helper.cli.mcp.profile_registry import (
 from automated_security_helper.cli.mcp_tools import mcp_select_profile
 from automated_security_helper.config.runtime_patch import RuntimePatchDeniedError
 
+pytestmark = pytest.mark.unit
+
 VERIFICATION_FILTER = (
     "detect_secrets.filters.common.is_ignored_due_to_verification_policies"
 )

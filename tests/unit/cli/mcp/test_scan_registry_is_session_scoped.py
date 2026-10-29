@@ -49,6 +49,8 @@ from tests.utils.mcp_transport_harness import (
     stdio_tool_calls,
 )
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Fixtures

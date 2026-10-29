@@ -128,6 +128,7 @@ def _apps():
 
 
 @pytest.mark.parametrize("transport", ["streamable-http", "sse"])
+@pytest.mark.integration
 def test_an_http_server_that_stops_kills_the_tools_groups(
     transport, recorded_group, stops
 ):
@@ -142,6 +143,7 @@ def test_an_http_server_that_stops_kills_the_tools_groups(
 
 
 @pytest.mark.parametrize("transport", ["streamable-http", "sse"])
+@pytest.mark.unit
 def test_an_http_server_that_stops_stops_its_scans_promptly(transport, stops):
     from starlette.testclient import TestClient
 
@@ -217,6 +219,7 @@ def sighup_left_alone():
     signal.signal(signal.SIGHUP, previous)
 
 
+@pytest.mark.unit
 def test_the_http_servers_wait_for_open_requests_is_bounded_at_5_seconds(
     fake_uvicorn, sighup_left_alone
 ):
@@ -231,6 +234,7 @@ def test_the_http_servers_wait_for_open_requests_is_bounded_at_5_seconds(
     assert server.config.timeout_graceful_shutdown == 5
 
 
+@pytest.mark.unit
 def test_sighup_asks_the_http_server_to_stop(fake_uvicorn, sighup_left_alone):
     from automated_security_helper.cli.mcp import _run_uvicorn
     from automated_security_helper.core.enums import AshLogLevel
@@ -253,6 +257,7 @@ def sighup_ignored():
     signal.signal(signal.SIGHUP, previous)
 
 
+@pytest.mark.unit
 def test_an_http_server_leaves_a_sighup_ignored_at_start_ignored(
     fake_uvicorn, sighup_ignored
 ):
@@ -268,6 +273,7 @@ def test_an_http_server_leaves_a_sighup_ignored_at_start_ignored(
     assert signal.getsignal(signal.SIGHUP) == signal.SIG_IGN
 
 
+@pytest.mark.unit
 def test_the_signal_that_stops_the_http_server_is_noted_while_it_runs(
     monkeypatch, fake_uvicorn, sighup_left_alone
 ):
@@ -290,6 +296,7 @@ def test_the_signal_that_stops_the_http_server_is_noted_while_it_runs(
     assert cli_mcp._stop_signal is None, "the stop signal outlived the server"
 
 
+@pytest.mark.unit
 def test_a_sigint_the_http_server_drops_is_not_noted(
     monkeypatch, stop_signals_put_back
 ):
@@ -308,6 +315,7 @@ def test_a_sigint_the_http_server_drops_is_not_noted(
     assert cli_mcp._stop_signal == signal.SIGTERM
 
 
+@pytest.mark.unit
 def test_the_http_servers_stop_handler_is_bound_to_the_server(
     monkeypatch, stop_signals_put_back
 ):
@@ -341,6 +349,7 @@ def forced_exits(monkeypatch) -> List[int]:
     return exits
 
 
+@pytest.mark.integration
 def test_a_second_ctrl_c_ends_the_tools_and_the_http_server_from_the_loop(
     forced_exits, recorded_group
 ):
@@ -377,6 +386,7 @@ def test_a_second_ctrl_c_ends_the_tools_and_the_http_server_from_the_loop(
     assert _exited(recorded_group), "the forced exit left a scanner's tool running"
 
 
+@pytest.mark.integration
 def test_a_ctrl_c_that_forces_the_stop_outside_the_loop_exits_at_once(
     forced_exits, recorded_group
 ):
@@ -393,6 +403,7 @@ def test_a_ctrl_c_that_forces_the_stop_outside_the_loop_exits_at_once(
     assert _exited(recorded_group), "the forced exit left a scanner's tool running"
 
 
+@pytest.mark.integration
 def test_signals_that_do_not_force_the_http_server_to_stop_do_not_exit(
     forced_exits, recorded_group
 ):
@@ -423,6 +434,7 @@ _HTTP_EXIT_STATUS = {signal.SIGINT: 130, signal.SIGHUP: 0, signal.SIGTERM: None}
     [signal.SIGINT, signal.SIGHUP, signal.SIGTERM, None],
     ids=["sigint", "sighup", "sigterm", "no-signal"],
 )
+@pytest.mark.integration
 def test_an_http_server_exits_once_its_stop_is_done_if_a_scan_did_not_stop(
     monkeypatch, recorded_group, signum, still_running
 ):
@@ -453,6 +465,7 @@ def test_an_http_server_exits_once_its_stop_is_done_if_a_scan_did_not_stop(
     assert _exited(recorded_group), "the server stopped and left a scanner's tool"
 
 
+@pytest.mark.integration
 def test_an_http_server_that_fails_kills_the_tools_groups(
     monkeypatch, fake_uvicorn, sighup_left_alone, recorded_group
 ):
@@ -475,6 +488,7 @@ async def _a_transport_that_yields() -> None:
         await asyncio.sleep(0.01)
 
 
+@pytest.mark.unit
 def test_a_stdio_server_on_a_worker_thread_closes_cleanly(monkeypatch):
     monkeypatch.setattr(mcp_server.mcp, "run_stdio_async", _a_transport_that_yields)
     monkeypatch.setattr(mcp_server, "_stdout_is_fd_1", lambda: False)
@@ -523,6 +537,7 @@ def stop_signals_put_back():
 
 
 @pytest.mark.parametrize("signum", _STOP_SIGNALS, ids=_STOP_SIGNAL_IDS)
+@pytest.mark.unit
 def test_a_signal_after_the_stdio_transport_returns_still_stops_the_server(
     monkeypatch, stop_signals_put_back, signum
 ):
@@ -578,6 +593,7 @@ def _receiver_delivering(signum: Optional[int], subscribed: List[tuple]):
 
 
 @pytest.mark.parametrize("signum", _STOP_SIGNALS, ids=_STOP_SIGNAL_IDS)
+@pytest.mark.integration
 def test_a_signal_while_serving_stops_the_scans_promptly_then_exits(
     monkeypatch, stops, recorded_group, stop_signals_put_back, signum
 ):
@@ -606,6 +622,7 @@ def test_a_signal_while_serving_stops_the_scans_promptly_then_exits(
     assert _exited(recorded_group), "the server exited and left a scanner's tool"
 
 
+@pytest.mark.unit
 def test_a_sigint_ignored_at_start_stays_ignored(monkeypatch, stop_signals_put_back):
     """A shell starts a background job with SIGINT ignored, so that Ctrl-C reaches
     only the job in the foreground. The server leaves it ignored, as Python and
@@ -626,6 +643,7 @@ def test_a_sigint_ignored_at_start_stays_ignored(monkeypatch, stop_signals_put_b
     assert signal.getsignal(signal.SIGINT) == signal.SIG_IGN
 
 
+@pytest.mark.unit
 def test_a_sighup_ignored_at_start_stays_ignored(monkeypatch, stop_signals_put_back):
     """nohup starts a command with SIGHUP ignored, so that it outlives the terminal
     it was started from. The server leaves it ignored, as it leaves an ignored
@@ -657,6 +675,7 @@ def _uvicorn_server():
     return _uvicorn_server_class()(uvicorn.Config(app=object(), log_config=None))
 
 
+@pytest.mark.unit
 def test_an_http_server_leaves_a_sigint_ignored_at_start_ignored(
     monkeypatch, stop_signals_put_back
 ):
@@ -682,6 +701,7 @@ def test_an_http_server_leaves_a_sigint_ignored_at_start_ignored(
     assert server.should_exit, "SIGTERM no longer stops the server"
 
 
+@pytest.mark.unit
 def test_an_http_server_is_uvicorns_own_when_sigint_was_not_ignored(monkeypatch):
     import uvicorn
 
@@ -694,6 +714,7 @@ def test_an_http_server_is_uvicorns_own_when_sigint_was_not_ignored(monkeypatch)
 
 
 @pytest.mark.parametrize("claims_fd_1", [True, False])
+@pytest.mark.unit
 def test_stdout_is_taken_off_the_wire_only_when_the_transport_had_it(
     monkeypatch, stop_signals_put_back, claims_fd_1
 ):
@@ -710,6 +731,7 @@ def test_stdout_is_taken_off_the_wire_only_when_the_transport_had_it(
     assert diverted == ([True] if claims_fd_1 else []), diverted
 
 
+@pytest.mark.unit
 def test_the_stdio_lifespan_flushes_stdout_before_the_transport_gets_it_back(
     monkeypatch, stops
 ):
@@ -748,6 +770,7 @@ class _FlushRaises:
     ],
     ids=["os-error", "value-error", "runtime-error"],
 )
+@pytest.mark.unit
 def test_flushing_stdout_for_the_exit_swallows_what_a_flush_can_raise(
     monkeypatch, error
 ):
@@ -756,6 +779,7 @@ def test_flushing_stdout_for_the_exit_swallows_what_a_flush_can_raise(
     mcp_server._flush_stdout()
 
 
+@pytest.mark.unit
 def test_flushing_stdout_for_the_exit_does_not_swallow_every_error(monkeypatch):
     """The control: the catch is for those three, not for whatever a flush raises."""
     monkeypatch.setattr(sys, "stdout", _FlushRaises(KeyError("not a flush error")))
@@ -764,6 +788,7 @@ def test_flushing_stdout_for_the_exit_does_not_swallow_every_error(monkeypatch):
         mcp_server._flush_stdout()
 
 
+@pytest.mark.unit
 def test_a_stdout_flush_from_inside_a_stdout_flush_is_swallowed(monkeypatch):
     """What a termination signal handled during the flush does, on a real writer.
 
@@ -791,6 +816,7 @@ def test_a_stdout_flush_from_inside_a_stdout_flush_is_swallowed(monkeypatch):
 
 
 @pytest.mark.parametrize("signum", _STOP_SIGNALS, ids=_STOP_SIGNAL_IDS)
+@pytest.mark.unit
 def test_a_late_signal_handled_inside_the_stdout_flush_still_exits_with_its_status(
     monkeypatch, signum
 ):
@@ -839,6 +865,7 @@ async def _leave_the_stdio_lifespan() -> None:
         pass
 
 
+@pytest.mark.unit
 def test_the_stdio_lifespan_shuts_the_source_pools_down_and_drops_their_queue(
     monkeypatch, stops, recording_pools
 ):
@@ -850,6 +877,7 @@ def test_the_stdio_lifespan_shuts_the_source_pools_down_and_drops_their_queue(
         assert pool.calls[0] == {"wait": False, "cancel_futures": True}, pool.calls
 
 
+@pytest.mark.unit
 def test_the_lifespan_leaves_the_source_pools_alone_when_it_is_not_the_stdio_serving(
     monkeypatch, stops, recording_pools
 ):
@@ -860,6 +888,7 @@ def test_the_lifespan_leaves_the_source_pools_alone_when_it_is_not_the_stdio_ser
     assert [pool.calls for pool in recording_pools] == [[], []]
 
 
+@pytest.mark.unit
 def test_an_http_server_that_stops_shuts_the_source_pools_down_and_drops_their_queue(
     stops, recording_pools
 ):
@@ -877,6 +906,7 @@ def a_clone_pool_of_one(monkeypatch):
     pool.shutdown(wait=False, cancel_futures=True)
 
 
+@pytest.mark.unit
 def test_a_running_clone_gets_a_bounded_wait_and_a_queued_one_is_dropped(
     monkeypatch, stops, a_clone_pool_of_one
 ):
@@ -908,6 +938,7 @@ def test_a_running_clone_gets_a_bounded_wait_and_a_queued_one_is_dropped(
     assert running.result(timeout=30) == "finished"
 
 
+@pytest.mark.unit
 def test_an_http_server_that_stops_reports_a_clone_still_running(
     stops, a_clone_pool_of_one, monkeypatch
 ):
@@ -930,6 +961,7 @@ def test_an_http_server_that_stops_reports_a_clone_still_running(
     assert still_running is True
 
 
+@pytest.mark.unit
 def test_idle_source_pools_do_not_hold_the_stop_up(
     monkeypatch, stops, a_clone_pool_of_one
 ):
@@ -948,6 +980,7 @@ def test_idle_source_pools_do_not_hold_the_stop_up(
 @pytest.mark.parametrize(
     "jobs_left_running", [True, False], ids=["a-job-is-running", "no-job-is-running"]
 )
+@pytest.mark.unit
 def test_the_late_stop_handlers_are_kept_only_while_a_source_job_is_running(
     monkeypatch, stop_signals_put_back, jobs_left_running
 ):

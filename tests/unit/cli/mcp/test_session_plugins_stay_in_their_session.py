@@ -62,6 +62,8 @@ from tests.utils.tool_guard import (
     reset_tool_lookup_caches,
 )
 
+pytestmark = pytest.mark.integration
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
 AWS_PLUGINS = "automated_security_helper.plugin_modules.ash_aws_plugins"
