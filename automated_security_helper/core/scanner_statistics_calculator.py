@@ -985,8 +985,12 @@ class ScannerStatisticsCalculator:
         # not a partial-loss ERROR) was flagged as one. The dump re-validates, so
         # an instance mutated after construction into a shape the model refuses is
         # refused here too (a ValidationError is a ValueError).
+        # warnings=False: pydantic warns (PydanticSerializationUnexpectedValue)
+        # when it serializes a value a field refuses, and under a
+        # warnings-as-errors filter that warning would raise here instead of
+        # the validation below refusing the instance.
         if isinstance(counts, ScannerSeverityCount):
-            counts = counts.model_dump()
+            counts = counts.model_dump(warnings=False)
         try:
             severity_counts = (
                 ScannerSeverityCount.model_validate(counts)
