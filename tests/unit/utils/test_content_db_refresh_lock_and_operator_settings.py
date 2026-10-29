@@ -89,7 +89,8 @@ def test_the_grype_refresh_runs_with_the_operators_config(tmp_path, captured):
     _prepare("grype", cache, tmp_path, config_file=config)
     (argv, env, what), *rest = captured
     assert not rest
-    assert what == "database"
+    # _run is given the label the refresh logs with, "<tool> <what>".
+    assert what == "grype database"
     assert argv[:3] == ["/opt/bin/grype", "db", "update"]
     assert argv[argv.index("-c") + 1] == config.as_posix()
     assert env["GRYPE_DB_CACHE_DIR"] == cache.as_posix()
@@ -121,7 +122,7 @@ def test_grype_db_auto_update_true_or_unset_runs_the_update(
 ):
     monkeypatch.setenv("GRYPE_DB_AUTO_UPDATE", "true")
     _prepare("grype", tmp_path / "grype-db", tmp_path)
-    assert [what for _argv, _env, what in captured] == ["database"]
+    assert [what for _argv, _env, what in captured] == ["grype database"]
 
 
 def test_the_checks_bundle_fetch_pins_its_report_format_and_output(tmp_path):
