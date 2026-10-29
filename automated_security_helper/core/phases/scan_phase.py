@@ -193,6 +193,65 @@ def _scanner_display_name(plugin_instance) -> str:
     return plugin_instance.__class__.__name__.lower()
 
 
+def _regular_files_under(directory: Any) -> Iterable[str]:
+    """Each regular file under ``directory``, as a string, in walk order.
+
+    An entry whose stat fails (a symlink whose target is in a directory this
+    user cannot search, a file removed mid-walk) is skipped and logged at
+    debug: ``Path.is_file`` raised out of the walk, and one such entry aborted
+    the whole scan before any scanner ran. A directory that cannot be listed
+    ends the walk with what was gathered, for the same reason.
+    """
+    try:
+        for path in directory.rglob("*"):
+            try:
+                if path.is_file():
+                    yield str(path)
+            except OSError as e:
+                ASH_LOGGER.debug(f"Skipping {path} while listing files: {e}")
+    except OSError as e:
+        ASH_LOGGER.debug(f"Could not finish listing {directory}: {e}")
+
+
+def _holds_a_regular_file(directory: Any) -> bool:
+    """Whether any regular file sits under ``directory``, whatever its name.
+
+    The converted tree used to count only when some name under it contained a
+    dot (``rglob("*.*")``), so an archive whose extracted members carry no
+    extension (``Dockerfile``, ``id_rsa``, a script without a suffix) was
+    converted and then never scanned. A file is a file whatever it is called.
+    """
+    return next(iter(_regular_files_under(directory)), None) is not None
+
+
+def _section_enabled(plugin_config: Any) -> bool:
+    """Whether a scanner's config section leaves it enabled.
+
+    Read from the dict ``get_plugin_config`` returns as well as from a model; an
+    absent section or an absent key means the default, enabled.
+    """
+    if plugin_config is None:
+        return True
+    if isinstance(plugin_config, dict):
+        enabled = plugin_config.get("enabled", True)
+    else:
+        enabled = getattr(plugin_config, "enabled", True)
+    return bool(enabled)
+
+
+def _loses_builtin_scanners(failed_module: str) -> bool:
+    """Whether a load error for ``failed_module`` cost the run every built-in scanner.
+
+    The built-in plugin package itself failing to import is recorded under the
+    package's own path, which carries no scanner-region marker and resolves no
+    scanner class, so the roster was never recorded and the scanner-region
+    filter dropped the error: a run that lost all ten shipped scanners exited
+    clean with zero scanners. The package root is the one module whose loss is
+    every scanner's.
+    """
+    return failed_module == _BUILTIN_PLUGIN_MODULE_PREFIX
+
+
 def _unconstructed_scanner_name(plugin_config: Any, plugin_class: type) -> str:
     """The name a scanner that did not construct is recorded under.
 
@@ -254,6 +313,62 @@ class ScanPhase(EnginePhase):
         """Return the name of this phase."""
         return "scan"
 
+    def _track_scanner_state(self, scanner_name: str, **state: Any) -> None:
+        """``validation_manager.update_scanner_state``, for a scanner that is
+        recorded whether or not the tracker admits its name.
+
+        The tracker refuses a name that is empty or ends in "Scanner" with a
+        ValueError. The row that calls this was written already (an ERROR row
+        for a constructor that raised, a SKIPPED row for a scanner the run did
+        not select), and that row is the record; the tracker's refusal is logged
+        and does not abort the scan.
+        """
+        try:
+            self.validation_manager.update_scanner_state(scanner_name, **state)
+        except ValueError as e:
+            ASH_LOGGER.debug(
+                f"The scanner tracker refused the name {scanner_name!r}: "
+                f"{error_text(e)}; the scanner's row stands"
+            )
+
+    def _record_refused_scanner_name(
+        self,
+        display_name: str,
+        plugin_instance: Any,
+        error: ValueError,
+        aggregated_results: AshAggregatedResults,
+    ) -> AshAggregatedResults:
+        """Record ERROR for a constructed scanner whose name the tracker refused.
+
+        The scanner did construct, so it has a row under the name it carries;
+        it does not run, because every later step registers it under that name
+        and would be refused the same way. ERROR, not SKIPPED: the operator did
+        not leave it out, and the completeness gate has to see it.
+        """
+        refusal = (
+            f"Scanner {display_name} was not run: its configured name is refused "
+            f"({type(error).__name__}: {error_text(error)}). A scanner's name is the "
+            "name it is selected and reported by, and cannot be empty or end in "
+            "'Scanner'."
+        )
+        ASH_LOGGER.error(refusal)
+        container = ScanResultsContainer(
+            scanner_name=display_name,
+            status=ScannerStatus.ERROR,
+            duration=None,
+            errors=[refusal],
+        )
+        aggregated_results = self._process_results(
+            results=container, aggregated_results=aggregated_results
+        )
+        aggregated_results.scanner_results[display_name] = ScannerTargetStatusInfo(
+            status=ScannerStatus.ERROR,
+            # No dependency was checked; see the construction-failure row.
+            dependencies_satisfied=True,
+            excluded=False,
+        )
+        return aggregated_results
+
     def _record_scanner_not_selected(
         self,
         display_name: str,
@@ -281,7 +396,7 @@ class ScanPhase(EnginePhase):
 
         excluded_scanner_names.append(display_name)
 
-        self.validation_manager.update_scanner_state(
+        self._track_scanner_state(
             display_name,
             registration_status="registered",
             enablement_status="excluded",
@@ -371,7 +486,8 @@ class ScanPhase(EnginePhase):
         self._scan_results = {}
         self._global_ignore_paths = global_ignore_paths or []
         self._max_workers = max_workers
-        self._include_work_dir = any(self.plugin_context.work_dir.rglob("*.*"))
+        # Any regular file, whatever its name: see _holds_a_regular_file.
+        self._include_work_dir = _holds_a_regular_file(self.plugin_context.work_dir)
 
         # Build the result processor (owns _process_results and validation metrics)
         self._result_processor = ScanResultProcessor(
@@ -379,14 +495,11 @@ class ScanPhase(EnginePhase):
             validation_manager=self.validation_manager,
         )
 
-        # Compute the source file list once so scanners don't each re-glob
-        source_files = [
-            str(p) for p in self.plugin_context.source_dir.rglob("*") if p.is_file()
-        ]
+        # Compute the source file list once so scanners don't each re-glob. The
+        # walk skips an entry it cannot stat instead of aborting the scan.
+        source_files = list(_regular_files_under(self.plugin_context.source_dir))
         if self._include_work_dir:
-            source_files.extend(
-                str(p) for p in self.plugin_context.work_dir.rglob("*") if p.is_file()
-            )
+            source_files.extend(_regular_files_under(self.plugin_context.work_dir))
         # Store on the context so individual scanners can access it
         self.plugin_context.cached_source_files = source_files
         ASH_LOGGER.debug(f"Cached {len(source_files)} source files for scanner use")
@@ -414,6 +527,12 @@ class ScanPhase(EnginePhase):
             # unresolved and must not be told its module is missing, and the
             # allowlist backstop below must not call it a name that matches nothing.
             construction_failed: Set[str] = set()
+            # Scanners this run does not execute, by name, for the enablement
+            # validation. Started here, before construction, so a scanner the run
+            # did not select whose constructor raised is counted with the others.
+            excluded_scanner_names: List[str] = []
+            # The operator's names, compared as everywhere in this phase.
+            operator_allowlist = {name.lower().strip() for name in enabled_scanners}
             if scanner_classes:
                 ASH_LOGGER.debug(
                     f"Creating instances for {len(scanner_classes)} scanner classes"
@@ -498,7 +617,41 @@ class ScanPhase(EnginePhase):
                         failed_name = _unconstructed_scanner_name(
                             plugin_config, plugin_class
                         )
-                        construction_failed.add(failed_name.lower().strip())
+                        failed_key = failed_name.lower().strip()
+                        construction_failed.add(failed_key)
+                        # Selection before diagnosis, as for a scanner that did
+                        # construct: one the operator excluded, left out of the
+                        # allowlist or disabled in the configuration was never
+                        # going to run, so its constructor raising is not a
+                        # failure of this scan. Recorded SKIPPED, excluded, like
+                        # the other not-selected scanners, and the error at debug;
+                        # recorded ERROR, it failed the completeness gate on a run
+                        # that ran everything it selected.
+                        not_selected_reasons = []
+                        if failed_key in operator_excluded:
+                            not_selected_reasons.append(
+                                f"excluded from this run ({names.exclusion})"
+                            )
+                        if operator_allowlist and failed_key not in operator_allowlist:
+                            not_selected_reasons.append(
+                                f"not named by {names.allowlist}"
+                            )
+                        if not _section_enabled(plugin_config):
+                            not_selected_reasons.append(
+                                "disabled in the configuration (enabled: false)"
+                            )
+                        if not_selected_reasons:
+                            ASH_LOGGER.debug(
+                                f"Scanner {failed_name} could not be constructed "
+                                f"({type(e).__name__}), and was not selected to run"
+                            )
+                            aggregated_results = self._record_scanner_not_selected(
+                                failed_name,
+                                ", ".join(not_selected_reasons),
+                                aggregated_results,
+                                excluded_scanner_names,
+                            )
+                            continue
                         # With the config's environment values: a constructor's
                         # error can name an option the config read from the
                         # environment, and this text goes to the report, ash.log,
@@ -539,7 +692,7 @@ class ScanPhase(EnginePhase):
                                 excluded=False,
                             )
                         )
-                        self.validation_manager.update_scanner_state(
+                        self._track_scanner_state(
                             failed_name,
                             registration_status="registered",
                             queued_for_execution=False,
@@ -549,16 +702,32 @@ class ScanPhase(EnginePhase):
 
             # Validate registered scanners after creating instances
             if scanner_instances:
-                self.validation_manager.validate_registered_scanners(scanner_instances)
-
-                # CRITICAL: Initialize validation manager state for all registered scanners
+                # CRITICAL: Initialize validation manager state for all registered
+                # scanners. One at a time, and before validate_registered_scanners,
+                # which registers the same names: the tracker refuses a name that
+                # is empty or ends in "Scanner" (a class name where a scanner name
+                # belongs), with a ValueError that used to escape here and abort
+                # the whole scan for one such plugin. The refused scanner is
+                # recorded ERROR under its name and left out of the run, and the
+                # others are registered as before.
+                admitted_instances = []
                 for plugin_instance in scanner_instances:
                     display_name = _scanner_display_name(plugin_instance)
-                    self.validation_manager.update_scanner_state(
-                        display_name,
-                        registration_status="registered",
-                        plugin_class=plugin_instance.__class__,
-                    )
+                    try:
+                        self.validation_manager.update_scanner_state(
+                            display_name,
+                            registration_status="registered",
+                            plugin_class=plugin_instance.__class__,
+                        )
+                    except ValueError as e:
+                        aggregated_results = self._record_refused_scanner_name(
+                            display_name, plugin_instance, e, aggregated_results
+                        )
+                        continue
+                    admitted_instances.append(plugin_instance)
+                scanner_instances = admitted_instances
+            if scanner_instances:
+                self.validation_manager.validate_registered_scanners(scanner_instances)
             else:
                 ASH_LOGGER.warning(
                     "No scanner instances created during plugin discovery!"
@@ -743,8 +912,8 @@ class ScanPhase(EnginePhase):
             enabled_scanner_classes = []
             enabled_scanner_names = []
 
-            # Initialize lists to track scanner states for validation
-            excluded_scanner_names = []
+            # Initialize lists to track scanner states for validation.
+            # excluded_scanner_names was started above the construction loop.
             # Scanners whose tool is absent and that have nothing to scan; SKIPPED.
             nothing_to_scan_names: List[str] = []
             dependency_error_scanners = {}
@@ -1429,10 +1598,13 @@ class ScanPhase(EnginePhase):
             # separated.
             for failed_module, error in load_errors.items():
                 # Only the scanner region lands in scanner_results; see
-                # _SCANNER_MODULE_MARKER for why.
+                # _SCANNER_MODULE_MARKER for why. The built-in package root is
+                # admitted with it: its import failing lost every shipped scanner
+                # (_loses_builtin_scanners).
                 if not (
                     failed_module.endswith(_SCANNER_MODULE_MARKER)
                     or f"{_SCANNER_MODULE_MARKER}." in failed_module
+                    or _loses_builtin_scanners(failed_module)
                 ):
                     continue
                 if failed_module in aggregated_results.scanner_results:
@@ -1470,12 +1642,15 @@ class ScanPhase(EnginePhase):
             # in this repository's own suite -- did not resolve the built-in set, and
             # measuring such a run against the built-in roster would report every
             # scanner the caller did not supply as one that went missing.
+            # Or TRIED to resolve it and lost it whole: a run whose built-in
+            # package failed to import resolved no built-in class, and without
+            # the roster its zero scanners passed every completeness check.
             resolved_builtin_plugins = any(
                 str(getattr(plugin_class, "__module__", "")).startswith(
                     _BUILTIN_PLUGIN_MODULE_PREFIX
                 )
                 for plugin_class in scanner_classes or []
-            )
+            ) or any(_loses_builtin_scanners(module) for module in load_errors)
             if resolved_builtin_plugins:
                 aggregated_results.metadata.expected_scanners = (
                     _declared_scanner_roster(self.plugin_context.config)
