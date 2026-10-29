@@ -794,9 +794,9 @@ def _zip_mtime(info: zipfile.ZipInfo) -> float:
     return float(calendar.timegm((*info.date_time, 0, 0, 0)))
 
 
-def unpack_artifact(results: ArtifactResults, target: Path) -> Path:
-    """Unpack the artifact's output under ``target`` and return the directory that
-    holds its ``ash_aggregated_results.json``, with every file's own mtime.
+def unpack_artifact(results: ArtifactResults, target: Path) -> tuple[Path, list[str]]:
+    """Unpack the artifact's output under ``target``; return the directory that holds
+    its ``ash_aggregated_results.json``, with every file's own mtime, and the problems.
 
     act's host executor runs each job in a directory it removes at the job's end, so
     the uploaded artifact is the only copy of ASH's output; the checks that read a
@@ -804,22 +804,45 @@ def unpack_artifact(results: ArtifactResults, target: Path) -> Path:
     the merge step started) read this copy. A zipped artifact is extracted member by
     member, those under the results file's own directory in the zip, each with the
     mtime its entry records; a stored directory is copied with its files' mtimes and
-    without its symbolic links.
+    without its symbolic links. An artifact that cannot be unpacked (a zip that
+    changed or broke since it was read, a file that cannot be read or written) is one
+    problem naming it, and the directory is returned as far as it got, so the checks
+    that read it still run and report what is missing.
     """
     target = Path(target)
     if results.member is None:
-        source = Path(results.source).parent
-        target.mkdir(parents=True, exist_ok=True)
-        for directory, dirs, files in os.walk(source):
-            here = Path(directory)
-            dirs[:] = [d for d in dirs if not (here / d).is_symlink()]
-            (target / here.relative_to(source)).mkdir(parents=True, exist_ok=True)
-            for name in files:
-                path = here / name
-                if not path.is_symlink() and path.is_file():
-                    shutil.copy2(path, target / path.relative_to(source))
-        return target
-    prefix = PurePosixPath(results.member).parent.parts
+        output = target
+    else:
+        output = target.joinpath(*PurePosixPath(results.member).parent.parts)
+    try:
+        if results.member is None:
+            _copy_stored_artifact(Path(results.source).parent, target)
+        else:
+            _extract_zipped_artifact(results, target)
+    except (OSError, ValueError, zipfile.BadZipFile) as error:
+        return output, [
+            (
+                f"the artifact {results.name} ({results.where}) could not be "
+                f"unpacked: {error}"
+            )
+        ]
+    return output, []
+
+
+def _copy_stored_artifact(source: Path, target: Path) -> None:
+    target.mkdir(parents=True, exist_ok=True)
+    for directory, dirs, files in os.walk(source):
+        here = Path(directory)
+        dirs[:] = [d for d in dirs if not (here / d).is_symlink()]
+        (target / here.relative_to(source)).mkdir(parents=True, exist_ok=True)
+        for name in files:
+            path = here / name
+            if not path.is_symlink() and path.is_file():
+                shutil.copy2(path, target / path.relative_to(source))
+
+
+def _extract_zipped_artifact(results: ArtifactResults, target: Path) -> None:
+    prefix = PurePosixPath(results.member or "").parent.parts
     with zipfile.ZipFile(results.source) as archive:
         for info in archive.infolist():
             if (
@@ -830,7 +853,6 @@ def unpack_artifact(results: ArtifactResults, target: Path) -> Path:
             extracted = archive.extract(info, target)
             mtime = _zip_mtime(info)
             os.utime(extracted, (mtime, mtime))
-    return target.joinpath(*prefix)
 
 
 _ASH_NAME = r"automated[-_]security[-_]helper"

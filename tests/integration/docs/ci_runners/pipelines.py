@@ -1468,7 +1468,8 @@ def _act_problems(prepared, launched, log, expected) -> list[str]:
     problems += selection
     output = out / "ash_output"
     if judged is not None:
-        output = reports.unpack_artifact(judged, output)
+        output, unpacked = reports.unpack_artifact(judged, output)
+        problems += unpacked
         problems += reports.findings_problems(
             reports.aggregated_results_at(output / reports.AGGREGATED), expected
         )

@@ -556,7 +556,8 @@ def test_a_zipped_artifact_is_unpacked_with_its_members_own_mtimes(tmp_path):
     found = read(store)
     assert found is not None and len(found) == 1, "only the shallowest copy is read"
     (judged,) = found
-    output = unpack(judged, tmp_path / "out" / "ash_output")
+    output, problems = unpack(judged, tmp_path / "out" / "ash_output")
+    assert problems == []
     assert output == tmp_path / "out" / "ash_output" / "out"
     aggregated = output / "ash_aggregated_results.json"
     sarif = output / "reports" / "ash.ghas.sarif"
@@ -597,7 +598,8 @@ def test_a_directory_artifact_is_unpacked_with_its_files_mtimes(tmp_path):
     (tmp_path / "outside.txt").write_text("not the run's", encoding="utf-8")
     (artifact / "reports" / "link.txt").symlink_to(tmp_path / "outside.txt")
     (judged,) = read(store)
-    output = unpack(judged, tmp_path / "out" / "ash_output")
+    output, problems = unpack(judged, tmp_path / "out" / "ash_output")
+    assert problems == []
     assert output == tmp_path / "out" / "ash_output"
     assert json.loads((output / "ash_aggregated_results.json").read_text()) == (
         _aggregated()
@@ -608,6 +610,31 @@ def test_a_directory_artifact_is_unpacked_with_its_files_mtimes(tmp_path):
     )
     assert not (output / "reports" / "link.txt").exists(), "links are left behind"
     assert not (output / "reports" / "link.txt").is_symlink()
+
+
+@pytest.mark.unit
+def test_an_artifact_that_cannot_be_unpacked_is_one_problem(tmp_path):
+    read = _api("reports", "results_from_artifact_store")
+    unpack = _api("reports", "unpack_artifact")
+    store = tmp_path / "artifacts"
+    archive = _zip_artifact(store, "ash-output", _aggregated(), SARIF_BYTES, "out/")
+    (judged,) = read(store)
+    # The store entry breaks between the read and the unpack (a truncated zip): one
+    # problem names the artifact, and the directory comes back so the later checks
+    # read it and report what is missing.
+    archive.write_bytes(b"PK\x03\x04 not a zip any more")
+    output, problems = unpack(judged, tmp_path / "out" / "ash_output")
+    assert output == tmp_path / "out" / "ash_output" / "out"
+    assert len(problems) == 1
+    assert "the artifact ash-output" in problems[0]
+    assert "could not be unpacked" in problems[0]
+    assert not (output / "ash_aggregated_results.json").exists()
+    # The control: the same artifact intact unpacks with no problem.
+    _zip_artifact(tmp_path / "good", "ash-output", _aggregated(), SARIF_BYTES, "out/")
+    (intact,) = read(tmp_path / "good")
+    output, problems = unpack(intact, tmp_path / "good-out")
+    assert problems == []
+    assert (output / "ash_aggregated_results.json").is_file()
 
 
 @pytest.mark.unit
