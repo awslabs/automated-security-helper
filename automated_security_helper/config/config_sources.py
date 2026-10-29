@@ -1233,7 +1233,10 @@ def pyproject_has_ash_table(path: Path) -> bool:
     unparsed: Optional[str] = None
     try:
         document = _parse_toml(text)
-    except (_TOMLDecodeError, RecursionError) as exc:
+    except (ValueError, RecursionError) as exc:
+        # TOMLDecodeError is a ValueError; so is the one int() raises for a
+        # number longer than the interpreter's digit limit, which tomllib lets
+        # through undressed. Either is this file not parsing.
         if not _TOOL_ASH_PATTERN.search(text):
             ASH_LOGGER.debug(
                 f"Skipping {Path(path).as_posix()} as a config source: it has no "
@@ -1540,8 +1543,14 @@ def check_discovered_source(path: Path, permit_base: Optional[PermitBase]) -> No
     See "Base paths". Nothing is checked without ``permit_base``. Raises
     ``ASHConfigInputNotPermittedError`` naming ``path`` as it was found, never the
     file it resolves to.
+
+    Resolved with ``os.path.realpath``, as ``_permitted`` resolves a candidate:
+    it reads links, opens nothing and does not raise on a symlink loop, where
+    ``Path.resolve`` raised a bare RuntimeError on one on Python 3.10 to 3.12
+    in place of a config refusal. A loop resolves to itself and is judged as
+    the path it was found at.
     """
-    if permit_base is None or permit_base(Path(path).resolve()):
+    if permit_base is None or permit_base(Path(os.path.realpath(path))):
         return
     raise ASHConfigInputNotPermittedError(
         f"{Path(path).as_posix()}, the config file found in the scanned directory, "
@@ -1858,7 +1867,9 @@ def toml_config_table(path: Path, text: str) -> Any:
     unparsed: Optional[str] = None
     try:
         document = _parse_toml(text)
-    except _TOMLDecodeError as exc:
+    except ValueError as exc:
+        # TOMLDecodeError, and the ValueError int() raises for a number past
+        # the interpreter's digit limit, which tomllib lets through undressed.
         unparsed = unparsed_config_reason(path, exc)
     if unparsed is not None:
         # Outside the handler (unparsed_config_reason).
@@ -1952,8 +1963,16 @@ def read_config_text(path: Path, expect: Optional[FileIdentity] = None) -> str:
     parse_config_text_literally: a caller that needs both of its views parses
     them from this one read, so a file changed in between cannot give two
     different ones. A path that is not a regular file is refused before it is
-    opened (``refuse_unless_a_file``); a TOML file loses a leading byte order
-    mark, and one that is not UTF-8 is refused as read_config_file refuses it.
+    opened (``refuse_unless_a_file``); a TOML or JSON file loses a leading byte
+    order mark (as ``read_config_file`` drops it: tomllib and json refuse one),
+    and a TOML file that is not UTF-8 is refused as read_config_file refuses it.
+
+    Every read goes through ``read_config_bytes``: a non-blocking open of a
+    regular file, held to ``expect`` when the caller took an identity, and
+    bounded by ``ASH_CONFIG_MAX_FILE_BYTES``. Without an identity this used to
+    fall back to a plain blocking ``open()`` and an unbounded read, so the
+    config validator, the linter, MCP profile loading and the literal
+    re-resolution read whole files with no bound.
     """
     path = Path(path)
     refuse_unless_a_file(path)
@@ -1966,12 +1985,13 @@ def read_config_text(path: Path, expect: Optional[FileIdentity] = None) -> str:
             undecoded = unparsed_config_reason(path, exc)
         # Outside the handler (unparsed_config_reason).
         raise ASHConfigUnparsedError(undecoded)
-    if expect is not None:
-        # The chain walk checked this file's identity (_resolve_base_path, or
-        # the root's caller); the read must open that same file.
-        return read_config_bytes(path, expect=expect).decode("utf-8")
-    with open(path, mode="r", encoding="utf-8") as f:
-        return f.read()
+    text = read_config_bytes(path, expect=expect).decode("utf-8")
+    if is_json_file(path):
+        # json.loads refuses a leading byte order mark; read_config_file
+        # decodes a JSON file as utf-8-sig, so the scan's own parse of this
+        # text (parse_config_text) must see the same text.
+        return text.removeprefix(chr(0xFEFF))
+    return text
 
 
 #: The name a chain walk refuses a file by while it reads a file its rule
@@ -2091,14 +2111,18 @@ def text_reads_the_environment(path: Path, text: str) -> bool:
     environment when ``path`` is loaded: an ``!ENV`` scalar or a plain YAML
     scalar the loader resolves as one (a key included), or a TOML string
     value starting with a reference (``_resolve_toml_env``). JSON reads
-    nothing. A text that does not parse reads nothing; its load says why."""
+    nothing. A text that does not parse reads nothing; its load says why. A
+    text nested past the interpreter's recursion limit is one of those: the
+    parser's RecursionError is answered False here, and the load's own parse
+    words it as an unparsed config (``parse_config_text``), where it used to
+    escape this check raw."""
     path = Path(path)
     if is_json_file(path):
         return False
     if is_toml_file(path):
         try:
             document = _toml_document(path, text)
-        except ASHConfigSourceError:
+        except (ASHConfigSourceError, RecursionError):
             return False
         pending: List[Any] = [document]
         while pending:
@@ -2125,7 +2149,9 @@ def _yaml_reads_the_environment(stream: Any) -> bool:
     _Loader.add_implicit_resolver("!ENV", ENV_REFERENCE_PATTERN, None)
     try:
         root = yaml.compose(stream, Loader=_Loader)
-    except (UnicodeDecodeError, yaml.YAMLError):
+    except (UnicodeDecodeError, yaml.YAMLError, RecursionError):
+        # A document nested past the recursion limit does not parse either;
+        # the caller's own load says so (text_reads_the_environment).
         return False
     pending = [root] if root is not None else []
     # An alias is the node it names, so a node can be reached twice, and a
@@ -2171,7 +2197,8 @@ def _toml_document(path: Path, text: str) -> Any:
     unparsed: Optional[str] = None
     try:
         document = _parse_toml(text)
-    except _TOMLDecodeError as exc:
+    except ValueError as exc:
+        # TOMLDecodeError, and int()'s digit-limit ValueError (toml_config_table).
         unparsed = unparsed_config_reason(path, exc)
     if unparsed is not None:
         # Outside the handler (unparsed_config_reason).
@@ -3478,12 +3505,18 @@ def _file_references(
     data: Any,
     reader: Callable[[Path], Any],
     text: Optional[str] = None,
+    parsed_as: Optional[Path] = None,
 ) -> List[EnvironmentReference]:
     """What the file at ``path``, which ``reader`` read as ``data``, read from the
     environment, each at the place the file wrote it (environment_record).
 
     The as-written view is parsed from ``text``, the text the resolution read
-    (``_ChainState.texts``), so both views are of one read. The file is never
+    (``_ChainState.texts``), so both views are of one read, in the format of
+    ``parsed_as`` (``path`` by default): the name whose suffix the resolution
+    parsed the text under. The root is parsed as the path the caller named,
+    so for a root that is a link to a file with another suffix the as-written
+    view parsed in the target's format read nothing while the data held the
+    values, and none of its reads was recorded. The file is never
     read from disk again, including for a text that does not parse (nothing is
     recorded then): a file swapped after the read would pair the swapped text
     against data the swap never produced, missing a reference the read made
@@ -3509,7 +3542,9 @@ def _file_references(
         setattr(unheld, _UNHELD_TEXT_MARK, True)
         raise unheld
     try:
-        written = parse_config_text_literally(path, text, keep_env_tags=True)
+        written = parse_config_text_literally(
+            parsed_as if parsed_as is not None else path, text, keep_env_tags=True
+        )
         # Folded as ``data`` was folded, so the two views pair up at a
         # respelled known-plugin section (plugin_section_names).
         written = fold_known_plugin_sections(written)
@@ -3625,6 +3660,13 @@ def refuse_past_expansion_bound(value: Any, subject: str, lead_in: str = "") -> 
     pending = [value] if isinstance(value, (dict, list)) else []
     while pending:
         item = pending.pop()
+        if isinstance(item, dict):
+            # A mapping's keys are written out too, once per place the
+            # mapping is aliased from: charged like its values, so an aliased
+            # long key repeated across many aliased mappings cannot pass the
+            # text budget on its values alone.
+            for key in item:
+                charged(key)
         children = item.values() if isinstance(item, dict) else item
         for child in children:
             charged(child)
@@ -4314,9 +4356,15 @@ def _resolve(
     # cannot get past it; the message quotes no value. The read itself refuses
     # such a file before it resolves a reference (_read_into_state); this stays
     # for a caller's reader that does not parse through parse_config_text.
+    # The name whose suffix the text was parsed under: the root is read as the
+    # caller named it (above), a base as the path it resolved to. The checks
+    # of the held text below read it in that same format, so a root that is a
+    # link to a file with another suffix is judged as it was parsed and not as
+    # its target would be.
+    parsed_as = path if not stack else real
     if env_refused:
         held_text = state.texts.get(real)
-        if held_text is not None and text_reads_the_environment(real, held_text):
+        if held_text is not None and text_reads_the_environment(parsed_as, held_text):
             raise _environment_read_refusal(state.shown(real))
 
     # Each known plugin's section keyed by its declared spelling, before this
@@ -4345,7 +4393,9 @@ def _resolve(
     # which are read below. The order decides only which of two references at
     # one position that resolved to the same text is recorded: the extending
     # file's, whose value the merge keeps.
-    read = _file_references(real, data, state.reader, state.texts.get(real))
+    read = _file_references(
+        real, data, state.reader, state.texts.get(real), parsed_as=parsed_as
+    )
     state.read.extend(read)
     own_references, from_ops = _split_references(read, data)
     # This file's references and, after the loop below, its bases': the ones
