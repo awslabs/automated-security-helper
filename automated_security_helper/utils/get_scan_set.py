@@ -2266,10 +2266,19 @@ def get_changed_files(
         # argument as that path, diffs it between the working tree and the index,
         # and exits 0. With it, git exits 128 on the missing ref and the full-scan
         # fallback applies.
+        #
+        # diff.relative=false, because the names are joined onto the repository
+        # root (git_repository_root), which is what git prints by default. With
+        # diff.relative set in the repository's or the user's config, git prints
+        # them relative to *cwd* and leaves out every change above it, so a scan
+        # of a subdirectory or a workspace project joined cwd-relative names onto
+        # the root, matched no finding, and reported nothing.
         result = subprocess.run(
             git_argv(  # nosec B603 B607
                 "-c",
                 "core.quotepath=false",
+                "-c",
+                "diff.relative=false",
                 "diff",
                 "--name-only",
                 "-z",
