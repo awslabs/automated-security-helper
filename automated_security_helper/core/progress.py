@@ -198,10 +198,13 @@ class LiveProgressDisplay:
         ``self.log_handler`` so stop() removes it as it removes the panel's.
         """
         panel_handler = self.log_handler
-        if panel_handler in ASH_LOGGER.handlers:
+        if panel_handler is not None and panel_handler in ASH_LOGGER.handlers:
             ASH_LOGGER.removeHandler(panel_handler)
         console_handler = logging.StreamHandler(sys.stderr)
-        console_handler.setLevel(panel_handler.level)
+        # A display whose handler was already taken off (a run that stopped
+        # and started again) has no level to copy; the panel's default level
+        # from __init__ stands in.
+        console_handler.setLevel(getattr(panel_handler, "level", 15))
         console_handler.setFormatter(logging.Formatter("%(message)s"))
         self.log_handler = run_handler(console_handler)
         ASH_LOGGER.addHandler(self.log_handler)

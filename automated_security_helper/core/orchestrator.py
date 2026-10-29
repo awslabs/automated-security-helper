@@ -1031,7 +1031,17 @@ class ASHScanOrchestrator(BaseModel):
             )
             if own is None:
                 continue
-            if isinstance(own, str) and not own.strip():
+            if not isinstance(own, str):
+                # Not a threshold the ladder can rank (False, 0, a list): left
+                # as the scanner's own setting for its validation to refuse,
+                # never handed to stricter_of, which reads strings.
+                ASH_LOGGER.warning(
+                    f"{name}'s severity_threshold is not a ladder value "
+                    f"({type(own).__name__}); the requested {requested} is not "
+                    f"applied to it"
+                )
+                continue
+            if not own.strip():
                 # An empty string is set, not unset: the executor reads it as
                 # the scanner's own threshold and grades that scanner with no
                 # gate, so the client's floor was loosened for exactly it. It
