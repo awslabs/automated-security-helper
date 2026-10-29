@@ -26,6 +26,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.secret_masking import (
     SecretValueShape,
+    _mask_secret_value,
     mask_secret_values_in_tree,
     mask_secrets_in_results,
 )
@@ -131,6 +132,25 @@ class TestEnumFieldsOfOverlappingResults:
         assert value not in model.sarif.runs[0].results[0].message.root.text
         assert value not in model.sarif.runs[0].results[1].message.root.text
         assert model.sarif.runs[0].results[1].level is Level.warning
+
+
+class TestFreeTextFieldsNamedLikeAnEnum:
+    def test_a_logical_locations_kind_is_still_masked(self):
+        """``LogicalLocation.kind`` is free text that shares its name with
+        ``Result.kind``; only the enum member is left alone."""
+        value = _derived("free-text-kind-value", 12)
+        neighbor = _result("B404", 5, "import", level="warning", kind="fail")
+        neighbor["locations"][0]["logicalLocations"] = [
+            {"name": "handler", "kind": f"function {value}"}
+        ]
+        model = _results(_result("B105", 5, HARDCODED + f"'{value}'"), neighbor)
+
+        mask_secrets_in_results(model)
+
+        result = model.sarif.runs[0].results[1]
+        logical = result.locations[0].logicalLocations[0]
+        assert logical.kind == "function " + _mask_secret_value(value)
+        assert result.kind is Kind.fail
 
 
 class TestEnumFieldsOfAPlainJsonReport:

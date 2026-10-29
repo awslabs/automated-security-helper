@@ -298,14 +298,15 @@ _SKIPPED_FIELDS = frozenset(
     }
 )
 #: Enum-valued SARIF fields: ``Result.level`` and ``Result.kind``,
-#: ``Suppression.kind`` and ``Suppression.status``, ``Run.columnKind``,
+#: ``Suppression.kind`` and ``Suppression.state``, ``Run.columnKind``,
 #: ``ThreadFlowLocation.importance`` and ``Artifact.roles``. A model holds them
 #: as ``Enum`` members, which ``_mask_tree`` leaves alone by type; these names
-#: cover a report already reduced to plain JSON. A value or shape that matched
-#: one (``warning``, ``inSource``) rewrote a result's severity and wrote a value
-#: the model refuses on the next load.
+#: cover only a report already reduced to plain JSON (``_is_skipped_key``), so a
+#: model's free-text ``kind`` fields stay masked. A value or shape that matched
+#: an enum (``warning``, ``inSource``) rewrote a result's severity and wrote a
+#: value the model refuses on the next load.
 _ENUM_FIELDS = frozenset(
-    {"level", "kind", "status", "columnKind", "importance", "roles"}
+    {"level", "kind", "state", "columnKind", "importance", "roles"}
 )
 #: Fields under which nothing is masked by value: a tool's rule metadata,
 #: taxonomies and policies, a result's rule reference and every ``tags`` list.
@@ -326,8 +327,23 @@ _METADATA_FIELDS = frozenset(
 
 
 def _is_skipped(name: str) -> bool:
-    """Whether nothing under a field or key of this name is masked by value."""
-    return name in _SKIPPED_FIELDS or name in _METADATA_FIELDS or name in _ENUM_FIELDS
+    """Whether nothing under a model field of this name is masked by value.
+
+    An enum-valued field of a model is left alone by its ``Enum`` type
+    (``_mask_tree``), so a free-text field that shares a name with one
+    (``Address.kind``, ``LogicalLocation.kind``, ``Exception.kind``) is still
+    masked.
+    """
+    return name in _SKIPPED_FIELDS or name in _METADATA_FIELDS
+
+
+def _is_skipped_key(key: str) -> bool:
+    """Whether nothing under a plain-JSON key of this name is masked by value.
+
+    A report reduced to plain data has no enum members, so its enum-valued
+    fields are known by name (``_ENUM_FIELDS``) as well.
+    """
+    return _is_skipped(key) or key in _ENUM_FIELDS
 
 
 _WORD_CHARACTER = re.compile(r"\w")
@@ -1337,7 +1353,7 @@ def _mask_source_whole(node: Any, seen: Set[int]) -> Any:
     if isinstance(node, dict):
         seen.add(id(node))
         for key in list(node):
-            if isinstance(key, str) and _is_skipped(key):
+            if isinstance(key, str) and _is_skipped_key(key):
                 continue
             item = node[key]
             masked = _mask_source_whole(item, seen)
@@ -1544,7 +1560,7 @@ def _mask_tree(node: Any, index: _SecretIndex, seen: Set[int]) -> Any:
         return node
     if isinstance(node, dict):
         for key in list(node):
-            if isinstance(key, str) and _is_skipped(key):
+            if isinstance(key, str) and _is_skipped_key(key):
                 continue
             item = node[key]
             masked = _mask_tree(item, index, seen)
