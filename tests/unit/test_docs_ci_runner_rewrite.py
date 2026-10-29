@@ -843,10 +843,12 @@ def test_an_existing_max_parallel_is_set_to_one_and_only_on_a_matrix():
 
 
 @pytest.mark.parametrize(
-    "old,new,named",
+    "old,count,new,named",
     [
         (
+            # The shard job's upload and the merge job's: the first is the one quoted.
             "      - uses: actions/upload-artifact@043fb46d",
+            2,
             '      - uses: "actions/upload-artifact@043fb46d',
             "actions/upload-artifact",
         ),
@@ -855,21 +857,24 @@ def test_an_existing_max_parallel_is_set_to_one_and_only_on_a_matrix():
                 "    strategy:\n      fail-fast: false\n      matrix:\n"
                 "        shard: [0, 1, 2, 3]\n"
             ),
+            1,
             "    strategy: {matrix: {shard: [0, 1, 2, 3]}}\n",
             "the job shard has a matrix",
         ),
     ],
     ids=["a quoted uses", "a flow-style strategy"],
 )
-def test_an_artifact_step_or_matrix_the_rewrite_cannot_read_is_refused(old, new, named):
+def test_an_artifact_step_or_matrix_the_rewrite_cannot_read_is_refused(
+    old, count, new, named
+):
     body = _block(SCALE_PAGE, "github-actions").body
-    assert body.count(old) == 1
+    assert body.count(old) == count
     rewrite = _api("rewrite", "rewrite_pipeline")
     error = _api("rewrite", "RewriteError")
     with pytest.raises(error) as raised:
         rewrite(
             "github-actions",
-            body.replace(old, new),
+            body.replace(old, new, 1),
             _context("act", WHEEL),
             where="scale.md:1",
         )
