@@ -90,8 +90,9 @@ def _starts_list_item(stripped: str) -> bool:
     entry's fields on the lines below it. `rstrip` takes a dash followed only
     by blanks as alone too, a tab among them, which `- ` does not cover (a
     CRLF file has no `\\r` left here: fix_unused reads it with read_text,
-    whose universal newlines drop them). Whether a line is an entry of the
-    suppressions list also depends on its indent; see _comment_out_suppressions.
+    whose universal newlines drop them). The entries of the suppressions list
+    are located by YAML node position (_comment_out_suppressions), not by this
+    text test, which is a reading of one line on its own.
     """
     return stripped.startswith("- ") or stripped.rstrip() == "-"
 
@@ -421,9 +422,17 @@ class ConfigLinter:
         cls._refuse_to_rewrite_env_references(config_path)
         config_data, raw_content = cls._load_config_and_text(config_path)
 
+        # The suppression fixes address an entry by its index in the list the
+        # issue's lint read. The file is read again here, after the caller's
+        # confirmation prompt, so an issue computed earlier is applied only
+        # when this read still raises it: an entry removed or moved meanwhile
+        # would otherwise have the fix delete or narrow whichever entry now
+        # sits at that index.
+        fresh_issues = cls.lint(config_path).fixable_issues
         if issues is None:
-            lint_result = cls.lint(config_path)
-            issues = lint_result.fixable_issues
+            issues = fresh_issues
+        else:
+            issues = [issue for issue in issues if issue in fresh_issues]
 
         fixed_issues: List[LintIssue] = []
 
@@ -505,7 +514,14 @@ class ConfigLinter:
                 f"--fix-unused comments suppressions out, which JSON cannot hold; "
                 f"remove them from {config_path} by hand"
             )
-        config_data, raw_content = cls._load_config_and_text(config_path)
+        # A file that does not parse, or cannot be read, has nothing to comment
+        # out: ``lint`` reported it (SYNTAX_ERROR, exit 3), and this returns
+        # with no changes rather than raising the parser's own error a second
+        # time, after lint's result was printed.
+        try:
+            config_data, raw_content = cls._load_config_and_text(config_path)
+        except (OSError, ValueError, yaml.YAMLError, ASHConfigSourceError):
+            return "", [], None
 
         # Find the unused suppressions report
         report_path, report_timestamp = cls._find_unused_report(config_path, output_dir)
@@ -513,23 +529,38 @@ class ConfigLinter:
         if report_path is None:
             return raw_content, [], None
 
-        # Load the report
-        with open(report_path, "r", encoding="utf-8") as f:
-            report_data = json.load(f)
+        # Load the report. A report lint already said it could not read (not
+        # JSON, not a JSON object, truncated, a directory, not UTF-8) comments
+        # nothing out.
+        try:
+            report_data = cls._read_unused_report(report_path)
+        except (ValueError, OSError):
+            return raw_content, [], report_timestamp
+
+        # A report whose scan evaluated no suppression (it ran with
+        # --ignore-suppressions) lists none as unused and says so; nothing
+        # is commented out on its account.
+        if report_data.get("not_evaluated"):
+            return raw_content, [], report_timestamp
 
         unused_suppressions = report_data.get("unused_suppressions", [])
-        if not unused_suppressions:
+        if not isinstance(unused_suppressions, list) or not unused_suppressions:
             return raw_content, [], report_timestamp
 
         # Build a set of unused suppression identifiers for matching
         unused_ids = set()
         for unused in unused_suppressions:
-            unused_id = cls._make_suppression_id(unused)
-            unused_ids.add(unused_id)
+            if isinstance(unused, dict):
+                unused_ids.add(cls._make_suppression_id(unused))
 
-        # Work with the raw YAML lines to comment out unused suppressions
+        # Work with the raw YAML lines to comment out unused suppressions.
+        # ``_suppressions_of``: a null ``global_settings`` or ``suppressions``,
+        # or a document that is not a mapping, holds no entries, where
+        # ``.get`` on the null raised.
         fixed_issues: List[LintIssue] = []
-        suppressions = config_data.get("global_settings", {}).get("suppressions", [])
+        suppressions = cls._suppressions_of(config_data)
+        if not suppressions:
+            return raw_content, [], report_timestamp
         # The path and rule_id each message quotes can be values the file read
         # from the environment: they are quoted from the copy in which each is
         # <value> at its own place, as in every other lint message.
@@ -556,172 +587,239 @@ class ConfigLinter:
         for i, (suppression, written) in enumerate(
             zip(suppressions, written_suppressions)
         ):
-            ids = cls._suppression_ids(suppression, written)
-            if ids & unused_ids:
+            if cls._suppression_ids(suppression, written) & unused_ids:
                 unused_indices.add(i)
-                # Past the shown copy's end, None: _shown_entry then shows every
-                # value as read from the environment, never as resolved.
-                shown = shown_suppressions[i] if i < len(shown_suppressions) else None
-                shown = cls._shown_entry(suppression, shown)
-                fixed_issues.append(
-                    LintIssue(
-                        severity=LintSeverity.INFO,
-                        category=LintCategory.SUPPRESSION_UNUSED,
-                        message=f"Commented out unused suppression: path='{shown.get('path', '')}', rule_id='{shown.get('rule_id', '*')}'",
-                        path=f"global_settings.suppressions[{i}]",
-                        fixable=True,
-                        fix_description="Comment out unused suppression",
-                    )
-                )
 
         if not unused_indices:
             return raw_content, [], report_timestamp
 
         # Comment out the unused suppressions in the raw YAML
         today = datetime.now().strftime("%Y-%m-%d")
-        fixed_content = cls._comment_out_suppressions(
-            raw_content, suppressions, unused_indices, today
+        fixed_content, commented = cls._comment_out_suppressions(
+            raw_content, unused_indices, today
         )
 
+        # An entry is reported commented out only once the text walker has
+        # commented it: a list it cannot edit (a flow sequence on one line, an
+        # alias of a list written elsewhere) leaves the text as it was, and a
+        # report of a change that was not made would send the operator on to
+        # the next scan believing the file changed.
+        for i in sorted(commented):
+            suppression = suppressions[i]
+            # Past the shown copy's end, None: _shown_entry then shows every
+            # value as read from the environment, never as resolved.
+            shown = shown_suppressions[i] if i < len(shown_suppressions) else None
+            shown = cls._shown_entry(suppression, shown)
+            fixed_issues.append(
+                LintIssue(
+                    severity=LintSeverity.INFO,
+                    category=LintCategory.SUPPRESSION_UNUSED,
+                    message=f"Commented out unused suppression: path='{shown.get('path', '')}', rule_id='{shown.get('rule_id', '*')}'",
+                    path=f"global_settings.suppressions[{i}]",
+                    fixable=True,
+                    fix_description="Comment out unused suppression",
+                )
+            )
+
         return fixed_content, fixed_issues, report_timestamp
+
+    @classmethod
+    def _read_unused_report(cls, report_path: Path) -> Dict[str, Any]:
+        """The unused suppressions report as a JSON object.
+
+        Raises ``ValueError`` (``json.JSONDecodeError`` and ``UnicodeDecodeError``
+        are subclasses) for a file that is not JSON or not UTF-8, and for one
+        whose JSON is not an object, and ``OSError`` for one that cannot be
+        read (a directory, say). One reader for the lint check and for
+        ``--fix-unused``, so a report the check tolerates with a warning never
+        crashes the fix.
+        """
+        with open(report_path, "r", encoding="utf-8") as f:
+            report_data = json.load(f)
+        if not isinstance(report_data, dict):
+            raise ValueError(
+                f"{report_path} does not hold a JSON object "
+                f"(got {type(report_data).__name__})"
+            )
+        return report_data
 
     @classmethod
     def _comment_out_suppressions(
         cls,
         raw_content: str,
-        suppressions: List[Dict[str, Any]],
-        unused_indices: set,
+        unused_indices: Set[int],
         date_str: str,
-    ) -> str:
-        """Comment out specific suppressions in the raw YAML content.
+    ) -> Tuple[str, Set[int]]:
+        """Comment out the entries at ``unused_indices`` of
+        ``global_settings.suppressions`` in the raw YAML text.
 
-        Finds each suppression block in the YAML and comments it out with a note.
-        A list whose every entry is commented out becomes `suppressions: []`:
+        Returns the text and the indices that were commented out.
+
+        The list is located by its place in the document, through the node
+        positions PyYAML's composer records (``_locate_suppressions_list``),
+        never by line text: a text search for a line starting
+        ``suppressions:`` found the key of any other mapping (a plugin's
+        option, another section's list), a line of a block scalar that happened
+        to start with the word, and counted their entries as the global list's,
+        so the wrong entries were commented out and the file could no longer
+        parse. Each entry's lines run from its own ``-`` to the next
+        entry's, or to the end of the list, as the scanner places them, so a
+        ``-`` inside a block scalar or a nested list is never an entry.
+
+        A list whose every entry is commented out becomes ``suppressions: []``:
         with only comments under it the key would hold null, which a scan
         refuses (exit 3).
+
+        A list this cannot edit line by line (a flow sequence, ``[{...}]``, or
+        an alias of a list written elsewhere, whose edit would change every
+        other use of the anchor) is left as it is, with nothing reported
+        commented out; the caller reports only what was.
         """
-        lines = raw_content.split("\n")
-        result_lines: List[str] = []
-        # For each `suppressions:` line (by its index in result_lines), how many
-        # entries its list had and how many of them were commented out.
-        entries_seen: Dict[int, int] = {}
-        entries_commented: Dict[int, int] = {}
-        section_line = -1
+        lines = cls._yaml_lines(raw_content)
+        located = cls._locate_suppressions_list(raw_content, lines)
+        if located is None:
+            return raw_content, set()
+        key_line, dash_positions, list_end_line, key_column = located
+        if not dash_positions:
+            return raw_content, set()
+        dash_column = dash_positions[0][1]
+        indent = " " * dash_column
 
-        # Find the suppressions list in the YAML by locating suppression entries
-        # Each suppression starts with "- path:" at the appropriate indentation
-        in_suppressions_section = False
-        current_suppression_idx = -1
-        suppression_indent = None
-        key_indent = 0
-        i = 0
-
-        while i < len(lines):
-            line = lines[i]
-            stripped = line.lstrip()
-
-            # Detect entry into the suppressions section
-            if stripped.startswith("suppressions:") and not stripped.startswith("#"):
-                in_suppressions_section = True
-                current_suppression_idx = -1
-                suppression_indent = None
-                key_indent = len(line) - len(stripped)
-                section_line = len(result_lines)
-                entries_seen[section_line] = 0
-                entries_commented[section_line] = 0
-                result_lines.append(line)
-                i += 1
+        commented: Set[int] = set()
+        # The lines of entry i run from its dash line up to the next entry's
+        # dash line, or the list's end. Every content line in the range is
+        # commented; blank lines stay blank and comment lines stay as they are.
+        for index, (dash_line, _column) in enumerate(dash_positions):
+            if index not in unused_indices:
                 continue
-
-            # If we're in the suppressions section, look for list items
-            if in_suppressions_section:
-                # The section ends at a non-comment line indented less than the
-                # `suppressions:` key, or at the key's own indent when it is not
-                # a list item: a list may be indented under the key or written
-                # at the key's indent (`  suppressions:` then `  - path: ...`),
-                # and the next key (`  ignore_paths:`) is at the key's indent.
-                if stripped and not stripped.startswith("#"):
-                    line_indent = len(line) - len(line.lstrip())
-                    if line_indent < key_indent or (
-                        line_indent == key_indent and not _starts_list_item(stripped)
-                    ):
-                        # We've left the suppressions section
-                        in_suppressions_section = False
-                        result_lines.append(line)
-                        i += 1
-                        continue
-
-                # Detect a new suppression entry ("- ...", or "-" alone). Once
-                # the first entry set the list's indent, only a list item at
-                # that indent starts one: a `-` or `- x` line deeper is part of
-                # an entry, such as a line of a block `reason: |`.
-                line_indent = len(line) - len(line.lstrip())
-                if _starts_list_item(stripped) and (
-                    suppression_indent is None or line_indent == suppression_indent
-                ):
-                    current_suppression_idx += 1
-                    entries_seen[section_line] += 1
-                    if suppression_indent is None:
-                        suppression_indent = len(line) - len(line.lstrip())
-
-                    if current_suppression_idx in unused_indices:
-                        entries_commented[section_line] += 1
-                        # Comment out this entire suppression block
-                        comment_note = f"{' ' * suppression_indent}# [ash-lint {date_str}] Commented out: unused suppression (not matched in last scan)"
-                        result_lines.append(comment_note)
-
-                        # Comment out the first line of the suppression
-                        result_lines.append(f"{' ' * suppression_indent}# {stripped}")
-                        i += 1
-
-                        # Comment out continuation lines (indented more than the "- " line)
-                        while i < len(lines):
-                            next_line = lines[i]
-                            next_stripped = next_line.lstrip()
-                            next_indent = len(next_line) - len(next_line.lstrip())
-
-                            # Stop if we hit another list item at same level, a blank line
-                            # followed by non-continuation, or less indentation
-                            if next_stripped == "":
-                                result_lines.append(next_line)
-                                i += 1
-                                continue
-                            if (
-                                _starts_list_item(next_stripped)
-                                and next_indent <= suppression_indent
-                            ):
-                                break
-                            if (
-                                next_indent <= suppression_indent
-                                and not next_stripped.startswith("#")
-                            ):
-                                break
-
-                            # Comment out this continuation line
-                            result_lines.append(
-                                f"{' ' * suppression_indent}# {next_stripped}"
-                            )
-                            i += 1
-                        continue
-                    else:
-                        result_lines.append(line)
-                        i += 1
-                        continue
-                else:
-                    result_lines.append(line)
-                    i += 1
+            next_dash_line = (
+                dash_positions[index + 1][0]
+                if index + 1 < len(dash_positions)
+                else list_end_line
+            )
+            text, ending = lines[dash_line]
+            note = (
+                f"{indent}# [ash-lint {date_str}] Commented out: unused "
+                "suppression (not matched in last scan)"
+            )
+            lines[dash_line] = (f"{note}{ending}{indent}# {text.lstrip()}", ending)
+            for line_no in range(dash_line + 1, min(next_dash_line, len(lines))):
+                text, ending = lines[line_no]
+                stripped = text.lstrip()
+                if not stripped or stripped.startswith("#"):
                     continue
-            else:
-                result_lines.append(line)
-                i += 1
-                continue
+                lines[line_no] = (f"{indent}# {stripped}", ending)
+            commented.add(index)
 
-        for line_idx, seen in entries_seen.items():
-            if seen and entries_commented[line_idx] == seen:
-                result_lines[line_idx] = result_lines[line_idx].replace(
-                    "suppressions:", "suppressions: []", 1
+        if commented and len(commented) == len(dash_positions):
+            text, ending = lines[key_line]
+            colon = text.find(":", key_column)
+            if colon != -1:
+                lines[key_line] = (
+                    text[: colon + 1] + " []" + text[colon + 1 :],
+                    ending,
                 )
-        return "\n".join(result_lines)
+        return "".join(text + ending for text, ending in lines), commented
+
+    # The line breaks PyYAML's reader counts (reader.py, ``forward``): LF, CRLF,
+    # a lone CR, NEL (U+0085), LINE SEPARATOR (U+2028) and PARAGRAPH SEPARATOR
+    # (U+2029). Split on these, so the line numbers the composer reports index
+    # the list ``_yaml_lines`` returns. The three non-ASCII ones are spelled by
+    # code point so the source holds no invisible character.
+    _YAML_LINE_BREAK = re.compile(
+        "\r\n|[\r\n" + chr(0x85) + chr(0x2028) + chr(0x2029) + "]"
+    )
+
+    @classmethod
+    def _yaml_lines(cls, text: str) -> List[Tuple[str, str]]:
+        """``text`` as (line, its line break) pairs, numbered as YAML numbers them.
+
+        The last pair's break is empty when the text does not end in one.
+        """
+        lines: List[Tuple[str, str]] = []
+        start = 0
+        for match in cls._YAML_LINE_BREAK.finditer(text):
+            lines.append((text[start : match.start()], match.group(0)))
+            start = match.end()
+        if start < len(text) or not lines:
+            lines.append((text[start:], ""))
+        return lines
+
+    @classmethod
+    def _locate_suppressions_list(
+        cls, raw_content: str, lines: List[Tuple[str, str]]
+    ) -> Optional[Tuple[int, List[Tuple[int, int]], int, int]]:
+        """Where ``global_settings.suppressions`` is in the YAML text.
+
+        Returns ``(key_line, dash_positions, list_end_line, key_column)``:
+        the line of the ``suppressions`` key, the (line, column) of each
+        entry's ``-``, in entry order, and the line the list ends before, all
+        0-based; or None when the document holds no such block list (no
+        ``global_settings`` mapping, no ``suppressions`` key under it, a value
+        that is not a sequence, a flow sequence, an alias of a sequence
+        anchored elsewhere), or when the text does not compose (its parse
+        failure was reported before this runs).
+
+        The composer places the sequence node at its first ``-`` and ends it
+        where the next key of the enclosing mapping starts, and the scanner
+        emits one BlockEntryToken per ``-`` of a block sequence at that
+        sequence's column, so the entries are the block-entry tokens at the
+        sequence's column inside its span. A ``-`` inside a block scalar is
+        text, not a token; one of a nested sequence is at a deeper column.
+        """
+        try:
+            root = yaml.compose(raw_content, Loader=yaml.SafeLoader)
+            tokens = list(yaml.scan(raw_content, Loader=yaml.SafeLoader))
+        except yaml.YAMLError:
+            return None
+        if not isinstance(root, yaml.MappingNode):
+            return None
+        settings = cls._mapping_value(root, "global_settings")
+        if not isinstance(settings, yaml.MappingNode):
+            return None
+        key_node = None
+        for key, _value in settings.value:
+            if isinstance(key, yaml.ScalarNode) and key.value == "suppressions":
+                key_node = key
+                break
+        if key_node is None:
+            return None
+        sequence = cls._mapping_value(settings, "suppressions")
+        if not isinstance(sequence, yaml.SequenceNode) or sequence.flow_style:
+            return None
+        key_line = key_node.start_mark.line
+        # An alias: the list's text is somewhere before the key that refers
+        # to it, and belongs to every other alias of the anchor too.
+        if (sequence.start_mark.line, sequence.start_mark.column) < (
+            key_node.start_mark.line,
+            key_node.start_mark.column,
+        ):
+            return None
+        column = sequence.start_mark.column
+        first_line = sequence.start_mark.line
+        end_line = sequence.end_mark.line
+        dash_positions = [
+            (token.start_mark.line, token.start_mark.column)
+            for token in tokens
+            if isinstance(token, yaml.BlockEntryToken)
+            and token.start_mark.column == column
+            and first_line <= token.start_mark.line < max(end_line, first_line + 1)
+        ]
+        if len(dash_positions) != len(sequence.value):
+            # The tokens and the node disagree on the entry count; nothing is
+            # edited on a reading this cannot check.
+            return None
+        if end_line >= len(lines):
+            end_line = len(lines)
+        return key_line, dash_positions, end_line, key_node.start_mark.column
+
+    @staticmethod
+    def _mapping_value(node: yaml.MappingNode, key: str) -> Optional[yaml.Node]:
+        """The value node of ``key`` in ``node``; None when no scalar key matches."""
+        for key_node, value_node in node.value:
+            if isinstance(key_node, yaml.ScalarNode) and key_node.value == key:
+                return value_node
+        return None
 
     @classmethod
     def get_unused_report_age(
@@ -1507,14 +1605,30 @@ class ConfigLinter:
 
         # Load the report
         try:
-            with open(report_path, "r", encoding="utf-8") as f:
-                report_data = json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
+            report_data = cls._read_unused_report(report_path)
+        except (ValueError, OSError) as e:
             result.issues.append(
                 LintIssue(
                     severity=LintSeverity.WARNING,
                     category=LintCategory.SUPPRESSION_UNUSED,
                     message=f"Failed to read unused suppressions report: {e}",
+                )
+            )
+            return
+
+        # The report of a scan run with --ignore-suppressions evaluated none of
+        # them and says so; it lists none as unused, and --fix-unused comments
+        # nothing out on its account.
+        if report_data.get("not_evaluated"):
+            result.issues.append(
+                LintIssue(
+                    severity=LintSeverity.INFO,
+                    category=LintCategory.SUPPRESSION_UNUSED,
+                    message=(
+                        "The unused suppressions report evaluated no suppression: "
+                        "the scan ran with --ignore-suppressions. Run a scan "
+                        "without it before --fix-unused."
+                    ),
                 )
             )
             return
@@ -1825,6 +1939,11 @@ class ConfigLinter:
                 shown_keys = [ENVIRONMENT_VALUE_SHOWN] * len(segment_data)
 
             for key, shown_key in zip(list(segment_data), shown_keys):
+                if not isinstance(key, str):
+                    # An unquoted `on:`, `true:` or `1:` is a bool or a number;
+                    # it is no spelling of a plugin name, and the string checks
+                    # below would raise on it.
+                    continue
                 env_read_key = shown_key != key
                 if env_read_key:
                     # Named by its written reference (``${VAR}``), the form the
@@ -1846,9 +1965,12 @@ class ConfigLinter:
                     continue  # not a built-in variant; let it pass
 
                 # Collision: BOTH the legacy variant AND the canonical
-                # form are present. A scan accepts the file and reads the
-                # canonical form, so this is a warning; --fix does not
-                # rename the key, since that would drop one of the two.
+                # form are present. A scan accepts the file and merges the
+                # two sections key by key, the canonical form winning where
+                # both set the same key (_PluginConfigSegment's before-
+                # validator), so a key only the legacy section sets, such as
+                # `enabled: false`, still applies. This is a warning; --fix
+                # does not rename the key, since that would drop one of the two.
                 if swapped in segment_data:
                     result.issues.append(
                         LintIssue(
@@ -1860,9 +1982,11 @@ class ConfigLinter:
                             message=(
                                 f"'{segment_name}.{shown_key}' (the legacy form) "
                                 f"and '{segment_name}.{swapped}' are both set; a "
-                                f"scan reads '{swapped}' and ignores "
-                                f"'{shown_key}'. Remove or merge one of them by "
-                                f"hand: `ash config lint --fix` does not rename it"
+                                f"scan merges them key by key, and where both "
+                                f"set a key '{swapped}' wins, so a key only "
+                                f"'{shown_key}' sets still applies. Remove or "
+                                f"merge one of them by hand: `ash config lint "
+                                f"--fix` does not rename it"
                             ),
                             fixable=False,
                         )
