@@ -25,9 +25,11 @@ it scans, which this module reads when it runs as the worker or as a pool proces
 processes of a ``spawn`` multiprocessing pool (macOS, Windows) import it again, as
 ``__mp_main__``, rather than inherit the worker's state, and refuse too. ``run()``
 puts the variable back to its previous state (the old value, or absent) once the pool
-has shut down. The scanner
-sets the same variable when it starts the worker, so the worker's own import refuses
-from its first line; a caller that does not set it gets the pool refusal all the same.
+has shut down. The module-level gate refuses unless the variable reads exactly "0":
+the scanner states "0" when the scan may verify and "1" otherwise, so the worker's own
+import refuses from its first line for a non-verifying scan, and a variable that an
+executor or an environment filter dropped on the way fails safe (unverified findings,
+no request); a caller that does not set it gets the refusal all the same.
 
 OUTPUT is written only on success, as a JSON list of ``[key, [secret, ...]]`` pairs in
 the collection's own key order, each secret in ``PotentialSecret.json()`` form. The key
@@ -244,21 +246,28 @@ def run(request: Dict[str, Any]) -> List[List[Any]]:
         accepted = _accepted_by_the_baseline(collection)
         with transient_settings(request["settings"]):
             _scan_files(collection, request["paths"])
-        lines_by_file: Dict[str, Optional[List[str]]] = {}
         return [
-            [
-                key,
-                [
-                    _with_column(secret, lines_by_file)
-                    for secret in secrets
-                    if not _is_accepted(accepted, key, secret, collection.root)
-                ],
-            ]
+            [key, _records_of(key, secrets, accepted, collection.root)]
             for key, secrets in collection.data.items()
         ]
     finally:
         if refusing:
             restore_environ(previous)
+
+
+def _records_of(key: str, secrets: Any, accepted: _Accepted, root: str) -> List[Any]:
+    """The OUTPUT records of the secrets keyed by *key*, each with its column.
+
+    The lines read for the column are cached for this key only: every secret under
+    one key is in one file, so a cache shared by every key held every finding
+    file's lines for the whole collection, and is released with the key's records.
+    """
+    lines_by_file: Dict[str, Optional[List[str]]] = {}
+    return [
+        _with_column(secret, lines_by_file)
+        for secret in secrets
+        if not _is_accepted(accepted, key, secret, root)
+    ]
 
 
 def main(argv: List[str]) -> int:
@@ -291,8 +300,12 @@ def main(argv: List[str]) -> int:
 
 # Only as the worker itself (``python -m``) or as a spawned pool process, which
 # imports the worker as ``__mp_main__``. ASH imports this module for REFUSE_HTTP_ENV,
-# and the variable must not turn off HTTP in ASH's own process.
-if __name__ in ("__main__", "__mp_main__") and os.environ.get(REFUSE_HTTP_ENV) == "1":
+# and the variable must not turn off HTTP in ASH's own process. The requests are
+# refused unless the variable says exactly "0", which the scanner states for a scan
+# that may verify: a variable an executor or an environment filter dropped or
+# rewrote then fails safe (the secrets are reported unverified) rather than letting
+# candidate secrets reach their issuers.
+if __name__ in ("__main__", "__mp_main__") and os.environ.get(REFUSE_HTTP_ENV) != "0":
     refuse_http_requests()
 
 if __name__ == "__main__":
