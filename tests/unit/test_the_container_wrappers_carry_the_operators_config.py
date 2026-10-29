@@ -1871,6 +1871,48 @@ def test_a_checkout_that_is_itself_a_link_does_not_mark_a_file_beside_it_as_the_
 
 @pytest.mark.integration
 @pytest.mark.parametrize("via", ["option", "environment"])
+def test_a_name_back_into_the_checkout_through_its_own_link_still_meets_the_links_it_holds(
+    fake_runner, tmp_path, via
+):
+    """The twin of the launcher's check in
+    tests/unit/test_sandbox_refused_by_every_container_entrypoint.py: the operator's
+    link to the checkout is followed out of the checkout by a ``..``, and the name
+    comes back in by the checkout's real name to a link the checkout holds that leads
+    outside it. The walk goes on past the operator's link, so the name is the tree's
+    and the file is refused as one the repository chose: exit 3, nothing built or
+    run. (The previous two checks are the other half: a ``..`` that leaves the
+    checkout and stays out is not refused.)"""
+    real = tmp_path / "data-root" / "repo"
+    (real / ".git").mkdir(parents=True)
+    outside = tmp_path / "outside.yaml"
+    outside.write_text("project_name: outside\n", encoding="utf-8")
+    (real / "lnk.yaml").symlink_to(outside)
+    home = tmp_path / "operator-home"
+    home.mkdir()
+    (home / "repo").symlink_to(real, target_is_directory=True)
+    words, env = _config_by_option_or_environment(via, f"{home}/repo/../repo/lnk.yaml")
+
+    rc, output_text, calls = _run_ash(
+        fake_runner,
+        tmp_path,
+        [
+            "--no-build",
+            "--source-dir",
+            str(home / "repo"),
+            "--output-dir",
+            str(tmp_path / "out"),
+            *words,
+        ],
+        env,
+    )
+
+    assert rc == 3, output_text
+    assert calls == [], calls
+    assert "is a link, or is reached through one" in output_text, output_text
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("via", ["option", "environment"])
 def test_a_file_in_the_checkout_is_the_repositorys_when_the_source_is_reached_through_an_alias(
     fake_runner, tmp_path, via
 ):
@@ -1907,12 +1949,30 @@ def test_a_file_in_the_checkout_is_the_repositorys_when_the_source_is_reached_th
 
     assert rc == 0, output_text
     run = _only_run(calls)
-    assert any(
-        Path(str(mount["source"])) == config.resolve()
-        for mount in _mounts(run).values()
-        if "source" in mount
-    ), _mounts(run)
-    assert any("from-scanned-repository" in word for word in _inner_args(run))
+    inner = _inner_args(run)
+    mounts = _mounts(run)
+    # The mark and the mount are the route's own: the --config file is mounted at
+    # /ash-config and marked with --config-from-scanned-repository; the ASH_CONFIG
+    # file at /ash-env-config, named with --ash-config-from-host, marked with the
+    # --config-file-from-scanned-repository pair, and, with no --config given, also
+    # the scan's --config with that mark. A match on any mount or on one mark word
+    # read the two routes alike and could not tell a dropped word from a given one.
+    if via == "option":
+        destination = "/ash-config/cfg.yaml"
+        assert _flag(inner, "--config") == destination, inner
+        assert "--config-from-scanned-repository" in inner, inner
+        assert "--config-file-from-scanned-repository" not in inner, inner
+    else:
+        destination = "/ash-env-config/cfg.yaml"
+        assert _flag(inner, "--ash-config-from-host") == destination, inner
+        assert _flag(inner, "--config-file-from-scanned-repository") == destination, (
+            inner
+        )
+        assert _flag(inner, "--config") == destination, inner
+        assert "--config-from-scanned-repository" in inner, inner
+    assert destination in mounts, mounts
+    assert Path(str(mounts[destination]["source"])) == config.resolve(), mounts
+    assert mounts[destination].get("readonly") is True, mounts
 
 
 @pytest.mark.integration
