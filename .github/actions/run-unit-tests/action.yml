@@ -217,13 +217,22 @@ runs:
         ASH_TEST_TIER_FLOOR: "1"
         MARKER: ${{ inputs.marker }}
       run: |
-        # A tier run, and each shard of the integration tier, sees only part of the
-        # suite, so the snapshots that belong to the other tiers' and the other shards'
-        # tests are unused by construction. syrupy fails a session that has unused
-        # snapshots unless it is told to warn, and that failed legs with no failing test.
-        # The flag is passed here and not in pytest.ini's addopts, so a contributor's run
-        # of the whole suite keeps syrupy's unused-snapshot check.
-        args=(-m "$MARKER" --junit-xml=test-results/pytest.junit.xml --snapshot-warn-unused)
+        args=(-m "$MARKER" --junit-xml=test-results/pytest.junit.xml)
+        # Only a sharded leg is told to warn on unused snapshots. syrupy reports unused
+        # snapshots in two ways: when every collected test was selected it reports whole
+        # snapshot files nothing used, and when some were deselected (as `-m` deselects
+        # the other tiers' tests on every leg here) it reports only an entry whose own
+        # test ran and no longer asserts it, a real stale entry. A shard collects a
+        # subset of the modules, so a shard whose collected tests all carry the tier
+        # marker takes the first branch and reports the other shards' snapshot files,
+        # which are unused by construction; that failed legs with no failing test, and
+        # the flag turns it into a warning. A whole-tier run always deselects the other
+        # tiers, so it takes the second branch, where every report is a real stale entry
+        # and syrupy's failing default is kept. The flag is passed here and not in
+        # pytest.ini's addopts, so a contributor's run keeps the check too.
+        if [ -n "${ASH_TEST_SHARD:-}" ]; then
+          args+=(--snapshot-warn-unused)
+        fi
         if [ "$MARKER" = "unit" ]; then
           args+=(--cov=automated_security_helper --cov-config=.coveragerc --cov-report=)
         else

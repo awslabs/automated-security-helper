@@ -9,9 +9,11 @@ anything cannot pass by default:
 * nothing CI runs passes syrupy's update or warn-unused flags (either would turn a
   failing snapshot into a rewritten or ignored one), with one exception: the single
   ``--snapshot-warn-unused`` in the "Run PyTest" step of
-  ``.github/actions/run-unit-tests/action.yml``. A tier run or a shard sees only part of
-  the suite, so the other tiers' and shards' snapshots are unused by construction, and
-  syrupy would fail a leg whose tests all passed;
+  ``.github/actions/run-unit-tests/action.yml``, which the step passes for a sharded leg
+  only. A shard collects part of the tier, so the other shards' snapshot files are unused
+  by construction and syrupy would fail a leg whose tests all passed; a whole-tier run
+  keeps syrupy's failing default (tests/unit/test_unit_test_step_gates.py pins which
+  legs get the flag);
 * every snapshot file maps to a test module that exists, which syrupy cannot check for a
   module that was deleted or renamed;
 * .github/scripts/check-snapshot-trailers.py rejects a golden change whose commit has no
@@ -67,8 +69,8 @@ def banned_flags(text: str) -> list[str]:
     return _BANNED.findall(_COMMENT.sub("", text))
 
 
-# The one place CI may pass --snapshot-warn-unused: the composite action that runs a tier
-# (or a shard of one), in its "Run PyTest" step, once.
+# The one place CI may pass --snapshot-warn-unused: the composite action that runs a tier,
+# in its "Run PyTest" step, once, and only on a sharded leg (the step's own condition).
 _WARN_UNUSED = "--snapshot-warn-unused"
 _ADMITTED_FILE = ".github/actions/run-unit-tests/action.yml"
 _ADMITTED_STEP = "Run PyTest"

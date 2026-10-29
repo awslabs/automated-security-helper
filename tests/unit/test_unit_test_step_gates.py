@@ -14,8 +14,9 @@ This file holds both sides:
 * The cdk guard skips without the variable and fails with it.
 * The step runs one tier of the suite: ``-m <marker>``, with ``--run-integration
   --run-slow --no-cov`` for the integration and e2e tiers and coverage measured, with
-  no threshold, for the unit tier. Every tier also gets ``--snapshot-warn-unused``,
-  since a tier or a shard leaves the other tests' snapshots unused. The step's own
+  no threshold, for the unit tier. A sharded leg also gets ``--snapshot-warn-unused``,
+  since a shard leaves the other shards' snapshot files unused; a whole-tier run does
+  not, so a stale entry inside the tier still fails it. The step's own
   script is run here under bash with
   ``uv`` replaced by a function that prints its arguments, so the argument list pinned
   is the one the shell builds and not a substring of the YAML.
@@ -99,14 +100,16 @@ def _bash(script: str, **env: str) -> subprocess.CompletedProcess:
     )
 
 
-def _pytest_argv(marker: str) -> list[str]:
+def _pytest_argv(marker: str, **env: str) -> list[str]:
     """The arguments "Run PyTest" gives pytest for ``marker``, as the shell builds them.
 
     ``uv`` is a function that prints each of its arguments on a line of its own, so the
     script's array is expanded by bash itself; ``run pytest`` come first and are dropped.
+    ``env`` is the rest of the step's environment; with none given the leg is unsharded,
+    as the step's ``ASH_TEST_SHARD`` is empty for a whole-tier run.
     """
     script = str(_step("Run PyTest")["run"])
-    done = _bash('uv() { printf "%s\\n" "$@"; }\n' + script, MARKER=marker)
+    done = _bash('uv() { printf "%s\\n" "$@"; }\n' + script, MARKER=marker, **env)
     assert done.returncode == 0, done.stdout + done.stderr
     argv = done.stdout.splitlines()
     assert argv[:2] == ["run", "pytest"], argv
@@ -400,18 +403,30 @@ class TestTheStepBuildsTheRightArgumentsForEachTier:
         assert "--junit-xml=test-results/pytest.junit.xml" in argv, argv
 
     @pytest.mark.parametrize("marker", TIERS)
-    def test_it_warns_instead_of_failing_on_snapshots_the_tier_leaves_unused(
+    def test_a_sharded_leg_warns_instead_of_failing_on_the_other_shards_snapshots(
         self, marker
     ):
-        """A tier or a shard sees part of the suite, so the rest's snapshots are unused.
+        """A shard collects part of the tier, so the other shards' snapshot files are unused.
 
-        Without the flag syrupy fails the session on them even when every test passed.
-        It is passed by the step and not through pytest.ini's addopts, so a whole-suite
-        run on a contributor's machine keeps the unused-snapshot check.
+        When every collected test of a shard carries the tier marker, syrupy reports
+        those whole files as unused and fails the session with every test passed. The
+        flag is passed by the step for a sharded leg and not through pytest.ini's
+        addopts, so a run on a contributor's machine keeps the unused-snapshot check.
         """
-        assert "--snapshot-warn-unused" in _pytest_argv(marker)
+        assert "--snapshot-warn-unused" in _pytest_argv(marker, ASH_TEST_SHARD="2of4")
         ini = PYTEST_INI.read_text(encoding="utf-8")
         assert "snapshot-warn-unused" not in ini
+
+    @pytest.mark.parametrize("marker", TIERS)
+    @pytest.mark.parametrize("shard", [None, ""])
+    def test_a_whole_tier_run_keeps_syrupys_unused_snapshot_check(self, marker, shard):
+        """A whole-tier run deselects the other tiers with ``-m``, and under a deselection
+        syrupy reports only an entry whose own test ran and no longer asserts it. Those
+        are real stale entries, so the step leaves syrupy's failing default in place
+        there: a warn-unused flag would hide every orphaned entry inside a tier from CI.
+        """
+        env = {} if shard is None else {"ASH_TEST_SHARD": shard}
+        assert "--snapshot-warn-unused" not in _pytest_argv(marker, **env)
 
     @pytest.mark.parametrize("marker", TIERS)
     def test_it_names_no_test_path(self, marker):
