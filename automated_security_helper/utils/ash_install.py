@@ -174,7 +174,12 @@ def _distributions_declaring_this_module(root_package: str) -> List[str]:
     """
     try:
         mapped = packages_distributions().get(root_package) or []
-    except (PackageNotFoundError, OSError) as exc:
+    except (PackageNotFoundError, OSError, KeyError, TypeError, ValueError) as exc:
+        # packages_distributions walks EVERY installed distribution and reads
+        # each one's metadata: a sibling dist-info with no METADATA (its
+        # ``metadata`` is None, read as a mapping) or no Name raises TypeError
+        # or KeyError out of it, which is the sibling's defect, not this
+        # install's, and the install-location strategy below reads no sibling.
         ASH_LOGGER.debug(
             f"Could not enumerate the distributions providing {root_package!r} "
             f"({exc}); trying the install-location strategy instead."
@@ -187,6 +192,7 @@ def _distributions_declaring_this_module(root_package: str) -> List[str]:
         here = Path(__file__).resolve()
     except OSError:  # pragma: no cover - resolve() on an unreadable cwd
         return []
+    accepted = _project_directories_of(here, root_package)
 
     located: List[str] = []
     try:
@@ -222,7 +228,13 @@ def _distributions_declaring_this_module(root_package: str) -> List[str]:
             project_dir = project_dir.resolve()
         except (OSError, ValueError):
             continue
-        if project_dir == here or project_dir in here.parents:
+        # Only the directory a project providing this package is installed
+        # from, not any ancestor of this module: an editable project that
+        # merely ENCLOSES an ASH checkout (a monorepo, a workspace directory)
+        # records a file:// URL that is an ancestor too, and was taken for ASH
+        # (its reinstall source, its own "cdk" extra installed into ASH's
+        # environment).
+        if project_dir in accepted:
             if name not in located:
                 located.append(name)
 
@@ -232,6 +244,30 @@ def _distributions_declaring_this_module(root_package: str) -> List[str]:
             f"treating ASH's own metadata as unreadable."
         )
     return located
+
+
+def _project_directories_of(module_file: Path, root_package: str) -> set:
+    """The directories a project providing ``root_package`` installs from.
+
+    ``module_file`` is a module inside the package. The package directory is
+    its nearest ancestor named ``root_package`` (the package's parent when none
+    is, for a layout that renamed it); a project is installed from that
+    directory's parent (a flat layout) or, when that parent is ``src``, from the
+    directory above it (a src layout). Nothing higher: an ancestor above the
+    project is another project.
+    """
+    package_dir: Optional[Path] = None
+    for parent in module_file.parents:
+        if parent.name == root_package:
+            package_dir = parent
+            break
+    if package_dir is None:
+        package_dir = module_file.parent.parent
+    project_dir = package_dir.parent
+    accepted = {project_dir}
+    if project_dir.name == "src" and project_dir.parent != project_dir:
+        accepted.add(project_dir.parent)
+    return accepted
 
 
 def _extra_marker(extra: str) -> "re.Pattern[str]":
@@ -437,9 +473,21 @@ def ash_install_arguments(extra: Optional[str] = None) -> str:
 
 
 def _uv_pip_install() -> str:
-    """``<python> -m uv pip install --python <python>`` for the running interpreter."""
+    """``<python> -P -m uv pip install --no-config --python <python>`` for the
+    running interpreter.
+
+    A hint is copied and run where the operator stands, which is usually the
+    repository being scanned. ``--no-config`` keeps uv from reading that
+    repository's ``uv.toml`` or ``pyproject.toml`` (an index URL there would
+    choose where the packages come from). ``-P`` keeps the interpreter from
+    putting the working directory first on ``sys.path`` for the ``-m uv``
+    import, so a ``uv`` module in the repository is not the one that runs; it
+    exists from Python 3.11, and the hint names the interpreter that is running,
+    so it is printed only when that interpreter accepts it.
+    """
     python = shlex.quote(sys.executable)
-    return f"{python} -m uv pip install --python {python}"
+    safe_path = " -P" if sys.version_info >= (3, 11) else ""
+    return f"{python}{safe_path} -m uv pip install --no-config --python {python}"
 
 
 def install_command(*requirements: str) -> str:
