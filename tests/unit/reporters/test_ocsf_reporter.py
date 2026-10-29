@@ -69,8 +69,8 @@ class TestOcsfReporterHelperMethods:
         assert vulnerability.title == "TEST001"
         assert vulnerability.desc == "Test error message"
         assert vulnerability.severity == "CRITICAL"
-        assert vulnerability.cve.uid == "TEST001"
-        assert vulnerability.cve.desc == "Test error message"
+        # A scanner rule id is not a CVE identifier, so no cve object is attached.
+        assert vulnerability.cve is None
 
     def test_create_vulnerability_from_result_with_location(self, reporter):
         """Test creating vulnerability from SARIF result with location info."""
@@ -418,7 +418,7 @@ class TestOcsfReporterHelperMethods:
         )
 
         assert isinstance(finding, VulnerabilityFinding)
-        assert finding.activity_name == "Scan"
+        assert finding.activity_name == "Create"
         assert (
             finding.severity_id == SeverityId.integer_5
         )  # CRITICAL for error, as the gate
@@ -1354,7 +1354,7 @@ class TestOcsfReporterSeverityMapping:
         # Each finding should be a VulnerabilityFinding object
         for finding in findings:
             assert "activity_name" in finding
-            assert finding["activity_name"] == "Scan"
+            assert finding["activity_name"] == "Create"
             assert "vulnerabilities" in finding
             assert len(finding["vulnerabilities"]) == 1  # One vulnerability per finding
             assert "finding_info" in finding

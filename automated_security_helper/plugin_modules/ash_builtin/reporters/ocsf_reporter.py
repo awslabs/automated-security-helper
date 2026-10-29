@@ -34,6 +34,7 @@ from automated_security_helper.schemas.ocsf.ocsf_vulnerability_finding import (
 from automated_security_helper.schemas.sarif_schema_model import Result, Suppression
 from automated_security_helper.utils.get_ash_version import get_ash_version
 import json
+import re
 from datetime import datetime, timezone
 import uuid
 from typing import Optional, List, Tuple
@@ -72,6 +73,29 @@ SKIPPED_PROJECT_STATUS = "Skipped"
 #: identifier and a SIEM deduplicates rather than accumulating one record per run
 #: for a project that keeps being skipped.
 SKIPPED_PROJECT_UID_PREFIX = "ash-workspace-skipped-project:"
+
+#: The ``activity_name`` for ``activity_id`` 1 of the OCSF vulnerability_finding
+#: class, whose activities are Unknown (0), Create (1), Update (2), Close (3) and
+#: Other (99). Every record this reporter emits is the creation of a finding.
+#: The name was "Scan", which is not an activity of the class, beside the id 1.
+ACTIVITY_NAME = "Create"
+
+#: A CVE identifier, the only value OCSF's ``cve.uid`` is defined to hold.
+_CVE_ID = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
+
+
+def _rule_id(result: Any) -> Optional[str]:
+    """The id of the rule *result* names: its ruleId, else its rule.id.
+
+    SARIF 2.1.0 lets a result name its rule either way (3.27.5, 3.27.7). Read
+    as ruleId alone, a result naming it as rule.id was emitted as "Unknown Rule".
+    """
+    rule_id = getattr(result, "ruleId", None)
+    if rule_id:
+        return rule_id
+    rule = getattr(result, "rule", None)
+    rule = getattr(rule, "root", rule)
+    return getattr(rule, "id", None) or None
 
 
 def _metadata_with_labels(metadata: Metadata, *labels: str) -> Metadata:
@@ -165,8 +189,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         try:
             # Safely extract rule ID first for logging context
             try:
-                if result.ruleId:
-                    rule_id = result.ruleId
+                rule_id = _rule_id(result) or rule_id
             except Exception as e:
                 ASH_LOGGER.debug(f"Error extracting rule ID: {str(e)}")
 
@@ -199,11 +222,14 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 "severity": severity,
             }
 
-            # Add CVE if rule ID exists and is valid
+            # Add a CVE only when the rule id is one. OCSF defines ``cve.uid``
+            # as the CVE identifier; a scanner rule id (a bandit or checkov
+            # rule) published there told a SIEM that every finding was a known
+            # CVE. The rule id is the vulnerability's ``title`` either way.
             try:
-                if rule_id and rule_id != "Unknown Rule":
+                if rule_id and _CVE_ID.match(rule_id):
                     vuln_dict["cve"] = {
-                        "uid": rule_id,
+                        "uid": rule_id.upper(),
                         "desc": desc,
                     }
             except Exception as e:
@@ -468,8 +494,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         # Extract rule ID early for logging context
         rule_id = "Unknown Rule"
         try:
-            if result.ruleId:
-                rule_id = result.ruleId
+            rule_id = _rule_id(result) or rule_id
         except Exception:  # nosec B110 — graceful fallback when ruleId attribute missing
             pass
 
@@ -587,8 +612,8 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             # Create OCSF vulnerability finding
             ASH_LOGGER.debug(f"Creating VulnerabilityFinding object for {rule_id}")
             vulnerability_finding_dict = {
-                "activity_id": ActivityId.integer_1,  # SCAN activity
-                "activity_name": "Scan",
+                "activity_id": ActivityId.integer_1,  # Create
+                "activity_name": ACTIVITY_NAME,
                 "severity_id": severity_id,
                 "type_uid": 200201,  # Vulnerability Finding type ID
                 "class_uid": 2002,  # Vulnerability Finding class ID
@@ -640,7 +665,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
 
                 fallback_finding = VulnerabilityFinding(
                     activity_id=ActivityId.integer_1,
-                    activity_name="Scan",
+                    activity_name=ACTIVITY_NAME,
                     severity_id=SeverityId.integer_2,  # LOW
                     status_id=StatusId.integer_0,  # Unknown
                     type_uid=200201,
@@ -684,7 +709,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         """
         return VulnerabilityFinding(
             activity_id=ActivityId.integer_1,
-            activity_name="Scan",
+            activity_name=ACTIVITY_NAME,
             # Informational: the record reports a fact about the run, not a risk.
             severity_id=SeverityId.integer_1,
             # 99 is OCSF's "not mapped -- see `status`". See the module constants.
@@ -808,7 +833,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         )
 
         for i, result in enumerate(all_results):
-            rule_id = getattr(result, "ruleId", None) or f"result_{i}"
+            rule_id = _rule_id(result) or f"result_{i}"
             ASH_LOGGER.debug(
                 f"Processing SARIF result {i + 1}/{total_results_count}: {rule_id}"
             )
@@ -870,10 +895,14 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             ASH_LOGGER.error(
                 "All SARIF results failed to process - returning error response"
             )
+            # processed_results_count, which is 0 here, not the total: the
+            # response adds its two counts into a total, so passing the total
+            # as the processed count doubled it and stated a 50% success rate
+            # for a run in which every result failed.
             return self._create_error_response(
                 "All findings failed to process",
                 current_time_ms,
-                total_results_count,
+                processed_results_count,
                 failed_results_count,
             )
 
