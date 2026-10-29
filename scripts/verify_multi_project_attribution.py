@@ -131,6 +131,7 @@ import argparse
 import json
 import os
 import shutil
+import signal
 import subprocess  # nosec B404 -- the gate runs ASH as a child process
 import sys
 import tempfile
@@ -138,6 +139,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
+from urllib.parse import unquote
 
 RESULTS_FILENAME = "ash_aggregated_results.json"
 WORKSPACE_FILENAME = "fixture.code-workspace"
@@ -458,6 +460,11 @@ class RunEvidence:
     #: that carries a workspace_uri, in encounter order. ``workspace_uris`` and
     #: ``raw_uris`` are flat, so only this field can say which file a value is for.
     located_results: Tuple[Tuple[str, Tuple[str, ...]], ...] = ()
+    #: every result in the run, whatever properties it carries. The denominator
+    #: for "every finding carries a workspace path": counting only the results
+    #: that carry a project attribution let a result with no properties at all
+    #: pass both sides of that accounting.
+    result_count: int = 0
 
 
 @dataclass
@@ -641,10 +648,12 @@ def collect_runs(results: Mapping[str, Any]) -> Tuple[RunEvidence, ...]:
         raw_uris: List[str] = []
         result_projects: List[str] = []
         located_results: List[Tuple[str, Tuple[str, ...]]] = []
+        result_count = 0
 
         for result in run.get("results") or []:
             if not isinstance(result, Mapping):
                 continue
+            result_count += 1
             rule_id = result.get("ruleId")
             if rule_id is not None:
                 key = str(rule_id)
@@ -678,6 +687,7 @@ def collect_runs(results: Mapping[str, Any]) -> Tuple[RunEvidence, ...]:
                 raw_uris=tuple(raw_uris),
                 result_projects=tuple(result_projects),
                 located_results=tuple(located_results),
+                result_count=result_count,
             )
         )
     return tuple(evidence)
@@ -752,6 +762,35 @@ def check_no_scanner_errors(statuses: Mapping[str, str]) -> List[str]:
         for name, status in sorted(statuses.items())
         if status == STATUS_ERROR
     ]
+
+
+def check_gate_scanners_ran(statuses: Mapping[str, str]) -> List[str]:
+    """Both scanners this gate selects must have run in the workspace rollup.
+
+    The gate's own text names checkov as the second producer the rollup check
+    needs, yet nothing refused a run in which checkov was MISSING (tool not
+    installed) or SKIPPED (nothing to scan, the fixture's Terraform file lost).
+    Every assertion that reads checkov then passed by reading nothing from it, and
+    the gate printed PASS having exercised one scanner while claiming two. Absent
+    from the rollup altogether is the same state with less evidence.
+    """
+    violations: List[str] = []
+    for scanner in GATE_SCANNERS:
+        status = statuses.get(scanner)
+        if status is None:
+            violations.append(
+                f"scanner '{scanner}' is one of the two this gate selects "
+                f"(--scanners) but is absent from scanner_results; present: "
+                f"{sorted(statuses) or 'none'}"
+            )
+        elif status in (STATUS_MISSING, STATUS_SKIPPED):
+            violations.append(
+                f"scanner '{scanner}' is one of the two this gate selects but "
+                f"reports {status}, so every check that reads its findings "
+                f"passed on an empty set. The gate asserts two scanner families "
+                f"and this run supplied one"
+            )
+    return violations
 
 
 def check_one_run_per_project(
@@ -1050,10 +1089,15 @@ def _uri_base_to_path(uri_base: str) -> Path:
 
     Textual rather than via ``urlsplit`` so a Windows ``file:///C:/x`` reduces to
     ``C:/x`` rather than to a path with a stray leading separator.
+
+    Percent-escapes are decoded: a URI spells a space as ``%20`` and a non-ASCII
+    character as its UTF-8 bytes, so a workspace root with either in its path
+    resolved to a directory that does not exist and every run failed the
+    root-resolution check for a reason that was not about the run.
     """
     text = uri_base
     if text.lower().startswith("file://"):
-        text = text[len("file://") :]
+        text = unquote(text[len("file://") :])
         if len(text) > 2 and text[0] == "/" and text[2] == ":":
             text = text[1:]
     return Path(text)
@@ -1083,6 +1127,23 @@ def check_result_paths_resolve_against_their_run_root(
             # check_one_run_per_project already reports the missing root.
             continue
         root = _uri_base_to_path(run.uri_base)
+        # The root has to be THIS project's directory. Every fixture project holds
+        # the same relative paths, so a run that declared another project's root
+        # still resolved every URI to an existing file and passed; the root's
+        # tail is compared against the attributed project's workspace-relative
+        # path, which no other project shares.
+        expected_tail = RELATIVE_PATH_BY_PROJECT.get(run.attributed_project or "")
+        if expected_tail is not None:
+            tail_parts = PurePosixPath(expected_tail).parts
+            root_parts = root.parts
+            if root_parts[-len(tail_parts) :] != tail_parts:
+                violations.append(
+                    f"SARIF run {run.index} is attributed to project "
+                    f"'{run.attributed_project}' at '{expected_tail}' but declares "
+                    f"its root as '{root}', which is not that project's directory. "
+                    f"Every project holds the same relative paths, so the URIs "
+                    f"would still resolve; the root itself is wrong"
+                )
         unresolvable: List[str] = []
         for uri in run.raw_uris:
             normalized = uri.replace("\\", "/")
@@ -1227,8 +1288,25 @@ def check_thresholds_are_per_project(
     lax = by_key.get(lax_key)
     violations: List[str] = []
 
+    # Every project first, not only the pair. Each fixture project writes its own
+    # severity_threshold into its config, and the payload reports the threshold
+    # the project was judged by; the two must agree for every project. Comparing
+    # the pair alone let a threshold leak into project-a or apps-admin, or a
+    # per-project config that never reached its scan, pass unseen.
+    for fixture in FIXTURE_PROJECTS:
+        outcome = by_key.get(fixture.key)
+        if outcome is None:
+            continue  # check_every_project_ran reports the missing project
+        if outcome.threshold != fixture.threshold:
+            violations.append(
+                f"project '{fixture.key}' reports severity_threshold "
+                f"'{outcome.threshold}' but its own config sets "
+                f"'{fixture.threshold}'. Either its config never reached its scan "
+                f"or another project's threshold was applied to it"
+            )
+
     if strict is None or lax is None:
-        return [
+        return violations + [
             (
                 f"cannot compare thresholds: '{strict_key}' or '{lax_key}' is missing "
                 f"from workspace.projects (present: {sorted(by_key)})"
@@ -1426,7 +1504,11 @@ def check_no_finding_lost_its_workspace_path(
     workspace = results.get("workspace") or {}
     counted = _as_int(workspace.get("unconvertible_finding_paths"))
     located = sum(len(run.workspace_uris) for run in runs)
-    total = sum(len(run.result_projects) for run in runs)
+    # Every result, not only those carrying a project attribution. The two
+    # properties are written together, so a result that lost both was absent
+    # from both sides of this accounting and passed silently.
+    total = sum(run.result_count for run in runs)
+    attributed = sum(len(run.result_projects) for run in runs)
 
     violations: List[str] = []
     if counted:
@@ -1438,9 +1520,10 @@ def check_no_finding_lost_its_workspace_path(
         )
     if total and located != total:
         violations.append(
-            f"{total} finding(s) carry a project attribution but only {located} "
-            f"carry a workspace_uri, and {counted} were counted as unconvertible. "
-            f"The difference is findings that lost their path silently"
+            f"{total} finding(s) are in the SARIF but only {located} carry a "
+            f"workspace_uri ({attributed} carry a project attribution), and "
+            f"{counted} were counted as unconvertible. The difference is findings "
+            f"that lost their path silently"
         )
     return violations
 
@@ -1517,8 +1600,42 @@ def check_findings_are_from_the_fixture(
     return violations
 
 
-def check_exit_code(exit_code: int) -> List[str]:
+def check_exit_code(
+    exit_code: int, projects: Sequence[ProjectOutcome] = ()
+) -> List[str]:
+    """The process exit code must say what the projects say.
+
+    Both tolerated codes are tolerated only in their own case. The fixture is
+    built so that project-a and project-b exceed their thresholds, so the
+    expected code is 2; tolerating 0 unconditionally let a workspace whose
+    projects reported exceeds_threshold pass with an exit code that says clean,
+    which is exactly the regression a consumer of the exit code would be hurt by.
+    When no project outcome is given (the pure logic called on its own) the two
+    codes are both accepted, as before.
+    """
     if exit_code in TOLERATED_EXIT_CODES:
+        exceeding = sorted(
+            project.key
+            for project in projects
+            if project.status == "completed" and project.exceeds_threshold
+        )
+        if exit_code == 0 and exceeding:
+            return [
+                (
+                    f"the workspace scan exited 0 although project(s) {exceeding} "
+                    f"report exceeds_threshold=true. The exit code says clean while "
+                    f"the payload says actionable findings; a CI consumer reading "
+                    f"the code would pass this workspace"
+                )
+            ]
+        if exit_code == 2 and projects and not exceeding:
+            return [
+                (
+                    "the workspace scan exited 2 (actionable findings) but no "
+                    "completed project reports exceeds_threshold=true; the exit "
+                    "code and the payload disagree"
+                )
+            ]
         return []
     if exit_code == WORKSPACE_ERROR_EXIT_CODE:
         return [
@@ -1587,6 +1704,10 @@ def evaluate_results(
     # violations below, so name it as the root cause rather than letting it sit
     # first in a flat list of ten.
     outcome.root_violations.extend(scanner_errors)
+    # A selected scanner that never ran explains the same downstream silence.
+    scanner_gaps = check_gate_scanners_ran(statuses)
+    outcome.violations.extend(scanner_gaps)
+    outcome.root_violations.extend(scanner_gaps)
     outcome.violations.extend(check_one_run_per_project(projects, runs))
     outcome.violations.extend(check_findings_are_attributed_to_their_own_project(runs))
     outcome.violations.extend(check_each_project_shows_only_its_own_marker_rule(runs))
@@ -1601,7 +1722,7 @@ def evaluate_results(
     outcome.violations.extend(check_per_project_subtrees(projects, output_dir))
     if exit_code is not None:
         outcome.violations.extend(check_workspace_status(results, exit_code))
-        outcome.violations.extend(check_exit_code(exit_code))
+        outcome.violations.extend(check_exit_code(exit_code, projects))
     if repo_root is not None:
         outcome.violations.extend(check_findings_are_from_the_fixture(runs, repo_root))
     return outcome
@@ -1755,6 +1876,61 @@ def build_scan_command(definition: Path, output_dir: Path) -> List[str]:
     return command
 
 
+def child_environment(base: Mapping[str, str] | None = None) -> Dict[str, str]:
+    """The environment the scan child runs under: no ``ASH_*`` variable.
+
+    The product reads options from the environment too (``ASH_EXCLUDED_SCANNERS``,
+    ``ASH_SCANNERS``, ``ASH_CONFIG``, ``ASH_WORKSPACE_CONFIG``, the shard
+    variables), so an operator's shell could change which run this gate judges
+    with no trace in its output. The gate's inputs are its command line and the
+    fixture it wrote. UTF-8 is forced both ways for the child's Rich table.
+    """
+    source = os.environ if base is None else base
+    env = {key: value for key, value in source.items() if not key.startswith("ASH_")}
+    env["PYTHONIOENCODING"] = "utf-8"
+    env.setdefault("PYTHONUTF8", "1")
+    return env
+
+
+#: Seconds the scan child gets to shut down after SIGTERM before it is killed.
+SHUTDOWN_GRACE_SECONDS = 15.0
+
+
+def _stop_process_group(
+    process: Any, grace_seconds: float = SHUTDOWN_GRACE_SECONDS
+) -> None:
+    """Stop the scan child and the tools it started, SIGTERM first.
+
+    ``subprocess.run(timeout=...)`` kills only the ASH process, with SIGKILL, so
+    the bandit and checkov processes ASH had started in their own sessions were
+    orphaned and kept writing into the kept evidence directory. The child is
+    started as the leader of its own process group, SIGTERM goes to the whole
+    group so ASH runs its own shutdown, and SIGKILL follows only for whatever is
+    left after the grace period. Without process groups the child alone is
+    terminated, then killed.
+    """
+    if process.poll() is not None:
+        return
+    group_signals = hasattr(os, "killpg") and hasattr(signal, "SIGKILL")
+    if group_signals:
+        with suppress(ProcessLookupError, PermissionError):
+            os.killpg(process.pid, signal.SIGTERM)
+    else:
+        process.terminate()
+    try:
+        process.wait(timeout=grace_seconds)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    if group_signals:
+        with suppress(ProcessLookupError, PermissionError):
+            os.killpg(process.pid, signal.SIGKILL)
+    else:
+        process.kill()
+    with suppress(subprocess.TimeoutExpired):
+        process.wait(timeout=grace_seconds)
+
+
 def run_scan(
     repo_root: Path, definition: Path, output_dir: Path, timeout: float
 ) -> subprocess.CompletedProcess[str]:
@@ -1763,21 +1939,34 @@ def run_scan(
     ``cwd=repo_root`` is load-bearing: it is passed to the child rather than set
     with ``os.chdir``, because this project deliberately removed process-wide cwd
     dependence.
+
+    Raises ``subprocess.TimeoutExpired`` carrying the output read so far when the
+    scan outlives *timeout*; the child and its tools are stopped first.
     """
-    env = dict(os.environ)
-    env["PYTHONIOENCODING"] = "utf-8"
-    env.setdefault("PYTHONUTF8", "1")
-    return subprocess.run(  # nosec B603 -- list args, no shell, argv[0] is sys.executable
-        build_scan_command(definition, output_dir),
+    command = build_scan_command(definition, output_dir)
+    popen_options: Dict[str, Any] = {}
+    if hasattr(os, "setsid"):
+        popen_options["start_new_session"] = True
+    with subprocess.Popen(  # nosec B603 -- list args, no shell, argv[0] is sys.executable
+        command,
         cwd=str(repo_root),
-        env=env,
-        capture_output=True,
+        env=child_environment(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=timeout,
-        check=False,
-    )
+        **popen_options,
+    ) as process:
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as expired:
+            _stop_process_group(process)
+            stdout, stderr = process.communicate()
+            raise subprocess.TimeoutExpired(
+                command, timeout, output=stdout, stderr=stderr
+            ) from expired
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
 def load_results(output_dir: Path) -> Any:
