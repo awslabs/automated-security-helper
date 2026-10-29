@@ -13,6 +13,7 @@ audit hook's prelude and a few lines of their own, never ASH.
 
 from __future__ import annotations
 
+import inspect
 import os
 import subprocess
 import sys
@@ -21,6 +22,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils import tool_guard
 from tests.utils.child_tool_starts import (
     POSIX_ONLY,
     SHADOWED_EXIT,
@@ -533,3 +535,42 @@ def test_a_shell_line_with_no_interpreter_adds_no_module_word():
     """The control: a shell line whose words run no Python module is read word
     by word and nothing is added."""
     assert readers()["_words_of"]("ls -l /tmp") == ["ls", "-l", "/tmp"]
+
+
+@pytest.mark.unit
+def test_the_prelude_carries_the_conftests_tables_and_the_guards_walk(tmp_path):
+    """The child reads a command line with the sets the root conftest reads and the
+    -m walk the tool guard runs, taken from those homes when the prelude is built,
+    so neither can drift from its copy: there is no copy."""
+    from tests import conftest as root_conftest
+
+    text = ChildToolStarts(tmp_path).prelude()
+
+    for name in ("_SHELLS", "_SHELL_OPTIONS_WITH_A_VALUE", "_SHELL_LONG_FLAGS"):
+        expected = f"{name} = {tuple(sorted(getattr(root_conftest, name)))!r}\n"
+        assert text.count(expected) == 1, name
+    assert text.count(inspect.getsource(tool_guard._module_run_by)) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "argv",
+    [
+        pytest.param(["python3", "-m", "uv", "--version"], id="m-then-the-module"),
+        pytest.param(["python3", "-Im", "uv"], id="m-ends-a-cluster"),
+        pytest.param(["python3", "-muv"], id="the-module-inside-the-cluster"),
+        pytest.param(["python3", "-W", "ignore", "-m", "uv"], id="a-valued-w-before-m"),
+        pytest.param(["python3", "-X", "utf8", "-m", "uv"], id="a-valued-x-before-m"),
+        pytest.param(["python3", "-c", "import uv"], id="c-ends-the-options"),
+        pytest.param(
+            ["python3", "script.py", "-m", "uv"], id="a-script-ends-the-options"
+        ),
+        pytest.param(["python3", "-", "-m", "uv"], id="a-lone-dash-ends-the-options"),
+        pytest.param(["python3", "-m"], id="m-with-no-module"),
+        pytest.param([b"python3", b"-m", b"detect_secrets"], id="bytes"),
+    ],
+)
+def test_the_exec_d_walk_answers_as_the_guards_own_does(argv):
+    """The two walkers are one function in two processes: the text the child runs
+    answers each command line as the tool guard's function does here."""
+    assert readers()["_module_run_by"](argv) == tool_guard._module_run_by(argv)

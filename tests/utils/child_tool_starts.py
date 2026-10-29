@@ -40,7 +40,10 @@ unchanged, which is what lets a launch scan follow the caller's import path.
 The prelude's reading of a command line (which words of an argv can name a tool) is
 plain functions with no state, kept apart from the hook in ``_READERS`` so that
 ``readers`` can run them in the test's own process: the tests that pin the walk call
-them on an argv and start nothing.
+them on an argv and start nothing. The shell tables and the -m walk are not copied
+into this file: the prelude takes the tables from tests/conftest.py's objects and the
+walk from tests/utils/tool_guard.py's ``_module_run_by`` source when it is built, so
+the child reads a command line exactly as the in-process guard does.
 
 The stand-ins are ``#!/bin/sh`` scripts, which Windows does not find on PATH, so the
 cells that use this class are skipped off POSIX (``POSIX_ONLY``).
@@ -48,6 +51,7 @@ cells that use this class are skipped off POSIX (``POSIX_ONLY``).
 
 from __future__ import annotations
 
+import inspect
 import os
 import shlex
 from pathlib import Path
@@ -55,6 +59,7 @@ from typing import Mapping
 
 import pytest
 
+from tests.utils import tool_guard
 from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
 
 #: The tools a child scan's availability probes start by name.
@@ -87,30 +92,17 @@ _STAND_INS = @STAND_INS@
 _EVENTS = ("subprocess.Popen", "os.posix_spawn", "os.exec", "os.spawn", "os.system")
 """
 
-#: The shell tables the readers use: the test conftest's set (tests/conftest.py,
-#: ``_SHELLS``, ``_SHELL_OPTIONS_WITH_A_VALUE`` and ``_SHELL_LONG_FLAGS``).
-_TABLES = """\
-_SHELLS = ("sh", "bash", "dash", "zsh", "ksh", "mksh")
-#: Shell options whose value is the next argument, not where the options end.
-_SHELL_OPTIONS_WITH_A_VALUE = ("-o", "+o", "-O", "+O", "--rcfile", "--init-file")
-#: Long shell options that take no value. Any other might take one, and then where
-#: the options end is unknown.
-_SHELL_LONG_FLAGS = (
-    "--norc",
-    "--noprofile",
-    "--login",
-    "--posix",
-    "--noediting",
-    "--restricted",
-    "--verbose",
-    "--debugger",
-    "--protected",
-)
-"""
+#: The shell tables the readers use, taken from the root conftest's own objects
+#: when the prelude is built (``_tables_source``), so the child reads the set the
+#: in-process guard reads: ``_SHELLS``, the shells whose -c runs its first operand;
+#: ``_SHELL_OPTIONS_WITH_A_VALUE``, the options whose value is the next argument;
+#: ``_SHELL_LONG_FLAGS``, the long options that take no value.
+_TABLE_NAMES = ("_SHELLS", "_SHELL_OPTIONS_WITH_A_VALUE", "_SHELL_LONG_FLAGS")
 
 #: The readers of a command line: which words of an argv a probed name can hide in.
-#: Plain functions of ``_os``, ``_NAMES`` and the tables, so ``readers`` can run them
-#: in the test's own process on an argv that is never started.
+#: Plain functions of ``_os``, ``_NAMES``, the tables and ``_module_run_by`` (the tool
+#: guard's own, whose source joins this text in ``_readers_source``), so ``readers``
+#: can run them in the test's own process on an argv that is never started.
 _READERS = '''\
 def _named(command):
     """The probed name *command* is, or None; a path counts by its last part."""
@@ -126,44 +118,6 @@ def _named(command):
 
 def _as_text(value):
     return _os.fsdecode(value) if isinstance(value, bytes) else str(value)
-
-
-def _module_run_by(argv):
-    """The module a Python command line runs with ``-m``, or None.
-
-    Read as the interpreter reads its options: ``-I -m uv``, ``-Im uv`` and ``-muv``
-    all run uv, and ``-c``, a script or ``-`` ends the options with no module. Of
-    the options before those, ``-W``, ``-X`` and ``--check-hash-based-pycs`` take a
-    value. (The in-process guard's walk, tests/utils/tool_guard.py:329-364.)
-    """
-    if not isinstance(argv, (list, tuple)):
-        return None
-    args = [_as_text(a) for a in argv[1:]]
-    index = 0
-    while index < len(args):
-        arg = args[index]
-        index += 1
-        if arg == "--check-hash-based-pycs":
-            index += 1
-            continue
-        if arg.startswith("--"):
-            continue
-        if not arg.startswith("-") or arg == "-":
-            return None
-        cluster = arg[1:]
-        for position, flag in enumerate(cluster):
-            rest = cluster[position + 1 :]
-            if flag == "m":
-                if rest:
-                    return rest
-                return args[index] if index < len(args) else None
-            if flag == "c":
-                return None
-            if flag in "WX":
-                if not rest:
-                    index += 1
-                break
-    return None
 
 
 def _shell_command_line(arguments):
@@ -328,9 +282,28 @@ for _name in _NAMES:
 """
 
 
+def _tables_source() -> str:
+    """The shell tables as Python source, each the root conftest's object as it is
+    now, so a change to the conftest's set reaches the child without a copy to
+    keep in step."""
+    from tests import conftest as root_conftest
+
+    return "".join(
+        f"{name} = {tuple(sorted(getattr(root_conftest, name)))!r}\n"
+        for name in _TABLE_NAMES
+    )
+
+
+def _module_run_by_source() -> str:
+    """The tool guard's ``_module_run_by`` as source: the one -m walk, read from
+    its home so the child runs what the in-process guard runs. It needs only
+    ``_as_text``, which the readers define under the same name."""
+    return inspect.getsource(tool_guard._module_run_by)
+
+
 def _readers_source() -> str:
     """The tables and the readers, as the prelude carries them."""
-    return _TABLES + "\n\n" + _READERS
+    return _tables_source() + "\n\n" + _READERS + "\n\n" + _module_run_by_source()
 
 
 def readers() -> dict:
