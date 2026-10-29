@@ -67,10 +67,19 @@ class SarifReporter(ReporterPluginBase[SARIFReporterConfig]):
         """
         sarif = model.sarif
         invocations = refusal_invocations(model)
-        if invocations and sarif is not None and sarif.runs:
+        per_project = workspace_converter_invocations(model)
+        if (invocations or per_project) and sarif is not None and sarif.runs:
             sarif = sarif.model_copy(deep=True)
-            run = sarif.runs[0]
-            run.invocations = list(run.invocations or []) + invocations
+            if invocations:
+                # A single-directory scan's results carry one run; the unified
+                # workspace model keeps its top-level converter rows empty, so
+                # this is never the arm that reports a project's converters.
+                run = sarif.runs[0]
+                run.invocations = list(run.invocations or []) + invocations
+            for run_index, project_invocations in per_project:
+                if 0 <= run_index < len(sarif.runs):
+                    run = sarif.runs[run_index]
+                    run.invocations = list(run.invocations or []) + project_invocations
         restore = complete_results_for_the_dump(sarif)
         try:
             return sarif.model_dump_json(
@@ -78,6 +87,85 @@ class SarifReporter(ReporterPluginBase[SARIFReporterConfig]):
             )
         finally:
             restore()
+
+
+def workspace_converter_invocations(
+    model: "AshAggregatedResults",
+) -> List[Tuple[int, List[Any]]]:
+    """Each project's converter shortfalls as invocations on that project's run.
+
+    The unified workspace model carries no top-level converter rows (its
+    ``converter_results`` is empty, because converter paths are relative to one
+    project's tree), so :func:`refusal_invocations` found nothing and the
+    workspace-level ``ash.sarif`` said nothing about a converter that lost
+    coverage in any project. What the model does carry is each project's
+    ``incomplete_converters`` (converter name to reason) and its
+    ``sarif_run_index``, so this adds to each project's own run one invocation
+    per converter that did not complete there, ``executionSuccessful`` false,
+    with one error-level notification naming the converter and the reason. The
+    per-input records a single-directory ``ash.sarif`` carries are not in the
+    unified model, so a workspace document names the converter and not the
+    inputs; the project's own ``projects/<key>/reports/ash.sarif`` has them.
+
+    Returns ``(run index, invocations)`` pairs; empty for a model that is not a
+    workspace scan, so the single-directory document is unchanged.
+    """
+    from automated_security_helper.schemas.sarif_schema_model import (
+        Invocation,
+        Level,
+        Message,
+        Message1,
+        Notification,
+        PropertyBag,
+        ReportingDescriptorReference,
+        ReportingDescriptorReference3,
+    )
+    from automated_security_helper.utils.converter_refusals import (
+        REFUSED_INPUT_NOTIFICATION_ID,
+    )
+
+    workspace = getattr(model, "workspace", None)
+    projects = getattr(workspace, "projects", None)
+    if not isinstance(projects, list):
+        return []
+
+    pairs: List[Tuple[int, List[Any]]] = []
+    for project in projects:
+        run_index = getattr(project, "sarif_run_index", None)
+        rows = getattr(project, "incomplete_converters", None)
+        if not isinstance(run_index, int) or not isinstance(rows, dict) or not rows:
+            continue
+        key = getattr(project, "project", None)
+        invocations = []
+        for converter, reason in sorted(rows.items()):
+            invocations.append(
+                Invocation(
+                    executionSuccessful=False,
+                    toolExecutionNotifications=[
+                        Notification(
+                            level=Level.error,
+                            message=Message(
+                                root=Message1(
+                                    text=(
+                                        f"{converter}: inputs of project "
+                                        f"'{key}' were not scanned: {reason}"
+                                    )
+                                )
+                            ),
+                            descriptor=ReportingDescriptorReference(
+                                root=ReportingDescriptorReference3(
+                                    id=REFUSED_INPUT_NOTIFICATION_ID
+                                )
+                            ),
+                        )
+                    ],
+                    properties=PropertyBag.model_validate(
+                        {"ash_converter": str(converter), "workspace_project": key}
+                    ),
+                )
+            )
+        pairs.append((run_index, invocations))
+    return pairs
 
 
 def complete_results_for_the_dump(sarif: Any) -> Callable[[], None]:
