@@ -54,7 +54,9 @@ def _model(reports: dict) -> AshAggregatedResults:
 UNUSABLE = {"cdk-nag": {"source": _report("PASSED", targets_failed=2)}}
 
 #: Two of three targets lost: the ordinary shortfall, with its numbers.
-PARTIAL = {"cdk-nag": {"source": _report("PASSED", targets_attempted=3, targets_failed=2)}}
+PARTIAL = {
+    "cdk-nag": {"source": _report("PASSED", targets_attempted=3, targets_failed=2)}
+}
 
 
 class TestTheSharedRenderer:

@@ -162,7 +162,18 @@ _XML_FORBIDDEN = re.compile(
     "[%s-%s%s%s%s-%s%s-%s%s%s]"
     % tuple(
         chr(point)
-        for point in (0x00, 0x08, 0x0B, 0x0C, 0x0E, 0x1F, 0xD800, 0xDFFF, 0xFFFE, 0xFFFF)
+        for point in (
+            0x00,
+            0x08,
+            0x0B,
+            0x0C,
+            0x0E,
+            0x1F,
+            0xD800,
+            0xDFFF,
+            0xFFFE,
+            0xFFFF,
+        )
     )
 )
 
@@ -435,7 +446,9 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                     # Only mark as error if it's actionable
                     if is_actionable:
                         if result.level == "error" or result.kind == "fail":
-                            test_case.result = [Error(message=message_text, type_="error")]
+                            test_case.result = [
+                                Error(message=message_text, type_="error")
+                            ]
                         elif result.level == "warning":
                             test_case.result = [
                                 Error(message=message_text, type_="warning")

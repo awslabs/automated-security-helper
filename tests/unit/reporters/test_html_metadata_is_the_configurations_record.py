@@ -79,7 +79,9 @@ def test_an_env_read_project_name_prints_as_its_reference(
     assert "zz-secret-project" not in project, project
 
 
-def test_a_literal_scanner_key_prints_as_written(tmp_path, monkeypatch, test_plugin_context):
+def test_a_literal_scanner_key_prints_as_written(
+    tmp_path, monkeypatch, test_plugin_context
+):
     """The control: a key the file wrote literally is unchanged by the record."""
     config = _resolve(
         tmp_path,

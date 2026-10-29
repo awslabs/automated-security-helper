@@ -355,9 +355,7 @@ class TestScannerThresholdIsRead:
         result = _make_result(level=level, scanner_name=scanner_name)
         model = _make_model(runs=[_make_run(results=[result])])
         model.ash_config.global_settings.severity_threshold = "MEDIUM"
-        model.ash_config.scanners.bandit.options.severity_threshold = (
-            scanner_threshold
-        )
+        model.ash_config.scanners.bandit.options.severity_threshold = scanner_threshold
         output = _get_reporter(tmp_path).report(model)
         return ET.fromstring(output).find(".//testcase")  # nosec B314
 

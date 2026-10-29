@@ -224,7 +224,9 @@ def _notes(rows: List[Dict[str, Any]]) -> List[tuple[str, str]]:
     conversion gap, a stale database) is the actionable half of a FAILED row,
     and it was built for every row and emitted by none of the renderers.
     """
-    return [(_shown(row["project"]), _shown(row["detail"])) for row in rows if row["detail"]]
+    return [
+        (_shown(row["project"]), _shown(row["detail"])) for row in rows if row["detail"]
+    ]
 
 
 #: Markdown's syntax characters, and the table's cell separator: each is kept

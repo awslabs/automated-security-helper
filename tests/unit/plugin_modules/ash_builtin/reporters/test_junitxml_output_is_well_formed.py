@@ -43,7 +43,9 @@ SHOWN = "\\x01"
 
 
 def _render(tmp_path, results):
-    return _get_reporter(tmp_path).report(_make_model(runs=[_make_run(results=results)]))
+    return _get_reporter(tmp_path).report(
+        _make_model(runs=[_make_run(results=results)])
+    )
 
 
 class TestForbiddenCharactersAreWrittenAsEscapes:

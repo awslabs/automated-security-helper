@@ -105,14 +105,21 @@ class TestInputsNotScannedShowsNameAndReason:
                     "target_type": "source",
                     "status": "MISSING",
                     "inputs_not_scanned": [
-                        {"path": "web/package-lock.json", "reason": "not\x1b[31m audited\n## x"}
+                        {
+                            "path": "web/package-lock.json",
+                            "reason": "not\x1b[31m audited\n## x",
+                        }
                     ],
                 }
             }
         }
         # The scanner's name reaches the line from the report's own key.
-        model.additional_reports["npm*audit\x07"] = model.additional_reports.pop("npm-audit")
-        model.additional_reports["npm*audit\x07"]["source"]["scanner_name"] = "npm*audit\x07"
+        model.additional_reports["npm*audit\x07"] = model.additional_reports.pop(
+            "npm-audit"
+        )
+        model.additional_reports["npm*audit\x07"]["source"]["scanner_name"] = (
+            "npm*audit\x07"
+        )
         return model
 
     def test_the_text_line_shows_the_name_and_the_reason(self, test_plugin_context):

@@ -61,24 +61,36 @@ def _model(*projects: WorkspaceProjectResult) -> AshAggregatedResults:
 
 class TestTheLabelIsShownNotObeyed:
     def test_markdown_keeps_the_label_on_its_row_and_literal(self):
-        lines = markdown_workspace_section(_model(_project("web", display_label=HOSTILE_LABEL)))
+        lines = markdown_workspace_section(
+            _model(_project("web", display_label=HOSTILE_LABEL))
+        )
         text = "\n".join(lines)
         assert "\x1b" not in text
         assert not any(line.startswith("## injected") for line in lines)
         (row,) = [line for line in lines if "injected" in line]
-        assert row.count("|") == len(("Project", "Status", "Findings", "Actionable", "Threshold", "Result")) + 1
+        assert (
+            row.count("|")
+            == len(
+                ("Project", "Status", "Findings", "Actionable", "Threshold", "Result")
+            )
+            + 1
+        )
         assert "\\*bold\\*" in row, row
         assert "&lt;b&gt;" in row, row
 
     def test_text_keeps_the_label_on_its_row(self):
-        lines = text_workspace_section(_model(_project("web", display_label=HOSTILE_LABEL)))
+        lines = text_workspace_section(
+            _model(_project("web", display_label=HOSTILE_LABEL))
+        )
         text = "\n".join(lines)
         assert "\x1b" not in text
         assert not any(line.startswith("## injected") for line in lines)
         assert any("\\x1b" in line and "injected" in line for line in lines), lines
 
     def test_html_shows_the_control_as_an_escape(self):
-        fragment = html_workspace_section(_model(_project("web", display_label=HOSTILE_LABEL)))
+        fragment = html_workspace_section(
+            _model(_project("web", display_label=HOSTILE_LABEL))
+        )
         assert "\x1b" not in fragment
         assert "\\x1b" in fragment
         assert "<b>" not in fragment.split("<tbody>", 1)[1]
@@ -109,7 +121,8 @@ class TestTheDetailIsRendered:
     def test_text_lists_the_detail_under_the_table(self):
         lines = text_workspace_section(self._incomplete())
         assert any(
-            line.strip().startswith("svc:") and "did not complete: semgrep, grype" in line
+            line.strip().startswith("svc:")
+            and "did not complete: semgrep, grype" in line
             for line in lines
         ), lines
         assert not any(line.strip().startswith("clean:") for line in lines), lines
@@ -123,4 +136,6 @@ class TestTheDetailIsRendered:
     def test_no_notes_when_no_row_has_a_detail(self):
         model = _model(_project("api"), _project("web"))
         assert 'class="project-notes"' not in html_workspace_section(model)
-        assert not any(line.startswith("- **") for line in markdown_workspace_section(model))
+        assert not any(
+            line.startswith("- **") for line in markdown_workspace_section(model)
+        )
