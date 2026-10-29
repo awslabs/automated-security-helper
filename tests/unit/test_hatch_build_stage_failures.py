@@ -20,18 +20,30 @@ outside every ANSI code page, so on a Windows host whose code page is not utf-8
 the read raised UnicodeDecodeError, no assets/Dockerfile was generated, and the
 same handler recorded "build-error".
 
+The first fix re-raised FileNotFoundError, which covers more than the staging
+assertion. ``_get_commit_sha`` runs git with ``subprocess.run`` and handles only
+``CalledProcessError``: a git that ``shutil.which`` finds but that cannot be run
+(its interpreter missing, say) raises FileNotFoundError with ENOENT, and that
+re-raise failed the build where an unrunnable git is meant to record
+"build-error" and continue (test_hatch_build_records_commit.py pins that for
+PermissionError). The missing staged source now raises its own class, caught by
+name.
+
 What is asserted
 ----------------
 ``_stage_assets`` on a tree whose staged sources are absent raises
 FileNotFoundError and records no "build-error". The raise comes before the hook
 runs git, so nothing here starts a process; the hook is loaded from a copy in
-``tmp_path`` so its paths point there. The encoding is a static read of the
-hook's own source: every text read and write of the Dockerfile names utf-8.
+``tmp_path`` so its paths point there. With the staged sources present and a
+``subprocess.run`` that raises FileNotFoundError for git, ``_stage_assets``
+records "build-error" and returns. The encoding is a static read of the hook's
+own source: every text read and write of the Dockerfile names utf-8.
 """
 
 from __future__ import annotations
 
 import ast
+import errno
 import importlib.util
 import shutil
 import sys
@@ -73,6 +85,34 @@ def test_a_missing_staged_source_fails_the_build(monkeypatch, tmp_path):
         "the missing source was swallowed and recorded as a build error instead "
         "of failing the build"
     )
+
+
+def test_a_git_that_cannot_be_run_still_records_build_error(monkeypatch, tmp_path):
+    """Only a missing staged source fails the build. A FileNotFoundError from
+    running git is an error like any other of the hook's: "build-error" is
+    recorded and the build continues."""
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    shutil.copyfile(HOOK, tree / "hatch_build.py")
+    shutil.copyfile(REPO_ROOT / "Dockerfile", tree / "Dockerfile")
+    hook = _load(monkeypatch, tree / "hatch_build.py", "hatch_build_git_not_runnable")
+    # The control: every staged source is present, so the staging assertion
+    # does not fire and the hook reaches git.
+    for source_rel, _staged in hook.DOCKERFILE_STAGED_PACKAGE_FILES:
+        source = tree / "automated_security_helper" / source_rel
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("# staged\n", encoding="utf-8")
+    git_path = str(tree / "bin" / "git")
+    monkeypatch.setattr(hook.shutil, "which", lambda name: git_path)
+
+    def run(*args, **kwargs):
+        raise FileNotFoundError(errno.ENOENT, "No such file or directory", git_path)
+
+    monkeypatch.setattr(hook.subprocess, "run", run)
+
+    object.__new__(hook.CustomBuildHook)._stage_assets()
+
+    assert hook.ASH_INSTALLED_REVISION_PATH.read_text() == "build-error"
 
 
 def test_the_dockerfile_is_read_and_written_as_utf8():

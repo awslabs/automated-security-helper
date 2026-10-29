@@ -46,6 +46,19 @@ DOCKERFILE_STAGED_PACKAGE_FILES: tuple = (
     ("core/exceptions.py", "exceptions.py"),
 )
 
+
+class StagedSourceMissingError(FileNotFoundError):
+    """A file DOCKERFILE_STAGED_PACKAGE_FILES names is not in the tree being built.
+
+    Its own class, so _stage_assets fails the build on exactly this and on
+    nothing else. Catching FileNotFoundError by name caught more: a git found on
+    PATH whose interpreter is missing raises FileNotFoundError from
+    subprocess.run inside _get_commit_sha, and that case is an unrunnable git,
+    which records "build-error" and lets the build continue, like every other
+    error of the hook.
+    """
+
+
 # The path every asset the root Dockerfile COPYs is under in a checkout. Inside
 # the shipped Dockerfile's build context (assets/ itself) the same file is at the
 # bare name, so the prefix comes off every source of every COPY.
@@ -231,7 +244,7 @@ class CustomBuildHook(BuildHookInterface):
                         "automated_security_helper", *source_rel.split("/")
                     )
                     if not source.exists():
-                        raise FileNotFoundError(
+                        raise StagedSourceMissingError(
                             f"Dockerfile stages {source_rel}, which does not exist "
                             f"at {source}"
                         )
@@ -257,13 +270,15 @@ class CustomBuildHook(BuildHookInterface):
                 f"Successfully wrote git details '{commit_sha}' to {ASH_INSTALLED_REVISION_PATH}"
             )
 
-        except FileNotFoundError:
+        except StagedSourceMissingError:
             # The staging loop's own assertion: a Dockerfile source that does not
             # exist. Re-raised so the build fails here, as the comment above says
             # it must. The handler below used to catch it with everything else,
             # so the build went on with a stale or missing assets/Dockerfile and
             # recorded "build-error" as the commit: exactly the silently-dropped
-            # stage the assertion exists to refuse.
+            # stage the assertion exists to refuse. Caught by its own class, not
+            # as FileNotFoundError: that name also covers a git that cannot be
+            # run, which belongs to the handler below.
             raise
         except Exception as e:
             _say(f"Unexpected error in build hook: {e}")
