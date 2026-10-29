@@ -211,7 +211,10 @@ def _distributions_declaring_this_module(root_package: str) -> List[str]:
         try:
             raw = dist.read_text("direct_url.json")
             name = dist.metadata["Name"]
-        except (OSError, KeyError, ValueError):
+        except (OSError, KeyError, ValueError, TypeError):
+            # TypeError: a .dist-info with no METADATA file gives a None
+            # ``metadata`` on some importlib versions, and subscripting it
+            # raised out of every hint and the cdk install-command builder.
             continue
         if not raw or not name:
             continue

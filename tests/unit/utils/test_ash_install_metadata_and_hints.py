@@ -68,6 +68,35 @@ def test_an_enclosing_editable_project_is_not_taken_for_ash(monkeypatch, tmp_pat
     ) == ["ash"]
 
 
+class _MetadatalessDistribution(_Distribution):
+    """A .dist-info with no METADATA file: its ``metadata`` reads as None."""
+
+    def __init__(self, project_dir: Path):
+        super().__init__("broken", project_dir)
+        self.metadata = None
+
+
+def test_a_sibling_with_no_metadata_does_not_take_the_lookup_down(
+    monkeypatch, tmp_path
+):
+    checkout = tmp_path / "ash"
+    module = checkout / "automated_security_helper" / "utils" / "ash_install.py"
+    module.parent.mkdir(parents=True)
+    module.write_text("", encoding="utf-8")
+    monkeypatch.setattr(ash_install, "__file__", str(module))
+    monkeypatch.setattr(ash_install, "packages_distributions", dict)
+    monkeypatch.setattr(
+        ash_install,
+        "distributions",
+        lambda: iter(
+            [_MetadatalessDistribution(tmp_path), _Distribution("ash", checkout)]
+        ),
+    )
+    assert ash_install._distributions_declaring_this_module(
+        "automated_security_helper"
+    ) == ["ash"]
+
+
 def test_a_src_layout_project_is_still_found(monkeypatch, tmp_path):
     """The control: the project directory of a src layout is one level higher."""
     checkout = tmp_path / "ash"
