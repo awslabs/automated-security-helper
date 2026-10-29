@@ -83,8 +83,11 @@ There is no directory default. A test with no tier marker, or with more than one
 module-level `integration` and a function-level `unit` count as two), makes collection
 refuse the whole session with a usage error that lists the first offenders, so nothing
 runs until each one has exactly one. The check is in `tests/conftest.py` and is pinned
-by `tests/unit/test_every_test_carries_one_tier_marker.py`. Other markers (`slow`,
-`skipif`, `usefixtures` and so on) are separate and stay as they are. `pytest --strict-markers`
+by `tests/unit/test_every_test_carries_one_tier_marker.py`. A `unit` test may not also
+carry `slow`: the unit job runs without `pytest --run-slow`, so the test would be skipped
+there and run in no tier, and collection refuses it the same way. Mark such a test
+`integration`, which runs with `pytest --run-slow`, or drop `slow`. Other markers
+(`skipif`, `usefixtures` and so on) are separate and stay as they are. `pytest --strict-markers`
 is on, so a marker has to be registered in `pytest.ini` or in a `conftest.py` before a
 test can use it.
 
