@@ -711,6 +711,38 @@ def measure(
     )
 
 
+def _unmeasured_record(
+    entry: ContentDatabase,
+    policy: str,
+    now: datetime,
+    scanner: Optional[str],
+    failure: str,
+) -> ContentDbAgeRecord:
+    """The record of a database whose scanner could not describe it: unknown age, no probe.
+
+    Built directly rather than by ``measure`` over a fabricated empty context: that
+    probe ran a real measurer against nothing, so its answer (an "absent" cache, a
+    missing directory) said nothing about the database the scan read and had to be
+    overwritten field by field. Nothing is probed here, so the record is unmeasurable
+    and not ``absent``, and the policy decides what the scan does with it.
+    """
+    reader = scanner if scanner in entry.readers else entry.scanner
+    return ContentDbAgeRecord(
+        name=entry.name,
+        scanner=reader,
+        built=None,
+        measured_by=entry.age_source,
+        max_age=entry.max_age,
+        measured_at=now,
+        policy=policy,
+        bound_source=entry.bound_source,
+        bound_is_tool_default=entry.bound_is_tool_default,
+        refresh=entry.refresh,
+        error=f"the scanner could not describe its database: {failure}",
+        timestamp_label=entry.timestamp_label,
+    )
+
+
 # --------------------------------------------------------------------------- the SARIF record
 
 
@@ -836,14 +868,7 @@ def assess_scanner(
             )
             entry_policy, policy_source = policy, None
         if ctx is None:
-            record = measure(
-                entry, ProbeContext(env={}), entry_policy, now, scanner_name
-            )
-            record.error = f"the scanner could not describe its database: {failure}"
-            record.built = None
-            # Unmeasured, not absent: the empty context's probe found no cache
-            # to look in, which says nothing about the database the scan read.
-            record.absent = False
+            record = _unmeasured_record(entry, entry_policy, now, scanner_name, failure)
         else:
             record = measure(entry, ctx, entry_policy, now, scanner_name)
         record.policy_source = policy_source

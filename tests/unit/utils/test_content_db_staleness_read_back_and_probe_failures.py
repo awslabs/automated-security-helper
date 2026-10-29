@@ -138,6 +138,29 @@ def test_a_probe_failure_grades_only_the_databases_the_scan_read_as_unmeasured()
     assert "no context" in (record.error or "")
 
 
+def test_a_probe_failure_runs_no_measurer(monkeypatch):
+    # The record of a database the scanner could not describe is built without a
+    # probe: measuring a fabricated empty context ran a real measurer against
+    # nothing and then overwrote its answer. A call of measure here is the defect.
+    def _no_probe(*args, **kwargs):
+        raise AssertionError(
+            "a measurer ran for a database the scanner could not describe"
+        )
+
+    monkeypatch.setattr(staleness, "measure", _no_probe)
+    entry = _entry("semgrep-offline-rules")
+    scanner = _Scanner("semgrep", [entry], RuntimeError("no context"))
+    records = staleness.assess_scanner(
+        scanner, _sarif("semgrep"), STALENESS_FAIL, now=_NOW
+    )
+    (record,) = records
+    assert record.built is None
+    assert record.absent is False
+    assert record.measured_by == entry.age_source
+    assert record.scanner == "semgrep"
+    assert record.stale is True
+
+
 def _results_with_stale_grype(reports):
     sarif = _sarif("grype")
     record = _record(built=_NOW - timedelta(days=30), max_age=timedelta(days=1))
