@@ -398,18 +398,21 @@ class ScanExecutionEngine:
         # selects this scan's share of the registry. The handler filter decides
         # which event handlers it notifies: those of the same plugins, plus
         # handlers the program running the scan subscribed from outside the
-        # plugin namespace. plugins_of is the one-callable scope form the phase
-        # objects consume as plugin_scope.
+        # plugin namespace. The phases this engine builds take the same handler
+        # filter as their plugin_scope, so a phase-level event (SCAN_START,
+        # SCAN_COMPLETE, every *_PHASE_START and *_PHASE_COMPLETE) reaches the
+        # same handlers EXECUTION_START and EXECUTION_COMPLETE reach. The
+        # phases used to be given plugins_of instead, which admits only the
+        # plugin namespace, so a handler the program subscribed saw the
+        # execution events and never a phase event.
         from automated_security_helper.plugins.loader import (
             masked_module_scope,
-            plugins_of,
             scan_handler_filter,
             scan_plugin_filter,
         )
 
         self._plugin_filter = scan_plugin_filter(combined_plugin_modules)
         self._handler_filter = scan_handler_filter(combined_plugin_modules)
-        self._plugin_scope = plugins_of(combined_plugin_modules)
         # The registry is the process's, so the lines its reads write name a
         # plugin's module as the plugin recorded it. A module an entry read
         # from the environment is, or sits inside or above, is named by its
@@ -745,7 +748,6 @@ class ScanExecutionEngine:
                             progress_display=self.progress_display,
                             asharp_model=self._asharp_model,
                         )
-                        convert_phase.plugin_scope = self._plugin_scope
                         self._results = convert_phase.execute(
                             aggregated_results=self._results,
                             python_based_plugins_only=self._python_only,
@@ -761,7 +763,6 @@ class ScanExecutionEngine:
                             asharp_model=self._asharp_model,
                         )
 
-                        scan_phase.plugin_scope = self._plugin_scope
                         # The completed scanners are stored for metrics display
                         # even when the phase ends by raising (a cancel is a
                         # ScanCancelled), so the ones that finished before the
@@ -869,7 +870,6 @@ class ScanExecutionEngine:
                             progress_display=self.progress_display,
                             asharp_model=self._results,
                         )
-                        report_phase.plugin_scope = self._plugin_scope
                         self._results = report_phase.execute(
                             report_dir=self._context.output_dir.joinpath("reports"),
                             cli_output_formats=self._output_formats or None,
@@ -887,7 +887,6 @@ class ScanExecutionEngine:
                             progress_display=self.progress_display,
                             asharp_model=self._asharp_model,
                         )
-                        inspect_phase.plugin_scope = self._plugin_scope
                         self._results = inspect_phase.execute(
                             aggregated_results=self._results,
                             python_based_plugins_only=self._python_only,
