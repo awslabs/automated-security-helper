@@ -267,8 +267,13 @@ class IgnorePathWithReason(RedactedSection):
         ``active_ignore_paths`` and ``should_suppress_finding`` already leave
         such an entry out: an unreadable date gives no assurance the entry still
         applies. Returning False here made ``AshSuppression.matches`` apply it.
+
+        Only None is "no expiration". An empty string is kept from a results
+        file as an unreadable date (``validate_expiration_date`` records it so),
+        and reading it as no expiration applied the entry permanently while the
+        load warning said it did not apply.
         """
-        if not self.expiration:
+        if self.expiration is None:
             return False
         try:
             return expiration_has_passed(self.expiration)
@@ -553,25 +558,36 @@ def suppression_id(suppression: Dict[str, Any]) -> str:
     Shared by ``AshSuppression.id`` and the config linter, which reads raw YAML
     dicts, so the unused-suppressions report and the linter's fixer agree.
     """
+    # Every part is text. The linter reads raw YAML dicts, where a rule id or a
+    # package version can arrive as a number (``rule_id: 1234``,
+    # ``package_version: 2.0``), and joining a number raised TypeError out of
+    # ``ash config lint --fix-unused``. ``str()`` of a value is what the config's
+    # own text form would have been.
+
+    def _text(value: Any, absent: str) -> str:
+        if value is None or value == "":
+            return absent
+        return value if isinstance(value, str) else str(value)
+
     line_start = suppression.get("line_start")
     line_end = suppression.get("line_end")
     line_end_val = line_end if line_end is not None else line_start
     parts = [
-        suppression.get("path") or "",
-        suppression.get("rule_id") or "*",
+        _text(suppression.get("path"), ""),
+        _text(suppression.get("rule_id"), "*"),
         str(line_start) if line_start is not None else "*",
         str(line_end_val) if line_end_val is not None else "*",
     ]
     symbol = suppression.get("symbol")
     if symbol or any(suppression.get(f) for f in PACKAGE_SUPPRESSION_FIELDS):
         parts.append(
-            "@".join(suppression.get(f) or "*" for f in PACKAGE_SUPPRESSION_FIELDS)
+            "@".join(_text(suppression.get(f), "*") for f in PACKAGE_SUPPRESSION_FIELDS)
         )
     # A symbol is a sixth part, and its presence always brings the fifth, so an
     # id's part count says which fields it carries and a symbol can never be
     # read as a package.
     if symbol:
-        parts.append(symbol)
+        parts.append(_text(symbol, "*"))
     return "|".join(parts)
 
 
@@ -673,6 +689,25 @@ class AshSuppression(IgnorePathWithReason):
             )
         return v
 
+    @field_validator("rule_id")
+    @classmethod
+    def validate_rule_id_not_blank(cls, v):
+        """Reject a blank rule_id.
+
+        An omitted ``rule_id`` matches every rule in the suppression's path, as the
+        suppressions guide says. A blank one was accepted and read the same way
+        by ``matches`` (an empty string is false there), so a suppression whose
+        rule id was left empty by mistake silently covered every rule in its
+        path; a whitespace-only one matched nothing at all. Both are refused
+        with what to write, as the package fields are.
+        """
+        if v is not None and not v.strip():
+            raise ValueError(
+                "rule_id must be omitted rather than left blank: a suppression "
+                "with no rule_id covers every rule in its path"
+            )
+        return v
+
     @field_validator("symbol", mode="before")
     @classmethod
     def validate_symbol(cls, v):
@@ -744,8 +779,14 @@ class AshSuppression(IgnorePathWithReason):
         if self.rule_id:
             if finding.rule_id is None:
                 return False
-            # Case-insensitive glob match for OS portability
-            if not fnmatch.fnmatch(finding.rule_id.lower(), self.rule_id.lower()):
+            # The finding's exact rule id first, then the case-insensitive glob.
+            # fnmatch reads '[' as a character class, so a suppression saved
+            # for a rule id that holds glob characters (cdk-nag's granular
+            # 'Rule[Resource::*]' ids, as the TUI saves them) never matched the
+            # finding it was saved for through the glob alone.
+            if finding.rule_id.lower() != self.rule_id.lower() and not fnmatch.fnmatch(
+                finding.rule_id.lower(), self.rule_id.lower()
+            ):
                 return False
 
         if not _path_pattern_matches(finding.file_path, self.path):
