@@ -522,6 +522,12 @@ def report_command(
     # link at the output directory or reports/ is refused as a scan refuses it.
     try:
         refuse_linked_output_dir(Path.cwd(), output_dir_path)
+        # That guard examines the components below the working directory only.
+        # With --output-dir outside it, the directory as given and its .ash sit
+        # above the resolved directory and below nothing the guard roots at, so
+        # a link at either was written through; as the output directory itself
+        # the given directory was refused. Guard from its parent down as well.
+        refuse_linked_output_dir(Path(output_dir).absolute().parent, output_dir_path)
     except OutputDirLinkRefused as refusal:
         # The message names the output directory, built from the path as given:
         # on one line.
