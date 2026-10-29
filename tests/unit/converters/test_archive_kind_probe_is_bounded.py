@@ -110,7 +110,12 @@ def test_the_kind_of_a_tar_with_a_large_first_header_is_read_from_one_block(
 @pytest.mark.parametrize(
     ("content", "kind"),
     [
-        pytest.param(b"\0" * (2 * tarfile.BLOCKSIZE), "tar", id="end-blocks-only"),
+        # tarfile opens no archive on a first block of zeros (its "empty file"),
+        # so neither does the probe; a gzip of zeros decompresses to one.
+        pytest.param(b"\0" * (2 * tarfile.BLOCKSIZE), None, id="end-blocks-only"),
+        pytest.param(
+            gzip.compress(b"\0" * (300 * 1024), mtime=0), None, id="gz-of-zeros"
+        ),
         pytest.param(b"\0" * 100, None, id="short-zeros"),
         pytest.param(b"x" * tarfile.BLOCKSIZE, None, id="a-block-of-text"),
         pytest.param(gzip.compress(b"x" * 600, mtime=0), None, id="gz-of-text"),

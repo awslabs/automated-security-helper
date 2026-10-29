@@ -714,16 +714,22 @@ def _plain_gzip_name(archive_file: str) -> Optional[str]:
 
 
 def _is_tar_header(block: bytes) -> bool:
-    """Whether ``block``, the first 512 bytes of a stream, is a tar header block.
+    """Whether ``block``, the first 512 bytes of a stream, is a tar header that
+    ``tarfile.open`` would open the stream on.
 
     A header whose checksum holds, whatever its type (a member, a pax header, a
-    GNU long name), or an end-of-archive block of zeros, which is how a tar of
-    end blocks only starts; a short block, or one whose checksum fails, is not.
+    GNU long name), with a size this Python's tarfile takes: ``TarInfo._block``
+    refuses a negative one where tarfile does, and the member is then not read.
+    A block of zeros is not a tar header: tarfile opens no archive on one (its
+    "empty file"), so a stream that starts with an end-of-archive block, and a
+    gzip of zero bytes, is not a tar. A short block, or one whose checksum fails,
+    is not either.
     """
     try:
-        tarfile.TarInfo.frombuf(block, "utf-8", "surrogateescape")
-    except tarfile.EOFHeaderError:
-        return True
+        info = tarfile.TarInfo.frombuf(block, "utf-8", "surrogateescape")
+        block_of = getattr(info, "_block", None)
+        if block_of is not None:
+            block_of(info.size)
     except tarfile.HeaderError:
         return False
     return True

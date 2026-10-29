@@ -113,6 +113,18 @@ def test_a_tar_header_with_a_negative_size_is_an_archive_that_cannot_be_read(
         assert converter.refused_inputs == []
 
 
+def test_the_kind_of_a_tar_with_a_negative_size_follows_tarfile():
+    """The probe takes a first header as ``tarfile.open`` does: where this
+    Python's tarfile refuses the negative size, the file is not a tar it reads,
+    and the converter records it as an archive that cannot be read; where tarfile
+    returns the member, the file is a tar and the budget refuses the member."""
+    expected = "tar" if tarfile_returns_a_negative_size() else None
+
+    handle = io.BytesIO(negative_size_tar())
+
+    assert archive_converter.archive_kind("neg.tar", handle) == expected
+
+
 def test_the_copy_path_writes_a_member_larger_than_one_chunk_whole(
     test_plugin_context, monkeypatch
 ):
