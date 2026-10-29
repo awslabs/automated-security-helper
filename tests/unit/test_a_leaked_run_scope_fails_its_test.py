@@ -17,6 +17,24 @@ import pytest
 
 from tests.utils.helpers import run_a_child_pytest_under_this_suite
 
+# The child pytest runs under the suite's own conftest, whose collection hook
+# refuses any test without exactly one tier marker. The probes measure scope
+# leaks, not tiers, so the marker is appended here once instead of being written
+# into each probe's source; a probe that marks itself is left as written.
+_A_TIER_FOR_THE_PROBE = """
+
+import pytest
+
+pytestmark = pytest.mark.unit
+"""
+
+
+def _with_a_tier(source: str) -> str:
+    """*source* with the collection hook's one-tier requirement satisfied."""
+    if "pytestmark" in source:
+        return source
+    return source + _A_TIER_FOR_THE_PROBE
+
 
 def _run_probe(
     tmp_path: Path,
@@ -33,8 +51,13 @@ def _run_probe(
     paths to contents) build a probe of more than one module, such as a real
     package; the child then collects them in name order before *source*'s
     ``test_zz`` module."""
+    if extra_files is not None:
+        extra_files = {
+            path: _with_a_tier(text) if Path(path).name.startswith("test_") else text
+            for path, text in extra_files.items()
+        }
     completed = run_a_child_pytest_under_this_suite(
-        source,
+        _with_a_tier(source),
         tmp_path,
         prefix=f"{kind}check-",
         # Definition order is the measurement where a probe's later test
@@ -51,12 +74,6 @@ from automated_security_helper.utils.log import open_run_log_scope
 
 def test_that_leaks_a_scope():
     open_run_log_scope()
-
-
-import pytest
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -94,12 +111,6 @@ def test_aa_closes_its_own_scope_by_value():
 
 def test_zz_the_following_test_runs_in_no_scope():
     assert current_run_log_scope() is None
-
-
-import pytest
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -141,10 +152,6 @@ def test_aa_uses_the_module_fixture(_a_scope_for_the_module):
 
 def test_zz_uses_nothing():
     pass
-
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -198,12 +205,6 @@ def test_zz_only_the_scope_whose_close_raised_is_left():
     for scope in left:
         _real_close(scope)
     assert left == set(_raised_for)
-
-
-import pytest
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -246,10 +247,6 @@ def test_aa_uses_the_wide_fixture(_a_scope_for_the_run):
 
 def test_zz_uses_nothing():
     pass
-
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -292,10 +289,6 @@ def test_aa_fails(_a_scope_for_the_run):
 
 def test_zz_would_run_next():
     pass
-
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -368,10 +361,6 @@ def test_aa_interrupts_the_run(_a_scope_for_the_run):
 
 def test_zz_would_run_next():
     pass
-
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -407,12 +396,6 @@ def test_aa_runs_after_the_module_opened_a_scope():
 
 def test_zz_uses_nothing():
     pass
-
-
-import pytest
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -453,12 +436,6 @@ def test_aa_renames_the_open_scopes():
 
 def test_zz_uses_nothing():
     pass
-
-
-import pytest
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -538,12 +515,6 @@ def test_aa_leaks_an_unclosable_scope():
 
 def test_zz_runs_after_the_leak():
     log.close_run_log_scope = _real_close
-
-
-import pytest
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -654,10 +625,6 @@ def test_aa_uses_the_wide_fixture(_a_scope_for_the_run):
 
 def test_zz_uses_nothing():
     pass
-
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -709,12 +676,6 @@ def _a_scope_for_the_package():
 _PACKAGE_TEST = """\
 def test_aa_inside_the_package():
     pass
-
-
-import pytest
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 _TEST_AFTER_THE_PACKAGE = """\
@@ -730,12 +691,6 @@ def test_zz_runs_after_the_package_ended():
     # the session would tear down after this test, with no marker yet.
     assert pathlib.Path(os.environ["TMPDIR"], "package-torn-down").exists()
     assert current_run_log_scope() is None
-
-
-import pytest
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -747,12 +702,7 @@ def test_a_scope_a_package_fixture_leaks_fails_the_run(tmp_path: Path) -> None:
     returncode, output = _run_probe(
         tmp_path,
         "pkg",
-        (
-            "def test_zz_outside_the_package():\n    pass\n"
-            "\n\nimport pytest\n\n"
-            "# The collection hook of the suite requires one tier per test.\n"
-            "pytestmark = pytest.mark.unit\n"
-        ),
+        "def test_zz_outside_the_package():\n    pass\n",
         extra_files={
             "aa_pkg/__init__.py": "",
             "aa_pkg/conftest.py": _PACKAGE_CONFTEST_THAT_LEAKS,
