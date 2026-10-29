@@ -5,7 +5,6 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-import threading
 import uuid
 from pydantic import (
     AnyUrl,
@@ -20,6 +19,7 @@ from pydantic import (
     model_validator,
 )
 
+from automated_security_helper.base.forward_refs import OnceOnlyResolver
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.core.enums import ExportFormat, ScannerStatus
 from automated_security_helper.core.sharding import ShardAssignment
@@ -1765,44 +1765,34 @@ class AshAggregatedResults(RecordModel):
 # deserializes while base/engine_phase.py constructs. Reentrant because importing
 # config.ash_config executes module bodies this module does not control, and one
 # of them constructing an AshAggregatedResults would re-enter on this thread.
-_forward_refs_lock = threading.RLock()
-_forward_refs_resolved = False
+#: The one once-only resolver both models share (base/forward_refs.py): the lock,
+#: the flag set only after the rebuild, and the import outside the lock. This
+#: module and base/plugin_context.py each carried a copy before.
+_forward_refs: OnceOnlyResolver[type] = OnceOnlyResolver()
+
+
+def _import_ash_config() -> type:
+    # Raises ImportError mid-cycle, when the model was used while the package
+    # was still being imported; the resolver then does nothing, and the next
+    # use, once the import has finished, resolves it.
+    from automated_security_helper.config.ash_config import AshConfig
+
+    return AshConfig
+
+
+def _bind_ash_config(ash_config: type) -> None:
+    globals()["AshConfig"] = ash_config
+    # The base class's rebuild: AshAggregatedResults.model_rebuild would call
+    # the resolver again.
+    super(AshAggregatedResults, AshAggregatedResults).model_rebuild()
 
 
 def _resolve_forward_refs() -> None:
-    """Bind AshConfig into this module and rebuild AshAggregatedResults on it.
+    """Bind AshConfig into this module and rebuild AshAggregatedResults on it, once.
 
     Cheap to call repeatedly, and a no-op while AshConfig is still unimportable.
     """
-    global _forward_refs_resolved
-    if _forward_refs_resolved:
-        return
-
-    # The import runs OUTSIDE the lock. The last line of config/ash_config.py
-    # calls this function, so a thread importing that module holds its import
-    # lock and then asks for this one; a thread that first used the model here
-    # held this lock and asked for the import lock. Importing first, under the
-    # import system's own locking, breaks the cycle: the thread that reaches
-    # the import from under ash_config's own import returns before the lock.
-    try:
-        from automated_security_helper.config.ash_config import AshConfig
-    except ImportError:
-        # Mid-cycle, so AshConfig does not exist yet: the model was used while
-        # the package was still being imported. Not logged; the next use, once
-        # the import has finished, resolves it.
-        return
-
-    with _forward_refs_lock:
-        if _forward_refs_resolved:
-            return
-
-        globals()["AshConfig"] = AshConfig
-        # The base class's rebuild: AshAggregatedResults.model_rebuild would call
-        # this function again.
-        super(AshAggregatedResults, AshAggregatedResults).model_rebuild()
-        # Set after the rebuild, never before. A caller that saw the flag early
-        # would skip the rebuild and run against the still-mocked validator.
-        _forward_refs_resolved = True
+    _forward_refs.resolve(_import_ash_config, _bind_ash_config)
 
 
 # Not called at import time. Importing config.ash_config from here imported the

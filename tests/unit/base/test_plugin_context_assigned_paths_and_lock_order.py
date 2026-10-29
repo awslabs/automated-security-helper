@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from automated_security_helper.base import plugin_context as plugin_context_module
+from automated_security_helper.base.forward_refs import OnceOnlyResolver
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
@@ -69,10 +70,13 @@ def test_a_str_assigned_to_output_dir_is_stored_as_a_path(context, tmp_path):
 
 
 def test_the_import_precedes_the_lock():
-    source = inspect.getsource(plugin_context_module._resolve_forward_refs)
-    import_at = source.index(
-        "from automated_security_helper.config.ash_config import AshConfig"
-    )
-    lock_at = source.index("with _forward_refs_lock:")
+    """The context resolves through the shared once-only resolver, whose
+    import step runs before its lock."""
+    assert isinstance(plugin_context_module._forward_refs, OnceOnlyResolver)
+    source = inspect.getsource(OnceOnlyResolver.resolve)
+    import_at = source.index("target = import_target()")
+    lock_at = source.index("with self._lock:")
 
     assert import_at < lock_at, source
+    plugin_context_module._resolve_forward_refs()
+    assert plugin_context_module._forward_refs.resolved is True

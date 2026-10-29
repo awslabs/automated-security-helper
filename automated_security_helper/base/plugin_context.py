@@ -2,7 +2,6 @@
 
 import os
 import secrets
-import threading
 import warnings
 from pathlib import Path
 from pydantic import (
@@ -16,6 +15,7 @@ from pydantic import (
 from pydantic.json_schema import SkipJsonSchema
 from typing import Annotated, Any, Dict, Optional, TYPE_CHECKING
 
+from automated_security_helper.base.forward_refs import OnceOnlyResolver
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.plugins.plugin_manager import AshPluginManager
 
@@ -310,39 +310,33 @@ def _record_derived_roots_on_config(context: Any) -> None:
 # PydanticUserError. So the reference is also resolved
 # on first use, the way models/asharp_model.py resolves AshAggregatedResults'; the
 # comments there explain the binding into globals() and the lock.
-_forward_refs_lock = threading.RLock()
-_forward_refs_resolved = False
+#: The one once-only resolver both models share (base/forward_refs.py); this
+#: module and models/asharp_model.py each carried a copy of its lock, flag and
+#: double-checked rebuild before.
+_forward_refs: OnceOnlyResolver[type] = OnceOnlyResolver()
+
+
+def _import_ash_config() -> type:
+    from automated_security_helper.config.ash_config import AshConfig
+
+    return AshConfig
+
+
+def _bind_ash_config(ash_config: type) -> None:
+    globals()["AshConfig"] = ash_config
+    # The base class's rebuild: PluginContext.model_rebuild would call the
+    # resolver again.
+    super(PluginContext, PluginContext).model_rebuild()
 
 
 def _resolve_forward_refs() -> None:
-    """Bind AshConfig into this module and rebuild PluginContext on it.
+    """Bind AshConfig into this module and rebuild PluginContext on it, once.
 
     Cheap to call repeatedly, and a no-op while AshConfig is still unimportable
-    (config.ash_config is mid-import and has not defined it yet).
+    (config.ash_config is mid-import and has not defined it yet). The import
+    runs outside the resolver's lock; see base/forward_refs.py for why.
     """
-    global _forward_refs_resolved
-    if _forward_refs_resolved:
-        return
-
-    # The import runs OUTSIDE the lock, as models/asharp_model.py's resolver
-    # does. config/ash_config.py calls this function as it finishes importing,
-    # so a thread importing that module held its import lock and then asked
-    # for this one, while a thread that first built a PluginContext held this
-    # lock and asked for the import lock: a deadlock on the first import.
-    try:
-        from automated_security_helper.config.ash_config import AshConfig
-    except ImportError:
-        return
-
-    with _forward_refs_lock:
-        if _forward_refs_resolved:
-            return
-
-        globals()["AshConfig"] = AshConfig
-        # The base class's rebuild: PluginContext.model_rebuild would call this
-        # function again.
-        super(PluginContext, PluginContext).model_rebuild()
-        _forward_refs_resolved = True
+    _forward_refs.resolve(_import_ash_config, _bind_ash_config)
 
 
 AshPluginManager.model_rebuild()
