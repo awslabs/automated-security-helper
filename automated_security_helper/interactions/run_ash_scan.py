@@ -5242,6 +5242,102 @@ def _run_container_mode(
 # ---------------------------------------------------------------------------
 
 
+def _nix_inner_argv(opts: ScanOptions) -> List[str]:
+    """The command line of the scan inside the Nix shell, built from this call.
+
+    From the options, not from this process's ``sys.argv``. A library caller's
+    ``run_ash_scan(mode=RunMode.nix, ...)`` has no command line of its own, and
+    forwarding the host program's arguments ran the inner scan on whatever that
+    program was started with (another directory, another scanner set, another
+    output directory) and read that run's results back as this call's. Every
+    option here is one the scan CLI reads as a flag; the options that are not
+    flags (an MCP client's settings) are refused for this mode before this
+    point. ``--cli-json-input`` never reaches the inner scan: its document was
+    read into these options already, and the shell's standard input is empty.
+    ``--mode`` is left to ``rewrite_mode_args``, which appends ``--mode local``.
+    """
+
+    def value_of(member: Any) -> str:
+        return str(member.value if hasattr(member, "value") else member)
+
+    argv: List[str] = [
+        "scan",
+        "--source-dir",
+        str(opts.source_dir),
+        "--output-dir",
+        str(opts.output_dir),
+    ]
+    if opts.config:
+        argv.extend(["--config", str(opts.config)])
+    for override in opts.config_overrides or []:
+        argv.extend(["--config-overrides", override])
+    for scanner in opts.scanners or []:
+        argv.extend(["--scanners", scanner])
+    for scanner in opts.excluded_scanners or []:
+        argv.extend(["--exclude-scanners", scanner])
+    for module in opts.ash_plugin_modules or []:
+        argv.extend(["--ash-plugin-modules", module])
+    for fmt in opts.output_formats or []:
+        argv.extend(["--output-formats", value_of(fmt)])
+    for phase in opts.phases or []:
+        argv.extend(["--phases", value_of(phase)])
+    argv.extend(["--strategy", value_of(opts.strategy)])
+    if opts.offline:
+        argv.append("--offline")
+    if opts.offline_semgrep_rulesets != "p/ci":
+        argv.extend(["--offline-semgrep-rulesets", opts.offline_semgrep_rulesets])
+    if not opts.progress:
+        argv.append("--no-progress")
+    if not opts.color:
+        argv.append("--no-color")
+    if not opts.show_summary:
+        argv.append("--no-show-summary")
+    for flag, given in (
+        ("--quiet", opts.quiet),
+        ("--verbose", opts.verbose),
+        ("--debug", opts.debug),
+        ("--simple", opts.simple),
+        ("--cleanup", opts.cleanup),
+        ("--inspect", opts.inspect),
+        ("--python-based-plugins-only", opts.python_based_plugins_only),
+        ("--ignore-suppressions", opts.ignore_suppressions),
+    ):
+        if given:
+            argv.append(flag)
+    log_level = value_of(opts.log_level)
+    if log_level != AshLogLevel.INFO.value:
+        argv.extend(["--log-level", log_level])
+    if opts.fail_on_findings is not None:
+        argv.append(
+            "--fail-on-findings" if opts.fail_on_findings else "--no-fail-on-findings"
+        )
+    if opts.fail_on_incomplete_scanners is not None:
+        argv.append(
+            "--fail-on-incomplete-scanners"
+            if opts.fail_on_incomplete_scanners
+            else "--no-fail-on-incomplete-scanners"
+        )
+    if opts.min_severity.lower() != "low":
+        argv.extend(["--min-severity", opts.min_severity])
+    if opts.changed_files_only:
+        argv.extend(["--changed-files-only", "--base-ref", opts.base_ref])
+    if opts.existing_results:
+        # The CLI resolves --use-existing to the output directory's own results
+        # file, which is the file this process's option names: the shell shares
+        # this filesystem, so the inner scan resolves the same file.
+        argv.append("--use-existing")
+    if opts.shard_index is not None and opts.shard_count is not None:
+        argv.extend(
+            [
+                "--shard-index",
+                str(opts.shard_index),
+                "--shard-count",
+                str(opts.shard_count),
+            ]
+        )
+    return argv
+
+
 def _run_nix_mode(
     opts: ScanOptions, logger, *, image_may_differ: Optional[bool] = None
 ) -> AshAggregatedResults:
@@ -5271,7 +5367,9 @@ def _run_nix_mode(
     # did not finish is not read back as a verdict. See utils/inner_run_outcome.py.
     outer_run_id = new_outer_run_id()
     try:
-        nix_result = run_ash_nix(debug=opts.debug, outer_run_id=outer_run_id)
+        nix_result = run_ash_nix(
+            argv=_nix_inner_argv(opts), debug=opts.debug, outer_run_id=outer_run_id
+        )
     except NixModeRefused as e:
         # `nix` missing, or the recursion guard. A message and exit 1, not a traceback.
         # 1 rather than the usage-error code: the command line is valid, and what is
