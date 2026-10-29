@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import re
 from typing import Literal, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -11,8 +12,14 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
+from automated_security_helper.core.scanner_statistics_calculator import (
+    ScannerStatisticsCalculator,
+)
 from automated_security_helper.models.flat_vulnerability import (
     extract_workspace_project,
+)
+from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_section import (
+    workspace_project_threshold,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_skipped_rows import (
     skipped_project_detail,
@@ -39,8 +46,10 @@ _FINDING_KINDS = frozenset({"fail", "open", "review"})
 # SARIF `kind` values that assert the opposite -- the rule ran and there is
 # nothing to report. cdk-nag uses `informational` for a COMPLIANT check
 # (cdk_nag_wrapper._level_and_kind), so rendering these as anything but a
-# passing test case would report a passed control as a problem.
-_NON_FINDING_KINDS = frozenset({"pass", "informational", "notApplicable"})
+# passing test case would report a passed control as a problem. `notApplicable`
+# is neither: the rule was NOT evaluated, so it renders as skipped (see the
+# emit cascade in `report`).
+_NON_FINDING_KINDS = frozenset({"pass", "informational"})
 
 #: The ``type`` attribute on a skipped project's ``<skipped>`` element. Distinct
 #: from the existing ``suppression`` and ``threshold`` types, which are both about
@@ -120,6 +129,61 @@ def _configured_severity_threshold(model: "AshAggregatedResults") -> str:
     return normalized
 
 
+def _scanner_threshold(
+    model: "AshAggregatedResults", scanner_name: str, cache: dict
+) -> str | None:
+    """The scanner's own ``options.severity_threshold``, normalized, or None.
+
+    Read through ``ScannerStatisticsCalculator.get_scanner_threshold_info``, the
+    resolver the exit code grades each result by and the summary table prints,
+    so the report cannot call a finding actionable that the exit code ignores
+    (or the reverse). Only a threshold the scanner's own config sets counts
+    here; the global one is ``_configured_severity_threshold``'s, which also
+    validates it. Memoized per scanner because the resolver dumps the whole
+    scanners section on every call and a large SARIF carries one result per
+    finding.
+    """
+    if scanner_name not in cache:
+        threshold, source = ScannerStatisticsCalculator.get_scanner_threshold_info(
+            model, scanner_name
+        )
+        cache[scanner_name] = (
+            _normalized_threshold(threshold) if source == "config" else None
+        )
+    return cache[scanner_name]
+
+
+#: XML 1.0 forbids these characters in text and attributes (section 2.2): C0
+#: controls other than tab, line feed and carriage return, the surrogate range
+#: and the two noncharacters. A scanner message, a suppression justification or a
+#: property value can carry one (a file name in a scanned repository may), and a
+#: document holding one is not well-formed, so no JUnit consumer reads it.
+_XML_FORBIDDEN = re.compile(
+    "[%s-%s%s%s%s-%s%s-%s%s%s]"
+    % tuple(
+        chr(point)
+        for point in (0x00, 0x08, 0x0B, 0x0C, 0x0E, 0x1F, 0xD800, 0xDFFF, 0xFFFE, 0xFFFF)
+    )
+)
+
+
+def _xml_text(value: object) -> str:
+    """*value* as text XML 1.0 admits, each forbidden character written as its escape.
+
+    Written out (``\\x01``, ``\\ufffe``) rather than dropped, so a reader can
+    see what the text held; the layout characters XML allows (tab, newline,
+    carriage return) are kept as they are, because ``system-out`` is joined
+    with newlines.
+    """
+    text = "" if value is None else str(value)
+
+    def shown(match: re.Match[str]) -> str:
+        point = ord(match.group(0))
+        return f"\\x{point:02x}" if point < 0x100 else f"\\u{point:04x}"
+
+    return _XML_FORBIDDEN.sub(shown, text)
+
+
 class JUnitXMLReporterConfigOptions(ReporterOptionsBase):
     # Consider findings as failures only if they're at or above the scanner's severity threshold
     respect_severity_threshold: bool = True
@@ -191,30 +255,66 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
 
         test_suite_dict = {}
 
-        # Read once: the threshold is a property of the scan, not of a finding.
+        # Read once: the global threshold is a property of the scan, not of a
+        # finding. A scanner's own threshold is resolved per scanner below and
+        # memoized here; a project's gate threshold is read off the workspace
+        # block per finding.
         configured_threshold = _configured_severity_threshold(model)
+        scanner_thresholds: dict = {}
 
         # Process SARIF report @ model.sarif
         if model.sarif is not None:
             all_results = model.sarif.get_all_results()
             for result in all_results:
-                # Create test case name from SARIF result details
-                test_name = (
-                    f"{result.message.root.text} [{result.ruleId}]"
-                    if result.ruleId
-                    else result.message.root.text
-                )
+                # Create test case name from SARIF result details. Every value
+                # a scanner or the scanned repository wrote passes through
+                # _xml_text, because XML 1.0 forbids a control character in
+                # text and attributes and one makes the whole document
+                # unreadable to every JUnit consumer.
+                message_text = _xml_text(result.message.root.text)
+                rule_id = _xml_text(result.ruleId) if result.ruleId else None
+                test_name = f"{message_text} [{rule_id}]" if rule_id else message_text
                 test_case = TestCase(
                     name=test_name,
-                    classname=result.ruleId,
+                    classname=rule_id,
                 )
+                # A result can carry no properties at all (an imported SARIF, a
+                # producer that writes none). Every read below goes through
+                # getattr so that result still gets its test case instead of
+                # losing the whole artefact to an AttributeError.
                 props = result.properties
+
+                # The scanner the finding came from, and the workspace project it
+                # was attributed to. Both are read before the gate, because the
+                # threshold a finding is judged by belongs to its scanner and to
+                # its project, not to the scan as a whole.
+                actual_scanner = "ash"
+                extra = getattr(props, "__pydantic_extra__", None) or {}
+                if "scanner_name" in extra:
+                    actual_scanner = extra["scanner_name"]
+                elif props is not None and getattr(props, "tags", None):
+                    for tag in props.tags:
+                        if tag.startswith("tool_name::"):
+                            actual_scanner = tag.split("::")[1]
+                            break
+                if (
+                    actual_scanner == "ash"
+                    and props is not None
+                    and hasattr(props, "scanner_details")
+                    and hasattr(props.scanner_details, "tool_name")
+                ):
+                    actual_scanner = props.scanner_details.tool_name
+                # Read through the shared helper rather than inline, so this and
+                # the flattening path cannot disagree about where the attribution
+                # lives -- which is how a finding ends up under the wrong project
+                # in one report and the right one in another.
+                project = extract_workspace_project(result)
 
                 # Add failure details for failed findings
                 if result.suppressions and len(result.suppressions) > 0:
                     test_case.result = [
                         Skipped(
-                            message=suppression.justification,
+                            message=_xml_text(suppression.justification),
                             type_="suppression",
                         )
                         for suppression in result.suppressions
@@ -271,9 +371,25 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                         # since a finding-level statement is more specific than a
                         # scan-level default; it is simply no longer the only
                         # source.
+                        #
+                        # After it, the most specific recorded gate: the project's
+                        # (a merged workspace file carries no ash_config, and each
+                        # project's verdict was judged against its own recorded
+                        # gate threshold, so grading every project against ASH's
+                        # default here contradicted the per-project verdicts and
+                        # the exit code); then the scanner's own
+                        # options.severity_threshold, which the exit code grades
+                        # each result by and this reporter used to ignore; then
+                        # the scan's global threshold.
                         threshold = (
                             _normalized_threshold(
                                 getattr(props, "severity_threshold", None)
+                            )
+                            or _normalized_threshold(
+                                workspace_project_threshold(model, project)
+                            )
+                            or _scanner_threshold(
+                                model, actual_scanner, scanner_thresholds
                             )
                             or configured_threshold
                         )
@@ -319,12 +435,25 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                     # Only mark as error if it's actionable
                     if is_actionable:
                         if result.level == "error" or result.kind == "fail":
-                            test_case.result = [
-                                Error(message=result.message.root.text, type_="error")
-                            ]
+                            test_case.result = [Error(message=message_text, type_="error")]
                         elif result.level == "warning":
                             test_case.result = [
-                                Error(message=result.message.root.text, type_="warning")
+                                Error(message=message_text, type_="warning")
+                            ]
+                        elif result.kind == "notApplicable":
+                            # SARIF 2.1.0 3.27.9: "the rule specified by ruleId was
+                            # not evaluated". cdk-nag writes this for a rule that
+                            # raised instead of reaching a verdict, and the exit
+                            # code fails the scan for that rule through the
+                            # run-level notification. A bare test case says the
+                            # rule passed, which it did not; JUnit's own word for
+                            # a test that did not run is skipped, which no CI
+                            # front end counts as a pass or a failure.
+                            test_case.result = [
+                                Skipped(
+                                    message="Rule was not evaluated for this target",
+                                    type_="not-evaluated",
+                                )
                             ]
                         elif result.kind in _FINDING_KINDS:
                             # An actionable finding at `note` or `none` whose kind
@@ -348,10 +477,11 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                             # imports only Error and Skipped; type_ carries the
                             # distinction, as it already does for `warning`.
                             test_case.result = [
-                                Error(message=result.message.root.text, type_="note")
+                                Error(message=message_text, type_="note")
                             ]
-                        # Any remaining kind is a non-finding (_NON_FINDING_KINDS)
-                        # and keeps its bare, passing test case.
+                        # Any remaining kind (`pass`, `informational`) says the
+                        # rule ran and found nothing, and keeps its bare, passing
+                        # test case.
                     else:
                         # Mark as skipped if below threshold
                         test_case.result = [
@@ -365,44 +495,18 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
 
                 # Add additional metadata in system-out
                 metadata = []
-                if hasattr(result, "properties") and result.properties is not None:
-                    for key, value in result.properties.model_dump(
-                        by_alias=True
-                    ).items():
+                if props is not None:
+                    for key, value in props.model_dump(by_alias=True).items():
                         metadata.append(f"{key}: {value}")
                 if metadata:
-                    test_case.system_out = "\n".join(metadata)
+                    test_case.system_out = _xml_text("\n".join(metadata))
 
-                # Create test suite for this finding type
-                actual_scanner = "ash"
-                if "scanner_name" in result.properties.__pydantic_extra__:
-                    actual_scanner = result.properties.__pydantic_extra__[
-                        "scanner_name"
-                    ]
-                elif result.properties and result.properties.tags:
-                    for tag in result.properties.tags:
-                        if tag.startswith("tool_name::"):
-                            actual_scanner = tag.split("::")[1]
-                            break
-                if (
-                    actual_scanner == "ash"
-                    and result.properties
-                    and hasattr(result.properties, "scanner_details")
-                ):
-                    if hasattr(result.properties.scanner_details, "tool_name"):
-                        actual_scanner = result.properties.scanner_details.tool_name
                 # In workspace mode the suite is named "<project>/<scanner>".
                 # Project leads so that one project's suites sort together in
                 # every CI front end that groups by suite name; the scanner is
                 # kept because discarding it -- the RFC's literal reading -- would
                 # lose a grouping single-directory mode has, for no gain.
-                #
-                # Read through the shared helper rather than inline, so this and
-                # the flattening path cannot disagree about where the attribution
-                # lives -- which is how a finding ends up under the wrong project
-                # in one report and the right one in another.
-                project = extract_workspace_project(result)
-                suite_name = (
+                suite_name = _xml_text(
                     f"{project}/{actual_scanner}" if project else actual_scanner
                 )
                 if suite_name not in test_suite_dict:
@@ -427,14 +531,14 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
         # rather than of anything enforced, and a merge that changed it would be
         # invisible here.
         for entry in skipped_projects(model):
-            suite = TestSuite(name=entry.project)
+            suite = TestSuite(name=_xml_text(entry.project))
             case = TestCase(
                 name=f"project skipped ({entry.reason.value})",
                 classname=SKIPPED_PROJECT_CLASSNAME,
             )
             case.result = [
                 Skipped(
-                    message=skipped_project_detail(entry),
+                    message=_xml_text(skipped_project_detail(entry)),
                     type_=SKIPPED_PROJECT_SKIP_TYPE,
                 )
             ]

@@ -20,12 +20,18 @@ here drive the threshold the way a scan does -- through
 property at all. Every assertion below fails on the code as it stood before the
 threshold source was fixed.
 
+Per-scanner threshold overrides
+-------------------------------
+``_compute_exit_code`` grades each result by the threshold governing its own
+scanner (``ScannerStatisticsCalculator.get_scanner_threshold_info``, memoized
+per scanner), so a scanner the operator tightened or relaxed through
+``options.severity_threshold`` was judged by its own setting in the exit code
+and the summary table, and by the global setting in this report. An earlier
+version of this docstring said the exit code did not consult them; it does, and
+``TestScannerThresholdIsRead`` pins the reporter to the same resolver.
+
 What these tests do not cover
 -----------------------------
-* Per-scanner threshold overrides. ``ScannerStatisticsCalculator`` resolves
-  those, but ``_compute_exit_code`` does not consult them, so honouring them
-  here would put the report and the exit code back into disagreement -- the
-  exact failure ``utils.severity_ladder`` exists to prevent.
 * ``<failure>``. The reporter imports only ``Error`` and ``Skipped``, so a
   qualifying finding is always ``<error>`` and never ``<failure>``. That is
   unchanged here and pinned only incidentally, by asserting on ``error``.
@@ -334,6 +340,43 @@ class TestConfiguredSeverityThresholdHelper:
         assert _outcome(testcase) == "actionable"
 
 
+class TestScannerThresholdIsRead:
+    """A scanner's own ``options.severity_threshold`` governs its findings.
+
+    The exit code resolves the threshold per result's scanner through
+    ``ScannerStatisticsCalculator.get_scanner_threshold_info``; the reporter
+    read ``global_settings.severity_threshold`` for every result, so a finding
+    the exit code ignored under a scanner's CRITICAL override was still an
+    ``<error>`` here (and the reverse under a scanner's LOW override).
+    """
+
+    @staticmethod
+    def _render(tmp_path, scanner_name, level, scanner_threshold):
+        result = _make_result(level=level, scanner_name=scanner_name)
+        model = _make_model(runs=[_make_run(results=[result])])
+        model.ash_config.global_settings.severity_threshold = "MEDIUM"
+        model.ash_config.scanners.bandit.options.severity_threshold = (
+            scanner_threshold
+        )
+        output = _get_reporter(tmp_path).report(model)
+        return ET.fromstring(output).find(".//testcase")  # nosec B314
+
+    def test_a_scanner_relaxed_to_critical_skips_its_warning_finding(self, tmp_path):
+        """At the base this was ``<error>``: MEDIUM graded a warning actionable."""
+        testcase = self._render(tmp_path, "bandit", "warning", "CRITICAL")
+        assert _outcome(testcase) == "below-threshold"
+
+    def test_a_scanner_tightened_to_low_reports_its_note_finding(self, tmp_path):
+        """At the base this was skipped: MEDIUM graded a note below threshold."""
+        testcase = self._render(tmp_path, "bandit", "note", "LOW")
+        assert _outcome(testcase) == "actionable"
+
+    def test_another_scanner_keeps_the_global_threshold(self, tmp_path):
+        """The control: bandit's override reaches bandit's findings only."""
+        testcase = self._render(tmp_path, "semgrep", "warning", "CRITICAL")
+        assert _outcome(testcase) == "actionable"
+
+
 class TestActionableSubErrorFindingsAreNotSilentlyPassed:
     """The last silent-pass path in this reporter, and the one case it must keep.
 
@@ -362,7 +405,7 @@ class TestActionableSubErrorFindingsAreNotSilentlyPassed:
         assert error.get("type") == "note"
         assert testcase.find("failure") is None
 
-    @pytest.mark.parametrize("kind", ["pass", "informational", "notApplicable"])
+    @pytest.mark.parametrize("kind", ["pass", "informational"])
     @pytest.mark.parametrize("level", ["note", "none"])
     def test_a_non_finding_kind_stays_a_passing_testcase(self, tmp_path, level, kind):
         """The control that keeps the arm above from being over-broad."""
@@ -370,6 +413,26 @@ class TestActionableSubErrorFindingsAreNotSilentlyPassed:
         assert testcase.find("error") is None
         assert testcase.find("failure") is None
         assert testcase.find("skipped") is None
+
+    @pytest.mark.parametrize("level", ["note", "none"])
+    def test_a_not_applicable_result_is_skipped_not_passed(self, tmp_path, level):
+        """SARIF ``notApplicable`` says the rule was NOT evaluated.
+
+        cdk-nag writes it, with level ``none``, for a rule that raised instead
+        of reaching a verdict, and the exit code fails the scan for that rule
+        through the run-level notification. The reporter used to render the
+        result as a bare passing test case, so the JUnit artefact said the rule
+        passed while the process status said it was never evaluated. Skipped is
+        JUnit's own word for a test that did not run.
+        """
+        testcase = _render_kind(
+            tmp_path, level=level, threshold="ALL", kind="notApplicable"
+        )
+        assert testcase.find("error") is None
+        assert testcase.find("failure") is None
+        skipped = testcase.find("skipped")
+        assert skipped is not None
+        assert skipped.get("type") == "not-evaluated"
 
     def test_cdk_nag_compliant_check_is_not_reported_as_a_problem(self, tmp_path):
         """cdk-nag's real compliant shape, named explicitly.

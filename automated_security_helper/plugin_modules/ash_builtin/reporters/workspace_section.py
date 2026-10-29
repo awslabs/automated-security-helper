@@ -73,6 +73,33 @@ HTML_SECTION_ID = "workspace-projects"
 COLUMNS = ("Project", "Status", "Findings", "Actionable", "Threshold", "Result")
 
 
+def workspace_project_threshold(
+    model: "AshAggregatedResults", project_key: Optional[str]
+) -> Optional[str]:
+    """The threshold *project_key*'s verdict was judged against, or None.
+
+    Read off ``model.workspace.projects`` -- the per-project record carries the
+    gate threshold its own scan used (``WorkspaceProjectResult.severity_threshold``
+    is written from ``project.gate_threshold``, the workspace ceiling folded in).
+    The merged results file carries no ``ash_config``, so a reporter grading a
+    finding attributed to a project has no other source for the project's gate;
+    reading ASH's default there made the merged JUnit and HTML reports grade
+    every project against one threshold while each project's verdict and the
+    exit code used its own.
+
+    None for a single-directory scan, an unattributed finding, a project the
+    workspace block does not list, and a project that never ran (its threshold
+    is recorded null).
+    """
+    if not project_key or not is_workspace_scan(model):
+        return None
+    for project in model.workspace.projects:
+        if project.project == project_key:
+            threshold = project.severity_threshold
+            return str(threshold) if threshold else None
+    return None
+
+
 def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]]:
     """One row per project, in workspace-file order, or ``[]`` for a single scan.
 
