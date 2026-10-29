@@ -590,6 +590,9 @@ class TestAnEmptyShardOfATierRunInARealPytest:
         done = self._run(tmp_path, index, "-m", "integration", "-n", "2")
         assert done.returncode == 0, done.stdout + done.stderr
         assert f"shard {index}of{self.COUNT} holds no test selected by" in done.stdout
+        # Both workers deselected the one unit test; the line names it once, not the
+        # sum of the workers' counts (which would read "(2 deselected)" here).
+        assert "(1 deselected); admitted" in done.stdout, done.stdout
 
     def test_a_shard_that_collects_nothing_at_all_exits_5_under_xdist_too(
         self, tmp_path
@@ -1133,15 +1136,22 @@ class TestAShardThatHoldsNoTestOfTheTierIsAdmitted:
         sharding.configure(SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager))
         assert manager.get_plugin("ash-tier-run-outcome") is None
 
-    def test_the_plugin_counts_what_the_run_and_its_workers_deselected(self):
+    def test_the_plugin_counts_what_the_run_deselected(self):
         plugin = sharding._TierRunOutcome()
         plugin.pytest_deselected([object(), object()])
         plugin.pytest_deselected([object()])
-        finished = SimpleNamespace(workeroutput={sharding.WORKEROUTPUT_KEY: 3})
-        plugin.pytest_testnodedown(finished, None)
+        assert plugin.deselected == 3
+
+    def test_the_controller_keeps_its_workers_count_once_not_their_sum(self):
+        """Every xdist worker deselects the same modules, so the controller sees one
+        number once per worker; summed, ``-n 2`` would print twice the real count."""
+        plugin = sharding._TierRunOutcome()
+        for count in (3, 3):
+            finished = SimpleNamespace(workeroutput={sharding.WORKEROUTPUT_KEY: count})
+            plugin.pytest_testnodedown(finished, None)
         crashed = SimpleNamespace(workeroutput=None)
         plugin.pytest_testnodedown(crashed, RuntimeError("worker crashed"))
-        assert plugin.deselected == 6
+        assert plugin.deselected == 3
 
     def test_a_worker_reports_its_count_and_leaves_the_exit_status_alone(self):
         written: list[str] = []
@@ -1153,7 +1163,9 @@ class TestAShardThatHoldsNoTestOfTheTierIsAdmitted:
         assert session.config.workeroutput == {sharding.WORKEROUTPUT_KEY: 2}
         assert session.exitstatus == 5 and not written
 
-    def test_the_controller_admits_on_the_sum_of_its_workers_counts(self):
+    def test_the_controller_admits_on_its_workers_count_and_prints_it_once(self):
+        """Two workers that each deselected the one test: admitted, "(1 deselected)",
+        not the "(2 deselected)" a sum of the workers' counts would print."""
         written: list[str] = []
         session = self._session("3of8", "integration", written)
         plugin = sharding._TierRunOutcome()
@@ -1162,7 +1174,7 @@ class TestAShardThatHoldsNoTestOfTheTierIsAdmitted:
             plugin.pytest_testnodedown(node, None)
         plugin.pytest_sessionfinish(session, pytest.ExitCode.NO_TESTS_COLLECTED)
         assert session.exitstatus == pytest.ExitCode.OK
-        assert "(2 deselected)" in written[0], written
+        assert "(1 deselected)" in written[0], written
 
 
 @pytest.mark.unit

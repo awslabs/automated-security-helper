@@ -62,7 +62,11 @@ reports.
 The deselected items are counted by a ``pytest_deselected`` hook on a plugin object that
 ``configure`` registers. Under xdist the controller never collects, so each worker counts
 its own and hands the number back in ``workeroutput`` when it finishes; the controller
-adds them up in ``pytest_testnodedown``. The executed and skipped counts are not sent
+keeps the largest in ``pytest_testnodedown``. Every worker collects and deselects the
+same modules, so the counts agree, and adding them up would print a multiple of the
+worker count in the admitted line (``-n 2`` read "(86 deselected)" for 43 tests) while
+the admission itself, which asks only whether the count is above zero, would be the
+same either way. The executed and skipped counts are not sent
 that way: xdist hands every worker's test report to the controller through
 ``pytest_runtest_logreport`` (xdist/dsession.py ``worker_testreport``), so the
 controller counts them from the reports it already receives, and summing the workers'
@@ -533,9 +537,14 @@ class _TierRunOutcome:
 
     @pytest.hookimpl(optionalhook=True)
     def pytest_testnodedown(self, node: Any, error: Any) -> None:
-        """Controller side of xdist: add up what a finished worker counted."""
+        """Controller side of xdist: keep the largest count a finished worker reported.
+
+        Each worker collects and deselects the same modules, so the counts are the
+        same number seen once per worker; their sum would be that number times the
+        worker count. The admission asks only whether the count is above zero.
+        """
         output = getattr(node, "workeroutput", None) or {}
-        self.deselected += int(output.get(WORKEROUTPUT_KEY, 0))
+        self.deselected = max(self.deselected, int(output.get(WORKEROUTPUT_KEY, 0)))
 
     def pytest_sessionfinish(self, session: Any, exitstatus: Any) -> None:
         workeroutput = getattr(session.config, "workeroutput", None)
