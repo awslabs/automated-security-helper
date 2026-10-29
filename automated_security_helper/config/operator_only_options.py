@@ -473,14 +473,26 @@ class RepositorySettings:
         """Whether a file of the chain other than the repository's sets the
         option: the merged document still holds it, under any of the plugin's
         section spellings."""
+        return self.elsewhere_value(kind, plugin, option) is not _MISSING
+
+    def elsewhere_value(self, kind: str, plugin: str, option: str) -> Any:
+        """The value a file of the chain other than the repository's set the
+        option to (the merged document's, under any of the plugin's section
+        spellings; the last section read wins), or ``_MISSING``. The settle
+        writes this value back: the configuration may hold another by the time
+        it runs (an override applied to the model before the confinement), and
+        skipping the option because a file outside the tree set it kept that
+        other value instead of the file's."""
         sections = self.document.get(kind) if isinstance(self.document, dict) else None
         if not isinstance(sections, dict):
-            return False
+            return _MISSING
         sections_of = _scanner_sections_in if kind == "scanners" else _sections_in
-        return any(
-            isinstance(section.get("options"), dict) and option in section["options"]
-            for _key, section in sections_of(sections, plugin)
-        )
+        value: Any = _MISSING
+        for _key, section in sections_of(sections, plugin):
+            options = section.get("options")
+            if isinstance(options, dict) and option in options:
+                value = options[option]
+        return value
 
 
 class _Settling(NamedTuple):
@@ -613,7 +625,13 @@ def _scanner_options_to_settle(
             environment_values=environment_values,
         ):
             continue
-        if repository.set_elsewhere("scanners", scanner, option):
+        elsewhere = repository.elsewhere_value("scanners", scanner, option)
+        if elsewhere is not _MISSING:
+            # A file outside the tree set it: that file's value holds, not
+            # whatever the configuration holds by now (an override applied to
+            # the model before the confinement).
+            if getattr(options, option) != elsewhere:
+                setattr(options, option, elsewhere)
             continue
         found.append(
             _Settling(
@@ -740,7 +758,14 @@ def _confine_scanner_options(
                 config_overrides,
                 kind="scanners",
                 environment_values=environment_values,
-            ) or repository.set_elsewhere("scanners", scanner, option):
+            ):
+                continue
+            elsewhere = repository.elsewhere_value("scanners", scanner, option)
+            if elsewhere is not _MISSING:
+                # A file outside the tree set it: that file's value holds, not
+                # whatever the configuration holds by now.
+                if getattr(options, option) != elsewhere:
+                    setattr(options, option, elsewhere)
                 continue
             operator_value = getattr(operator_options, option)
             if getattr(options, option) != operator_value:

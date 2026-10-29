@@ -20,8 +20,11 @@ import datetime
 
 import pytest
 
+from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.environment_record import EnvironmentReference
 from automated_security_helper.config.operator_only_options import (
+    RepositorySettings,
+    _confine_scanner_options,
     _sections_in,
     mark_operator_only_options,
 )
@@ -29,6 +32,25 @@ from automated_security_helper.config.operator_only_options import (
 pytestmark = pytest.mark.unit
 
 SH = "aws-security-hub"
+
+
+def test_an_option_a_file_outside_the_tree_set_holds_that_files_value():
+    """The chain document holds the limit a file outside the tree wrote; the
+    configuration holds another value by the time the settle runs (an override
+    applied to the model before the confinement). Skipping the option because a
+    file outside the tree set it kept the other value; the file's value is
+    written back."""
+    repository = RepositorySettings(trees=[])
+    repository.document = {
+        "scanners": {"detect-secrets": {"options": {"max_worker_output_mib": 256}}}
+    }
+    config = AshConfig.model_validate(
+        {"scanners": {"detect-secrets": {"options": {"max_worker_output_mib": 2048}}}}
+    )
+
+    _confine_scanner_options(config, AshConfig(), [], repository)
+
+    assert config.scanners.detect_secrets.options.max_worker_output_mib == 256
 
 
 def test_a_non_string_reporters_key_is_skipped_not_raised():
