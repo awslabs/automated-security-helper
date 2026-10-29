@@ -108,9 +108,10 @@ def report_file_name(key: str) -> WrapValidator:
     """Validator for an option that names a file in the reports directory, named ``key``.
 
     A reporter writes such a file directly inside the reports directory, so only a
-    single path component is accepted, from any source: a value with ``/``, ``\\``
-    or NUL, or one that is ``.`` or ``..``, is replaced by the option's default,
-    with one warning naming ``key``.
+    single path component is accepted, from any source: a value with ``/``, ``\\``,
+    ``:`` (an NTFS stream of another file) or NUL, or one that is ``.`` or ``..``,
+    is replaced by the option's default, with one warning naming ``key`` and
+    every refused character, so the operator can see which one the value held.
     """
 
     def _validate(value: Any, handler: ValidatorFunctionWrapHandler, _info: Any) -> Any:
@@ -127,8 +128,8 @@ def report_file_name(key: str) -> WrapValidator:
             str(value),
             f"Ignoring {key}: the value is not a file name such as 'summary.md'. "
             "The file is written directly inside the reports directory, so the name "
-            "cannot contain '/', '\\' or NUL, or be '.' or '..'. Using the default "
-            "instead.",
+            "cannot contain '/', '\\', ':' or NUL, or be '.' or '..'. Using the "
+            "default instead.",
         )
         raise PydanticUseDefault from None
 
