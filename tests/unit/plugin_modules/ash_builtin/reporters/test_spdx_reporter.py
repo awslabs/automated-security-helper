@@ -136,9 +136,12 @@ class TestSpdxDocument:
             }
         ]
         assert by_name["@scope/left pad"]["licenseDeclared"] == "MIT OR Apache-2.0"
-        # A free-text license name is not an SPDX expression; claiming nothing is
-        # the valid answer.
-        assert by_name["mystery"]["licenseDeclared"] == "NOASSERTION"
+        # A free-text license name is not an SPDX expression; it is declared as a
+        # LicenseRef the document defines in hasExtractedLicensingInfos.
+        assert (
+            by_name["mystery"]["licenseDeclared"]
+            == "LicenseRef-Some-custom-license-text"
+        )
         assert "versionInfo" not in by_name["mystery"]
 
     def test_relationships_describe_the_root_and_contain_each_package(self, document):

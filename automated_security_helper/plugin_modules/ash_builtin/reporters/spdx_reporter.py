@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import itertools
 import json
 import re
 import uuid
@@ -61,14 +62,49 @@ def _spdx_created(value: Any) -> str:
     return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _declared_license(component: Dict[str, Any]) -> str:
+#: What the root package says when no SBOM scanner produced an inventory.
+NO_SBOM_COMMENT = (
+    "No SBOM scanner produced an inventory for this scan (the scanner was "
+    "missing, skipped or failed), so the packages this document would CONTAIN "
+    "are unknown. An empty package list here is not a statement that the "
+    "project has no dependencies."
+)
+
+
+def _license_ref(name: str, extracted: Dict[str, Dict[str, str]]) -> str:
+    """A ``LicenseRef-`` identifier for the free-text license *name*.
+
+    Registered in *extracted*, the document's ``hasExtractedLicensingInfos``,
+    so the reference resolves. Two names that sanitize to one identifier get
+    distinct ones, because an identifier that stood for both would declare the
+    second component under the first's license.
+    """
+    base = f"LicenseRef-{_SPDX_ID_UNSAFE.sub('-', name)}"[:120]
+    ref = base
+    counter = 2
+    while ref in extracted and extracted[ref]["name"] != name:
+        ref = f"{base}-{counter}"
+        counter += 1
+    extracted.setdefault(
+        ref, {"licenseId": ref, "name": name, "extractedText": NOASSERTION}
+    )
+    return ref
+
+
+def _declared_license(
+    component: Dict[str, Any], extracted: Dict[str, Dict[str, str]]
+) -> str:
     """The component's license as an SPDX expression, or NOASSERTION.
 
     CycloneDX carries a license as an SPDX ``id``, a free-text ``name`` or an
-    ``expression``. Only ``id`` and ``expression`` are SPDX expressions; a
-    ``name`` is arbitrary text, and putting it in ``licenseDeclared`` would make
-    the document invalid, so a component that has only names is NOASSERTION.
-    Several ids are joined with AND, the conservative reading of a list.
+    ``expression``. ``id`` and ``expression`` are SPDX expressions and are used
+    as they are. A ``name`` is arbitrary text and cannot stand in an expression,
+    so it becomes a ``LicenseRef-`` identifier declared in the document's
+    ``hasExtractedLicensingInfos`` (*extracted*), the SPDX way to declare a
+    license that has no listed identifier. Dropping name-only licenses, as this
+    once did, declared a narrower license than the SBOM states: a component
+    under "Apache-2.0" and a named commercial license read as Apache-2.0 alone.
+    Several terms are joined with AND, the conservative reading of a list.
     """
     terms: List[str] = []
     for choice in component.get("licenses") or []:
@@ -83,6 +119,10 @@ def _declared_license(component: Dict[str, Any]) -> str:
             license_id = license_obj.get("id")
             if isinstance(license_id, str) and license_id.strip():
                 terms.append(license_id.strip())
+                continue
+            license_name = license_obj.get("name")
+            if isinstance(license_name, str) and license_name.strip():
+                terms.append(_license_ref(license_name.strip(), extracted))
     if not terms:
         return NOASSERTION
     if len(terms) == 1:
@@ -90,7 +130,9 @@ def _declared_license(component: Dict[str, Any]) -> str:
     return " AND ".join(f"({term})" if " " in term else term for term in terms)
 
 
-def _package(component: Dict[str, Any], index: int) -> Dict[str, Any]:
+def _package(
+    component: Dict[str, Any], index: int, extracted: Dict[str, Dict[str, str]]
+) -> Dict[str, Any]:
     name = str(component.get("name") or f"component-{index}")
     package: Dict[str, Any] = {
         "SPDXID": f"SPDXRef-Package-{index}-{_SPDX_ID_UNSAFE.sub('-', name)}"[:200],
@@ -98,7 +140,7 @@ def _package(component: Dict[str, Any], index: int) -> Dict[str, Any]:
         "downloadLocation": NOASSERTION,
         "filesAnalyzed": False,
         "licenseConcluded": NOASSERTION,
-        "licenseDeclared": _declared_license(component),
+        "licenseDeclared": _declared_license(component, extracted),
         "copyrightText": NOASSERTION,
     }
     version = component.get("version")
@@ -150,14 +192,19 @@ def build_spdx_document(model: "AshAggregatedResults") -> Dict[str, Any]:
     )
 
     components: List[Dict[str, Any]] = []
+    # Every SBOM a scanner writes has metadata or a serial number; the default
+    # model, and its dump read back from a results file, have neither (the
+    # cyclonedx reporter's test for the same case).
+    no_sbom = True
     if model.cyclonedx is not None:
         # exclude_unset as in cyclonedx_reporter: only what the SBOM actually says.
         bom = model.cyclonedx.model_dump(
             by_alias=True, exclude_unset=True, exclude_none=True, mode="json"
         )
         components = [c for c in bom.get("components") or [] if isinstance(c, dict)]
+        no_sbom = not (bom.get("metadata") or bom.get("serialNumber") or components)
 
-    root_package = {
+    root_package: Dict[str, Any] = {
         "SPDXID": ROOT_PACKAGE_SPDX_ID,
         "name": project_name,
         "downloadLocation": NOASSERTION,
@@ -167,25 +214,45 @@ def build_spdx_document(model: "AshAggregatedResults") -> Dict[str, Any]:
         "copyrightText": NOASSERTION,
         "primaryPackagePurpose": "SOURCE",
     }
-    packages = [root_package] + [
-        _package(component, index) for index, component in enumerate(components, 1)
-    ]
-    relationships = [
+    if no_sbom:
+        # A document with the root package only is valid, and before this it
+        # was byte-identical to the document of a project with no dependencies.
+        root_package["comment"] = NO_SBOM_COMMENT
+
+    packages: List[Dict[str, Any]] = [root_package]
+    relationships: List[Dict[str, str]] = [
         {
             "spdxElementId": DOCUMENT_SPDX_ID,
             "relationshipType": "DESCRIBES",
             "relatedSpdxElement": ROOT_PACKAGE_SPDX_ID,
         }
-    ] + [
-        {
-            "spdxElementId": ROOT_PACKAGE_SPDX_ID,
-            "relationshipType": "CONTAINS",
-            "relatedSpdxElement": package["SPDXID"],
-        }
-        for package in packages[1:]
     ]
+    extracted: Dict[str, Dict[str, str]] = {}
+    counter = itertools.count(1)
 
-    return {
+    def add(items: List[Dict[str, Any]], parent_spdx_id: str) -> None:
+        # Depth first, so a component's nested ``components`` (CycloneDX's
+        # assemblies, a bundled dependency's own dependencies) become packages
+        # CONTAINED by their parent package. Reading the top level alone left
+        # them out, so this document and the CycloneDX report listed different
+        # inventories for one scan.
+        for component in items:
+            package = _package(component, next(counter), extracted)
+            packages.append(package)
+            relationships.append(
+                {
+                    "spdxElementId": parent_spdx_id,
+                    "relationshipType": "CONTAINS",
+                    "relatedSpdxElement": package["SPDXID"],
+                }
+            )
+            nested = component.get("components")
+            if isinstance(nested, list):
+                add([c for c in nested if isinstance(c, dict)], package["SPDXID"])
+
+    add(components, ROOT_PACKAGE_SPDX_ID)
+
+    document: Dict[str, Any] = {
         "spdxVersion": SPDX_VERSION,
         "dataLicense": "CC0-1.0",
         "SPDXID": DOCUMENT_SPDX_ID,
@@ -199,6 +266,9 @@ def build_spdx_document(model: "AshAggregatedResults") -> Dict[str, Any]:
         "packages": packages,
         "relationships": relationships,
     }
+    if extracted:
+        document["hasExtractedLicensingInfos"] = list(extracted.values())
+    return document
 
 
 @ash_reporter_plugin
