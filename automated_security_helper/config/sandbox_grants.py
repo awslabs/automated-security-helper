@@ -102,7 +102,6 @@ from automated_security_helper.config.environment_record import (
     ENVIRONMENT_VALUE_SHOWN,
 )
 from automated_security_helper.config.untrusted_source import UntrustedSource
-from automated_security_helper.utils.link_locations import link_locations
 from automated_security_helper.utils.log import (
     ASH_LOGGER,
     NO_MARKUP,
@@ -931,7 +930,16 @@ def scanned_checkouts(scan_root: Path) -> List[Path]:
     the superproject around it too. Empty for a scan root outside every checkout.
     """
     found: List[Path] = []
-    for start in (as_named(scan_root), Path(os.path.realpath(scan_root))):
+    # Every name the scan root has, as ``scanned_trees`` takes them: as given,
+    # resolved, and through ``$PWD``; without the shell's name, ``cd vendor &&
+    # ash scan`` found no superproject above the root the kernel names, and a
+    # path inside it that the other trust checks count as the scanned tree was
+    # honored as the operator's.
+    for start in (
+        as_named(scan_root),
+        Path(os.path.realpath(scan_root)),
+        *_logical_paths(scan_root),
+    ):
         outermost = None
         for candidate in (start, *start.parents):
             if _git_shaped(candidate / ".git"):
@@ -1114,11 +1122,15 @@ def tree_holding(
     say which tree to move the file out of. The file is judged by its own path
     and by each path in ``names`` it was reached by
     (``config_sources.ResolvedConfigDocument.names``), and each of those at
-    every symlink on the way (``utils/link_locations``).
+    every link on the way, found by this module's own walk (``_walk_links``),
+    which counts a Windows junction as the link it is and says so once when it
+    stops before the end; ``Path.is_symlink`` is False for a junction, and a
+    walk that stepped through one as a directory never saw the tree it sits in.
     """
     trees = list(trees)
     for name in (path, *(names or {}).get(path, ())):
-        places = [name, *(link.parent for link in link_locations(name))]
+        links, _decided = _walk_links(name)
+        places = [name, *(link.parent for link in links)]
         for tree in trees:
             if any(is_within(place, tree) for place in places):
                 return tree
