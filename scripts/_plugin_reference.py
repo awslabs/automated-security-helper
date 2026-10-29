@@ -145,17 +145,45 @@ def plugin_packages() -> list[str]:
     return sorted(names, key=lambda n: (n != BUILTIN_PACKAGE, n))
 
 
+def _refuse_lost_plugin_groups(package: str, module: Any) -> None:
+    """Raise when a group of ``package``'s plugins failed to import.
+
+    ``ash_builtin`` isolates each plugin group's import and records a failure in
+    ``ASH_PLUGIN_LOAD_ERRORS`` instead of raising, so the package imports with a
+    shorter list and a page built from it would publish the survivors as the
+    whole set, with nothing on it to say so. A group lost only to the order this
+    process imported ASH's modules in loads on retry
+    (``retry_failed_plugin_groups``, which ``plugins/loader.py`` calls the same
+    way before it reads the lists); a group that still fails is the error the
+    page would otherwise hide.
+    """
+    retry = getattr(module, "retry_failed_plugin_groups", None)
+    if callable(retry):
+        errors = retry()
+    else:
+        errors = getattr(module, "ASH_PLUGIN_LOAD_ERRORS", None) or {}
+    if errors:
+        failed = "; ".join(f"{name}: {error}" for name, error in sorted(errors.items()))
+        raise ImportError(
+            f"{package} did not load every plugin group, so a page built from it "
+            f"would list a smaller set than ASH ships: {failed}"
+        )
+
+
 def discover(kind: str) -> list[Plugin]:
     """Every plugin of ``kind`` any package declares, in package then name order.
 
-    A package that fails to import is an error: listing what survived would publish
-    a smaller set than ASH ships with nothing on the page to say so.
+    A package that fails to import is an error, and so is a package that imported
+    with a plugin group missing (``_refuse_lost_plugin_groups``): listing what
+    survived would publish a smaller set than ASH ships with nothing on the page
+    to say so.
     """
     attr = REGISTRY_LISTS[kind]
     plugins: list[Plugin] = []
     seen: set[type] = set()
     for package in plugin_packages():
         module = importlib.import_module(package)
+        _refuse_lost_plugin_groups(package, module)
         for cls in getattr(module, attr, None) or []:
             if cls in seen:
                 continue
