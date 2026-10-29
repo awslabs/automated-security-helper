@@ -485,7 +485,9 @@ def _remove_tree(path: Path) -> bool:
             else:
                 shutil.rmtree(root, onerror=clear_and_retry)
         passes += 1
-        if not os.path.lexists(root):
+        try:
+            os.lstat(root)
+        except OSError:
             return True
         if passes >= _REMOVE_TREE_MAX_PASSES:
             return False
@@ -600,7 +602,11 @@ def _swap_into_place(
     """
 
     replaced: Optional[Path] = None
-    if os.path.lexists(target):
+    try:
+        os.lstat(target)
+    except OSError:
+        pass
+    else:
         replaced = _move_aside(target, session_dir, "the previously delivered source")
     try:
         _rename_with_retries(staging, target)
@@ -713,11 +719,15 @@ def _put_a_lost_source_back(
         and path.is_dir()
         and not path.is_symlink()
     ]
-    if (
-        not hidden
-        or os.path.lexists(target)
-        or get_session_source_dir(session_id) != target
-    ):
+    if not hidden:
+        return leftovers
+    try:
+        os.lstat(target)
+    except OSError:
+        pass
+    else:
+        return leftovers
+    if get_session_source_dir(session_id) != target:
         return leftovers
     if len(hidden) > 1:
         _logger.warning(
@@ -785,7 +795,12 @@ def _sweep_delivery_scratch(session_dir: Path, session_id: str) -> None:
         else:
             with contextlib.suppress(OSError):
                 leftover.unlink()
-            gone = not os.path.lexists(leftover)
+            try:
+                os.lstat(leftover)
+            except OSError:
+                gone = True
+            else:
+                gone = False
         if not gone:
             stuck.append(leftover)
     if stuck:
@@ -1801,7 +1816,12 @@ def _clone_into_session(
     # Read before the clone: only a session that has a source to free, or previous
     # source trees kept, is told that freeing them makes room (``_DISK_FULL_HINT``,
     # ``_DISK_FULL_KEPT_HINT``).
-    a_source_is_delivered = os.path.lexists(target)
+    try:
+        os.lstat(target)
+    except OSError:
+        a_source_is_delivered = False
+    else:
+        a_source_is_delivered = True
     kept_trees = _kept_previous_trees(session_dir)
     try:
         env = _git_environment(session_dir)
