@@ -64,6 +64,7 @@ Rejected alternatives
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -878,6 +879,7 @@ def _writes_plugin_default(document: Any, denial: Any, base: AshConfig) -> bool:
         plugin_key_lookup_names,
         reduced_plugin_name,
     )
+    from automated_security_helper.config.config_sources import _resolve_dict_key
     from automated_security_helper.config.runtime_patch import _path_segments, _walk
 
     if denial.from_patch:
@@ -892,7 +894,10 @@ def _writes_plugin_default(document: Any, denial: Any, base: AshConfig) -> bool:
             continue
         trusted = base.get_plugin_config("scanner", scanner)
         options = (trusted or {}).get("options") or {}
-        if option in options:
+        # Under either spelling of the key, as every other option lookup here
+        # reads a plugin's section: a trusted value written ``ignore-file``
+        # is the trusted base's own value too.
+        if _resolve_dict_key(options, option) in options:
             return False
         present, value = _walk(document, segments)
         return present and value == default
@@ -1294,6 +1299,13 @@ def _drop_denied_fields(
                 "They were not applied; the server's values were used instead.",
             )
         )
+    # The rebuilt model is the same configuration with the denied fields
+    # restored, so it keeps everything its load recorded (AshConfig's private
+    # attributes: the values and keys its files read from the environment, the
+    # written-field record, the trust records), as apply_config_overrides keeps
+    # them for its rebuild. Without them a dropped config printed and recorded
+    # the environment values its file read.
+    dropped.__pydantic_private__ = copy.deepcopy(config.__pydantic_private__)
     dropped._resolution_warnings = warnings
     return dropped
 
