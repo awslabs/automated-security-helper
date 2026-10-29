@@ -319,6 +319,65 @@ def _is_within(path: Path, parent: Path) -> bool:
         return False
 
 
+def _carved_homes(policy: SandboxPolicy) -> List[Path]:
+    """The homes a granted path that holds one must not reopen, resolved.
+
+    HOME's directory, the passwd entry's when it is another one, and each directory
+    or file a link at the top of either names (``policy._home_link_targets``), which
+    is part of that home. The filesystem root is left out: a HOME of "/" (a
+    container's) names no home, and as one it would sit inside no path and take
+    every other home's place.
+    """
+    homes = [h for h in [_real(policy.home)] if h != Path(h.anchor)]
+    other = _other_home(policy)
+    if other is not None:
+        homes.append(other)
+    return homes + _home_link_targets(homes, files=True)
+
+
+def _around(paths: Sequence[Path], homes: Sequence[Path]) -> List[Path]:
+    """``paths``, resolved, with each of ``homes`` carved out of the ones holding it.
+
+    For a backend whose rules only grant (Landlock): a rule on /opt reads everything
+    beneath it, a home at /opt/app/home included, and no rule takes a subtree back.
+    The policy keeps a system read path that holds a home (``policy._under_home``:
+    dropping /opt for a HOME of /opt/app/home would take away a tool's installation
+    prefix), so such a path is replaced here by what sits beside the way to the
+    home: its entries, and the entries of each directory on the way, all but the
+    home and any entry that resolves to or into a home (a link into it). A path that
+    is a home, or sits inside one, is the policy's own grant (the scanned tree under
+    ~, a cache it lists) and is kept as it is. A directory on the way that cannot be
+    listed is left out whole, nothing beneath it granted, rather than the home.
+    """
+    kept: List[Path] = []
+    seen: Set[Path] = set()
+
+    def beside(root: Path) -> None:
+        if root in seen:
+            return
+        seen.add(root)
+        try:
+            entries = sorted(root.iterdir())
+        except OSError:
+            return
+        for entry in entries:
+            real = _real(entry)
+            if any(real == home or _is_within(real, home) for home in homes):
+                continue
+            if any(_is_within(home, real) for home in homes):
+                beside(real)
+            else:
+                kept.append(real)
+
+    for path in paths:
+        real = _real(path)
+        if any(home != real and _is_within(home, real) for home in homes):
+            beside(real)
+        else:
+            kept.append(real)
+    return list(dict.fromkeys(kept))
+
+
 def _symlinked_components(path: Path) -> List[Tuple[Path, str]]:
     """Every component of ``path`` that is a symlink on the host, shallowest first.
 
@@ -805,11 +864,17 @@ class LandlockBackend(SandboxBackend):
         private_tmp.mkdir()
         private_home.mkdir()
         _link_policy_paths_into(private_home, policy)
+        # Landlock rules only grant, so a granted path that holds a home (a HOME
+        # under /opt or /usr/local, which the policy keeps for the tool prefix)
+        # would read the home with it: the home is carved out of such a path here,
+        # and the policy's own paths inside the home stay granted as listed.
+        read_only = _around(
+            list(policy.read_only) + list(policy.cache), _carved_homes(policy)
+        )
         document = {
             # Caches are read-only: Landlock cannot discard a write, so one in place
             # would change what later runs read. See _private_caches.
-            "read_only": [_real(p).as_posix() for p in policy.read_only]
-            + [_real(p).as_posix() for p in policy.cache]
+            "read_only": [p.as_posix() for p in read_only]
             + ["/proc", "/dev/zero", "/dev/random", "/dev/urandom", "/dev/full"],
             "writable": [_real(p).as_posix() for p in policy.writable]
             # /dev/shm because POSIX semaphores live there and multiprocessing needs
@@ -1113,6 +1178,25 @@ class SandboxExecBackend(SandboxBackend):
         ]
         if readable:
             lines.append(f"(allow file-read* {readable})")
+        # A path the policy lists can hold a home (a HOME under /opt or /usr/local,
+        # which the policy keeps for the tool prefix; an extra read path naming a
+        # home's parent), and the allow above reopened that home: take it back
+        # again, then give back the policy's own paths inside it.
+        listed = sorted({_real(p) for p in list(policy.read_only) + list(policy.cache)})
+        reopened = sorted(
+            {
+                h
+                for h in _carved_homes(policy)
+                if any(p != h and _is_within(h, p) for p in listed)
+            }
+        )
+        if reopened:
+            lines.append(f"(deny file-read* {_sbpl_subpaths(reopened)})")
+            inside_homes = [
+                p for p in listed if any(_is_within(p, h) for h in reopened)
+            ]
+            if inside_homes:
+                lines.append(f"(allow file-read* {_sbpl_subpaths(inside_homes)})")
         # Then take back what the tool may not read, wherever it is (a checkout under
         # /opt is otherwise read through "/" or a tool path), and give back what the
         # policy lists inside it. The results directory comes back with the

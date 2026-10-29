@@ -1,0 +1,217 @@
+"""A granted system read path that holds the home directory does not reopen it.
+
+The policy keeps a system read path that holds a home (``/opt`` with a HOME of
+``/opt/app/home``: dropping it would take away a tool's installation prefix), so
+each backend has to take the home back out of that path itself. Landlock rules
+only grant, so its plan grants what sits beside the way to the home instead of the
+path holding it; sandbox-exec's profile allows the policy's paths after it denies
+the homes, and the last matching rule wins, so it denies a home again after that
+allow and gives back the policy's own paths inside it. Every test reads the built
+rule list; none runs a backend.
+"""
+
+import json
+import os
+import re
+import sys
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from automated_security_helper.utils.sandbox import backends as backends_module
+from automated_security_helper.utils.sandbox import policy as policy_module
+from automated_security_helper.utils.sandbox.backends import (
+    LandlockBackend,
+    SandboxExecBackend,
+)
+from automated_security_helper.utils.sandbox.policy import (
+    SandboxRequirements,
+    build_scanner_policy,
+)
+
+pytestmark = pytest.mark.unit
+
+
+def _real(path):
+    return Path(os.path.realpath(path))
+
+
+@pytest.fixture
+def prefix(tmp_path, monkeypatch):
+    """A system read path that holds the home, with a tool beside the way to it.
+
+    ``<prefix>/app/home`` is HOME's directory and the passwd entry's; ``<prefix>/tool``
+    and ``<prefix>/app/other`` sit beside the way to it. The only system read path is
+    the prefix, PATH names one system directory, and uv's directory variables are
+    cleared so nothing from the environment running the tests lands in the policy.
+    """
+    root = tmp_path / "opt"
+    home = root / "app" / "home"
+    (home / ".ssh").mkdir(parents=True)
+    (home / ".ssh" / "id").write_text("not a key")
+    (root / "tool" / "bin").mkdir(parents=True)
+    (root / "app" / "other").mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    # Path.home() reads USERPROFILE on Windows, where these tests run too: the
+    # profile and the plan document are path logic, independent of the platform.
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("PATH", "/usr/bin")
+    for variable in (
+        "XDG_DATA_HOME",
+        "XDG_CACHE_HOME",
+        "UV_TOOL_DIR",
+        "UV_PYTHON_INSTALL_DIR",
+        "UV_CACHE_DIR",
+    ):
+        monkeypatch.delenv(variable, raising=False)
+    # backends imports policy's _passwd_home by name, so each module has its own
+    # binding, and the passwd home is faked in both.
+    for module in (policy_module, backends_module):
+        monkeypatch.setattr(module, "_passwd_home", Path.home, raising=False)
+    monkeypatch.setattr(policy_module, "SYSTEM_READ_PATHS", (root.as_posix(),))
+    return SimpleNamespace(root=root, home=home)
+
+
+def _policy(source):
+    """The policy of one scanner scanning ``source``, offline, with no network."""
+    output = source / ".ash" / "ash_output"
+    output.mkdir(parents=True, exist_ok=True)
+    return build_scanner_policy(
+        "probe",
+        SandboxRequirements(),
+        argv0=sys.executable,
+        source_dir=source,
+        output_dir=output,
+        results_dir=output / "scanners" / "probe",
+        scan_target=source,
+        cwd=source,
+        offline=True,
+        network_scanners=None,
+    )
+
+
+def test_the_policy_keeps_the_path_holding_the_home(prefix, tmp_path):
+    """The premise: the prefix stays in the read set, and the home is not listed.
+
+    Dropping the prefix would take away a tool's installation prefix, so the policy
+    keeps it (``_under_home`` drops a path that is a home or sits under one) and the
+    backends have to carve the home out of it.
+    """
+    read_only = {_real(p) for p in _policy(tmp_path / "src").read_only}
+
+    assert _real(prefix.root) in read_only
+    assert _real(prefix.home) not in read_only
+
+
+def _landlock_read_grants(policy, tmp_path, monkeypatch):
+    """The paths the Landlock plan's document grants reading, resolved."""
+    # The plan makes its private root with tempfile; keep it under tmp_path.
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    plan = LandlockBackend().plan([sys.executable], {"PATH": "/usr/bin"}, policy)
+    try:
+        document = json.loads(plan.argv[plan.argv.index("--policy") + 1])
+    finally:
+        plan.run_cleanup()
+    return {Path(p) for p in document["read_only"]}
+
+
+def _holding(granted, home):
+    """The grants that are ``home`` or a directory holding it: each reads the home."""
+    return sorted(str(p) for p in granted if p == home or p in home.parents)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Landlock is a Linux backend; its plan document is read on POSIX hosts",
+)
+def test_landlock_grants_what_sits_beside_the_home_not_the_path_holding_it(
+    prefix, tmp_path, monkeypatch
+):
+    """No grant is the home or holds it; the entries beside the way to it are granted.
+
+    A link beside the way that points into the home grants nothing either: the
+    plan reads real paths, and the real path is inside the home.
+    """
+    (prefix.root / "link").symlink_to(prefix.home / ".ssh")
+    granted = _landlock_read_grants(_policy(tmp_path / "src"), tmp_path, monkeypatch)
+    home = _real(prefix.home)
+
+    assert _holding(granted, home) == []
+    assert _real(prefix.root / "tool") in granted
+    assert _real(prefix.root / "app" / "other") in granted
+    inside = sorted(str(p) for p in granted if home in p.parents)
+    assert inside == [], inside
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Landlock is a Linux backend; its plan document is read on POSIX hosts",
+)
+def test_landlock_keeps_the_policys_own_path_inside_the_home(
+    prefix, tmp_path, monkeypatch
+):
+    """Positive control: the scanned tree under the home is granted, the home is not."""
+    source = prefix.home / "proj"
+    source.mkdir()
+    granted = _landlock_read_grants(_policy(source), tmp_path, monkeypatch)
+    home = _real(prefix.home)
+
+    assert _real(source) in granted
+    assert _holding(granted, home) == []
+
+
+def _last_file_read_rule(lines, path):
+    """The last file-read rule whose subpaths cover ``path``: the one that decides."""
+    covering = [
+        line
+        for line in lines
+        if line.startswith(("(allow file-read*", "(deny file-read*"))
+        and any(
+            path == Path(subpath) or Path(subpath) in path.parents
+            for subpath in re.findall(r'\(subpath "([^"]*)"\)', line)
+        )
+    ]
+    return covering[-1]
+
+
+def test_sandbox_exec_denies_the_home_again_after_the_path_holding_it(prefix, tmp_path):
+    """The rule that decides a read of the home, and of a file in it, is a deny.
+
+    The profile allows reading from "/", denies the home, then allows the policy's
+    paths, the prefix among them, which covers the home again. A later deny of the
+    home has to be the last word on it, while the tool beside it stays readable.
+    """
+    lines = (
+        SandboxExecBackend()
+        .profile(_policy(tmp_path / "src"), tmp_path / "private-tmp")
+        .splitlines()
+    )
+    home = _real(prefix.home)
+
+    assert _last_file_read_rule(lines, home).startswith("(deny file-read*")
+    assert _last_file_read_rule(lines, home / ".ssh" / "id").startswith(
+        "(deny file-read*"
+    )
+    assert _last_file_read_rule(lines, _real(prefix.root / "tool")).startswith(
+        "(allow file-read*"
+    )
+
+
+def test_sandbox_exec_gives_back_the_policys_own_path_inside_the_home(prefix, tmp_path):
+    """Positive control: the scanned tree under the home is readable, the home is not."""
+    source = prefix.home / "proj"
+    source.mkdir()
+    lines = (
+        SandboxExecBackend()
+        .profile(_policy(source), tmp_path / "private-tmp")
+        .splitlines()
+    )
+    home = _real(prefix.home)
+
+    assert _last_file_read_rule(lines, _real(source)).startswith("(allow file-read*")
+    assert _last_file_read_rule(lines, home).startswith("(deny file-read*")
+    assert _last_file_read_rule(lines, home / ".ssh" / "id").startswith(
+        "(deny file-read*"
+    )
