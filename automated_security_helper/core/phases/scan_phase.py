@@ -2058,10 +2058,12 @@ class ScanPhase(EnginePhase):
         ``unified_metrics.metrics_consistency_discrepancies``, which
         ``populate_metrics_from_unified_source`` runs after it writes both sides.
         That is where a scan checks this: at the end of this phase neither side is
-        final -- a scanner that ran has no row until the rebuild, and
-        ``save_model`` fills summary_stats whenever scanner_results is empty -- so
-        the same check run at the end of this phase would warn about every scan in
-        which every scanner ran and found something.
+        final -- a scanner that ran has no row until the rebuild, and summary_stats
+        is filled in only when the results file is written, which the orchestrator
+        does once after every phase (``save_model`` fills it whenever
+        scanner_results is empty) -- so the same check run at the end of this
+        phase would warn about every scan in which every scanner ran and found
+        something.
 
         Args:
             aggregated_results: The AshAggregatedResults to validate
