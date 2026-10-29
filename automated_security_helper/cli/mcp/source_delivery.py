@@ -961,6 +961,11 @@ _GIT_CONFIG = (
     "protocol.ssh.allow=always",
     "-c",
     "http.followRedirects=false",
+    # Links in the repository are checked out as plain files holding the
+    # target path, as the zip delivery refuses every link entry: a delivered
+    # link is read by a scan of the tree, and it reads outside the tree.
+    "-c",
+    "core.symlinks=false",
     "-c",
     "gc.auto=0",
     "-c",
@@ -1174,6 +1179,15 @@ def _run_git(
         group = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
     else:
         group = {"start_new_session": True}
+    # The group is recorded with the scanners' tools' groups for as long as it
+    # runs, so a server that stops while a clone, fetch or checkout runs ends
+    # it (subprocess_utils.kill_running_groups) instead of leaving it to run
+    # on, writing into a workspace the server has given up.
+    from automated_security_helper.utils.subprocess_utils import (
+        _register_group,
+        _unregister_group,
+    )
+
     process = subprocess.Popen(  # nosec B603 - list-form argv, git from _GIT_ARGV, url and ref validated before any call; see set_source_git
         cmd,
         stdin=subprocess.DEVNULL,
@@ -1184,7 +1198,21 @@ def _run_git(
         env=env,
         **group,
     )
+    _register_group(process)
     deadline = time.monotonic() + GIT_TIMEOUT_SECONDS
+    try:
+        return _await_git(cmd, process, deadline, grows_in)
+    finally:
+        _unregister_group(process)
+
+
+def _await_git(
+    cmd: List[str],
+    process: "subprocess.Popen[str]",
+    deadline: float,
+    grows_in: Optional[Path],
+) -> subprocess.CompletedProcess[str]:
+    """Wait for ``process``, a git command of a delivery, within its deadline."""
     try:
         while True:
             remaining = deadline - time.monotonic()
@@ -1975,6 +2003,32 @@ def _clone(
         message = f"git clone failed (exit {result.returncode}): {detail}"
         raise GitCommandError(message, GIT_CLONE_FAILED, disk_full=disk_full)
     if not ref:
+        # A clone of a repository whose HEAD names a branch that does not exist
+        # (an empty repository, or one whose default branch was deleted) exits 0
+        # with no commit and an empty working tree. Registered as the session's
+        # source, that tree scans clean for code the client never delivered, so
+        # the clone is refused unless its HEAD is a commit.
+        head = _run_git_step(
+            git_argv(
+                *_GIT_CONFIG,
+                "-C",
+                str(target),
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                "HEAD^{commit}",
+                program=program,
+            ),
+            env=env,
+            what="git rev-parse HEAD",
+            error_type=GIT_CLONE_FAILED,
+        )
+        if head.returncode != 0:
+            raise GitCommandError(
+                "git clone produced no commit: the repository's default branch "
+                "has no commits or does not exist. Name a ref to deliver.",
+                GIT_CLONE_FAILED,
+            )
         return
 
     # A shallow clone is single-branch, so a ref off the default branch is not in
@@ -2100,6 +2154,56 @@ def _final_zip_path(session_dir: Path, upload_id: str) -> Path:
     return _upload_path(session_dir, upload_id, ".zip")
 
 
+#: How many uploads a session may hold in ``incoming/`` at once, and how many
+#: bytes they may hold together. Each upload is capped at ``_MAX_ZIP_BYTES`` on
+#: its own; without a bound across uploads a session could open any number of
+#: upload ids and hold that many archives on the server's disk until it ended
+#: or was swept.
+_MAX_UPLOADS_PER_SESSION: int = 4
+_MAX_INCOMING_BYTES: int = 2 * _MAX_ZIP_BYTES
+
+_UPLOAD_SUFFIXES = (".zip.part", ".zip")
+
+
+def _refuse_another_upload(incoming: Path, upload_id: str) -> None:
+    """Refuse the first chunk of an upload the session has no room for.
+
+    Counts the archives and partial archives in ``incoming/`` other than
+    ``upload_id``'s own (an upload sent again under its id replaces its own
+    file) and their bytes. An upload whose chunks all arrived and whose finalize
+    was never sent holds its bytes until the next delivery, a clear or the end of
+    the session; this is the bound on how many of those a session keeps.
+    """
+    own = {f"{upload_id}{suffix}" for suffix in _UPLOAD_SUFFIXES}
+    held = 0
+    held_bytes = 0
+    try:
+        entries = list(os.scandir(incoming))
+    except OSError:
+        return
+    for entry in entries:
+        if not entry.name.endswith(_UPLOAD_SUFFIXES) or entry.name in own:
+            continue
+        try:
+            st = entry.stat(follow_symlinks=False)
+        except OSError:
+            continue
+        if not stat.S_ISREG(st.st_mode):
+            continue
+        held += 1
+        held_bytes += st.st_size
+    if held >= _MAX_UPLOADS_PER_SESSION:
+        raise ValueError(
+            f"too many uploads in progress for this session: {held} already held, "
+            f"the limit is {_MAX_UPLOADS_PER_SESSION}; finalize or clear them first"
+        )
+    if held_bytes >= _MAX_INCOMING_BYTES:
+        raise ValueError(
+            f"uploads in progress for this session hold {held_bytes} bytes, the "
+            f"limit is {_MAX_INCOMING_BYTES}; finalize or clear them first"
+        )
+
+
 def _read_next_sequence(session_dir: Path, upload_id: str) -> int:
     meta = _meta_path(session_dir, upload_id)
     if not meta.exists():
@@ -2194,6 +2298,8 @@ def _append_zip_chunk(
         raise ValueError(
             f"out-of-order chunk: expected sequence {expected}, got {sequence}"
         )
+    if sequence == 0:
+        _refuse_another_upload(part.parent, upload_id)
 
     try:
         decoded = base64.b64decode(data_b64, validate=True)
@@ -2258,6 +2364,13 @@ def _validate_zip_member(name: str) -> None:
 
     if not name:
         raise ValueError("zip entry has empty name")
+    if "\\" in name:
+        # The zip format's separator is "/". An entry named with backslashes
+        # passed the checks below as a nested path, since they read a backslash
+        # as a separator, and was then extracted on POSIX as one flat file whose
+        # name holds the backslashes, which a scanner keyed on directories never
+        # sees. Refused rather than rewritten, as every other malformed entry.
+        raise ValueError(f"backslash in zip entry name: {name!r}")
     # Normalize separators for the pure-text checks below.
     normalized = name.replace("\\", "/")
     if os.path.isabs(normalized) or normalized.startswith("/"):
@@ -2359,6 +2472,25 @@ def _refusing_after_close(
         raise ValueError(str(refused)) from None
 
 
+@contextlib.contextmanager
+def _removing_a_refused_zip(final: Path) -> Iterator[None]:
+    """Remove ``final`` when the validation or extraction inside refuses it.
+
+    Entered outside the ``zipfile.ZipFile`` that opens ``final``, so the handle
+    is closed before the unlink: Windows does not delete a file that is open.
+    Best effort, as for the oversize and checksum refusals: a held file must not
+    replace the refusal the caller is owed, and a zip that stays is refused again
+    by the same call. Only a refusal (``ValueError``, ``zipfile.BadZipFile``)
+    removes it; a failure on disk (``OSError``) leaves it for the next attempt.
+    """
+    try:
+        yield
+    except (ValueError, zipfile.BadZipFile):
+        with contextlib.suppress(OSError):
+            final.unlink()
+        raise
+
+
 def _remove_zip_still_at(
     final: Path, opened: os.stat_result, session_id: str, upload_id: str
 ) -> None:
@@ -2445,8 +2577,11 @@ def _finalize_zip_upload(
     try:
         # Pre-extraction validation pass: walk the namelist and the zipinfo
         # list, rejecting absolute paths, traversal components, oversize totals,
-        # and symlinks that would resolve outside the session sandbox.
-        with zipfile.ZipFile(final) as zf:
+        # and symlinks that would resolve outside the session sandbox. An archive
+        # one of them refuses is removed with the refusal (_removing_a_refused_zip):
+        # it held its bytes in incoming/ until the session ended otherwise, and a
+        # client that sends the same finalize again is told the upload is gone.
+        with _removing_a_refused_zip(final), zipfile.ZipFile(final) as zf:
             infos = zf.infolist()
             if len(infos) > _MAX_FILES:
                 raise ValueError(f"too many files in zip: {len(infos)} > {_MAX_FILES}")
@@ -2542,6 +2677,16 @@ def clear_source(session_id: str, *, workspace_root: Optional[Path] = None) -> N
             removes the directory they write into.
     """
 
+    # The binding select_profile made names the profile materialized in this
+    # workspace's config/ directory. Removing the workspace and keeping the
+    # binding left later scans with a bound profile whose file is gone, which
+    # the workspace tools refuse and the single-target scan ran without; the
+    # binding goes with the files it names, as it does when the session ends.
+    from automated_security_helper.cli.mcp.profile_registry import (
+        clear_session_state,
+    )
+
+    clear_session_state(session_id)
     if not remove_session_workspace(session_id, workspace_root=workspace_root):
         _logger.warning(
             "could not delete the whole workspace of session %s; the entries that "
