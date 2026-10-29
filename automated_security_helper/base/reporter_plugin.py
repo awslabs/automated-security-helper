@@ -399,23 +399,42 @@ def warn_off_host_section_without_enabled(
     """
     if getattr(reporter_class, "sends_off_host", False) is not True:
         return
-    if not isinstance(plugin_config, dict) or "enabled" in plugin_config:
-        return
-    if not any(_sets_something(value) for value in plugin_config.values()):
+    if not isinstance(plugin_config, dict):
         return
     key = plugin_config_key(reporter_class)
+    if "enabled" in plugin_config:
+        # A section that sets 'enabled' to anything but a bool (the string
+        # "true", 1, "yes") is refused by off_host_reporter_refused, which
+        # admits only the boolean true. Left silent, `ash merge` and the
+        # workspace report step dropped a reporter the operator had tried to
+        # turn on with no message. The value's TYPE is named, never the
+        # value: a config file can read it from the environment.
+        value = plugin_config["enabled"]
+        if isinstance(value, bool):
+            return
+        kind = "null" if value is None else f"a {type(value).__name__}"
+        message = (
+            f"Reporter '{key}' sends findings off the host and is not run: its "
+            f"config section sets enabled to {kind}, and only the boolean true "
+            f"turns it on (reporters.{key}.enabled). To run it, set "
+            f"reporters.{key}.enabled: true in the operator's config, or pass "
+            f"--config-overrides reporters.{key}.enabled=true."
+        )
+    else:
+        if not any(_sets_something(value) for value in plugin_config.values()):
+            return
+        message = (
+            f"Reporter '{key}' sends findings off the host and is disabled by "
+            "default. Its config section sets options but not 'enabled': it does "
+            "not set enabled: true, so it does not run. "
+            f"To run it, set reporters.{key}.enabled: true in the operator's "
+            f"config, or pass --config-overrides reporters.{key}.enabled=true."
+        )
     with _UNENABLED_SECTIONS_LOCK:
         if key in _UNENABLED_SECTIONS_WARNED:
             return
         _UNENABLED_SECTIONS_WARNED.add(key)
-    ASH_LOGGER.warning(
-        f"Reporter '{key}' sends findings off the host and is disabled by default. "
-        "Its config section sets options but not 'enabled': it does not set "
-        "enabled: true, so it does not run. "
-        f"To run it, set reporters.{key}.enabled: true in the operator's config, or "
-        f"pass --config-overrides reporters.{key}.enabled=true.",
-        extra=NO_MARKUP,
-    )
+    ASH_LOGGER.warning(message, extra=NO_MARKUP)
 
 
 def reporter_classes_for_run(
@@ -518,6 +537,17 @@ class ReporterPluginBase(PluginBase, Generic[T]):
         if self.context is None:
             raise ScannerError(f"No context provided for {self.__class__.__name__}!")
         ASH_LOGGER.trace(f"Using provided context for {self.__class__.__name__}")
+        if self.config is None:
+            # A reporter built with no config section runs on the defaults its
+            # declared model states: its enabled default, its name and its
+            # extension. Left None, the enabled filter was skipped, the report
+            # was written as the base's "ash.txt", and the reporter could not be
+            # selected by name. A reporter that declares no model keeps None.
+            declared = plugin_declared_config_model(
+                type(self), ReporterPluginConfigBase
+            )
+            if declared is not None:
+                self.config = declared()
         return self
 
     def configure(
