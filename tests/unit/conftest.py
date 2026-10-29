@@ -83,7 +83,11 @@ REAL_HOME_MODULES = frozenset({"home_isolation_probe.py", "test_home_isolation.p
 #: the stand-in records ``uv tool run ... <tool> --version`` as a start; a test
 #: of a probe has to reach the real code under its own doubles, so these keep
 #: the probes as they are. Each still runs under the guard: a probe that reaches
-#: a stand-in is recorded as before.
+#: a stand-in is recorded as before. A module can be here and in REAL_TOOL_MODULES
+#: at once: that list only permits the ``runs_real_tools`` marker, and the tests of
+#: such a module that do not carry it are guarded and keep their real probes only
+#: through this entry, so the dual listing is load-bearing, not a leftover
+#: (tests/unit/test_unit_conftest_module_lists.py pins both lists).
 PROBE_SUBJECT_MODULES = frozenset(
     {
         "base/test_failure_lines_carry_no_environment_value.py",
