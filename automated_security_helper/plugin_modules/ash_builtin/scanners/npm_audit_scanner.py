@@ -141,9 +141,10 @@ def _usable_cvss_score(cvss: Any) -> float | None:
     return float(score)
 
 
-# One comparator of an npm advisory range: an operator and a version.
+# One comparator of an npm advisory range: an operator, a version and an
+# optional prerelease or build suffix.
 _RANGE_COMPARATOR = re.compile(
-    r"^(<=|>=|<|>|=)?v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]*)?)$"
+    r"^(<=|>=|<|>|=)?v?(\d+\.\d+\.\d+)([-+][0-9A-Za-z.+-]*)?$"
 )
 
 
@@ -160,8 +161,13 @@ def _version_in_range(version: Any, vulnerable_range: Any) -> bool | None:
 
     None, which the caller reads as "keep the result", whenever the answer is
     not certain: no version, a version or comparator that does not parse
-    (``^``, ``~``, ``x`` ranges, hyphen ranges), or a prerelease version, whose
-    place in a range npm's semver decides by rules not reproduced here.
+    (``^``, ``~``, ``x`` ranges, hyphen ranges), or a prerelease version or
+    bound, whose place in a range npm's semver decides by rules not reproduced
+    here. A bound's suffix is never handed to packaging: semver reads
+    ``2.0.0-0`` (the upper bound node's semver writes for ``^1``) as a
+    prerelease below 2.0.0, while packaging reads it as a post-release above
+    it, so ``>=2.0.0-0`` against an installed 2.0.0 would have read False and
+    dropped a result the range covers.
     """
     from packaging.version import InvalidVersion, Version
 
@@ -184,6 +190,8 @@ def _version_in_range(version: Any, vulnerable_range: Any) -> bool | None:
             if match is None:
                 return None
             operator, bound_text = match.group(1) or "=", match.group(2)
+            if match.group(3):
+                return None
             try:
                 bound = Version(bound_text)
             except InvalidVersion:

@@ -170,6 +170,7 @@ def test_a_prerelease_copy_keeps_the_result(scanner, monkeypatch):
         ("1.0.0", "^1.0.0", None),
         ("1.0.0", "1.0.0 - 2.0.0", None),
         ("1.0.0-rc.1", "<2.0.0", None),
+        ("2.0.0", ">=2.0.0-0", None),
         ("not a version", "<2.0.0", None),
         (None, "<2.0.0", None),
         ("1.0.0", None, None),
