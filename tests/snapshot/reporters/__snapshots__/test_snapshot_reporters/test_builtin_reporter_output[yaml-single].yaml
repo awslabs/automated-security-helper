@@ -850,6 +850,7 @@ sarif:
     originalUriBaseIds: null
     policies: []
     properties:
+      ash_occurrence_context_version: 1
       tags: []
     redactionTokens: []
     results:
@@ -910,6 +911,16 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: bandit
+          message:
+            state: resolved
+            text: subprocess call with shell=True identified, security issue.
+          resolved_rule:
+            id: B602
+          rule_index: 0
+          version: 1
         issue_confidence: HIGH
         issue_severity: HIGH
         scanner_details:
@@ -988,6 +999,16 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: bandit
+          message:
+            state: resolved
+            text: 'Possible hardcoded password: ''hu**********************t'''
+          resolved_rule:
+            id: B105
+          rule_index: 1
+          version: 1
         issue_confidence: MEDIUM
         issue_severity: LOW
         scanner_details:
@@ -1066,6 +1087,16 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: checkov
+          message:
+            state: resolved
+            text: S3 Bucket has an ACL defined which allows public READ access.
+          resolved_rule:
+            id: CKV_AWS_20
+          rule_index: 0
+          version: 1
         issue_severity: HIGH
         scanner_details:
           tool_invocation:
@@ -1143,6 +1174,16 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: checkov
+          message:
+            state: resolved
+            text: Ensure the S3 bucket has access logging enabled
+          resolved_rule:
+            id: CKV_AWS_18
+          rule_index: 1
+          version: 1
         issue_severity: MEDIUM
         scanner_details:
           tool_invocation:
@@ -1220,6 +1261,16 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: checkov
+          message:
+            state: resolved
+            text: Ensure the last USER is not root
+          resolved_rule:
+            id: CKV_DOCKER_8
+          rule_index: 2
+          version: 1
         issue_severity: MEDIUM
         scanner_details:
           tool_invocation:
@@ -1297,6 +1348,17 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: checkov
+          message:
+            state: resolved
+            text: Ensure that HEALTHCHECK instructions have been added to container
+              images
+          resolved_rule:
+            id: CKV_DOCKER_2
+          rule_index: 3
+          version: 1
         issue_severity: LOW
         scanner_details:
           tool_invocation:
@@ -1375,6 +1437,17 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: semgrep
+          message:
+            state: resolved
+            text: The last user in the container is 'root'. Switch back to an unprivileged
+              user.
+          resolved_rule:
+            id: dockerfile.security.last-user-is-root.last-user-is-root
+          rule_index: 0
+          version: 1
         issue_severity: LOW
         scanner_details:
           tool_invocation:
@@ -1452,6 +1525,16 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: semgrep
+          message:
+            state: resolved
+            text: Command string built with an f-string; prefer an argument list.
+          resolved_rule:
+            id: python.lang.best-practice.unpinned-shell-command
+          rule_index: 1
+          version: 1
         issue_severity: INFO
         scanner_details:
           tool_invocation:
@@ -1529,6 +1612,17 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: detect-secrets
+          message:
+            state: resolved
+            text: Secret of type Secret Keyword detected in file app/app.py at line
+              5
+          resolved_rule:
+            id: SECRET-SECRET-KEYWORD
+          rule_index: 0
+          version: 1
         issue_severity: HIGH
         scanner_details:
           tool_invocation:
@@ -1615,6 +1709,17 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: grype
+          message:
+            state: resolved
+            text: A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was
+              found at requirements.txt
+          resolved_rule:
+            id: CVE-2018-18074-requests
+          rule_index: 0
+          version: 1
         issue_severity: CRITICAL
         scanner_details:
           tool_invocation:
@@ -1693,6 +1798,17 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: grype
+          message:
+            state: resolved
+            text: A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was
+              found at requirements.txt
+          resolved_rule:
+            id: CVE-2023-32681-requests
+          rule_index: 1
+          version: 1
         issue_severity: MEDIUM
         scanner_details:
           tool_invocation:

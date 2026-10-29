@@ -130,6 +130,20 @@ subprocess call with shell=True identified, security issue.
         "start_time": "2026-01-15T12:00:00+00:00",
         "end_time": "2026-01-15T12:00:01.250000+00:00"
       }
+    },
+    "ash_occurrence_context": {
+      "version": 1,
+      "rule_index": 0,
+      "component": {
+        "name": "bandit"
+      },
+      "resolved_rule": {
+        "id": "B602"
+      },
+      "message": {
+        "state": "resolved",
+        "text": "subprocess call with shell=True identified, security issue."
+      }
     }
   },
   "index": 1,
@@ -199,6 +213,20 @@ S3 Bucket has an ACL defined which allows public READ access.
         "start_time": "2026-01-15T12:00:01.250000+00:00",
         "end_time": "2026-01-15T12:00:08.750000+00:00"
       }
+    },
+    "ash_occurrence_context": {
+      "version": 1,
+      "rule_index": 0,
+      "component": {
+        "name": "checkov"
+      },
+      "resolved_rule": {
+        "id": "CKV_AWS_20"
+      },
+      "message": {
+        "state": "resolved",
+        "text": "S3 Bucket has an ACL defined which allows public READ access."
+      }
     }
   },
   "index": 3,
@@ -255,6 +283,20 @@ Ensure the S3 bucket has access logging enabled
         "duration": 7.5,
         "start_time": "2026-01-15T12:00:01.250000+00:00",
         "end_time": "2026-01-15T12:00:08.750000+00:00"
+      }
+    },
+    "ash_occurrence_context": {
+      "version": 1,
+      "rule_index": 1,
+      "component": {
+        "name": "checkov"
+      },
+      "resolved_rule": {
+        "id": "CKV_AWS_18"
+      },
+      "message": {
+        "state": "resolved",
+        "text": "Ensure the S3 bucket has access logging enabled"
       }
     }
   },
@@ -313,6 +355,20 @@ Ensure the last USER is not root
         "duration": 7.5,
         "start_time": "2026-01-15T12:00:01.250000+00:00",
         "end_time": "2026-01-15T12:00:08.750000+00:00"
+      }
+    },
+    "ash_occurrence_context": {
+      "version": 1,
+      "rule_index": 2,
+      "component": {
+        "name": "checkov"
+      },
+      "resolved_rule": {
+        "id": "CKV_DOCKER_8"
+      },
+      "message": {
+        "state": "resolved",
+        "text": "Ensure the last USER is not root"
       }
     }
   },
@@ -417,6 +473,20 @@ A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requi
         "start_time": "2026-01-15T12:00:13.250000+00:00",
         "end_time": "2026-01-15T12:00:16.250000+00:00"
       }
+    },
+    "ash_occurrence_context": {
+      "version": 1,
+      "rule_index": 0,
+      "component": {
+        "name": "grype"
+      },
+      "resolved_rule": {
+        "id": "CVE-2018-18074-requests"
+      },
+      "message": {
+        "state": "resolved",
+        "text": "A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requirements.txt"
+      }
     }
   },
   "index": 10,
@@ -473,6 +543,20 @@ A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at require
         "duration": 3.0,
         "start_time": "2026-01-15T12:00:13.250000+00:00",
         "end_time": "2026-01-15T12:00:16.250000+00:00"
+      }
+    },
+    "ash_occurrence_context": {
+      "version": 1,
+      "rule_index": 1,
+      "component": {
+        "name": "grype"
+      },
+      "resolved_rule": {
+        "id": "CVE-2023-32681-requests"
+      },
+      "message": {
+        "state": "resolved",
+        "text": "A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt"
       }
     }
   },

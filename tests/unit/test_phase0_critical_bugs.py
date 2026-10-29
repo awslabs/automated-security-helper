@@ -54,7 +54,8 @@ def test_phase0_bug1_flat_vulnerability_id_is_stable_hash_not_pythonhash():
     utils/finding_identity.py: the scanner, the rule, and the location, of which
     this result has none. The expected id is written out rather than recomputed
     here, so a change to how ids are formed, which changes every id a user has
-    recorded, fails this test instead of passing it.
+    recorded, fails this test instead of passing it. The same result restored from
+    its own JSON gets the same id, so the identity survives a save and reload.
     """
     description = "test vulnerability description abc"
 
@@ -69,6 +70,8 @@ def test_phase0_bug1_flat_vulnerability_id_is_stable_hash_not_pythonhash():
         f"got id={vuln.id!r}. The id is not the stable sha256-derived value: it "
         f"either uses Python's randomized hash() or the way ids are formed changed."
     )
+    restored = Result.model_validate_json(result.model_dump_json())
+    assert vuln.id == FlatVulnerability.from_sarif_result(restored, "bandit", "SAST").id
 
 
 # -----------------------------------------------------------------------------

@@ -113,6 +113,20 @@ subprocess call with shell=True identified, security issue.
         "end_time": "2026-01-15T12:00:01+00:00"
       }
     },
+    "ash_occurrence_context": {
+      "version": 1,
+      "rule_index": 0,
+      "component": {
+        "name": "bandit"
+      },
+      "resolved_rule": {
+        "id": "B602"
+      },
+      "message": {
+        "state": "resolved",
+        "text": "subprocess call with shell=True identified, security issue."
+      }
+    },
     "workspace_project": "api",
     "workspace_uri": "api/app.py"
   },
@@ -174,6 +188,20 @@ S3 Bucket has an ACL defined which allows public READ access.
         "end_time": "2026-01-15T12:00:02+00:00"
       }
     },
+    "ash_occurrence_context": {
+      "version": 1,
+      "rule_index": 0,
+      "component": {
+        "name": "checkov"
+      },
+      "resolved_rule": {
+        "id": "CKV_AWS_20"
+      },
+      "message": {
+        "state": "resolved",
+        "text": "S3 Bucket has an ACL defined which allows public READ access."
+      }
+    },
     "workspace_project": "web",
     "workspace_uri": "web/main.tf"
   },
@@ -232,6 +260,20 @@ Bucket name is hardcoded; derive it from a variable.
         "duration": 1.5,
         "start_time": "2026-01-15T12:00:02+00:00",
         "end_time": "2026-01-15T12:00:03.500000+00:00"
+      }
+    },
+    "ash_occurrence_context": {
+      "version": 1,
+      "rule_index": 0,
+      "component": {
+        "name": "semgrep"
+      },
+      "resolved_rule": {
+        "id": "terraform.aws.best-practice.s3-bucket-name-hardcoded"
+      },
+      "message": {
+        "state": "resolved",
+        "text": "Bucket name is hardcoded; derive it from a variable."
       }
     },
     "workspace_project": "web",

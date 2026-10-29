@@ -2582,21 +2582,49 @@ class SarifReport(RecordModel):
         report_run = sarif_report.runs[0]
         report_tool = report_run.tool
         report_invocations = report_run.invocations
+        from automated_security_helper.utils.occurrence_context import (
+            CONTEXT_PROPERTY,
+            MERGE_MARKER,
+            CONTEXT_VERSION,
+            is_composed_run,
+            occurrence_context,
+        )
+
+        def curated_copy(res, source_run, drop_rule_index=True):
+            clean_result = res.model_dump(
+                exclude=["ruleIndex"] if drop_rule_index else []
+            )
+            properties = clean_result.get("properties")
+            if isinstance(properties, dict):
+                properties.pop(CONTEXT_PROPERTY, None)
+            context = occurrence_context(res, source_run)
+            if context is not None:
+                properties = properties if isinstance(properties, dict) else {}
+                properties[CONTEXT_PROPERTY] = context
+                clean_result["properties"] = properties
+            return Result(**clean_result)
+
         report_results = []
         # A run may carry no results list at all (SARIF allows omitting it, and a
         # scanner that failed leaves it so), which merges as no results.
         for res in report_run.results or []:
-            clean_result = res.model_dump(
-                # Remove `ruleIndex`, since we're reordering rules. RuleId should
-                # correctly correlate results to associated rules in our set of scanners
-                # without it.
-                exclude=["ruleIndex"]
-            )
-            report_results.append(Result(**clean_result))
+            # Curate source identity before removing an index into reordered rules.
+            report_results.append(curated_copy(res, report_run))
+        needs_marker = is_composed_run(report_run) or any(
+            getattr(result.properties, CONTEXT_PROPERTY, None) is not None
+            for result in report_results
+        )
         if self.runs is None:
             self.runs = []
 
         self_run = self.runs[0] if self.runs is not None else None
+        if self_run is not None and needs_marker and not is_composed_run(self_run):
+            # Capture an existing target's local references before its first
+            # transition to aggregate lifecycle disables table-based lookup.
+            self_run.results = [
+                curated_copy(result, self_run, False)
+                for result in self_run.results or []
+            ]
         if self_run is None:
             cleaned_run = json.loads(report_run.model_dump_json())
             self_run = Run(**cleaned_run)
@@ -2606,7 +2634,9 @@ class SarifReport(RecordModel):
                     self_run.tool.extensions is None
                     or len(self_run.tool.extensions) == 0
                 ):
-                    self_run.tool.extensions = [report_tool.driver]
+                    self_run.tool.extensions = [
+                        report_tool.driver.model_copy(deep=True)
+                    ]
                 else:
                     # Check if report_tool.driver.name already exists in self_run.tool.extensions
                     existing_extension = next(
@@ -2620,7 +2650,9 @@ class SarifReport(RecordModel):
                         None,
                     )
                     if existing_extension is None:
-                        self_run.tool.extensions.append(report_tool.driver)
+                        self_run.tool.extensions.append(
+                            report_tool.driver.model_copy(deep=True)
+                        )
                     else:
                         if include_rules:
                             # Add rules if the rule.id doesn't already exist in existing_extension.rules
@@ -2630,11 +2662,17 @@ class SarifReport(RecordModel):
                             }
                             for rule in report_tool.driver.rules or []:
                                 if rule.id not in cur_rule_id_hash:
-                                    existing_extension.rules.append(rule)
+                                    existing_extension.rules.append(
+                                        rule.model_copy(deep=True)
+                                    )
 
         if self_run.results is None:
             self_run.results = []
         self_run.results.extend(report_results)
+        if needs_marker:
+            if self_run.properties is None:
+                self_run.properties = PropertyBag()
+            setattr(self_run.properties, MERGE_MARKER, CONTEXT_VERSION)
         if self_run.invocations is None or len(self_run.invocations) == 0:
             # Include by default if it doesn't have
             # any invocations or doesn't exist yet
