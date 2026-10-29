@@ -800,6 +800,203 @@ class TestATierRunThatRanNothingInARealPytest:
         assert self.LINE in done.stdout, done.stdout
 
 
+@pytest.mark.integration
+class TestSkipifLegsAndWarnModeInARealPytest:
+    """The floor on a planted tree whose tests skip for different reasons.
+
+    The tree's conftest wires the sharding module as the one in
+    TestAnEmptyShardOfATierRunInARealPytest does, and adds what tests/conftest.py adds
+    to every test of the integration tier: a ``--run-integration`` option and a ``skip``
+    mark with the gate's text when it is absent. The runs are the sharded integration
+    leg of CI: ``-m integration``, the opt-in in the child's environment, shard 1of1
+    (which owns every module), with and without ``-n 2``. The conftest gate is the one
+    skip the floor must keep failing on; a ``skipif`` whose condition held is admitted.
+    """
+
+    GATE_REASON = sharding.GATE_SKIP_REASONS[1]
+    GATE = textwrap.dedent(
+        f"""\
+
+
+        def pytest_addoption(parser):
+            parser.addoption("--run-integration", action="store_true", default=False)
+
+
+        def pytest_collection_modifyitems(config, items):
+            if not config.getoption("--run-integration"):
+                gate = pytest.mark.skip(reason={GATE_REASON!r})
+                for item in items:
+                    if item.get_closest_marker("integration"):
+                        item.add_marker(gate)
+        """
+    )
+    CONFTEST = TestAnEmptyShardOfATierRunInARealPytest.CONFTEST + GATE
+    SKIPIF_REASON = "not supported on this runner"
+
+    def _plant(
+        self, root: Path, *, skipif: int = 0, gated: int = 0, absent_tool: int = 0
+    ) -> None:
+        """Modules of integration tests: skipif(True) ones, plain ones, ones that
+        ``pytest.skip`` in the body. The plain ones are the gate's when it is closed."""
+        (root / "conftest.py").write_text(self.CONFTEST, encoding="utf-8")
+        (root / "pytest.ini").write_text(
+            "[pytest]\ntestpaths = suite\npython_files = test_*.py\n"
+            "markers =\n    integration: the integration tier\n",
+            encoding="utf-8",
+        )
+        (root / "suite").mkdir()
+        plain_top = "import pytest\n\npytestmark = pytest.mark.integration\n\n\n"
+        skipif_top = (
+            "import pytest\n\n"
+            "pytestmark = [\n    pytest.mark.integration,\n"
+            f"    pytest.mark.skipif(True, reason={self.SKIPIF_REASON!r}),\n]\n\n\n"
+        )
+        modules = {
+            "test_skipif.py": (skipif, skipif_top, "    pass\n"),
+            "test_plain.py": (gated, plain_top, "    pass\n"),
+            "test_absent_tool.py": (
+                absent_tool,
+                plain_top,
+                "    pytest.skip('bandit is absent')\n",
+            ),
+        }
+        for name, (count, top, body) in modules.items():
+            if count:
+                tests = "".join(f"def test_{i}():\n{body}\n\n" for i in range(count))
+                (root / "suite" / name).write_text(top + tests, encoding="utf-8")
+
+    def _run(
+        self,
+        root: Path,
+        *,
+        floor: str = "1",
+        gate_open: bool,
+        extra: tuple[str, ...] = (),
+    ):
+        env = _clean_env(PYTHONPATH=str(REPO_ROOT))
+        env[sharding.ENV_VAR] = "1of1"
+        if floor:
+            env[sharding.FLOOR_ENV_VAR] = floor
+        return subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "-c",
+                str(root / "pytest.ini"),
+                "--rootdir",
+                str(root),
+                "--confcutdir",
+                str(root),
+                "-p",
+                "no:cacheprovider",
+                "-p",
+                "no:randomly",
+                "-m",
+                "integration",
+                *(("--run-integration",) if gate_open else ()),
+                *extra,
+            ],
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+
+    ADMITTED = (
+        "tier run executed no test; admitted, because every skip is a skipif "
+        "condition that held: 2 skipped (2 x 'not supported on this runner')"
+    )
+
+    def test_a_leg_whose_every_test_is_a_skipif_that_held_is_admitted(self, tmp_path):
+        self._plant(tmp_path, skipif=2)
+        done = self._run(tmp_path, gate_open=True)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert self.ADMITTED in done.stdout, done.stdout
+        assert "executed no test: " not in done.stdout, done.stdout
+
+    def test_the_same_leg_is_admitted_under_xdist(self, tmp_path):
+        """The keywords and the skip's place cross the worker boundary in the reports."""
+        import xdist  # noqa: F401 - the run below needs the plugin
+
+        self._plant(tmp_path, skipif=2)
+        done = self._run(tmp_path, gate_open=True, extra=("-n", "2"))
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert self.ADMITTED in done.stdout, done.stdout
+
+    def test_a_skipif_wins_over_the_gate_on_the_same_test(self, tmp_path):
+        """pytest evaluates ``skipif`` before ``skip``, so the gate text is not the reason."""
+        self._plant(tmp_path, skipif=2)
+        done = self._run(tmp_path, gate_open=False)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert self.ADMITTED in done.stdout, done.stdout
+
+    def test_a_leg_the_conftest_gate_skipped_fails(self, tmp_path):
+        self._plant(tmp_path, gated=2)
+        done = self._run(tmp_path, gate_open=False)
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert (
+            "tier run executed no test: 2 collected, 2 skipped, 0 executed; "
+            "a leg that runs nothing is not green"
+        ) in done.stdout, done.stdout
+        assert "admitted, because" not in done.stdout, done.stdout
+
+    def test_a_leg_the_conftest_gate_skipped_fails_under_xdist(self, tmp_path):
+        import xdist  # noqa: F401 - the run below needs the plugin
+
+        self._plant(tmp_path, gated=2)
+        done = self._run(tmp_path, gate_open=False, extra=("-n", "2"))
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert "2 collected, 2 skipped, 0 executed" in done.stdout, done.stdout
+
+    def test_a_mixed_leg_of_skipif_and_gate_skips_fails(self, tmp_path):
+        self._plant(tmp_path, skipif=2, gated=1)
+        done = self._run(tmp_path, gate_open=False)
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert "3 collected, 3 skipped, 0 executed" in done.stdout, done.stdout
+        assert "admitted, because" not in done.stdout, done.stdout
+
+    def test_a_mixed_leg_of_skipif_and_gate_skips_fails_under_xdist(self, tmp_path):
+        import xdist  # noqa: F401 - the run below needs the plugin
+
+        self._plant(tmp_path, skipif=2, gated=1)
+        done = self._run(tmp_path, gate_open=False, extra=("-n", "2"))
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert "3 collected, 3 skipped, 0 executed" in done.stdout, done.stdout
+
+    def test_a_mixed_leg_of_skipif_and_a_missing_tool_skip_fails(self, tmp_path):
+        """The gate is open; one test finds its tool absent and skips itself."""
+        self._plant(tmp_path, skipif=2, absent_tool=1)
+        done = self._run(tmp_path, gate_open=True)
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert "3 collected, 3 skipped, 0 executed" in done.stdout, done.stdout
+
+    def test_warn_mode_prints_the_prefixed_line_and_exits_0(self, tmp_path):
+        self._plant(tmp_path, absent_tool=1)
+        done = self._run(tmp_path, floor="warn", gate_open=True)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert (
+            sharding.WARN_PREFIX
+            + "tier run executed no test: 1 collected, 1 skipped, 0 executed; "
+            "a leg that runs nothing is not green"
+        ) in done.stdout, done.stdout
+
+    def test_the_value_1_on_the_same_tree_exits_1(self, tmp_path):
+        """The control for warn mode: only the value differs."""
+        self._plant(tmp_path, absent_tool=1)
+        done = self._run(tmp_path, floor="1", gate_open=True)
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert sharding.WARN_PREFIX not in done.stdout, done.stdout
+
+    def test_any_other_value_leaves_the_floor_off(self, tmp_path):
+        self._plant(tmp_path, absent_tool=1)
+        done = self._run(tmp_path, floor="WARN", gate_open=True)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert "executed no test" not in done.stdout, done.stdout
+
+
 @pytest.mark.unit
 class TestAShardThatHoldsNoTestOfTheTierIsAdmitted:
     """A shard owns modules, not tiers, so with ``-m`` it can hold none of the tier.
@@ -951,6 +1148,7 @@ class TestATierRunThatExecutedNoTestFails:
         expression: str = "unit",
         text: str = "",
         under_ci: bool = True,
+        warn: bool = False,
         collected: int = 3,
         status: Any = pytest.ExitCode.OK,
         **options: Any,
@@ -958,6 +1156,7 @@ class TestATierRunThatExecutedNoTestFails:
         stash = pytest.Stash()
         stash[sharding._TEXT_KEY] = text
         stash[sharding._FLOOR_KEY] = under_ci
+        stash[sharding._FLOOR_WARN_KEY] = warn
         values = {"markexpr": expression, **options}
         reporter = SimpleNamespace(write_line=written.append)
         config = SimpleNamespace(
@@ -1189,6 +1388,233 @@ class TestATierRunThatExecutedNoTestFails:
         assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
         assert written == [self.LINE]
 
+    @staticmethod
+    def _skip(
+        reason: str = "not supported on this runner",
+        *,
+        when: str = "setup",
+        keywords: tuple[str, ...] = ("integration", "skipif"),
+        prefix: str = "Skipped: ",
+        path: str = "/root/suite/test_x.py",
+        line: int = 11,
+        location: Any = ("suite/test_x.py", 10, "test_x"),
+        **extra: Any,
+    ) -> SimpleNamespace:
+        """A skipped report as pytest builds it for a mark at an item defined on line 11."""
+        return SimpleNamespace(
+            when=when,
+            failed=False,
+            skipped=True,
+            keywords={name: 1 for name in keywords},
+            longrepr=(path, line, prefix + reason),
+            location=location,
+            **extra,
+        )
+
+    @pytest.mark.parametrize(
+        ("report", "expected"),
+        [
+            pytest.param(
+                _skip.__func__(),
+                "not supported on this runner",
+                id="skipif-at-the-item",
+            ),
+            pytest.param(
+                _skip.__func__(prefix=""),
+                "not supported on this runner",
+                id="reason-without-the-prefix",
+            ),
+            pytest.param(
+                _skip.__func__(
+                    "condition: os.name == 'nt'", keywords=("skipif", "unit")
+                ),
+                "condition: os.name == 'nt'",
+                id="the-reason-pytest-makes-up-for-a-bare-condition",
+            ),
+            pytest.param(
+                _skip.__func__(
+                    path="C:\\root\\suite\\test_x.py",
+                    location=("suite\\test_x.py", 10, "test_x"),
+                ),
+                "not supported on this runner",
+                id="windows-separators",
+            ),
+            pytest.param(
+                _skip.__func__("Need --run-integration option to run"),
+                None,
+                id="gate-text-on-a-test-that-also-carries-a-skipif",
+            ),
+            pytest.param(
+                _skip.__func__("Need --run-slow option to run"),
+                None,
+                id="slow-gate-text",
+            ),
+            pytest.param(
+                _skip.__func__(keywords=("integration", "skip")),
+                None,
+                id="a-skip-mark-is-not-a-skipif",
+            ),
+            pytest.param(
+                _skip.__func__(when="call", prefix="Skipped: "),
+                None,
+                id="a-skip-in-the-call-phase",
+            ),
+            pytest.param(
+                _skip.__func__(line=57),
+                None,
+                id="raised-at-another-line-as-by-a-fixture",
+            ),
+            pytest.param(
+                _skip.__func__(path="/root/suite/conftest.py"),
+                None,
+                id="raised-in-another-file",
+            ),
+            pytest.param(
+                _skip.__func__(wasxfail="reason"), None, id="an-expected-failure"
+            ),
+            pytest.param(_skip.__func__(location=None), None, id="no-location"),
+            pytest.param(
+                SimpleNamespace(
+                    when="setup",
+                    failed=False,
+                    skipped=True,
+                    keywords={"skipif": 1},
+                    longrepr="a string",
+                    location=("suite/test_x.py", 10, "test_x"),
+                ),
+                None,
+                id="a-longrepr-that-is-not-the-skip-tuple",
+            ),
+            pytest.param(
+                SimpleNamespace(
+                    when="setup", failed=False, skipped=False, keywords={"skipif": 1}
+                ),
+                None,
+                id="not-skipped",
+            ),
+        ],
+    )
+    def test_skipif_reason_tells_a_skipif_skip_from_every_other_skip(
+        self, report, expected
+    ):
+        assert sharding.skipif_reason(report) == expected
+
+    def test_the_gate_texts_are_the_ones_the_root_conftest_uses(self):
+        """The discriminator copies two strings; this fails if the conftest changes them."""
+        source = ROOT_CONFTEST.read_text(encoding="utf-8")
+        assert len(sharding.GATE_SKIP_REASONS) == 2
+        for reason in sharding.GATE_SKIP_REASONS:
+            assert f'reason="{reason}"' in source, reason
+
+    def test_a_leg_whose_every_skip_is_a_skipif_is_admitted_with_the_reasons(self):
+        written: list[str] = []
+        session = self._session(written)
+        plugin = sharding._TierRunOutcome()
+        for reason in (
+            "not supported on Windows",
+            "needs a newer tool",
+            "not supported on Windows",
+        ):
+            plugin.pytest_runtest_logreport(self._skip(reason))
+        assert plugin.skipif_reasons == {
+            "not supported on Windows": 2,
+            "needs a newer tool": 1,
+        }
+        plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
+        assert session.exitstatus == pytest.ExitCode.OK
+        assert written == [
+            "tier run executed no test; admitted, because every skip is a skipif "
+            "condition that held: 3 skipped "
+            "(2 x 'not supported on Windows', 1 x 'needs a newer tool')"
+        ]
+
+    def test_a_gate_skip_among_skipif_skips_keeps_the_failure(self):
+        written: list[str] = []
+        session = self._session(written)
+        plugin = sharding._TierRunOutcome()
+        plugin.pytest_runtest_logreport(self._skip())
+        plugin.pytest_runtest_logreport(self._skip())
+        plugin.pytest_runtest_logreport(
+            self._skip(
+                "Need --run-integration option to run", keywords=("integration", "skip")
+            )
+        )
+        plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
+        assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+        assert written == [self.LINE]
+
+    def test_a_skip_in_the_call_phase_among_skipif_skips_keeps_the_failure(self):
+        """A missing tool found by the test body is not a declared condition."""
+        written: list[str] = []
+        session = self._session(written)
+        plugin = sharding._TierRunOutcome()
+        plugin.pytest_runtest_logreport(self._skip())
+        plugin.pytest_runtest_logreport(self._skip())
+        plugin.pytest_runtest_logreport(self._skip("bandit is absent", when="call"))
+        plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
+        assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+        assert written == [self.LINE]
+
+    def test_a_leg_that_only_gate_skipped_keeps_the_failure(self):
+        written: list[str] = []
+        session = self._session(written)
+        plugin = sharding._TierRunOutcome()
+        for _ in range(3):
+            plugin.pytest_runtest_logreport(
+                self._skip(
+                    "Need --run-integration option to run",
+                    keywords=("integration", "skip"),
+                )
+            )
+        plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
+        assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+        assert written == [self.LINE]
+
+    def test_a_leg_with_no_skip_at_all_is_not_admitted(self):
+        """Selected items that were all leg assertions: nothing was skipped, nothing ran."""
+        written: list[str] = []
+        session = self._session(written, collected=1)
+        plugin = sharding._TierRunOutcome()
+        plugin.pytest_runtest_logreport(
+            self._report("call", "passed", keywords={sharding.LEG_ASSERTION_MARKER: 1})
+        )
+        plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
+        assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+        assert "1 collected, 0 skipped, 0 executed" in written[0], written
+
+    def test_warn_mode_prints_the_line_with_a_prefix_and_leaves_the_status(self):
+        written: list[str] = []
+        session = self._session(written, warn=True)
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
+        assert session.exitstatus == pytest.ExitCode.OK
+        assert written == [sharding.WARN_PREFIX + self.LINE]
+        assert sharding.WARN_PREFIX.startswith("warning")
+
+    def test_warn_mode_through_the_plugin_leaves_the_status(self):
+        written: list[str] = []
+        session = self._session(written, warn=True)
+        plugin = sharding._TierRunOutcome()
+        for _ in range(3):
+            plugin.pytest_runtest_logreport(self._report("setup", "skipped"))
+        plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
+        assert session.exitstatus == pytest.ExitCode.OK
+        assert written == [sharding.WARN_PREFIX + self.LINE]
+
+    def test_warn_mode_says_nothing_about_a_run_that_executed_a_test(self):
+        written: list[str] = []
+        session = self._session(written, warn=True)
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 1, 2)
+        assert session.exitstatus == pytest.ExitCode.OK and not written
+
+    def test_warn_mode_still_admits_a_skipif_leg_without_a_warning(self):
+        written: list[str] = []
+        session = self._session(written, warn=True)
+        assert not sharding.fail_a_tier_run_that_executed_no_test(
+            session, 0, 3, {"not supported on this runner": 3}
+        )
+        assert session.exitstatus == pytest.ExitCode.OK
+        assert len(written) == 1 and written[0].startswith("tier run executed no test;")
+
     def test_a_worker_leaves_the_exit_status_to_the_controller(self):
         written: list[str] = []
         session = self._session(written)
@@ -1206,8 +1632,11 @@ class TestATierRunThatExecutedNoTestFails:
         assert manager.get_plugin("ash-tier-run-outcome") is not None
         assert config.stash[sharding._FLOOR_KEY] is True
 
-    @pytest.mark.parametrize("value", ["true", "0", "yes", ""])
-    def test_only_the_value_1_opts_a_run_in(self, monkeypatch, value):
+    @pytest.mark.parametrize(
+        "value", ["true", "0", "yes", "", "WARN", "warning", " 1", "1 ", "warn "]
+    )
+    def test_only_the_values_1_and_warn_opt_a_run_in(self, monkeypatch, value):
+        """Any other value is ignored, as before."""
         monkeypatch.delenv(sharding.ENV_VAR, raising=False)
         monkeypatch.setenv(sharding.FLOOR_ENV_VAR, value)
         manager = pytest.PytestPluginManager()
@@ -1215,6 +1644,28 @@ class TestATierRunThatExecutedNoTestFails:
         sharding.configure(config)
         assert manager.get_plugin("ash-tier-run-outcome") is None
         assert config.stash[sharding._FLOOR_KEY] is False
+        assert config.stash[sharding._FLOOR_WARN_KEY] is False
+
+    def test_the_value_warn_opts_a_run_in_as_a_report_only_floor(self, monkeypatch):
+        monkeypatch.delenv(sharding.ENV_VAR, raising=False)
+        monkeypatch.setenv(sharding.FLOOR_ENV_VAR, "warn")
+        manager = pytest.PytestPluginManager()
+        config = SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager)
+        sharding.configure(config)
+        assert manager.get_plugin("ash-tier-run-outcome") is not None
+        assert config.stash[sharding._FLOOR_KEY] is True
+        assert config.stash[sharding._FLOOR_WARN_KEY] is True
+        assert sharding.FLOOR_ENV_VAR not in os.environ
+
+    def test_the_value_1_is_the_failing_floor_and_not_the_warning_one(
+        self, monkeypatch
+    ):
+        monkeypatch.delenv(sharding.ENV_VAR, raising=False)
+        monkeypatch.setenv(sharding.FLOOR_ENV_VAR, "1")
+        config = SimpleNamespace(stash=pytest.Stash())
+        sharding.configure(config)
+        assert config.stash[sharding._FLOOR_KEY] is True
+        assert config.stash[sharding._FLOOR_WARN_KEY] is False
 
     def test_github_actions_alone_does_not_opt_a_run_in(self, monkeypatch):
         """``act`` and any other pytest under Actions set it too; the opt-in is explicit."""

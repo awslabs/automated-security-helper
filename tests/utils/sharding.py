@@ -76,6 +76,35 @@ reach every pytest a test starts, and a child that loaded tests/conftest.py and 
 a directory would drop the modules other shards own. The hook reads the setting from the
 config, never from the environment. xdist workers are started after the removal and get
 the setting through ``workerinput`` (``pytest_configure_node``).
+
+The executed-test floor, continued. A leg whose every skip comes from an explicit
+``skipif`` marker whose condition held is admitted: the test code declared that it does
+not apply on this runner (a class that is ``skipif(os.name == "nt")`` on a Windows
+shard), and the leg has nothing else to run. The line the floor prints then says so and
+names the skip reasons with their counts. Every other skip still fails the floor: the
+root conftest's ``--run-integration`` and ``--run-slow`` gates, a ``pytest.skip`` in a
+test or a fixture (a missing tool), an unconditional ``skip`` mark.
+:func:`skipif_reason` tells the two apart from what a report carries, because an xdist
+controller receives reports and no items: the skip happened in setup, ``skipif`` is
+among ``report.keywords``, the report points at the item's own line (a mark skips at the
+item; a skip raised in a fixture or a test body points at the line that raised it), and
+the reason is not one of the gate texts that :data:`GATE_SKIP_REASONS` copies from
+tests/conftest.py (a unit test fails if the two drift apart). The alternative not taken
+is to tag each skip where the item exists, with a ``pytest_runtest_makereport``
+hookwrapper that re-evaluates the item's ``skipif`` marks
+(``_pytest.skipping.evaluate_skip_marks``, a private function) or adds a user property
+to the report. The property would be published in the JUnit XML, for the reason given at
+``LEG_ASSERTION_MARKER``, and the private call can change between pytest releases. Known
+limits: a test that carries a ``skipif`` whose condition did not hold and is skipped by a
+gate shows the gate's text and is not admitted, which is the safe direction; and a
+``skipif`` whose condition is a missing tool (``skipif(shutil.which("x") is None)``) is
+admitted like any other, because it is declared, where a ``pytest.skip`` found at run
+time is not.
+
+``ASH_TEST_TIER_FLOOR=warn`` opts in like ``1`` and reports instead of failing: the
+same line is printed with a warning prefix and the exit status is left alone. The e2e
+legs run in warn mode until a hosted run shows every one of them executing a real test
+with its scanners installed. Any other value is ignored.
 """
 
 from __future__ import annotations
@@ -85,7 +114,7 @@ import os
 import re
 import zlib
 from pathlib import Path
-from typing import Any, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 import pytest
 
@@ -154,10 +183,24 @@ _TEXT_KEY = pytest.StashKey[str]()
 #: The ``workerinput`` key the controller hands the text to a worker under.
 WORKERINPUT_KEY = "ash_test_shard"
 #: The opt-in the run-unit-tests action sets for a CI tier run; ``1`` turns the
-#: executed-test floor on. Read once by ``configure`` and removed from the environment.
+#: executed-test floor on and ``warn`` turns it on in report-only mode. Read once by
+#: ``configure`` and removed from the environment.
 FLOOR_ENV_VAR = "ASH_TEST_TIER_FLOOR"
-#: Whether this run opted in to the floor.
+#: The value of the opt-in that reports a floor failure and leaves the exit status alone.
+FLOOR_WARN_VALUE = "warn"
+#: What the floor line starts with in warn mode, so a reader knows it did not fail the run.
+WARN_PREFIX = "warning (ASH_TEST_TIER_FLOOR=warn, exit status unchanged): "
+#: Whether this run opted in to the floor, in either mode.
 _FLOOR_KEY = pytest.StashKey[bool]()
+#: Whether this run opted in with ``warn``: the floor reports and does not fail.
+_FLOOR_WARN_KEY = pytest.StashKey[bool]()
+#: The reasons of the two skips tests/conftest.py adds to a run that was not given
+#: ``--run-slow`` or ``--run-integration``. They are gate skips and not ``skipif`` skips,
+#: and the floor fails on them. A unit test checks that each text is still in that file.
+GATE_SKIP_REASONS = (
+    "Need --run-slow option to run",
+    "Need --run-integration option to run",
+)
 #: The ``workerinput`` key the controller hands the opt-in to a worker under.
 WORKERINPUT_FLOOR_KEY = "ash_test_tier_floor"
 
@@ -181,9 +224,13 @@ def configure(config: pytest.Config) -> None:
     if workerinput is not None:
         text = workerinput.get(WORKERINPUT_KEY) or ""
         floor = bool(workerinput.get(WORKERINPUT_FLOOR_KEY))
+        # A worker never applies the floor, so it does not need the mode.
+        warn = False
     else:
         text = os.environ.pop(ENV_VAR, "")
-        floor = os.environ.pop(FLOOR_ENV_VAR, "") == "1"
+        floor_value = os.environ.pop(FLOOR_ENV_VAR, "")
+        floor = floor_value in ("1", FLOOR_WARN_VALUE)
+        warn = floor_value == FLOOR_WARN_VALUE
     try:
         shard = parse_shard(text) if text else None
     except ValueError as error:
@@ -191,6 +238,7 @@ def configure(config: pytest.Config) -> None:
     config.stash[_SHARD_KEY] = shard
     config.stash[_TEXT_KEY] = text
     config.stash[_FLOOR_KEY] = floor
+    config.stash[_FLOOR_WARN_KEY] = warn
     # A stand-in config without a plugin manager (the unit tests of this module use one)
     # registers nothing. The early return above is what keeps this to once per config.
     # A run with a shard needs the plugin for the empty-shard admission, and a run that
@@ -253,8 +301,69 @@ def is_ci_tier_run(config: Any) -> bool:
     return bool(config.stash.get(_FLOOR_KEY, False))
 
 
+def _write_line(config: Any, text: str) -> None:
+    """Print one line through the terminal reporter, or to stdout without one."""
+    reporter = config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is not None:
+        reporter.write_line(text)
+    else:
+        print(text)
+
+
+def _is_the_items_own_location(path: Any, line: Any, location: Any) -> bool:
+    """Whether a skip's ``(path, line)`` is the item's own place, as a mark skip reports.
+
+    ``location`` is the report's ``(relative path, 0-based line, domain)``. A skip from a
+    mark is reported at the item (path and line + 1); a skip raised in a fixture or in the
+    test body is reported at the line that raised it. An absolute ``path`` ends with the
+    relative one.
+    """
+    if not isinstance(location, (tuple, list)) or len(location) < 2:
+        return False
+    if location[1] is None or line != location[1] + 1:
+        return False
+    absolute = str(path).replace("\\", "/")
+    relative = str(location[0]).replace("\\", "/")
+    return absolute == relative or absolute.endswith("/" + relative)
+
+
+def skipif_reason(report: Any) -> Optional[str]:
+    """The reason of a skipped report that came from a ``skipif`` marker, else None.
+
+    It reads only what the report carries (an xdist controller receives no item). All of
+    these hold for a ``skipif`` skip: the report is a skip in the ``setup`` phase and not
+    an expected failure; ``skipif`` is among ``report.keywords``; ``report.longrepr`` is
+    the ``(path, line, reason)`` tuple of a skip and its place is the item's own
+    (:func:`_is_the_items_own_location`); and the reason, once pytest's ``Skipped: ``
+    prefix is removed, is not one of :data:`GATE_SKIP_REASONS`. Anything else, such as a
+    gate skip, an unconditional ``skip`` mark, a ``pytest.skip`` in a fixture or in the
+    test body, is None.
+    """
+    if getattr(report, "when", None) != "setup":
+        return None
+    if not getattr(report, "skipped", False) or hasattr(report, "wasxfail"):
+        return None
+    if "skipif" not in (getattr(report, "keywords", None) or {}):
+        return None
+    longrepr = getattr(report, "longrepr", None)
+    if not isinstance(longrepr, (tuple, list)) or len(longrepr) != 3:
+        return None
+    path, line, text = longrepr
+    if not _is_the_items_own_location(path, line, getattr(report, "location", None)):
+        return None
+    reason = str(text)
+    if reason.startswith("Skipped: "):
+        reason = reason[len("Skipped: ") :]
+    if reason in GATE_SKIP_REASONS:
+        return None
+    return reason
+
+
 def fail_a_tier_run_that_executed_no_test(
-    session: Any, executed: int, skipped: int
+    session: Any,
+    executed: int,
+    skipped: int,
+    skipif_reasons: Optional[Mapping[str, int]] = None,
 ) -> bool:
     """Fail a CI tier run that selected tests and executed none of them.
 
@@ -268,9 +377,17 @@ def fail_a_tier_run_that_executed_no_test(
     ``executed`` is zero. ``admit_empty_shard`` is not touched: a shard that collected
     nothing selected nothing, so an admitted empty shard stays ``OK`` here.
 
-    The status becomes ``TESTS_FAILED`` and one line says what the run did. It does
-    nothing in an xdist worker, whose share of the tests may be all skips while the run
-    executed hundreds; the controller counts every worker's reports and decides.
+    ``skipif_reasons`` maps each reason of a ``skipif`` skip (:func:`skipif_reason`) to
+    how many tests were skipped for it. When they account for every skip, the leg is
+    admitted: it stays ``OK``, one line names the reasons and their counts, and this
+    returns False. A gate skip, a ``pytest.skip`` or a ``skip`` mark among the skips
+    keeps the failure.
+
+    The status becomes ``TESTS_FAILED`` and one line says what the run did. In warn mode
+    (``ASH_TEST_TIER_FLOOR=warn``) the same line is printed with :data:`WARN_PREFIX` and
+    the status is left alone, so this returns False. It does nothing in an xdist worker,
+    whose share of the tests may be all skips while the run executed hundreds; the
+    controller counts every worker's reports and decides.
     """
     config = session.config
     # Only the controller decides. A worker has ``workerinput``; the controller does not.
@@ -294,16 +411,27 @@ def fail_a_tier_run_that_executed_no_test(
     selected = session.testscollected
     if selected <= 0 or executed > 0:
         return False
-    session.exitstatus = pytest.ExitCode.TESTS_FAILED
+    reasons = dict(skipif_reasons or {})
+    if skipped > 0 and sum(reasons.values()) == skipped:
+        listed = ", ".join(
+            f"{count} x {reason!r}"
+            for reason, count in sorted(reasons.items(), key=lambda r: (-r[1], r[0]))
+        )
+        _write_line(
+            config,
+            "tier run executed no test; admitted, because every skip is a skipif "
+            f"condition that held: {skipped} skipped ({listed})",
+        )
+        return False
     line = (
         f"tier run executed no test: {selected} collected, {skipped} skipped, "
         "0 executed; a leg that runs nothing is not green"
     )
-    reporter = config.pluginmanager.get_plugin("terminalreporter")
-    if reporter is not None:
-        reporter.write_line(line)
-    else:
-        print(line)
+    if config.stash.get(_FLOOR_WARN_KEY, False):
+        _write_line(config, WARN_PREFIX + line)
+        return False
+    session.exitstatus = pytest.ExitCode.TESTS_FAILED
+    _write_line(config, line)
     return True
 
 
@@ -326,14 +454,16 @@ class _TierRunOutcome:
 
     ``configure`` registers it for a run with a shard or under CI. A class because tests/conftest.py already defines the module-level
     ``pytest_sessionfinish`` that a hook imported by name would have to share, and
-    because it holds the counts of the run: the items it deselected, and the tests it
-    executed and skipped.
+    because it holds the counts of the run: the items it deselected, the tests it
+    executed and skipped, and how many of the skips came from a ``skipif`` marker, by
+    reason.
     """
 
     def __init__(self) -> None:
         self.deselected = 0
         self.executed = 0
         self.skipped = 0
+        self.skipif_reasons: Dict[str, int] = {}
 
     def pytest_deselected(self, items: Sequence[Any]) -> None:
         self.deselected += len(items)
@@ -348,7 +478,9 @@ class _TierRunOutcome:
         in setup, or ``pytest.skip`` in the body, is skipped; an expected failure
         (``wasxfail``) ran its body and is executed. A leg assertion is neither: it
         is left out of both counts, and it is recognized by its marker name in
-        ``report.keywords``, which reaches an xdist controller with the report.
+        ``report.keywords``, which reaches an xdist controller with the report. A
+        setup skip that :func:`skipif_reason` reads as a ``skipif`` skip is also tallied
+        by its reason.
         """
         if LEG_ASSERTION_MARKER in (getattr(report, "keywords", None) or {}):
             return
@@ -357,6 +489,9 @@ class _TierRunOutcome:
                 self.executed += 1
             elif report.skipped:
                 self.skipped += 1
+                reason = skipif_reason(report)
+                if reason is not None:
+                    self.skipif_reasons[reason] = self.skipif_reasons.get(reason, 0) + 1
         elif report.when == "call":
             if report.skipped and not hasattr(report, "wasxfail"):
                 self.skipped += 1
@@ -377,7 +512,9 @@ class _TierRunOutcome:
             workeroutput[WORKEROUTPUT_KEY] = self.deselected
             return
         admit_empty_shard(session, exitstatus, self.deselected)
-        fail_a_tier_run_that_executed_no_test(session, self.executed, self.skipped)
+        fail_a_tier_run_that_executed_no_test(
+            session, self.executed, self.skipped, self.skipif_reasons
+        )
 
 
 #: The name the plugin object is registered under, once per config.
