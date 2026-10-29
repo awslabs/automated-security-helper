@@ -312,7 +312,16 @@ _ENUM_FIELDS = frozenset(
 #: They describe or classify findings; a finding tagged ``secret`` whose tag was
 #: masked stopped being a secret finding on the next pass.
 _METADATA_FIELDS = frozenset(
-    {"tool", "taxonomies", "translations", "policies", "rule", "tags"}
+    {
+        "tool",
+        "driver",
+        "extensions",
+        "taxonomies",
+        "translations",
+        "policies",
+        "rule",
+        "tags",
+    }
 )
 
 
@@ -385,13 +394,38 @@ def _physical_locations_of(result: Any, related: bool = False) -> Iterable[Any]:
             yield physical
 
 
+def _external_properties_of(sarif_report: Any) -> List[Any]:
+    """The ``inlineExternalProperties`` of a SARIF log: results, artifacts and
+    tool components a log carries outside its runs."""
+    return list(getattr(sarif_report, "inlineExternalProperties", None) or [])
+
+
+def _all_results(sarif_report: Any) -> List[Any]:
+    """Every result of a SARIF log: each run's, and each external property set's."""
+    results = list(sarif_report.get_all_results() or [])
+    for external in _external_properties_of(sarif_report):
+        results.extend(getattr(external, "results", None) or [])
+    return results
+
+
+def _artifacts_of(sarif_report: Any) -> Iterable[Any]:
+    for run in getattr(sarif_report, "runs", None) or []:
+        yield from getattr(run, "artifacts", None) or []
+    for external in _external_properties_of(sarif_report):
+        yield from getattr(external, "artifacts", None) or []
+
+
 def _rules_of(sarif_report: Any) -> Iterable[Any]:
+    components: List[Any] = []
     for run in getattr(sarif_report, "runs", None) or []:
         tool = getattr(run, "tool", None)
-        components = [getattr(tool, "driver", None)]
+        components.append(getattr(tool, "driver", None))
         components.extend(getattr(tool, "extensions", None) or [])
-        for component in components:
-            yield from getattr(component, "rules", None) or []
+    for external in _external_properties_of(sarif_report):
+        components.append(getattr(external, "driver", None))
+        components.extend(getattr(external, "extensions", None) or [])
+    for component in components:
+        yield from getattr(component, "rules", None) or []
 
 
 def _rule_ids_tagged(sarif_report: Any, is_tag) -> Set[str]:
@@ -504,16 +538,30 @@ def is_secret_finding(
     )
 
     rule_id = getattr(result, "ruleId", None) or ""
-    if rule_id in _SECRET_RULE_IDS or rule_id in secret_rule_ids:
-        return True
-    if rule_id.startswith(_SECRET_RULE_PREFIXES) or _SECRET_RULE_ID.search(rule_id):
+    if rule_id in secret_rule_ids or _is_secret_rule_id(rule_id):
         return True
     if any(_is_secret_tag(tag) for tag in result_tags(result)):
         return True
     if SECRETS_TOOL_TYPE in result_tool_types(result):
         return True
     text = _text_of(getattr(result, "message", None)) or ""
-    return bool(_quoted_values(text)) or _describes_a_credential_in_code(text)
+    return _text_reports_a_secret(text)
+
+
+def _is_secret_rule_id(rule_id: Any) -> bool:
+    """Whether a rule id alone marks a secret finding (see the module notes)."""
+    return isinstance(rule_id, str) and (
+        rule_id in _SECRET_RULE_IDS
+        or rule_id.startswith(_SECRET_RULE_PREFIXES)
+        or bool(_SECRET_RULE_ID.search(rule_id))
+    )
+
+
+def _text_reports_a_secret(text: Any) -> bool:
+    """Whether a message quotes a value or describes a credential in code."""
+    return isinstance(text, str) and (
+        bool(_quoted_values(text)) or _describes_a_credential_in_code(text)
+    )
 
 
 def _same_file(first: str, second: str) -> bool:
@@ -561,7 +609,7 @@ def _known_lines(sarif_report: Any) -> Dict[str, Dict[int, str]]:
         for offset, line in enumerate(_split_lines(text)):
             lines.setdefault(first_line + offset, line)
 
-    for result in sarif_report.get_all_results() or []:
+    for result in _all_results(sarif_report):
         for physical in _physical_locations_of(result, related=True):
             uri = getattr(getattr(physical, "artifactLocation", None), "uri", None)
             for name in ("region", "contextRegion"):
@@ -571,13 +619,12 @@ def _known_lines(sarif_report: Any) -> Dict[str, Dict[int, str]]:
                     getattr(region, "startLine", None),
                     getattr(getattr(region, "snippet", None), "text", None),
                 )
-    for run in getattr(sarif_report, "runs", None) or []:
-        for artifact in getattr(run, "artifacts", None) or []:
-            record(
-                getattr(getattr(artifact, "location", None), "uri", None),
-                1,
-                getattr(getattr(artifact, "contents", None), "text", None),
-            )
+    for artifact in _artifacts_of(sarif_report):
+        record(
+            getattr(getattr(artifact, "location", None), "uri", None),
+            1,
+            getattr(getattr(artifact, "contents", None), "text", None),
+        )
     return known
 
 
@@ -850,7 +897,7 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
     rule_ids = secret_rule_ids(sarif_report)
     described = _rule_ids_described(sarif_report)
     known: Optional[Dict[str, Dict[int, str]]] = None
-    for result in sarif_report.get_all_results() or []:
+    for result in _all_results(sarif_report):
         if not is_secret_finding(result, rule_ids):
             continue
         index.secret_results.append(result)
@@ -969,20 +1016,30 @@ def _overlapping_values(result: Any, index: _SecretIndex) -> Set[str]:
         if uri is None:
             continue
         for first, last in _line_spans(physical):
-            for secret_uri, start, end, values in index.local_values:
-                if not _same_file(secret_uri, uri):
-                    continue
-                # A span with no line cannot be placed, so it overlaps. Each pair
-                # is None together (_line_spans, _index_secrets), so the end
-                # checks only say so to the type checker.
-                if (
-                    first is None
-                    or last is None
-                    or start is None
-                    or end is None
-                    or (first <= end and start <= last)
-                ):
-                    found |= values
+            found |= _values_at(uri, first, last, index)
+    return found
+
+
+def _values_at(
+    uri: str, first: Optional[int], last: Optional[int], index: _SecretIndex
+) -> Set[str]:
+    """The values of the secret findings whose location lines ``first``-``last``
+    of the normalized ``uri`` overlap; a span with no line overlaps every one."""
+    found: Set[str] = set()
+    for secret_uri, start, end, values in index.local_values:
+        if not _same_file(secret_uri, uri):
+            continue
+        # A span with no line cannot be placed, so it overlaps. Each pair is None
+        # together (_line_spans, _index_secrets), so the end checks only say so
+        # to the type checker.
+        if (
+            first is None
+            or last is None
+            or start is None
+            or end is None
+            or (first <= end and start <= last)
+        ):
+            found |= values
     return found
 
 
@@ -1473,7 +1530,9 @@ def _mask_report(
     ``values`` and ``shapes`` are masked as well as what the report's own secret
     findings expose; every value's shape joins the index's shapes.
     """
-    has_runs = sarif_report is not None and bool(getattr(sarif_report, "runs", None))
+    has_runs = sarif_report is not None and bool(
+        getattr(sarif_report, "runs", None) or _external_properties_of(sarif_report)
+    )
     # Indexed before the messages are masked, which removes the values from them.
     index = _index_secrets(sarif_report) if has_runs else _SecretIndex()
     index.add_values(values)
@@ -1490,7 +1549,7 @@ def _mask_report(
         current = getattr(region, "endLine", None)
         if not (isinstance(current, int) and current >= block_end):
             region.endLine = block_end
-    for result in sarif_report.get_all_results() or []:
+    for result in _all_results(sarif_report):
         message = getattr(result, "message", None)
         root: Any = getattr(message, "root", message)
         if root is None:
@@ -1513,14 +1572,16 @@ def _mask_report(
         _mask_own_source_text(result, index)
     if index.lines or index.values or index.shapes:
         seen: Set[int] = set()
-        for run in sarif_report.runs:
+        for run in getattr(sarif_report, "runs", None) or []:
             _mask_tree(run, index, seen)
+        for external in _external_properties_of(sarif_report):
+            _mask_tree(external, index, seen)
     # A value that does not look like a secret is not masked everywhere, but it is
     # masked in every finding whose region or context overlaps the secret
     # finding's location: what that finding reports is the same line.
     if index.local_values:
         secret_ids = {id(result) for result in index.secret_results}
-        for result in sarif_report.get_all_results() or []:
+        for result in _all_results(sarif_report):
             values = _overlapping_values(result, index)
             if not values:
                 continue
@@ -1587,9 +1648,11 @@ def mask_secrets_in_results(
 ) -> Any:
     """Mask, in place, every secret value the findings of an aggregated result set expose.
 
-    Covers the SARIF report and the values in ``additional_reports``. Called once
-    a scan's results are merged, before ``ash_aggregated_results.json`` is saved
-    and before any reporter runs, and on every load of a stored results file.
+    Covers the SARIF report (its runs and its inline external properties), the
+    entries of ``additional_reports`` (``_mask_additional_reports``) and the
+    CycloneDX SBOM. Called once a scan's results are merged, before
+    ``ash_aggregated_results.json`` is saved and before any reporter runs, and on
+    every load of a stored results file.
 
     Also masks ``values`` (raw values other result sets exposed) and every token
     of ``shapes`` and of the shapes ``results`` already records
@@ -1604,10 +1667,89 @@ def mask_secrets_in_results(
     )
     index = _mask_report(getattr(results, "sarif", None), known_values, known_shapes)
     additional = getattr(results, "additional_reports", None)
-    if (index.values or index.shapes) and isinstance(additional, dict):
-        _mask_tree(additional, index, set())
+    if isinstance(additional, dict):
+        _mask_additional_reports(additional, index)
+    # The SBOM is written to the results file and to the CycloneDX, SPDX and
+    # GitLab SBOM reports as it is; a value a finding exposed can be in it.
+    cyclonedx = getattr(results, "cyclonedx", None)
+    if cyclonedx is not None and (index.values or index.shapes):
+        _mask_tree(cyclonedx, index, set())
     _record(results, index)
     return results
+
+
+def _mask_additional_reports(additional: Dict[str, Any], index: _SecretIndex) -> None:
+    """Mask a scan's ``additional_reports`` in place.
+
+    Every value and shape the index holds is masked throughout. The entries the
+    flat model reads as findings (the dicts in a scanner's list, with
+    ``file_path``, ``line_start`` and a ``snippet`` the reports print) are also
+    masked the way the SARIF results are: an entry that is itself a secret
+    finding has its snippet masked whole and its quoted values masked; any other
+    entry has its snippet masked at the lines secret findings report in its file,
+    and the values of the secret findings it overlaps masked whatever they look
+    like.
+    """
+    if index.values or index.shapes:
+        _mask_tree(additional, index, set())
+    for scanner_name, entries in additional.items():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if isinstance(entry, dict):
+                _mask_additional_entry(entry, scanner_name, index)
+
+
+def _additional_entry_is_secret(entry: Dict[str, Any], scanner_name: Any) -> bool:
+    from automated_security_helper.utils.scanner_tool_types import (
+        SECRETS_TOOL_TYPE,
+        scanner_tool_type,
+    )
+
+    if scanner_tool_type(scanner_name) == SECRETS_TOOL_TYPE:
+        return True
+    if _is_secret_rule_id(entry.get("rule_id")):
+        return True
+    tags = entry.get("tags")
+    if isinstance(tags, list) and any(_is_secret_tag(tag) for tag in tags):
+        return True
+    return any(_text_reports_a_secret(entry.get(name)) for name in _ENTRY_TEXTS)
+
+
+#: The text fields of an additional-report entry the flat model shows.
+_ENTRY_TEXTS = ("description", "title")
+
+
+def _mask_additional_entry(
+    entry: Dict[str, Any], scanner_name: Any, index: _SecretIndex
+) -> None:
+    snippet = entry.get("snippet")
+    if _additional_entry_is_secret(entry, scanner_name):
+        for name in _ENTRY_TEXTS:
+            text = entry.get(name)
+            if isinstance(text, str):
+                entry[name] = _mask_message_values(text)
+        if isinstance(snippet, str):
+            entry["snippet"] = _mask_text_whole(snippet)
+        return
+    uri = _normalized_uri(entry.get("file_path"))
+    if uri is None:
+        return
+    first = entry.get("line_start")
+    first = first if isinstance(first, int) else None
+    last = entry.get("line_end")
+    last = (
+        last if isinstance(last, int) and first is not None and last >= first else first
+    )
+    placed = index.lines_for(uri)
+    if placed is not None and isinstance(snippet, str):
+        whole, lines = placed
+        entry["snippet"] = _mask_lines(snippet, first, whole, lines)
+    values = _values_at(uri, first, last, index)
+    if values:
+        local = _SecretIndex()
+        local.values = set(values)
+        _mask_tree(entry, local, set())
 
 
 def source_snippet_masker(results: Any) -> Callable[[Any, Optional[int], str], str]:
