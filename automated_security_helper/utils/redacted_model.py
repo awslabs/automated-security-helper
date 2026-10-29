@@ -976,9 +976,9 @@ _GENERATED_ALIAS_CACHE: Dict[Tuple[Any, int], Tuple[Any, Optional[Dict[str, Any]
 def _generated_aliases(
     annotation: Any, alias_generator: Any
 ) -> Optional[Dict[str, Any]]:
-    """The validation alias of each field of the TypedDict or NamedTuple
-    *annotation* once *alias_generator* has been applied, by field name; None
-    when it cannot be read.
+    """The validation alias of each field of the TypedDict, NamedTuple or
+    standard-library dataclass *annotation* once *alias_generator* has been
+    applied, by field name; None when it cannot be read.
 
     pydantic applies the generator while it builds the schema, to a copy of
     each field's metadata, so neither the class nor a bare ``FieldInfo``
@@ -987,7 +987,8 @@ def _generated_aliases(
     a TypedDict itself, so the config goes with the wrapper, and a TypedDict
     with a config of its own keeps it. The read depends on the core schema's
     dict shape (a ``typed-dict`` field's ``validation_alias``, a NamedTuple
-    parameter's ``alias``), which is documented but less stable than a field
+    parameter's ``alias``, a ``dataclass-args`` field's ``validation_alias``),
+    which is documented but less stable than a field
     object; a schema of another shape reads as None and the caller falls back
     to the metadata. Built once per holder and generator (a generator is kept
     alive by its entry, which is cleared at 256)."""
@@ -1013,6 +1014,16 @@ def _generated_aliases(
                 result = {
                     parameter["name"]: _alias_object(parameter.get("alias"))
                     for parameter in arguments["arguments_schema"]
+                }
+        elif isinstance(node, dict) and node.get("type") == "dataclass":
+            arguments = node.get("schema")
+            if (
+                isinstance(arguments, dict)
+                and arguments.get("type") == "dataclass-args"
+            ):
+                result = {
+                    field["name"]: _alias_object(field.get("validation_alias"))
+                    for field in arguments["fields"]
                 }
     except Exception:  # a holder pydantic cannot build is not read
         result = None
@@ -1050,7 +1061,12 @@ def _typed_container_fields(annotation: Any) -> Optional[Dict[Any, Any]]:
     except Exception:  # an unresolvable forward reference
         return None
     names = tuple(annotation._fields) if _is_named_tuple(annotation) else tuple(hints)
-    by_name = {name: hints.get(name, Any) for name in names}
+    # Each field's own annotation is read from a map no alias key is added
+    # to: an earlier field's alias can land under a later field's own name
+    # and turn that entry into an _AliasSlots, and the later field's alias
+    # must then record the field's annotation, not the merged entry.
+    own = {name: hints.get(name, Any) for name in names}
+    by_name = dict(own)
     for name in names:
         if generated is not None:
             aliases: Tuple[Any, ...] = (generated.get(name),)
@@ -1062,7 +1078,7 @@ def _typed_container_fields(annotation: Any) -> Optional[Dict[Any, Any]]:
             aliases = (info.alias, info.validation_alias)
         for alias in aliases:
             for path in _alias_paths(alias):
-                _add_alias_slot(by_name, path, by_name[name])
+                _add_alias_slot(by_name, path, own[name])
     return by_name
 
 
@@ -1070,21 +1086,53 @@ def _dataclass_fields(
     annotation: Any, bindings: Dict[Any, Any]
 ) -> Optional[Dict[Any, Any]]:
     """The annotation of each field a dataclass declares, by field name and by
-    every key a pydantic dataclass's validation alias reads, with the type
-    variables in *bindings* replaced. None when the hints cannot be resolved."""
+    every key its validation alias reads, with the type variables in
+    *bindings* replaced. None when the hints cannot be resolved.
+
+    A pydantic dataclass carries its aliases in ``__pydantic_fields__``, like
+    a model. A standard-library dataclass has none of its own, and pydantic
+    reads a field's ``Field(alias=...)`` or ``Field(validation_alias=...)``
+    off its ``Annotated`` metadata, under the config in force around the
+    dataclass (the holder's, which pydantic applies to a stdlib dataclass used
+    as a field), whose ``alias_generator`` names the keys of its fields
+    (:func:`_generated_aliases`), as for a TypedDict."""
     try:
         hints = get_type_hints(annotation)
     except Exception:  # an unresolvable forward reference
         return None
-    by_name = {
+    own = {
         field.name: _bound(hints.get(field.name, Any), bindings)
         for field in dataclasses.fields(annotation)
     }
-    # A pydantic dataclass carries validation aliases like a model does.
-    for name, field in getattr(annotation, "__pydantic_fields__", {}).items():
-        for alias in (field.alias, field.validation_alias):
+    by_name = dict(own)
+    pydantic_fields = getattr(annotation, "__pydantic_fields__", None)
+    if pydantic_fields is not None:
+        for name, field in pydantic_fields.items():
+            for alias in (field.alias, field.validation_alias):
+                for path in _alias_paths(alias):
+                    _add_alias_slot(by_name, path, own.get(name, Any))
+        return by_name
+    config = _WALK_CONFIG.get()
+    generator = config.get("alias_generator") if config else None
+    generated = (
+        _generated_aliases(annotation, generator) if generator is not None else None
+    )
+    try:
+        declared = get_type_hints(annotation, include_extras=True)
+    except Exception:  # an unresolvable forward reference
+        declared = {}
+    for name in own:
+        if generated is not None:
+            aliases: Tuple[Any, ...] = (generated.get(name),)
+        else:
+            try:
+                info = FieldInfo.from_annotation(declared.get(name, Any))
+            except Exception:  # metadata pydantic would refuse as well
+                continue
+            aliases = (info.alias, info.validation_alias)
+        for alias in aliases:
             for path in _alias_paths(alias):
-                _add_alias_slot(by_name, path, by_name.get(name, Any))
+                _add_alias_slot(by_name, path, own[name])
     return by_name
 
 
