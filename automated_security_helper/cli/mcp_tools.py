@@ -5544,11 +5544,17 @@ def _validated_document_denials(
     except Exception as exc:  # noqa: BLE001 -- a check that cannot finish refuses
         return problems + [_unchecked_against_policy(exc)]
     shown = _plugin_modules_shown(check)
+    # A denial quotes the config's own text -- a module name the policy refuses
+    # can hold a value the chain read from the environment, glued in by "_".
+    # _with_modules_shown covers a name the environment supplied whole; every
+    # other value passes the same redaction as the validator's own errors.
     return problems + [
         _config_problem(
             key,
-            "{} may not be set by a config an MCP client delivers: {}".format(
-                key, _with_modules_shown(reason, shown)
+            check.redact(
+                "{} may not be set by a config an MCP client delivers: {}".format(
+                    key, _with_modules_shown(reason, shown)
+                )
             ),
             "denied_by_runtime_policy",
         )

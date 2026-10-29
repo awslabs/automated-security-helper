@@ -51,7 +51,10 @@ from tests.utils.config_link_layouts import config_through_links
 from tests.utils.helpers import link_walk_cannot_examine, mark_git_checkout
 
 GRANT = "project_name: tier\nsandbox:\n  extra_read_paths:\n    - /opt/tier-grant\n"
-FIX = "Keep --config, and every file it extends, outside every git checkout"
+FIX = (
+    "Keep --config, and every file it extends, outside the checkout around the "
+    "workspace root"
+)
 
 
 @pytest.fixture
@@ -564,9 +567,13 @@ def test_a_config_whose_name_walk_never_finished_is_refused_without_a_location(
     ), message
     assert config.as_posix() in message, message
     assert "is in the git checkout" not in message, message
-    from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
+    # Not in a checkout as far as anyone knows, so moving it out is no remedy: the
+    # walk has to be able to finish (confinement_remedy, resolve_config).
+    from automated_security_helper.config.confinement_remedy import (
+        KEEP_A_SETTING_WHEN_THE_WALK_STOPPED,
+    )
 
-    assert message.endswith(f"{FIX}. {KEEP_A_SETTING}"), message
+    assert message.endswith(f"{FIX}. {KEEP_A_SETTING_WHEN_THE_WALK_STOPPED}"), message
 
 
 def test_a_chain_of_a_found_file_and_an_undecided_one_says_each_reason(
@@ -588,6 +595,12 @@ def test_a_chain_of_a_found_file_and_an_undecided_one_says_each_reason(
     assert f"{located.as_posix()} is in the git checkout" in message, message
     assert f"whether {undecided.as_posix()} is in that checkout" in message, message
     assert f"{undecided.as_posix()} is in the git checkout" not in message, message
+    # The located file still moves out, the undecided one is made resolvable.
+    from automated_security_helper.config.confinement_remedy import (
+        KEEP_A_SETTING_BESIDE_A_LOCATED_FILE,
+    )
+
+    assert message.endswith(f"{FIX}. {KEEP_A_SETTING_BESIDE_A_LOCATED_FILE}"), message
 
 
 def test_the_scan_cli_refuses_it_before_clearing_the_output(

@@ -165,14 +165,16 @@ MAX_WORKER_OUTPUT_MIB = 4096
 
 
 class DetectSecretsScanSettingsPluginsUsed(RedactedSection):
-    model_config = ConfigDict(extra="allow")
+    # Built directly from a baseline's entries, so a refused value must not be
+    # quoted in the error's text (a baseline's entry can hold a secret).
+    model_config = ConfigDict(extra="allow", hide_input_in_errors=True)
     name: str | None = None
     limit: float | None = None
     keyword_exclude: str | None = None
 
 
 class DetectSecretsScanSettingsFiltersUsed(RedactedSection):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", hide_input_in_errors=True)
     path: str | None = None
     min_level: int | None = None
     keyword_exclude: str | None = None

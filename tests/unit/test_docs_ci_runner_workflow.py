@@ -2170,7 +2170,13 @@ def test_the_run_settings_that_keep_legs_independent_and_tokens_out():
     assert job["strategy"].get("fail-fast") is False
     assert workflow.get("concurrency") == {
         "group": "${{ github.workflow }}-${{ github.ref }}-${{ inputs.legs || 'all' }}",
-        "cancel-in-progress": True,
+        # A newer run supersedes an older one on the same ref and leg, except on main
+        # and tags, where a run is never cancelled. The expression is the one every
+        # workflow shares; test_workflows_cancel_superseded_runs_outside_main.py pins
+        # it across the directory.
+        "cancel-in-progress": (
+            "${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}"
+        ),
     }
     assert "github.token" not in text and "GITHUB_TOKEN" not in text
     cached = [

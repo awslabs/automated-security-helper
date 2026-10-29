@@ -93,10 +93,12 @@
 │                                                                            every one is SKIPPED, │
 │                                                                            such as when no       │
 │                                                                            selected scanner had  │
-│                                                                            a file to scan.       │
-│                                                                            Without it, a shard   │
-│                                                                            whose scanners never  │
-│                                                                            ran contributes no    │
+│                                                                            a file to scan. On by │
+│                                                                            default: under        │
+│                                                                            --no-fail-on-incompl… │
+│                                                                            a shard whose         │
+│                                                                            scanners never ran    │
+│                                                                            contributes no        │
 │                                                                            findings and the      │
 │                                                                            merged report reads   │
 │                                                                            as a complete, clean  │
