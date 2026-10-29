@@ -255,9 +255,14 @@ class TestFinalizeCannotReachOutsideTheSession:
         """The id is a single component and the path still must not be a link.
 
         Containment alone would accept this: the link sits inside ``incoming/``.
-        Following it would hash and then unlink whatever it points at, so the
-        candidate itself is required to be a real file -- the same call the zip
-        member handling makes for symlink entries.
+        Following it would stat and hash whatever it points at, so the candidate
+        itself is required to be a real file -- the same call the zip member
+        handling makes for symlink entries.
+
+        The unlink on the oversize and checksum branches removes the link, not
+        the file it points at, so the victim's survival alone proves nothing
+        about which branch ran. The assertions below pin the refusal to the path
+        guard's own text and check that the link itself is still in place.
         """
         outside = tmp_path / "outside-the-workspace"
         outside.mkdir()
@@ -266,9 +271,10 @@ class TestFinalizeCannotReachOutsideTheSession:
 
         incoming = tmp_path / _SESSION / "incoming"
         incoming.mkdir(parents=True)
-        (incoming / "sneaky.zip").symlink_to(victim)
+        link = incoming / "sneaky.zip"
+        link.symlink_to(victim)
 
-        with pytest.raises(ValueError, match="upload_id"):
+        with pytest.raises(ValueError) as excinfo:
             sd.set_source_zip_finalize(
                 upload_id="sneaky",
                 expected_sha256="0" * 64,
@@ -276,7 +282,19 @@ class TestFinalizeCannotReachOutsideTheSession:
                 session_id=_SESSION,
             )
 
+        message = str(excinfo.value)
+        assert "upload_id" in message
+        # The path guard's refusal names the incoming directory; the oversize and
+        # checksum branches, which run after a guard that let the link through,
+        # do not. Matching the guard's text keeps a reworded later message from
+        # satisfying this test.
+        assert "does not name a file inside the session's incoming directory" in message
+        assert "zip too large" not in message
+        # No delete branch ran: the link is still a link, and its target holds
+        # the bytes written above.
+        assert link.is_symlink()
         assert victim.exists()
+        assert victim.read_bytes() == b"not an uploaded archive"
 
 
 class TestFailedRedeliveryKeepsThePreviousTree:
