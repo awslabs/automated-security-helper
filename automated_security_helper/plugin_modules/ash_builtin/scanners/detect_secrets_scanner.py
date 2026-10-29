@@ -721,9 +721,9 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         #
         # The config's own filters, told apart from the baseline's by identity
         # (_drop_in_tree_settings_paths keeps the same objects), so that
-        # _apply_settings_trust judges each by its own source. When the baseline's
-        # filters replace the config's, the config's verification filter is kept
-        # beside them: an operator who names only that filter still verifies.
+        # _apply_settings_trust judges each by its own source. The baseline's
+        # filters are added beside the config's, which are kept whole: the
+        # option's documentation gives scan_settings precedence over the baseline.
         config_filter_ids = {
             id(item) for item in self.config.options.scan_settings.filters_used
         }
@@ -751,16 +751,24 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                         ]
                         loaded_from_baseline.add("plugins_used")
                     # Load filters from baseline (includes should_exclude_file, etc.)
+                    # The operator's own filters_used stay, every entry: the
+                    # option's documentation says scan_settings takes precedence
+                    # over the baseline, and only the verification filter used
+                    # to survive this replacement. A baseline entry whose path
+                    # the operator also configured is the operator's.
                     if "filters_used" in baseline_data:
-                        config_verification = [
-                            item
-                            for item in self.config.options.scan_settings.filters_used
-                            if is_verification_filter(item.path)
-                        ]
+                        config_filters = list(
+                            self.config.options.scan_settings.filters_used
+                        )
+                        config_paths = {item.path for item in config_filters}
                         self.config.options.scan_settings.filters_used = [
-                            DetectSecretsScanSettingsFiltersUsed(**f)
-                            for f in baseline_data["filters_used"]
-                        ] + config_verification
+                            item
+                            for item in (
+                                DetectSecretsScanSettingsFiltersUsed(**f)
+                                for f in baseline_data["filters_used"]
+                            )
+                            if item.path not in config_paths
+                        ] + config_filters
                         loaded_from_baseline.add("filters_used")
                     ASH_LOGGER.debug(
                         f"Loaded settings from baseline: "
