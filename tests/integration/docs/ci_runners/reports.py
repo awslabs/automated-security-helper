@@ -596,7 +596,8 @@ class ArtifactResults:
     artifact holds none. ``mtime`` is when the store entry was written: the zip's, or
     the stored results file's. ``source`` is the zip, or the stored results file, and
     ``member`` the results file's name inside the zip (None for a stored file); the
-    two are what ``unpack_artifact`` reads.
+    two are what ``unpack_artifact`` reads, and ``source`` is what groups the copies
+    one artifact holds (``artifact_key``).
     """
 
     name: str
@@ -604,8 +605,15 @@ class ArtifactResults:
     aggregated: dict[str, Any]
     sarif: bytes | None
     mtime: float
-    source: Path | None = None
+    source: Path
     member: str | None = None
+
+
+def artifact_key(results: ArtifactResults) -> str:
+    """The store entry the results came from: the zip, or the directory holding a
+    stored results file; two results with one key are copies inside one artifact."""
+    source = Path(results.source)
+    return str(source if results.member is not None else source.parent)
 
 
 def _zipped_results(path: Path, depth: int) -> list[tuple[int, ArtifactResults]]:
@@ -719,31 +727,49 @@ def results_to_judge(
 ) -> tuple[ArtifactResults | None, list[str]]:
     """Which of a store's results the run is judged on, and why none when none.
 
-    One artifact with results is the run's output. Several are a sharded run, and
-    the one whose name marks it as the merged output is judged; without one the
+    The copies are grouped by the store entry they came from (``artifact_key``), so
+    one artifact holding two results files at one depth (a workspace scan's
+    ``projects/*/ash_aggregated_results.json`` uploaded without the top-level file)
+    is reported as that, apart from a run that kept several artifacts. One artifact
+    with one results file is the run's output. Several artifacts are a sharded run,
+    and the one whose name marks it as the merged output is judged; without one the
     shards are named, because the findings and the SARIF the merge wrote are then in
     no artifact. None is the missing-results problem, in ``findings_problems``'s
     words.
     """
     if not found:
         return None, findings_problems([], {})
-    if len(found) == 1:
-        return found[0], []
-    merged = [results for results in found if is_merged_artifact(results.name)]
+    by_artifact: dict[str, list[ArtifactResults]] = {}
+    for results in found:
+        by_artifact.setdefault(artifact_key(results), []).append(results)
+    crowded = [copies for copies in by_artifact.values() if len(copies) > 1]
+    if crowded:
+        return None, [
+            (
+                f"the artifact {copies[0].name} holds {len(copies)} copies of "
+                f"{AGGREGATED} at one depth ({', '.join(c.where for c in copies)}), "
+                "so none of them is the run's own results file"
+            )
+            for copies in crowded
+        ]
+    artifacts = [copies[0] for copies in by_artifact.values()]
+    if len(artifacts) == 1:
+        return artifacts[0], []
+    merged = [results for results in artifacts if is_merged_artifact(results.name)]
     if len(merged) == 1:
         return merged[0], []
-    names = ", ".join(results.name for results in found)
+    names = ", ".join(results.name for results in artifacts)
     if merged:
         return None, [
             f"{len(merged)} artifacts are named as the merged output: "
             + ", ".join(results.name for results in merged)
-            + f" (the run kept {len(found)} artifacts with results: {names})"
+            + f" (the run kept {len(artifacts)} artifacts with results: {names})"
         ]
     return None, [
         (
-            f"the run kept {len(found)} artifacts with results ({names}) and none "
-            "named as the merged output, so the merge job uploaded no artifact and "
-            "its findings and SARIF are in none"
+            f"the run kept {len(artifacts)} artifacts with results ({names}) and "
+            "none named as the merged output, so the merge job uploaded no artifact "
+            "and its findings and SARIF are in none"
         )
     ]
 

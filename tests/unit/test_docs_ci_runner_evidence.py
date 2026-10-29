@@ -457,6 +457,44 @@ def test_two_artifacts_named_as_merged_are_a_problem(tmp_path):
 
 
 @pytest.mark.unit
+def test_one_artifact_holding_two_copies_is_not_two_artifacts(tmp_path):
+    read = _api("reports", "results_from_artifact_store")
+    judge = _api("reports", "results_to_judge")
+    store = tmp_path / "artifacts"
+    # A workspace scan's upload holding only the per-project copies: two results
+    # files at one depth inside ONE artifact, which is neither a sharded run nor two
+    # merged artifacts.
+    archive = store / "1" / "ash-merged" / "ash-merged.zip"
+    archive.parent.mkdir(parents=True)
+    with zipfile.ZipFile(archive, "w") as zipped:
+        for project in ("a", "b"):
+            zipped.writestr(
+                f"projects/{project}/ash_aggregated_results.json",
+                json.dumps(_aggregated()),
+            )
+    found = read(store)
+    assert found is not None and len(found) == 2, "the reader keeps both copies"
+    assert {_api("reports", "artifact_key")(r) for r in found} == {str(archive)}
+    judged, problems = judge(found)
+    assert judged is None
+    assert len(problems) == 1
+    assert "the artifact ash-merged holds 2 copies" in problems[0]
+    assert "projects/a/" in problems[0] and "projects/b/" in problems[0]
+    assert "artifacts are named" not in problems[0], "not read as two merged artifacts"
+    # The control: the same two copies in two artifacts are two shards.
+    _zip_artifact(tmp_path / "two", "ash-shard-0", _aggregated())
+    _zip_artifact(tmp_path / "two", "ash-shard-1", _aggregated())
+    judged, problems = judge(read(tmp_path / "two"))
+    assert judged is None and "the run kept 2 artifacts" in problems[0]
+    # A stored directory's copies group by the directory holding each file.
+    stored = store / "1" / "ash-output"
+    stored.mkdir()
+    (stored / "ash_aggregated_results.json").write_text("{}", encoding="utf-8")
+    (found_stored,) = [r for r in read(store) if r.name == "ash-output"]
+    assert _api("reports", "artifact_key")(found_stored) == str(stored)
+
+
+@pytest.mark.unit
 def test_a_store_without_results_is_the_missing_results_problem():
     judge = _api("reports", "results_to_judge")
     missing = _api("reports", "findings_problems")([], {})
