@@ -360,6 +360,17 @@
 
 ### Breaking changes
 
+- **`set_source_git` clones only from the hosts `ASH_MCP_GIT_ALLOWED_HOSTS` names.**
+  The variable is unset by default, so a server whose operator has not set it clones
+  from no host and answers every `set_source_git` call with `error_type`
+  `clone_host_not_permitted`. An operator whose clients clone with the tool sets it to
+  the hosts they clone from: comma- or whitespace-separated `[scheme://]host[:port]`
+  entries, matched without regard to case, where a bare host stands for its scheme's
+  default port (https 443, ssh 22) on either scheme, `host:port` names the port, and
+  `https://` or `ssh://` the scheme. The tool also refuses every `ssh_key_id` with
+  `error_type` `ssh_key_not_registered`: the server registers no SSH keys and never
+  accepts a private key over MCP, so a repository that needs one cannot be delivered
+  this way.
 - **A configured plugin module that fails to import refuses the run with
   exit 3.** `ash scan`, `ash report`, `ash merge`, `ash dependencies install`
   and `ash plugin list` used to log a WARNING and continue without the module's
