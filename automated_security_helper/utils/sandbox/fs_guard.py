@@ -294,17 +294,58 @@ def _sweep_tree(
     Entries are removed relative to their directory's descriptor for the same
     reason. Platforms without fwalk (Windows, where no sandbox backend exists)
     fall back to os.walk.
+
+    A directory the walk cannot open for listing (a mode the scanner set, a
+    descriptor limit) is refused rather than skipped: both walks would otherwise
+    pass over it without a word, and every link below it would survive for a
+    reader that opens paths by name to follow. The refusal is logged as a removal
+    failure is, and raised as the OSError the walk met, so the post-scan sweep
+    fails the scanner and the spawn cleanup records it.
     """
     removed = 0
+
+    def warn(text: str, value_free: str) -> None:
+        if values_unread:
+            # The values to hide could not be read, so nothing here can be
+            # redacted: no entry name, root or OS error.
+            ASH_LOGGER.warning(value_free)
+            return
+        # The entry's name and the root are paths a tool or an option chose, so
+        # either can hold an env-read value: redacted with the sweep's values,
+        # and the scope's, before it is logged.
+        from automated_security_helper.utils.sandbox.scope import scope_shown_text
+
+        ASH_LOGGER.warning(scope_shown_text(text, tuple(values)))
+
+    def unlistable(error: OSError) -> None:
+        if error.errno == errno.ENOENT:
+            # Removed while the walk ran: nothing is below it any more.
+            return
+        warn(
+            f"Could not list {error.filename} under {root}: {error}",
+            "Could not list a directory a scanner left in its results directory; "
+            "it is not named because the plugin's redaction values could not be "
+            "read",
+        )
+        raise OSError(
+            error.errno,
+            f"could not list {error.filename} under {root}, so the links a "
+            "scanner may have left below it could not be removed",
+        ) from error
+
     if not hasattr(os, "fwalk"):
-        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        for dirpath, dirnames, filenames in os.walk(
+            root, onerror=unlistable, followlinks=False
+        ):
             for name in list(dirnames) + filenames:
                 path = os.path.join(dirpath, name)
                 if _is_special(os.lstat(path).st_mode):
                     os.unlink(path)
                     removed += 1
         return removed
-    for _, dirnames, filenames, dir_fd in os.fwalk(root, follow_symlinks=False):
+    for _, dirnames, filenames, dir_fd in os.fwalk(
+        root, onerror=unlistable, follow_symlinks=False
+    ):
         for name in list(dirnames) + filenames:
             try:
                 mode = os.lstat(name, dir_fd=dir_fd).st_mode
@@ -316,28 +357,11 @@ def _sweep_tree(
                 os.unlink(name, dir_fd=dir_fd)
                 removed += 1
             except OSError as e:
-                if values_unread:
-                    # The values to hide could not be read, so nothing here
-                    # can be redacted: no entry name, root or OS error.
-                    ASH_LOGGER.warning(
-                        "Could not remove an entry a scanner left in its results "
-                        "directory; it is not named because the plugin's "
-                        "redaction values could not be read"
-                    )
-                    if name in dirnames:
-                        dirnames.remove(name)
-                    continue
-                # The entry's name and the root are paths a tool or an option
-                # chose, so either can hold an env-read value: redacted with
-                # the sweep's values, and the scope's, before it is logged.
-                from automated_security_helper.utils.sandbox.scope import (
-                    scope_shown_text,
-                )
-
-                ASH_LOGGER.warning(
-                    scope_shown_text(
-                        f"Could not remove {name} under {root}: {e}", tuple(values)
-                    )
+                warn(
+                    f"Could not remove {name} under {root}: {e}",
+                    "Could not remove an entry a scanner left in its results "
+                    "directory; it is not named because the plugin's redaction "
+                    "values could not be read",
                 )
             if name in dirnames:
                 dirnames.remove(name)
@@ -357,12 +381,27 @@ def refuse_links_below(root: Union[str, Path]) -> None:
     regular file with more than one name is refused too (OutputHardLinkRefused):
     the scanner can write the results directory, and a write to that file changes
     every name it has. The walk never follows a link. A missing ``root`` has nothing
-    below it.
+    below it. A directory below ``root`` that cannot be opened for listing is
+    refused too, as the OSError the walk met: skipped, the links below it would be
+    neither refused here nor removed by the sweep.
     """
     root = Path(os.path.abspath(root))
     if not hasattr(os, "fwalk") or not root.is_dir():
         return
-    for dirpath, dirnames, filenames, dir_fd in os.fwalk(root, follow_symlinks=False):
+
+    def unlistable(error: OSError) -> None:
+        if error.errno == errno.ENOENT:
+            # Removed while the walk ran: nothing is below it any more.
+            return
+        raise OSError(
+            error.errno,
+            f"could not list {error.filename} under {root}, so a link below it "
+            "could not be refused",
+        ) from error
+
+    for dirpath, dirnames, filenames, dir_fd in os.fwalk(
+        root, onerror=unlistable, follow_symlinks=False
+    ):
         for name in sorted(list(dirnames) + filenames):
             try:
                 status = os.lstat(name, dir_fd=dir_fd)
