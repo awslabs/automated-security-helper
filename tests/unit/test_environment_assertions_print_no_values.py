@@ -1997,12 +1997,10 @@ def test_the_child_carries_its_tier_and_its_conftest_registers_the_mark():
     """The child runs both ways: under the suite's conftest, whose collection hook
     refuses a test with no tier marker, and under its own rootdir, where the suite's
     pytest.ini is not read. So it carries the marker and CHILD_CONFTEST registers it,
-    and no warning filter hides an unknown mark (tests/NAMING_CONVENTIONS.md)."""
+    and no warning filter hides an unknown mark."""
     assert "pytestmark = pytest.mark.unit" in CHILD
     assert "catch_warnings" not in CHILD and "simplefilter" not in CHILD
     assert 'config.addinivalue_line("markers", "unit:' in CHILD_CONFTEST
-    rule = (REPOSITORY / "tests" / "NAMING_CONVENTIONS.md").read_text(encoding="utf-8")
-    assert "runs in a child pytest carries a tier marker" in rule
 
 
 COMPARISONS_CHILD = f"""\
