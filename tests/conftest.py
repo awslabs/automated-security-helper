@@ -549,7 +549,10 @@ def pytest_configure(config):
         "markers", "unit: Unit tests that test individual components in isolation"
     )
     config.addinivalue_line(
-        "markers", "integration: Integration tests that test component interactions"
+        "markers",
+        "integration: Tests of one component with a real dependency: the test starts a "
+        "process (a child Python, git, the ash CLI, a real tool), opens a socket or "
+        "runs git on any path (tests/NAMING_CONVENTIONS.md)",
     )
     config.addinivalue_line(
         "markers",

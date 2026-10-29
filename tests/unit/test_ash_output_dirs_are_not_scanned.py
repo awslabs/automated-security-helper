@@ -82,7 +82,8 @@ PluginContext.model_rebuild()
 # The fixture itself, so warnings are captured the way test_merge.py captures them.
 capture = test_merge.capture
 
-#: The scanners built here start no tool (tests/unit/conftest.py).
+#: Integration because every tree here is a real git checkout (``_git`` starts git);
+#: the scanners built here start no tool (tests/unit/conftest.py).
 pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("no_tool_probes")]
 
 #: Directories ASH names as its own output in this tree.
