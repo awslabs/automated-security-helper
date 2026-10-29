@@ -511,7 +511,7 @@ class CaseInsensitiveNeedle(str):
     """A value matched ignoring case inside a redact_values call whose other
     values are matched as written (``whole_words`` without ``ignore_case``).
 
-    The text is the value, so every str-typed carrier transports it unchanged
+    The text is the value, so every str-typed holder transports it unchanged
     and a consumer that sees only the str treats it as the plain value. The one
     extra REFINES the literal treatment: ``ignore_case`` widens the match of
     this value's forms to any case, where the call's own flags would match
