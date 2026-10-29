@@ -26,6 +26,7 @@ from automated_security_helper.core.constants import (
     ASH_BIN_PATH,
     ash_bin_path_from_environment,
     is_offline_mode,
+    usable_home,
     warn_if_home_unusable,
 )
 from automated_security_helper.core.exceptions import (
@@ -89,6 +90,13 @@ _DOWNLOAD_BASE_DELAY_DEFAULT = 5.0
 _DOWNLOAD_MAX_DELAY = 60.0
 _TRANSIENT_HTTP_STATUS = frozenset({429})
 
+# How long one socket operation of a download may block before the attempt is
+# given up as a TimeoutError, which the retry policy treats as transient. Without
+# it urlopen waited without end, so a connection that stalled mid-body hung the
+# install, and the TimeoutError branch of _is_transient_download_error never ran.
+# A bound per read, not per download: a slow link still finishes a large asset.
+_DOWNLOAD_SOCKET_TIMEOUT_SECONDS = 60.0
+
 
 def _download_retry_policy() -> "tuple[int, float]":
     """``(attempts, base delay)`` for one download, from the environment.
@@ -139,6 +147,44 @@ def _is_transient_download_error(exc: BaseException) -> bool:
             http.client.RemoteDisconnected,
         ),
     )
+
+
+def _copy_whole_body(response, sink, url: str) -> int:
+    """Copy the response body to ``sink``, refusing a body the server cut short.
+
+    ``HTTPResponse.read(amt)`` returns an empty read when the connection closes
+    before ``Content-Length`` bytes have arrived (http.client leaves the
+    IncompleteRead unraised there for compatibility), so ``shutil.copyfileobj``
+    ended a dropped download as if it were complete. The retry loop then saw no
+    error, and the digest check reported the short file as an integrity failure,
+    which reads as a tampered asset rather than the dropped connection it was.
+    The bytes are counted against the declared length instead, and a shortfall
+    is raised as the connection error it is, which the retry policy repeats.
+
+    Returns the number of bytes copied.
+    """
+    copied = 0
+    for chunk in iter(lambda: response.read(_HASH_CHUNK_BYTES), b""):
+        sink.write(chunk)
+        copied += len(chunk)
+    declared = response.headers.get("Content-Length") if response.headers else None
+    if declared is not None and declared.strip().isdigit():
+        expected = int(declared)
+        if copied != expected:
+            raise ConnectionError(
+                f"the connection closed after {copied} of {expected} bytes of {url}"
+            )
+    return copied
+
+
+def _sha256_of_open_file(fd: int) -> str:
+    """The lowercase hex SHA256 of the file open at ``fd``, read from its start."""
+    digest = hashlib.sha256()
+    os.lseek(fd, 0, os.SEEK_SET)
+    with open(fd, "rb", closefd=False) as handle:
+        for chunk in iter(lambda: handle.read(_HASH_CHUNK_BYTES), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def sha256_file(file_path: Path) -> str:
@@ -242,8 +288,10 @@ def _download_verified(
             )
             try:
                 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-                with urllib.request.urlopen(url) as response:  # nosec B310 - This url is evaluated for https scheme a few lines above
-                    shutil.copyfileobj(response, temp_file)
+                with urllib.request.urlopen(  # nosec B310 - This url is evaluated for https scheme a few lines above
+                    url, timeout=_DOWNLOAD_SOCKET_TIMEOUT_SECONDS
+                ) as response:
+                    _copy_whole_body(response, temp_file, url)
                 break
             except Exception as exc:
                 # Re-raised unless the error is both transient and there is an
@@ -359,22 +407,33 @@ def _finalize_staged(staging: Path, target: Path, expected_sha256: str) -> str:
     On mismatch after the rename the target is removed. Leaving unverified bytes at an
     install path is worse than leaving nothing there.
     """
-    staged = sha256_file(staging)
-    if staged != expected_sha256:
-        # Not unlinked here: both callers already remove the staging file on any
-        # exception, and one of them also has an fd to close.
-        raise ToolDownloadIntegrityError(
-            f"The file staged for {target} does not match the digest it was verified "
-            f"against (expected {expected_sha256}, found {staged}). Something replaced "
-            "it before installing it; refusing to put it at the install path."
-        )
-    if platform.system() != "Windows":
-        # Set the final mode here rather than leaving make_executable to OR 0o111 onto
-        # the 0o600 mkstemp creates, which would produce 0o711 and quietly differ from
-        # the 0o755 the previous umask-dependent code produced. A scanner binary must
-        # be executable by whoever runs the scan, which is not always whoever
-        # installed it.
-        os.chmod(staging, 0o755)  # nosec B103 - an executable must be executable
+    # One open of the staging path, refusing to follow a link there, and both the
+    # hash and the mode change made on that open file: the mode was set by name
+    # after the hash, so an entry renamed over the staging name in between (the
+    # directory can be writable by others) had its mode set instead, and a symlink
+    # there was followed to whatever file it named. The post-rename hash still
+    # covers a swap between this open and the rename.
+    fd = os.open(staging, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        staged = _sha256_of_open_file(fd)
+        if staged != expected_sha256:
+            # Not unlinked here: both callers already remove the staging file on
+            # any exception, and one of them also has an fd to close.
+            raise ToolDownloadIntegrityError(
+                f"The file staged for {target} does not match the digest it was "
+                f"verified against (expected {expected_sha256}, found {staged}). "
+                "Something replaced it before installing it; refusing to put it at "
+                "the install path."
+            )
+        if platform.system() != "Windows":
+            # Set the final mode here rather than leaving make_executable to OR
+            # 0o111 onto the 0o600 mkstemp creates, which would produce 0o711 and
+            # quietly differ from the 0o755 the previous umask-dependent code
+            # produced. A scanner binary must be executable by whoever runs the
+            # scan, which is not always whoever installed it.
+            os.fchmod(fd, 0o755)  # nosec B103 - an executable must be executable
+    finally:
+        os.close(fd)
     os.replace(staging, target)
     landed = sha256_file(target)
     if landed != expected_sha256:
@@ -491,8 +550,30 @@ def receipt_root() -> Path:
     ``$HOME`` rather than the bin directory: the container sets the non-root home to
     0750 and leaves root's at its default, so neither is world-writable, and
     ``read_receipt`` refuses a receipt in a group- or other-writable location anyway.
+
+    The home is ``core.constants.usable_home``, the one place ASH decides whether
+    there is one, not ``Path.home()``: an empty HOME put the receipts at ``/.ash``, a
+    relative one under the working directory (the scanned repository), and an unset
+    HOME with no passwd entry raised RuntimeError out of every install. With no
+    usable home there is no receipt store: this raises ``ReceiptStoreUnavailable``,
+    which ``read_receipt`` reads as no receipt and ``write_receipt`` as a receipt it
+    could not write, so an install still installs and is reported as it went.
+
+    Raises:
+        ReceiptStoreUnavailable: there is no usable home directory.
     """
-    return Path.home().joinpath(".ash", RECEIPT_DIR_NAME)
+    home = usable_home()
+    if home is None:
+        raise ReceiptStoreUnavailable(
+            "no usable home directory (HOME is unset, empty or relative, and no "
+            "absolute home is on record for this user), so install receipts have "
+            "nowhere to live"
+        )
+    return home.joinpath(".ash", RECEIPT_DIR_NAME)
+
+
+class ReceiptStoreUnavailable(OSError):
+    """There is no usable home directory to keep install receipts in."""
 
 
 def receipt_path(destination: Path, installed_as: str) -> Path:
@@ -596,9 +677,22 @@ def read_receipt(destination: Path, installed_as: str) -> Optional[dict]:
     also treated as absent. Anyone who can rewrite it chooses the digest an installed
     scanner is checked against, which makes it worth nothing -- and re-downloading is
     the cheap, safe answer.
+
+    So is a receipt whose directory cannot be traversed, or that has no usable home to
+    live under: ``Path.is_file`` raises PermissionError for a directory this user may
+    not search (pathlib swallows only a missing path), and that crashed every pinned
+    install instead of reinstalling.
     """
-    path = receipt_path(destination, installed_as)
-    if not path.is_file():
+    try:
+        path = receipt_path(destination, installed_as)
+        present = path.is_file()
+    except OSError as e:
+        ASH_LOGGER.debug(
+            f"No install receipt for {installed_as} in {destination} can be read "
+            f"({e}); treating it as absent"
+        )
+        return None
+    if not present:
         return None
     for level in _receipt_trust_chain(path):
         reason = _untrusted_reason(level)
@@ -641,16 +735,18 @@ def write_receipt(
     umask, since a permissive umask would otherwise produce a receipt this code then
     declines to trust.
     """
-    path = receipt_path(destination, installed_as)
+    path: Optional[Path] = None
     try:
+        path = receipt_path(destination, installed_as)
         _private_dir(path.parent)
         path.write_text(json.dumps(receipt, indent=2, sort_keys=True), encoding="utf-8")
         if platform.system() != "Windows":
             os.chmod(path, 0o600)
     except OSError as e:
+        where = f"to {path}" if path is not None else "anywhere"
         ASH_LOGGER.warning(
-            f"Installed {installed_as} but could not write its install receipt to "
-            f"{path}: {e}. The next install will re-download it."
+            f"Installed {installed_as} but could not write its install receipt "
+            f"{where}: {e}. The next install will re-download it."
         )
         return None
     return path
@@ -693,7 +789,12 @@ def _already_installed(
     30-100MB binary.
     """
     target = destination.joinpath(installed_as)
-    if not target.is_file():
+    # A regular file, not a link: ``is_file`` follows a symlink, so a link planted at
+    # the install path to a file with the installed bytes passed every check below
+    # and skipped every later install, while the scan ran whatever the link named
+    # by then. Not installed, so the install replaces the link through its staging
+    # rename.
+    if target.is_symlink() or not target.is_file():
         return False
     if expected_sha256 is None:
         return False
@@ -901,15 +1002,21 @@ def _extract_single_member(
     suffixes = "".join(archive_path.suffixes[-2:]).lower()
     fd, staging = _open_staging(target)
     written = hashlib.sha256()
-    staged = False
+    # Whether the fd has been handed to a file object, which then owns closing it.
+    # Set the moment fdopen takes it, not once the copy is through: a copy that
+    # failed midway had its fd closed by the file object's exit, and the handler
+    # below then closed it again, raising EBADF over the real error and skipping
+    # the unlink of the partial staging file.
+    fd_handed = False
 
     def _stage(source) -> None:
-        nonlocal staged
-        with os.fdopen(fd, "wb") as sink:
+        nonlocal fd_handed
+        sink = os.fdopen(fd, "wb")
+        fd_handed = True
+        with sink:
             for chunk in iter(lambda: source.read(_HASH_CHUNK_BYTES), b""):
                 written.update(chunk)
                 sink.write(chunk)
-        staged = True
 
     try:
         # The inner handler converts only the two archive-format errors, and only
@@ -968,7 +1075,7 @@ def _extract_single_member(
         # caller re-deriving it from the target after the fact.
         return _finalize_staged(staging, target, written.hexdigest())
     except BaseException:
-        if not staged:
+        if not fd_handed:
             # The fd was never handed to fdopen, so nothing closed it.
             os.close(fd)
         staging.unlink(missing_ok=True)

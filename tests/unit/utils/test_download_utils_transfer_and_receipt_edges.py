@@ -1,0 +1,231 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""The download and install path at its edges: stalled or cut-short transfers, a link
+at the install or staging path, and a home or receipt store that is not there.
+
+Each test pins one property of utils/download_utils.py:
+
+- the fetch bounds every socket operation, so a stalled connection ends the attempt
+  as a TimeoutError the retry policy repeats;
+- a body the server cuts short is retried, not accepted and then reported as a
+  digest mismatch;
+- the staged file's mode is set on the file that was hashed, never through a link
+  renamed over the staging name;
+- with no usable home there is no receipt store: an install still installs, the
+  receipt is skipped with a warning, and nothing raises;
+- a receipt directory this user cannot search reads as no receipt;
+- a symlink at the install path is not an installed tool;
+- a copy that fails while staging an archive member raises the copy's own error
+  and removes the partial staging file, instead of closing the staging fd twice.
+"""
+
+from __future__ import annotations
+
+import errno
+import hashlib
+import io
+import os
+import platform
+import stat
+import zipfile
+
+import pytest
+
+from automated_security_helper.core.exceptions import ToolDownloadIntegrityError
+from automated_security_helper.utils import download_utils
+
+pytestmark = pytest.mark.unit
+
+_URL = "https://example.invalid/tool.bin"
+_BODY = b"the whole asset, every byte of it"
+_DIGEST = hashlib.sha256(_BODY).hexdigest()
+
+posix_only = pytest.mark.skipif(
+    platform.system() == "Windows", reason="file modes and symlinks on POSIX only"
+)
+not_root = pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0, reason="root traverses anything"
+)
+
+
+class _Response:
+    """What urlopen yields: a body read in chunks and a Content-Length header."""
+
+    def __init__(self, body: bytes, declared: int):
+        self._body = io.BytesIO(body)
+        self.headers = {"Content-Length": str(declared)}
+
+    def read(self, amount=-1):
+        return self._body.read(amount)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+@pytest.fixture
+def quick_retry(monkeypatch):
+    monkeypatch.setenv("ASH_DOWNLOAD_MAX_ATTEMPTS", "2")
+    monkeypatch.setenv("ASH_DOWNLOAD_RETRY_DELAY", "0")
+    monkeypatch.setattr(download_utils.time, "sleep", lambda _s: None)
+
+
+def test_the_fetch_bounds_every_socket_operation(monkeypatch, tmp_path, quick_retry):
+    seen = {}
+
+    def urlopen(url, **kwargs):
+        seen.update(kwargs)
+        return _Response(_BODY, len(_BODY))
+
+    monkeypatch.setattr(download_utils.urllib.request, "urlopen", urlopen)
+    download_utils.download_file(_URL, tmp_path / "bin", expected_sha256=_DIGEST)
+    assert seen.get("timeout") == download_utils._DOWNLOAD_SOCKET_TIMEOUT_SECONDS
+    assert seen["timeout"] > 0
+
+
+def test_a_body_cut_short_is_retried_not_reported_as_tampering(
+    monkeypatch, tmp_path, quick_retry
+):
+    attempts = []
+
+    def urlopen(url, **kwargs):
+        attempts.append(url)
+        # The first connection closes after half the body; the second is whole.
+        body = _BODY[: len(_BODY) // 2] if len(attempts) == 1 else _BODY
+        return _Response(body, len(_BODY))
+
+    monkeypatch.setattr(download_utils.urllib.request, "urlopen", urlopen)
+    installed = download_utils.download_file(
+        _URL, tmp_path / "bin", expected_sha256=_DIGEST
+    )
+    assert len(attempts) == 2
+    assert installed.read_bytes() == _BODY
+
+
+def test_a_body_cut_short_on_the_last_attempt_raises_the_connection_error(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("ASH_DOWNLOAD_MAX_ATTEMPTS", "1")
+    monkeypatch.setattr(
+        download_utils.urllib.request,
+        "urlopen",
+        lambda url, **kwargs: _Response(_BODY[:5], len(_BODY)),
+    )
+    with pytest.raises(ConnectionError, match="closed after 5 of"):
+        download_utils.download_file(_URL, tmp_path / "bin", expected_sha256=_DIGEST)
+    assert not (tmp_path / "bin" / "tool.bin").exists()
+
+
+@posix_only
+def test_the_staged_files_mode_is_never_set_through_a_link(tmp_path):
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.write_bytes(_BODY)
+    os.chmod(elsewhere, 0o600)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    staging = bin_dir / ".tool.ash-partial"
+    staging.symlink_to(elsewhere)
+    with pytest.raises(OSError):
+        download_utils._finalize_staged(staging, bin_dir / "tool", _DIGEST)
+    assert stat.S_IMODE(elsewhere.stat().st_mode) == 0o600
+    assert not (bin_dir / "tool").exists()
+
+
+@posix_only
+def test_with_no_usable_home_receipts_are_skipped_and_nothing_raises(
+    monkeypatch, tmp_path, caplog
+):
+    monkeypatch.setenv("HOME", "")
+    with pytest.raises(download_utils.ReceiptStoreUnavailable):
+        download_utils.receipt_root()
+    assert download_utils.read_receipt(tmp_path / "bin", "tool") is None
+    written = download_utils.write_receipt(
+        tmp_path / "bin", "tool", {"url": _URL, "sha256": _DIGEST}
+    )
+    assert written is None
+    assert not download_utils._already_installed(
+        tmp_path / "bin", "tool", _URL, _DIGEST
+    )
+
+
+@posix_only
+@not_root
+def test_a_receipt_directory_this_user_cannot_search_reads_as_no_receipt(
+    monkeypatch, tmp_path
+):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    path = download_utils.write_receipt(
+        destination, "tool", {"url": _URL, "sha256": _DIGEST}
+    )
+    assert path is not None and path.is_file()
+    os.chmod(path.parent, 0o000)
+    try:
+        assert download_utils.read_receipt(destination, "tool") is None
+    finally:
+        os.chmod(path.parent, 0o700)
+
+
+@posix_only
+def test_a_symlink_at_the_install_path_is_not_an_installed_tool(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    real = tmp_path / "real-tool"
+    real.write_bytes(_BODY)
+    (destination / "tool").symlink_to(real)
+    receipt = {"url": _URL, "sha256": _DIGEST, "installed_sha256": _DIGEST}
+    assert download_utils.write_receipt(destination, "tool", receipt) is not None
+    assert not download_utils._already_installed(destination, "tool", _URL, _DIGEST)
+    (destination / "tool").unlink()
+    (destination / "tool").write_bytes(_BODY)
+    assert download_utils._already_installed(destination, "tool", _URL, _DIGEST)
+
+
+def test_a_copy_that_fails_while_staging_raises_its_own_error_and_cleans_up(
+    monkeypatch, tmp_path
+):
+    archive = tmp_path / "tool.zip"
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("tool-1.0/tool", _BODY)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    real_fdopen = os.fdopen
+
+    class _FullDisk:
+        def __init__(self, fd, mode):
+            self._file = real_fdopen(fd, mode)
+
+        def write(self, chunk):
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self._file.close()
+            return False
+
+    monkeypatch.setattr(download_utils.os, "fdopen", _FullDisk)
+    with pytest.raises(OSError) as raised:
+        download_utils._extract_single_member(archive, "tool", bin_dir / "tool")
+    assert raised.value.errno == errno.ENOSPC
+    assert [p.name for p in bin_dir.iterdir()] == []
+
+
+def test_a_whole_body_download_is_still_verified(monkeypatch, tmp_path, quick_retry):
+    monkeypatch.setattr(
+        download_utils.urllib.request,
+        "urlopen",
+        lambda url, **kwargs: _Response(_BODY, len(_BODY)),
+    )
+    with pytest.raises(ToolDownloadIntegrityError):
+        download_utils.download_file(_URL, tmp_path / "bin", expected_sha256="0" * 64)
