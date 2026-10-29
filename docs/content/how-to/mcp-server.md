@@ -299,7 +299,10 @@ session refuse every call with `error_type` `session_identity_required`: `run_as
 `run_ash_workspace_scan` returns its results in its response and needs no session. The session
 is never what a client claims: on a stateful server an `Mcp-Session-Id` the server did not
 issue names no session, and on SSE the session is the one the server issued for the event
-stream.
+stream. On a stateful server a request that names a protocol version outside the ones the
+`initialize` handshake negotiates names no session either, whatever `Mcp-Session-Id` it
+sends, and the refusal says so: send the `Mcp-Protocol-Version` the handshake negotiated
+together with the `Mcp-Session-Id` it returned.
 
 When a platform in front of ASH issues and authenticates `Mcp-Session-Id`, start the server
 with `--trust-upstream-session-id` as well. The header then names the caller's session, so two
