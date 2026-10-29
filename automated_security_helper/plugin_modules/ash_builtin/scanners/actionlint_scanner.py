@@ -428,6 +428,10 @@ def redact_credentials(payload: Any) -> Any:
 def build_sarif(payload: Any, exit_code: int) -> Dict[str, Any]:
     """Convert actionlint's ``ACTIONLINT_FORMAT`` output into a SARIF 2.1.0 dict.
 
+    An error whose ``line`` is not a positive integer (actionlint writes 0 for an
+    error with no position) is kept as a result with no region, so one such
+    workflow never drops the findings of every other workflow in the run.
+
     Raises:
         ScannerError: if the payload is not the shape the template produces, or if
             the exit code contradicts the findings (1 with none, 0 with some).
@@ -467,13 +471,10 @@ def build_sarif(payload: Any, exit_code: int) -> Dict[str, Any]:
             and isinstance(message, str)
             and isinstance(filepath, str)
             and filepath
-            and isinstance(line, int)
-            and not isinstance(line, bool)
-            and line >= 1
         ):
             raise ScannerError(
-                f"actionlint error #{index} is missing kind, message, filepath or a "
-                f"valid line: {error!r}"
+                f"actionlint error #{index} is missing kind, message or filepath: "
+                f"{error!r}"
             )
         if kind not in KIND_SEVERITY and kind not in kinds_seen:
             ASH_LOGGER.warning(
@@ -483,41 +484,45 @@ def build_sarif(payload: Any, exit_code: int) -> Dict[str, Any]:
         severity = severity_for(kind, message)
         kinds_seen.setdefault(kind, KIND_SEVERITY.get(kind, UNKNOWN_KIND_SEVERITY))
 
-        region: Dict[str, Any] = {"startLine": line, "endLine": line}
-        if isinstance(column, int) and not isinstance(column, bool) and column >= 1:
-            region["startColumn"] = column
-            end_column = error.get("end_column")
-            if (
-                isinstance(end_column, int)
-                and not isinstance(end_column, bool)
-                and end_column >= column
-            ):
-                # actionlint's end_column is inclusive; SARIF's endColumn is the
-                # column after the last character.
-                region["endColumn"] = end_column + 1
-        snippet = error.get("snippet")
-        # A credentials finding's snippet is the hard-coded password itself, so it
-        # is not copied into the report.
-        if isinstance(snippet, str) and snippet and kind != "credentials":
-            region["snippet"] = {"text": snippet}
+        physical_location: Dict[str, Any] = {
+            "artifactLocation": {"uri": filepath.replace("\\", "/")}
+        }
+        # actionlint reports line 0 for an error that has no position: an empty
+        # file, invalid UTF-8, a YAML error raised before the first line. That is
+        # still a finding on the file, so it is kept without a region rather than
+        # failing the whole run and dropping every other workflow's findings.
+        if isinstance(line, int) and not isinstance(line, bool) and line >= 1:
+            region: Dict[str, Any] = {"startLine": line, "endLine": line}
+            if isinstance(column, int) and not isinstance(column, bool) and column >= 1:
+                region["startColumn"] = column
+                end_column = error.get("end_column")
+                if (
+                    isinstance(end_column, int)
+                    and not isinstance(end_column, bool)
+                    and end_column >= column
+                ):
+                    # actionlint's end_column is inclusive; SARIF's endColumn is
+                    # the column after the last character.
+                    region["endColumn"] = end_column + 1
+            snippet = error.get("snippet")
+            # A credentials finding's snippet is the hard-coded password itself,
+            # so it is not copied into the report.
+            if isinstance(snippet, str) and snippet and kind != "credentials":
+                region["snippet"] = {"text": snippet}
+            physical_location["region"] = region
+
+        properties: Dict[str, Any] = {
+            "issue_severity": severity,
+            "actionlint_kind": kind,
+        }
 
         results.append(
             {
                 "ruleId": kind,
                 "level": _SEVERITY_TO_LEVEL[severity],
                 "message": {"text": message},
-                "locations": [
-                    {
-                        "physicalLocation": {
-                            "artifactLocation": {"uri": filepath.replace("\\", "/")},
-                            "region": region,
-                        }
-                    }
-                ],
-                "properties": {
-                    "issue_severity": severity,
-                    "actionlint_kind": kind,
-                },
+                "locations": [{"physicalLocation": physical_location}],
+                "properties": properties,
             }
         )
 

@@ -402,22 +402,54 @@ def test_an_unknown_kind_is_reported_low_and_logged_once(caplog):
         ),
         ({"errors": ["text"]}, 1, "not a JSON object"),
         ({"errors": [{"kind": "id", "message": "m", "line": 1}]}, 1, "missing"),
-        (
-            {"errors": [{"kind": "id", "message": "m", "filepath": "a", "line": 0}]},
-            1,
-            "missing",
-        ),
-        (
-            {"errors": [{"kind": "id", "message": "m", "filepath": "a", "line": True}]},
-            1,
-            "missing",
-        ),
     ],
 )
 @pytest.mark.unit
 def test_malformed_output_raises(payload, exit_code, match):
     with pytest.raises(ScannerError, match=match):
         build_sarif(payload, exit_code)
+
+
+@pytest.mark.parametrize(
+    "line", [0, True, None, "3"], ids=["zero", "bool", "none", "str"]
+)
+@pytest.mark.unit
+def test_an_error_without_a_valid_line_is_kept_without_a_region(line):
+    """actionlint reports line 0 for an error with no position (an empty workflow,
+    invalid UTF-8, a YAML error before the first line). The finding stays, without
+    a region, and the other workflow's finding is not dropped with it."""
+    payload = {
+        "version": "1.7.12",
+        "errors": [
+            {
+                "kind": "syntax-check",
+                "message": "empty",
+                "filepath": ".github/workflows/empty.yml",
+                "line": line,
+                "column": 0,
+            },
+            {
+                "kind": "expression",
+                "message": '"github.event.issue.title" is potentially untrusted',
+                "filepath": ".github/workflows/vulnerable.yml",
+                "line": 20,
+                "column": 24,
+            },
+        ],
+    }
+
+    results = build_sarif(payload, exit_code=1)["runs"][0]["results"]
+
+    assert [result["ruleId"] for result in results] == ["syntax-check", "expression"]
+    first = results[0]["locations"][0]["physicalLocation"]
+    assert first["artifactLocation"]["uri"] == ".github/workflows/empty.yml"
+    assert "region" not in first
+    assert results[1]["locations"][0]["physicalLocation"]["region"] == {
+        "startLine": 20,
+        "endLine": 20,
+        "startColumn": 24,
+    }
+    assert results[1]["properties"]["issue_severity"] == "HIGH"
 
 
 @pytest.mark.unit
