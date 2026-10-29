@@ -107,6 +107,12 @@ class SpawnPlan:
     argv: List[str]
     env: Dict[str, str]
     cleanup: List[Callable[[], None]] = field(default_factory=list)
+    #: Whether the spawner starts the child as the leader of a session of its
+    #: own (``Popen(start_new_session=True)``). A wrapper that calls setsid
+    #: itself (bwrap, the sandbox-exec plan) leaves it False; firejail does not,
+    #: so its plan sets it, and the stop paths' group signals then reach every
+    #: process the tool starts rather than the wrapper alone.
+    start_new_session: bool = False
 
     def run_cleanup(self) -> None:
         """Run each cleanup once; later calls do nothing."""
@@ -699,7 +705,12 @@ class FirejailBackend(SandboxBackend):
         cmd.extend(_with_socket_filter(argv))
         child_env = policy.filter_env(env)
         cleanup = _private_caches(policy, child_env)
-        return SpawnPlan(argv=cmd, env=child_env, cleanup=cleanup)
+        # firejail does not call setsid, so the spawner starts it as the leader
+        # of a session of its own and the stop paths' group signals reach the
+        # tool and what it starts, not firejail alone.
+        return SpawnPlan(
+            argv=cmd, env=child_env, cleanup=cleanup, start_new_session=True
+        )
 
 
 # ---------------------------------------------------------------------------

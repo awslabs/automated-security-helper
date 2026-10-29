@@ -2942,6 +2942,21 @@ def _start_in_own_group(kwargs: Dict[str, Any]) -> None:
         kwargs.setdefault("start_new_session", True)
 
 
+def _plan_popen_kwargs(plan: "Optional[SpawnPlan]") -> Dict[str, Any]:
+    """The Popen keyword arguments a sandbox plan asks for beyond argv and env.
+
+    ``start_new_session=True`` when the plan says so (SpawnPlan.start_new_session):
+    the child leads a session of its own where the wrapper does not call setsid
+    itself, so the stop paths' group signals reach what the tool starts. Empty for
+    every other plan and for no plan, so such a spawn is passed exactly what it
+    was. Where the runner sets the flag itself (_start_in_own_group), the plan's
+    True is the same value.
+    """
+    if plan is not None and plan.start_new_session:
+        return {"start_new_session": True}
+    return {}
+
+
 def _signal_group(pgid: int, signum: int) -> bool:
     """Send signum to the process group; False when the group has no process left."""
     try:
@@ -3876,6 +3891,7 @@ def spawn_run(args: List[str], **kwargs: Any) -> subprocess.CompletedProcess:
                 _runner(sandboxed=False), args, kwargs, started
             )
         kwargs["env"] = _spawn_env(plan.env)
+        kwargs.update(_plan_popen_kwargs(plan))
         try:
             return _run_recording_the_start(
                 _runner(sandboxed=True), plan.argv, kwargs, started
@@ -4159,6 +4175,7 @@ def run_command(
                 timeout=timeout,
                 encoding=encoding,
                 errors=errors,
+                **_plan_popen_kwargs(sandbox_plan),
             )
         ran = result
 
@@ -4582,6 +4599,7 @@ def run_command_with_output_handling(
                     encoding=encoding,
                     errors=errors,
                     timeout=timeout,
+                    **_plan_popen_kwargs(sandbox_plan),
                 )
         except subprocess.TimeoutExpired:
             raise
@@ -5014,6 +5032,7 @@ def run_command_stream_output(
                 shell=shell,
                 encoding=encoding,
                 errors=errors,
+                **_plan_popen_kwargs(sandbox_plan),
             )
         except Exception as e:
             # Around the spawn alone, as in run_command_with_output_handling: an
@@ -5239,6 +5258,7 @@ def create_process_with_pipes(
             shell=shell,
             encoding=encoding,
             errors=errors,
+            **_plan_popen_kwargs(sandbox_plan),
         )
         if sandbox_plan is not None:
             # The caller owns the process, so the plan's temporary files go when it
