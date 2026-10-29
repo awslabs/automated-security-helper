@@ -225,13 +225,15 @@ def ignore_path_pattern(pattern: str) -> str:
 
     ``./`` and ``.\\`` are not read as the directory ``.``, which would be every
     ``./``-prefixed path: like ``.`` and ``""`` they name no path
-    (:func:`names_no_path`) and are returned as they are.
+    (:func:`names_no_path`) and are returned as they are. So is a spelling with
+    more trailing separators, ``.//`` or ``.\\\\``: the directory is what is
+    left once they come off, and ``.`` names no path either. Checked after the
+    strip, because checked before it ``.//`` was not one of the spellings
+    :func:`names_no_path` knows and became ``./*/**``, every path.
     """
-    if names_no_path(pattern):
-        return pattern
     if pattern.endswith(("/", "\\")):
         directory = pattern.rstrip("/\\")
-        if directory:
+        if directory and not names_no_path(directory):
             return f"{directory}/*/{_DOUBLE_STAR}"
     return pattern
 
