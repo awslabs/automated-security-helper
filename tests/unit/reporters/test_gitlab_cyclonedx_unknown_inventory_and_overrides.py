@@ -116,3 +116,62 @@ class TestOverridesReachTheMetadataWithNoDominantEcosystem:
         assert props["gitlab:dependency_scanning:category"] == "production"
         assert "gitlab:dependency_scanning:package_manager:name" not in props
         assert "gitlab:dependency_scanning:language:name" not in props
+
+
+def _component(name: str, purl: str, location: str) -> dict:
+    return {
+        "type": "library",
+        "name": name,
+        "purl": purl,
+        "properties": [{"name": "syft:location:0:path", "value": location}],
+    }
+
+
+class TestVendoredComponentsDoNotVote:
+    """A Python repository whose .venv holds a documentation toolchain: three npm
+    components inside the virtual environment, one declared Python dependency.
+    The majority vote labelled it an npm project with input file yarn.lock."""
+
+    VENDORED_HEAVY = {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.6",
+        "metadata": {"timestamp": "2026-10-29T00:00:00Z"},
+        "components": [
+            _component("requests", "pkg:pypi/requests@2.32.3", "/requirements.txt"),
+            _component(
+                "left-pad",
+                "pkg:npm/left-pad@1.3.0",
+                "/.venv/lib/python3.12/site-packages/docs/node_modules/yarn.lock",
+            ),
+            _component(
+                "lodash",
+                "pkg:npm/lodash@4.17.21",
+                "/.venv/lib/python3.12/site-packages/docs/node_modules/yarn.lock",
+            ),
+            _component(
+                "chalk",
+                "pkg:npm/chalk@5.3.0",
+                "/.venv/lib/python3.12/site-packages/docs/node_modules/yarn.lock",
+            ),
+        ],
+    }
+
+    def test_the_declared_dependency_decides_the_source(self, tmp_path):
+        model = AshAggregatedResults()
+        model.cyclonedx = CycloneDXReport.model_validate(self.VENDORED_HEAVY)
+
+        props = _props(json.loads(_reporter(tmp_path).report(model)))
+
+        assert props["gitlab:dependency_scanning:package_manager:name"] == "pip"
+        assert props["gitlab:dependency_scanning:language:name"] == "Python"
+        assert props["gitlab:dependency_scanning:input_file:path"] == "requirements.txt"
+
+    def test_an_all_vendored_inventory_still_votes(self, tmp_path):
+        only_vendored = dict(self.VENDORED_HEAVY)
+        only_vendored["components"] = self.VENDORED_HEAVY["components"][1:]
+        model = AshAggregatedResults()
+        model.cyclonedx = CycloneDXReport.model_validate(only_vendored)
+
+        props = _props(json.loads(_reporter(tmp_path).report(model)))
+
+        assert props["gitlab:dependency_scanning:package_manager:name"] == "npm"

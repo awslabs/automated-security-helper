@@ -188,6 +188,43 @@ def _extract_purl_type(purl: str | None) -> str | None:
     return remainder[:slash_idx] or None
 
 
+#: Path segments that mark a component as a vendored or installed copy rather
+#: than a dependency the repository declares: a virtual environment, an installed
+#: site-packages tree, a node_modules tree, a vendor directory.
+_VENDORED_SEGMENTS = (
+    ".venv/",
+    "venv/",
+    "site-packages/",
+    "node_modules/",
+    "vendor/",
+)
+
+
+def _is_vendored(component_dict: dict) -> bool:
+    """Whether the component's recorded location lies inside a vendored tree."""
+    raw_path = _get_component_property(component_dict, "syft:location:0:path")
+    if not raw_path:
+        return False
+    path = raw_path.lstrip("/")
+    return any(segment in path for segment in _VENDORED_SEGMENTS)
+
+
+def _declared_components(components: list[dict]) -> list[dict]:
+    """The components that vote for the report-level source.
+
+    Components found inside a virtual environment, site-packages, node_modules
+    or vendor directory describe what is installed under the repository, not
+    what the repository declares: with them in the vote ASH's own repository
+    (a Python project whose .venv holds a documentation toolchain) was labelled
+    an npm project with input file yarn.lock. They are left out of the vote
+    when any component outside such a tree exists; an inventory that is all
+    vendored copies keeps voting as before, so the metadata is never empty for
+    a repository that has only vendored dependencies.
+    """
+    declared = [c for c in components if not _is_vendored(c)]
+    return declared or list(components)
+
+
 def _normalize_input_file_path(raw_path: str | None) -> str | None:
     """Attempt to make a Syft location path repo-relative.
 
@@ -206,14 +243,7 @@ def _normalize_input_file_path(raw_path: str | None) -> str | None:
     # If the path contains common virtual-env or site-packages segments,
     # extract just the filename (the lockfile/manifest).
     # This is a heuristic — better than showing a container-internal path.
-    segments_to_skip = (
-        ".venv/",
-        "venv/",
-        "site-packages/",
-        "node_modules/",
-        "vendor/",
-    )
-    for segment in segments_to_skip:
+    for segment in _VENDORED_SEGMENTS:
         idx = path.find(segment)
         if idx != -1:
             # Find the last path component that looks like a manifest
@@ -368,7 +398,7 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
         from collections import Counter
 
         types: Counter[str] = Counter()
-        for component in components:
+        for component in _declared_components(components):
             # Try syft:package:type first
             syft_type = _get_component_property(component, "syft:package:type")
             if syft_type and syft_type in SYFT_TYPE_TO_GITLAB:
@@ -386,7 +416,7 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
         from collections import Counter
 
         files: Counter[str] = Counter()
-        for component in components:
+        for component in _declared_components(components):
             raw_path = _get_component_property(component, "syft:location:0:path")
             normalized = _normalize_input_file_path(raw_path)
             if normalized:
