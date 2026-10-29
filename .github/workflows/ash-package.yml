@@ -99,9 +99,13 @@ concurrency:
   # per-entry gh-readonly-queue/main/pr-<n>-<sha> branch, so every queue entry lands
   # in its own group and entries never serialize behind one another.
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Only pull_request runs may be cancelled. A merge_group run must finish or the
-  # queue loses its verdict.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # A newer run on any ref other than main or a tag supersedes the one in progress: a
+  # fresh push to a pull request or a branch makes the previous head's run moot, and a
+  # second dispatch on a branch replaces the first. Runs on main and on tags are never
+  # cancelled; each is the only report its commit gets. A merge_group entry has its own
+  # per-entry ref, so a second run in its group only means the entry was rebuilt and the
+  # earlier run's answer is for a queue entry that no longer exists.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   build:
