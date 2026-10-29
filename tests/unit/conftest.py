@@ -3,10 +3,11 @@
 
 """The unit tests' tool guard, and fixtures a unit-test module takes by name.
 
-``_unit_tool_guard`` is autouse: every unit test runs under it. The others are not.
-Each replaces something a tested function would otherwise see, and the tests of that
-function have to see the real thing, so a module opts in with
-``pytestmark = pytest.mark.usefixtures(...)``.
+``_unit_tool_guard``, ``_no_real_container_runtime`` and
+``_the_source_delivery_pools_are_this_tests_own`` are autouse: every unit test runs
+under them. The others are not. Each replaces something a tested function would
+otherwise see, and the tests of that function have to see the real thing, so a module
+opts in with ``pytestmark = pytest.mark.usefixtures(...)``.
 """
 
 from __future__ import annotations
@@ -14,6 +15,8 @@ from __future__ import annotations
 import itertools
 import os
 import shutil
+import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import NamedTuple, Optional
 
@@ -328,6 +331,42 @@ def _no_real_container_runtime(tmp_path_factory, _isolated_home):
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(container_leftovers, "_removed", checked)
         yield
+
+
+@pytest.fixture(autouse=True)
+def _the_source_delivery_pools_are_this_tests_own(monkeypatch):
+    """Each test gets clone and delivery pools of its own, started on first use.
+
+    A stdio server's lifespan and an HTTP app's shutdown close the two pools in
+    ``cli/mcp_server``, as the server's exit does
+    (``_begin_stopping_source_jobs``), and a closed pool takes no more jobs.
+    The pools are module-global, so a test that closes an app or leaves the stdio
+    lifespan would otherwise make every later test in its worker fail on submit.
+    That reaches beyond tests/unit/cli: the docs tests close HTTP apps and then
+    deliver sources too, so the fixture lives here, for every unit test.
+
+    Left alone when the module has not been imported: there is no pool to close,
+    and importing it here would load the MCP server for every unit test.
+    """
+    module = sys.modules.get("automated_security_helper.cli.mcp_server")
+    if module is None:
+        yield
+        return
+    from automated_security_helper.cli.mcp import source_delivery
+
+    clone = ThreadPoolExecutor(
+        max_workers=source_delivery.CLONE_MAX_WORKERS,
+        thread_name_prefix="ash-mcp-clone",
+    )
+    delivery = ThreadPoolExecutor(
+        max_workers=source_delivery.DELIVERY_MAX_WORKERS,
+        thread_name_prefix="ash-mcp-delivery",
+    )
+    monkeypatch.setattr(module, "_CLONE_EXECUTOR", clone)
+    monkeypatch.setattr(module, "_DELIVERY_EXECUTOR", delivery)
+    yield
+    clone.shutdown(wait=False, cancel_futures=True)
+    delivery.shutdown(wait=False, cancel_futures=True)
 
 
 #: What a uv-managed tool's version probe reports under ``no_tool_probes``.
