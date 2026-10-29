@@ -12,6 +12,7 @@ tests/unit/cli/inspect/test_finding_text_is_not_markup.py fails when a module he
 hands text to a markup-reading API any other way.
 """
 
+import re
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, BinaryIO, Callable, Dict, List, Optional
 
@@ -158,6 +159,29 @@ def _cut_excerpt_lines(excerpt: str) -> str:
     return "\n".join(cut)
 
 
+#: The line ends a finding's line number counts: universal newlines, as the
+#: scanners number lines and as the masker counts them
+#: (utils/secret_masking.py's _LINE_BREAK). Counted by ``\n`` alone, a file with
+#: a lone carriage return numbered its lines differently from the finding that
+#: names one, so the arrow marked another line.
+_LINE_END = re.compile(rb"\r\n|\n|\r")
+
+
+def _line_ends(chunk: bytes) -> int:
+    """How many line ends *chunk* holds, a ``\\r\\n`` counted once."""
+    return chunk.count(b"\n") + chunk.count(b"\r") - chunk.count(b"\r\n")
+
+
+def _read_chunk(handle: BinaryIO, budget: int) -> bytes:
+    """Up to _READ_CHUNK bytes of *handle*, within *budget*, never ending between
+    the two bytes of a ``\\r\\n``: a chunk that ends on ``\\r`` reads one more byte, so
+    the pair is never counted as two line ends."""
+    chunk = handle.read(min(budget, _READ_CHUNK))
+    if chunk.endswith(b"\r") and len(chunk) < budget:
+        chunk += handle.read(1)
+    return chunk
+
+
 def _offset_of_line(handle: BinaryIO, line: int, budget: int) -> Optional[int]:
     """The byte offset where line *line* (counted from 1) of *handle* starts, or None
     when the file, or *budget* bytes, end first.
@@ -165,19 +189,21 @@ def _offset_of_line(handle: BinaryIO, line: int, budget: int) -> Optional[int]:
     The line ends before it are counted in _READ_CHUNK reads, not read a line at a
     time: a file of 40 million short lines took 18.9 s to reach its end one
     readline at a time, on the UI thread, though the byte budget bounds the read.
+    The ends are counted (``_line_ends``) and only the chunk holding the wanted
+    line is scanned end by end.
     """
     to_skip = line - 1
     offset = 0
     while to_skip > 0:
-        chunk = handle.read(min(budget - offset, _READ_CHUNK))
+        chunk = _read_chunk(handle, budget - offset)
         if not chunk:
             return None
-        ends = chunk.count(b"\n")
+        ends = _line_ends(chunk)
         if ends >= to_skip:
-            index = -1
-            for _ in range(to_skip):
-                index = chunk.index(b"\n", index + 1)
-            return offset + index + 1
+            for match in _LINE_END.finditer(chunk):
+                to_skip -= 1
+                if to_skip == 0:
+                    return offset + match.end()
         to_skip -= ends
         offset += len(chunk)
     return offset
@@ -201,16 +227,27 @@ def _read_lines(handle: BinaryIO, first: int, last: int) -> list[str]:
     number = first
     head = bytearray()
     while number <= last and budget > 0:
-        piece = handle.readline(min(budget, _READ_CHUNK))
-        if not piece:
+        # Read in chunks and split at every line end (_LINE_END), not readline:
+        # readline ends a line at "\n" alone, so a lone "\r" stayed inside a
+        # line and the lines after it were numbered one less than the finding
+        # numbers them.
+        chunk = _read_chunk(handle, budget)
+        if not chunk:
             break
-        budget -= len(piece)
-        if len(head) < _LINE_HEAD_BYTES:
-            head += piece[: _LINE_HEAD_BYTES - len(head)]
-        if piece.endswith(b"\n"):
+        budget -= len(chunk)
+        position = 0
+        for match in _LINE_END.finditer(chunk):
+            if len(head) < _LINE_HEAD_BYTES:
+                head += chunk[position : match.start()][: _LINE_HEAD_BYTES - len(head)]
             kept.append(_line_text(bytes(head)))
             head.clear()
             number += 1
+            position = match.end()
+            if number > last:
+                break
+        else:
+            if len(head) < _LINE_HEAD_BYTES:
+                head += chunk[position:][: _LINE_HEAD_BYTES - len(head)]
     if head and number <= last:
         # The last line read: the file or the limit ended inside it.
         kept.append(_line_text(bytes(head)))
