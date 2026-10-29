@@ -51,6 +51,7 @@ Failure modes and limits
 
 from __future__ import annotations
 
+import functools
 import re
 import uuid
 from dataclasses import dataclass
@@ -425,8 +426,15 @@ class SessionBoundary:
             if time.monotonic() < self._next_sweep:
                 return
             try:
+                # The sessions this app still holds as issued are kept: an sse
+                # stream that is open but idle, a stateful session the SDK has
+                # not ended. Their end comes through _end, not the sweep.
                 await anyio.to_thread.run_sync(
-                    sweep_stale_workspaces, self.session_workspace_ttl
+                    functools.partial(
+                        sweep_stale_workspaces,
+                        self.session_workspace_ttl,
+                        in_use=frozenset(self._issued),
+                    )
                 )
             except Exception as exc:
                 # A sweep must not fail the request that started it.

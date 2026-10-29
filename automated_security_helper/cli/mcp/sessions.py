@@ -59,7 +59,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Optional, Set
+from typing import Any, Callable, Collection, Dict, Iterator, List, Optional, Set
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from typing_extensions import Self
@@ -888,13 +888,34 @@ def _forget_session_in_memory(session_id: str) -> None:
 
 
 def finish_ended_session(session_id: Optional[str]) -> None:
-    """Complete the removal of a session that ended while its scan or write ran."""
+    """Complete the removal of a session that ended while its scan or write ran.
+
+    The stdio session is shared by every stdio server of one user, and its end
+    is decided by the exiting server under the presence registry's lock, when no
+    other server is live (:meth:`StdioServerPresence.__exit__`). A scan that
+    outlived that decision completes it here, later, when a server started
+    since may be using the workspace, so the question is asked again: another
+    live server keeps the workspace, and its removal falls to the last one out.
+    """
     if session_id is None:
         return
     with _ended_lock:
         pending = session_id in _ended_while_scanning
-    if pending:
-        end_session(session_id)
+    if not pending:
+        return
+    if _is_the_stdio_session(session_id) and StdioServerPresence.a_server_is_live():
+        with _ended_lock:
+            _ended_while_scanning.discard(session_id)
+        return
+    end_session(session_id)
+
+
+def _is_the_stdio_session(session_id: str) -> bool:
+    from automated_security_helper.cli.mcp.profile_registry import (
+        DEFAULT_SESSION_ID,
+    )
+
+    return session_id == DEFAULT_SESSION_ID
 
 
 #: ``error_type`` the MCP tools return for :class:`SessionWorkspaceBusyError`.
@@ -1155,11 +1176,28 @@ def _try_lock(handle: Any) -> _LockOutcome:
 
 
 def _lock_blocking(handle: Any) -> None:
+    """Take an exclusive lock on ``handle``, waiting for as long as it takes.
+
+    On POSIX ``flock`` waits. On Windows ``msvcrt.locking`` with ``LK_LOCK``
+    tries once a second for ten seconds and then raises ``OSError``, so a
+    server that waits behind a sibling's registration or exit for longer than
+    that would read the refusal as "no registry", run uncounted, and have the
+    default workspace removed under it by the next server to exit. The lock is
+    asked for again until it is granted; only an error that is not the lock's
+    refusal (a closed handle, say) is raised.
+    """
     if sys.platform == "win32":
+        import errno
         import msvcrt
 
         handle.seek(0)
-        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        while True:
+            try:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+                return
+            except OSError as exc:
+                if exc.errno not in (errno.EACCES, errno.EDEADLK):
+                    raise
     else:
         import fcntl
 
@@ -1297,6 +1335,25 @@ class StdioServerPresence:
             except OSError:
                 live = True
         return live
+
+    @staticmethod
+    def a_server_is_live() -> bool:
+        """Whether any stdio server holds a locked entry in the presence registry.
+
+        Read under the registry's lock file, as the exit check is. False when
+        there is no registry on this root, or it cannot be read or locked: a
+        server that could not register there left the default workspace alone
+        on exit for the same reason, so nothing is kept on its account.
+        """
+        try:
+            registry = StdioServerPresence._registry()
+            if not registry.is_dir():
+                return False
+            with open(registry / _STDIO_SERVERS_LOCK, "a+b") as guard:
+                _lock_blocking(guard)
+                return StdioServerPresence._another_server_is_live(registry)
+        except (OSError, RuntimeError):
+            return False
 
     def abandon_for_tests(self) -> None:
         """Drop the lock but keep the entry, as a server that died would."""
@@ -1541,9 +1598,19 @@ def touch_session_workspace(session_id: str) -> None:
 
 
 def sweep_stale_workspaces(
-    ttl_seconds: float, now: Optional[float] = None
+    ttl_seconds: float,
+    now: Optional[float] = None,
+    *,
+    in_use: Optional[Collection[str]] = None,
 ) -> List[str]:
     """Remove session workspaces nobody used for longer than ``ttl_seconds``.
+
+    ``in_use`` names the sessions the caller still holds as issued (the HTTP
+    boundary's: an sse event stream that is still open, a stateful session the
+    SDK has not ended). Those are kept whatever their age: an open stream that
+    has sent no message for longer than the TTL is idle, not ended, and its
+    workspace, bound profile and delivered-source record end with the stream
+    (``end_session``), not with the sweep.
 
     Only directories ASH created are considered. A session workspace carries
     ``session_paths.SESSION_MARKER``, and anything else under the root (an
@@ -1618,6 +1685,9 @@ def sweep_stale_workspaces(
             _remove_stale_leftover(root, entry, cutoff)
             continue
         if is_reserved_session_id(session_id):
+            continue
+        if in_use is not None and session_id in in_use:
+            # Still issued by the caller: its end comes through end_session.
             continue
         try:
             validated_path_component(session_id)

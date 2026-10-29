@@ -223,7 +223,7 @@ def test_a_failed_removal_when_an_sse_stream_ends_still_finishes_it(
 def test_a_failing_sweep_does_not_fail_the_request(root, log, monkeypatch) -> None:
     calls: List[float] = []
 
-    def sweep_stale_workspaces(ttl_seconds: float, now=None):
+    def sweep_stale_workspaces(ttl_seconds: float, now=None, *, in_use=None):
         calls.append(ttl_seconds)
         raise RuntimeError("simulated sweep failure")
 
