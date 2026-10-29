@@ -122,11 +122,27 @@ def same_baseline(
 
 
 def _detect_secrets_overrides(config_overrides: Optional[Sequence[str]]) -> List[str]:
-    """The ``--config-overrides`` entries that can change detect-secrets' settings."""
+    """The ``--config-overrides`` entries that can change detect-secrets' settings.
+
+    An entry at ``scanners`` whole, or one whose section segment is any spelling
+    the apply folds onto the declared ``detect-secrets`` section
+    (``DetectSecrets``, ``detectsecrets``, ``Detect-Secrets``;
+    ``plugin_section_names.plugin_key_in``): an entry the apply lands on the
+    section is replayed, so what the operator asked for is kept as the
+    operator's under every spelling the config accepts.
+    """
+    from automated_security_helper.config.plugin_section_names import (
+        folded_section_name,
+    )
+
+    wanted = folded_section_name("detect_secrets")
     selected: List[str] = []
     for override in config_overrides or []:
-        key = override.partition("=")[0].removesuffix("+").strip().replace("-", "_")
-        if key == "scanners" or key.startswith("scanners.detect_secrets"):
+        key = override.partition("=")[0].removesuffix("+").strip()
+        parts = [part.strip() for part in key.split(".")]
+        if parts[0] != "scanners":
+            continue
+        if len(parts) == 1 or folded_section_name(parts[1]) == wanted:
             selected.append(override)
     return selected
 
