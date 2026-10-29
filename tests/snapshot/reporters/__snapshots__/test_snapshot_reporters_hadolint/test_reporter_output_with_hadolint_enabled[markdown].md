@@ -73,8 +73,8 @@ MAINTAINER is deprecated
 - Rule ID: DL1000
 - Location: services/Dockerfile.broken:3
 
-unexpected &\#x27;N&\#x27;
-expecting &\#x27;\#&\#x27;, &\#x27;\\&\#x27;, ADD, ARG, CMD, COPY, ENTRYPOINT, ENV, EXPOSE, FROM, HEALTHCHECK, LABEL, MAINTAINER, ONBUILD, RUN, SHELL, STOPSIGNAL, USER, VOLUME, WORKDIR, a pragma, at least one space, or end of input
+unexpected 'N'
+expecting '\#', '\\', ADD, ARG, CMD, COPY, ENTRYPOINT, ENV, EXPOSE, FROM, HEALTHCHECK, LABEL, MAINTAINER, ONBUILD, RUN, SHELL, STOPSIGNAL, USER, VOLUME, WORKDIR, a pragma, at least one space, or end of input
 
 </details>
 
