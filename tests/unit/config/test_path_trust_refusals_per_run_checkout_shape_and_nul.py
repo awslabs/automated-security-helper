@@ -25,6 +25,7 @@ from typing import List
 import pytest
 
 from automated_security_helper.config.path_trust import (
+    OperatorPaths,
     honored_path,
     reset_path_refusal_warnings,
     scanned_checkout_reason,
@@ -139,6 +140,31 @@ def test_a_baseline_reached_through_a_link_inside_the_checkout_is_the_repository
     reason = scanned_checkout_reason(named, app)
 
     assert reason is not None and "a link inside" in reason, reason
+
+
+def test_an_operator_document_under_a_respelled_scanner_section_is_credited():
+    """The operator's file spells the section ``Syft``; the configuration reads
+    it as the syft scanner's (case and separators dropped), so the path it names
+    is the operator's under the key the scanner asks about."""
+    paths = OperatorPaths(
+        documents=[
+            {"scanners": {"Syft": {"options": {"config_file": "/ops/syft.yaml"}}}}
+        ]
+    )
+
+    assert paths.named("scanners.syft.options.config_file", "/ops/syft.yaml")
+    assert not paths.named("scanners.syft.options.config_file", "/ops/other.yaml")
+
+
+def test_an_override_under_a_respelled_scanner_section_is_credited():
+    paths = OperatorPaths(
+        overrides=[("scanners.DetectSecrets.options.baseline_file", "/ops/base.json")]
+    )
+
+    assert paths.named(
+        "scanners.detect_secrets.options.baseline_file", "/ops/base.json"
+    )
+    assert not paths.named("scanners.bandit.options.config_file", "/ops/base.json")
 
 
 def test_a_value_holding_a_nul_is_dropped_not_raised(tmp_path, ash_warnings):

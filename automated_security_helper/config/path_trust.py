@@ -142,8 +142,38 @@ def _key_segments(key: str) -> List[Tuple[str, bool]]:
     return segments
 
 
-def _leaves(node: Any, segments: List[Tuple[str, bool]]) -> Iterator[Any]:
-    """The values at ``segments`` in a parsed config document."""
+def _section_key_matches(key: Any, name: str, parent: Optional[str]) -> bool:
+    """Whether document key ``key`` is the option segment ``name``.
+
+    Directly under a plugin segment (``scanners``, ``reporters``,
+    ``converters``) a section is matched under the fold the configuration
+    reads it by (``folded_section_name``: ASCII case and the separators
+    dropped), so an operator's override written under ``scanners.Syft`` or
+    ``scanners.detectsecrets`` is credited to the section the document holds.
+    Elsewhere the two separators are alike and case is kept, as config
+    merging compares keys.
+    """
+    if not isinstance(key, str):
+        return False
+    if parent is not None:
+        from automated_security_helper.config.plugin_section_names import (
+            PLUGIN_SEGMENT_KEYS,
+            folded_section_name,
+        )
+
+        if parent in PLUGIN_SEGMENT_KEYS:
+            return folded_section_name(key) == folded_section_name(name)
+    return _key_part(key) == name
+
+
+def _leaves(
+    node: Any, segments: List[Tuple[str, bool]], parent: Optional[str] = None
+) -> Iterator[Any]:
+    """The values at ``segments`` in a parsed config document.
+
+    ``parent`` is the key the ``node`` sits under, which decides how the next
+    segment is matched (``_section_key_matches``).
+    """
     if not segments:
         if isinstance(node, list):
             yield from node
@@ -154,22 +184,28 @@ def _leaves(node: Any, segments: List[Tuple[str, bool]]) -> Iterator[Any]:
     if not isinstance(node, dict):
         return
     for key, value in node.items():
-        if _key_part(key) != name:
+        if not _section_key_matches(key, name, parent):
             continue
         if many and isinstance(value, list):
             for item in value:
-                yield from _leaves(item, rest)
+                yield from _leaves(item, rest, name)
         elif not many:
-            yield from _leaves(value, rest)
+            yield from _leaves(value, rest, name)
 
 
 def _same_path(leaf: Any, value: Union[str, Path]) -> bool:
-    """Whether a config value names ``value``; a ``file://...::name`` entry by its file."""
+    """Whether a config value names ``value``; a ``file://...::name`` entry by its file.
+
+    Compared as normalized paths (``os.path.normpath``), so a value written
+    ``./rules/a.yaml`` and the anchored form a scanner holds compare the way
+    the anchoring normalized them; a relative value against an absolute one
+    still differs, since the document's directory is not known here.
+    """
     if not isinstance(leaf, str):
         return False
     if leaf.startswith("file://"):
         leaf = leaf[len("file://") :].partition("::")[0]
-    return leaf == str(value)
+    return leaf == str(value) or os.path.normpath(leaf) == os.path.normpath(str(value))
 
 
 @dataclass
@@ -204,9 +240,17 @@ class OperatorPaths:
             return True
         for override_key, parsed in self.overrides:
             prefix = _key_segments(override_key)
-            if [name for name, _ in segments[: len(prefix)]] != [
-                name for name, _ in prefix
-            ]:
+            # Segment by segment under the same matching the document walk
+            # uses: a section segment under a plugin segment folds, so an
+            # override typed under a respelled section is credited too.
+            if len(prefix) > len(segments) or any(
+                not _section_key_matches(
+                    prefix[index][0],
+                    segments[index][0],
+                    segments[index - 1][0] if index else None,
+                )
+                for index in range(len(prefix))
+            ):
                 continue
             rest = segments[len(prefix) :]
             # An override that sets a list (`plugins_used=[...]`) is the list itself.
@@ -215,10 +259,11 @@ class OperatorPaths:
                 if prefix and segments[len(prefix) - 1][1] and isinstance(parsed, list)
                 else [parsed]
             )
+            under = segments[len(prefix) - 1][0] if prefix else None
             if any(
                 _same_path(leaf, value)
                 for item in items
-                for leaf in _leaves(item, rest)
+                for leaf in _leaves(item, rest, under)
             ):
                 return True
         return False
