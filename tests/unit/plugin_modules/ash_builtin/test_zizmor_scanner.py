@@ -1088,6 +1088,34 @@ def test_a_workflow_rejected_as_not_an_action_is_a_failed_target(repo, quoted):
     assert scanner.targets_failed == 1
 
 
+def test_a_rejected_workflow_is_counted_when_the_source_dir_is_the_workflows_dir(
+    repo,
+):
+    """The source dir may itself be ``.github/workflows`` (a supported shape).
+    zizmor then quotes a rejected file by its bare name, relative to that cwd:
+    the name alone says nothing about where it sits, so the quoted path is read
+    against the source dir, and the file counts as a failed workflow rather than
+    being dropped as an inapplicable action."""
+    source = repo / ".github" / "workflows"
+    rejected = (
+        " WARN collect_inputs: zizmor::registry::input: failed to validate "
+        "action.yml as action: input does not match expected validation schema\n"
+    )
+    empty_sarif = json.dumps(
+        {
+            "version": "2.1.0",
+            "runs": [{"tool": {"driver": {"name": "zizmor"}}, "results": []}],
+        }
+    )
+    scanner = _scanner(source)
+    _fake_run(scanner, stdout=empty_sarif, stderr=rejected)
+    scanner.scan(source, "source", [])
+    # clean.yml and vulnerable.yml were collected; the rejected workflow is one
+    # of the attempted targets that failed, not a target removed from the count.
+    assert scanner.targets_attempted == 2
+    assert scanner.targets_failed == 1
+
+
 def test_exit_3_counts_every_remaining_input_as_failed(repo):
     """Exit 3 says zizmor audited nothing. When its rejection lines use words the
     parser does not read, the inputs must still count as not audited, never as

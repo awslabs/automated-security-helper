@@ -120,6 +120,7 @@ other exit status is a tool failure and the scan reports ERROR.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from pathlib import Path, PurePath
 from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
@@ -224,14 +225,22 @@ _NOT_AN_ACTION_PATTERN = re.compile(
 )
 
 
-def _names_a_workflow(path_text: str) -> bool:
+def _names_a_workflow(path_text: str, cwd: Optional[Path] = None) -> bool:
     """Whether the input zizmor quotes sits directly in a ``.github/workflows``.
 
     A file there is a workflow GitHub runs, whatever its name: one named
     ``action.yml`` is handed to zizmor as a composite action and rejected as "not
     an action", but it is a target ASH meant to audit, not an inapplicable file.
+
+    zizmor quotes the path as it was given, relative to the subprocess ``cwd``
+    (the source dir). When that directory is itself ``.github/workflows`` the
+    quoted path is the bare file name, so a relative path is resolved against
+    ``cwd`` (lexically; nothing is read) before its tail is examined.
     """
-    parts = PurePath(path_text.removeprefix("file://").replace("\\", "/")).parts
+    text = path_text.removeprefix("file://").replace("\\", "/")
+    if cwd is not None and not PurePath(text).is_absolute():
+        text = os.path.normpath(os.path.join(Path(cwd).absolute().as_posix(), text))
+    parts = PurePath(text).parts
     return len(parts) >= 3 and parts[-3] == ".github" and parts[-2] == "workflows"
 
 
@@ -1111,9 +1120,12 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         Returns the warning lines, for the log.
         """
         rejected = _REJECTED_INPUT_PATTERN.findall(stderr)
+        # zizmor quotes each input as it was given: relative to source_dir, the
+        # subprocess cwd (_input_argument), so a bare name is read against it.
+        cwd = Path(self._plugin_context.source_dir)
         for line in rejected:
             not_an_action = _NOT_AN_ACTION_PATTERN.search(line)
-            if not_an_action and not _names_a_workflow(not_an_action.group(1)):
+            if not_an_action and not _names_a_workflow(not_an_action.group(1), cwd):
                 self.targets_attempted = max(0, self.targets_attempted - 1)
             else:
                 self.targets_failed += 1
