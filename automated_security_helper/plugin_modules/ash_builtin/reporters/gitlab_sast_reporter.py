@@ -295,8 +295,16 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
             }
         )
 
-        # Create location object
-        location_obj = {"file": file_path, "start_line": start_line}
+        # Create location object. Only the fields that have a value: the GitLab
+        # security-report schema types `file` as a string and `start_line` as a
+        # number, so `"file": null` for a result with no artifact URI or region
+        # fails validation of the whole report, where an empty `location` object
+        # is valid and says what is true, that the finding has no file position.
+        location_obj: Dict[str, Any] = {}
+        if file_path:
+            location_obj["file"] = file_path
+        if start_line is not None:
+            location_obj["start_line"] = start_line
 
         # Create details object
         details: Dict[str, Any] = {}
