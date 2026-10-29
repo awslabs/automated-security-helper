@@ -40,8 +40,13 @@ The other side of the same coin is a leg that collected tests and ran none of th
 tier leg whose every selected test is skipped (a tool is absent, a gate is off) exits 0
 and reads green while it measured nothing. ``fail_a_tier_run_that_executed_no_test``
 turns that into ``TESTS_FAILED`` and prints one line, but only for a CI tier run: a
-``-m`` expression was given AND the run is under GitHub Actions (``GITHUB_ACTIONS=true``,
-read once in ``configure``) or has a shard. It acts only when pytest is about to exit
+``-m`` expression was given AND the run opted in with ``ASH_TEST_TIER_FLOOR=1`` or has a
+shard. The run-unit-tests action sets the variable on its pytest step; ``configure``
+reads it once and removes it from ``os.environ``, as it does the shard variable, so a
+pytest that a test starts does not inherit it and the floor does not differ between a
+CI runner and a developer's machine. ``GITHUB_ACTIONS`` is not consulted: ``act`` and
+any other pytest under Actions would have set it too. The floor acts only when pytest is
+about to exit
 ``OK``, at least one item was collected and selected, and none of them executed. An
 item executed when its call phase ran and did not skip, or when its setup failed (an
 error is a result). A run that collected nothing is left to ``admit_empty_shard`` and
@@ -145,10 +150,13 @@ _SHARD_KEY = pytest.StashKey[Optional[Tuple[int, int]]]()
 _TEXT_KEY = pytest.StashKey[str]()
 #: The ``workerinput`` key the controller hands the text to a worker under.
 WORKERINPUT_KEY = "ash_test_shard"
-#: The variable GitHub Actions sets on every runner; ``true`` marks a CI run.
-CI_ENV_VAR = "GITHUB_ACTIONS"
-#: Whether this run is under GitHub Actions, read once by ``configure``.
-_CI_KEY = pytest.StashKey[bool]()
+#: The opt-in the run-unit-tests action sets for a CI tier run; ``1`` turns the
+#: executed-test floor on. Read once by ``configure`` and removed from the environment.
+FLOOR_ENV_VAR = "ASH_TEST_TIER_FLOOR"
+#: Whether this run opted in to the floor.
+_FLOOR_KEY = pytest.StashKey[bool]()
+#: The ``workerinput`` key the controller hands the opt-in to a worker under.
+WORKERINPUT_FLOOR_KEY = "ash_test_tier_floor"
 
 
 def configure(config: pytest.Config) -> None:
@@ -169,22 +177,23 @@ def configure(config: pytest.Config) -> None:
     workerinput = getattr(config, "workerinput", None)
     if workerinput is not None:
         text = workerinput.get(WORKERINPUT_KEY) or ""
+        floor = bool(workerinput.get(WORKERINPUT_FLOOR_KEY))
     else:
         text = os.environ.pop(ENV_VAR, "")
+        floor = os.environ.pop(FLOOR_ENV_VAR, "") == "1"
     try:
         shard = parse_shard(text) if text else None
     except ValueError as error:
         raise pytest.UsageError(f"{ENV_VAR}: {error}") from None
     config.stash[_SHARD_KEY] = shard
     config.stash[_TEXT_KEY] = text
-    under_ci = os.environ.get(CI_ENV_VAR) == "true"
-    config.stash[_CI_KEY] = under_ci
+    config.stash[_FLOOR_KEY] = floor
     # A stand-in config without a plugin manager (the unit tests of this module use one)
     # registers nothing. The early return above is what keeps this to once per config.
-    # A run with a shard needs the plugin for the empty-shard admission, and a run under
-    # GitHub Actions needs it for the executed-test floor, sharded or not.
+    # A run with a shard needs the plugin for the empty-shard admission, and a run that
+    # opted in needs it for the executed-test floor, sharded or not.
     plugins = getattr(config, "pluginmanager", None)
-    if (shard is not None or under_ci) and plugins is not None:
+    if (shard is not None or floor) and plugins is not None:
         plugins.register(_TierRunOutcome(), _TIER_RUN_PLUGIN)
 
 
@@ -223,8 +232,8 @@ def admit_empty_shard(session: Any, exitstatus: Any, deselected: int) -> bool:
 
 
 def is_ci_tier_run(config: Any) -> bool:
-    """Whether this is a CI tier run: a ``-m`` expression was given AND the run is under
-    GitHub Actions (as ``configure`` read it) or has a shard configured.
+    """Whether this is a CI tier run: a ``-m`` expression was given AND the run opted in
+    with ``ASH_TEST_TIER_FLOOR=1`` (as ``configure`` read it) or has a shard configured.
 
     The one definition the floor and the tests that assert what a CI leg is provisioned
     with both use, so they cannot drift apart. It reads the config, not the environment:
@@ -232,7 +241,7 @@ def is_ci_tier_run(config: Any) -> bool:
     """
     if not config.getoption("markexpr", default=""):
         return False
-    return bool(config.stash.get(_TEXT_KEY, "") or config.stash.get(_CI_KEY, False))
+    return bool(config.stash.get(_TEXT_KEY, "") or config.stash.get(_FLOOR_KEY, False))
 
 
 def fail_a_tier_run_that_executed_no_test(
@@ -243,8 +252,7 @@ def fail_a_tier_run_that_executed_no_test(
     True when it changed the exit status. Why: a leg whose every selected test is
     skipped (a tool is absent, a gate is off) exits 0 and reads green while it measured
     nothing. It acts only when all of these hold: the run was given a ``-m``
-    expression; it is a CI run (``GITHUB_ACTIONS=true`` when ``configure`` ran, or a
-    shard is configured); it is not a ``--collect-only``, ``--setup-plan``,
+    expression; it is a CI tier run (:func:`is_ci_tier_run`); it is not a ``--collect-only``, ``--setup-plan``,
     ``--setup-only``, ``--fixtures`` or ``--fixtures-per-test`` run, which run no test
     by design; pytest is about to exit ``OK``;
     at least one item was collected and selected (``session.testscollected``); and
@@ -364,8 +372,13 @@ def pytest_configure(config: pytest.Config) -> None:
 
 @pytest.hookimpl(optionalhook=True)
 def pytest_configure_node(node: Any) -> None:
-    """Hand the controller's shard setting to an xdist worker. Not called without xdist."""
+    """Hand the controller's shard setting and floor opt-in to an xdist worker.
+
+    Not called without xdist. A worker never applies the floor, but the tests it runs
+    ask :func:`is_ci_tier_run`, which reads the same stash.
+    """
     node.workerinput[WORKERINPUT_KEY] = node.config.stash.get(_TEXT_KEY, "")
+    node.workerinput[WORKERINPUT_FLOOR_KEY] = node.config.stash.get(_FLOOR_KEY, False)
 
 
 def pytest_ignore_collect(

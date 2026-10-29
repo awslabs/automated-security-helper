@@ -170,7 +170,7 @@ def _clean_env(**extra: str) -> dict[str, str]:
         k: v
         for k, v in os.environ.items()
         if not k.startswith(("PYTEST_", "COV_CORE_", "COVERAGE_"))
-        and k != sharding.ENV_VAR
+        and k not in (sharding.ENV_VAR, sharding.FLOOR_ENV_VAR)
     }
     env.update(extra)
     return env
@@ -626,7 +626,8 @@ class TestATierRunThatRanNothingInARealPytest:
     The planted tree uses the wiring conftest of
     TestAnEmptyShardOfATierRunInARealPytest and one unit module holding a single
     ``@pytest.mark.skip`` test. The run is the unsharded unit leg of CI: ``-m unit`` with
-    ``GITHUB_ACTIONS=true`` in the child's environment and no shard.
+    ``ASH_TEST_TIER_FLOOR=1`` in the child's environment, as the run-unit-tests action
+    sets it, and no shard.
     """
 
     CONFTEST = TestAnEmptyShardOfATierRunInARealPytest.CONFTEST
@@ -652,9 +653,8 @@ class TestATierRunThatRanNothingInARealPytest:
 
     def _run(self, root: Path, *, under_ci: bool):
         env = _clean_env(PYTHONPATH=str(REPO_ROOT))
-        env.pop(sharding.CI_ENV_VAR, None)
         if under_ci:
-            env[sharding.CI_ENV_VAR] = "true"
+            env[sharding.FLOOR_ENV_VAR] = "1"
         return subprocess.run(
             [
                 sys.executable,
@@ -690,7 +690,7 @@ class TestATierRunThatRanNothingInARealPytest:
         assert self.LINE in done.stdout, done.stdout
 
     def test_the_same_run_on_a_developer_machine_stays_green(self, tmp_path):
-        """The control: without GITHUB_ACTIONS and a shard, a skipped test is a skip."""
+        """The control: without the opt-in and a shard, a skipped test is a skip."""
         self._plant(tmp_path)
         done = self._run(tmp_path, under_ci=False)
         assert done.returncode == 0, done.stdout + done.stderr
@@ -787,9 +787,9 @@ class TestAShardThatHoldsNoTestOfTheTierIsAdmitted:
         assert manager.get_plugin("ash-tier-run-outcome") is first
 
     def test_configure_registers_nothing_for_a_whole_run(self, monkeypatch):
-        """No shard and not under GitHub Actions: a developer's plain ``pytest``."""
+        """No shard and no floor opt-in: a developer's plain ``pytest``."""
         monkeypatch.delenv(sharding.ENV_VAR, raising=False)
-        monkeypatch.delenv(sharding.CI_ENV_VAR, raising=False)
+        monkeypatch.delenv(sharding.FLOOR_ENV_VAR, raising=False)
         manager = pytest.PytestPluginManager()
         sharding.configure(SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager))
         assert manager.get_plugin("ash-tier-run-outcome") is None
@@ -855,7 +855,7 @@ class TestATierRunThatExecutedNoTestFails:
     ) -> SimpleNamespace:
         stash = pytest.Stash()
         stash[sharding._TEXT_KEY] = text
-        stash[sharding._CI_KEY] = under_ci
+        stash[sharding._FLOOR_KEY] = under_ci
         values = {"markexpr": expression, **options}
         reporter = SimpleNamespace(write_line=written.append)
         config = SimpleNamespace(
@@ -898,7 +898,7 @@ class TestATierRunThatExecutedNoTestFails:
         assert len(written) == 1 and "admitted" in written[0], written
 
     def test_a_run_that_is_not_a_ci_tier_run_is_left_alone(self):
-        """A developer's ``pytest -m unit``: no GITHUB_ACTIONS and no shard."""
+        """A developer's ``pytest -m unit``: no floor opt-in and no shard."""
         written: list[str] = []
         session = self._session(written, under_ci=False)
         assert not sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
@@ -1033,26 +1033,35 @@ class TestATierRunThatExecutedNoTestFails:
         plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
         assert session.exitstatus == pytest.ExitCode.OK and not written
 
-    def test_configure_registers_the_plugin_for_a_run_under_github_actions(
-        self, monkeypatch
-    ):
+    def test_configure_registers_the_plugin_for_a_run_that_opted_in(self, monkeypatch):
         monkeypatch.delenv(sharding.ENV_VAR, raising=False)
-        monkeypatch.setenv(sharding.CI_ENV_VAR, "true")
+        monkeypatch.setenv(sharding.FLOOR_ENV_VAR, "1")
         manager = pytest.PytestPluginManager()
         config = SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager)
         sharding.configure(config)
         assert manager.get_plugin("ash-tier-run-outcome") is not None
-        assert config.stash[sharding._CI_KEY] is True
+        assert config.stash[sharding._FLOOR_KEY] is True
 
-    @pytest.mark.parametrize("value", ["false", "1", ""])
-    def test_only_the_value_true_marks_a_run_as_ci(self, monkeypatch, value):
+    @pytest.mark.parametrize("value", ["true", "0", "yes", ""])
+    def test_only_the_value_1_opts_a_run_in(self, monkeypatch, value):
         monkeypatch.delenv(sharding.ENV_VAR, raising=False)
-        monkeypatch.setenv(sharding.CI_ENV_VAR, value)
+        monkeypatch.setenv(sharding.FLOOR_ENV_VAR, value)
         manager = pytest.PytestPluginManager()
         config = SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager)
         sharding.configure(config)
         assert manager.get_plugin("ash-tier-run-outcome") is None
-        assert config.stash[sharding._CI_KEY] is False
+        assert config.stash[sharding._FLOOR_KEY] is False
+
+    def test_github_actions_alone_does_not_opt_a_run_in(self, monkeypatch):
+        """``act`` and any other pytest under Actions set it too; the opt-in is explicit."""
+        monkeypatch.delenv(sharding.ENV_VAR, raising=False)
+        monkeypatch.delenv(sharding.FLOOR_ENV_VAR, raising=False)
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        manager = pytest.PytestPluginManager()
+        config = SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager)
+        sharding.configure(config)
+        assert manager.get_plugin("ash-tier-run-outcome") is None
+        assert config.stash[sharding._FLOOR_KEY] is False
 
 
 class TestTheSettingStaysInTheRunThatWasGivenIt:
@@ -1150,6 +1159,36 @@ class TestTheSettingStaysInTheRunThatWasGivenIt:
         sharding.configure(worker)
         assert worker.stash[sharding._SHARD_KEY] == (2, 3)
         assert sharding.ENV_VAR not in os.environ
+
+    @pytest.mark.unit
+    def test_configure_removes_the_floor_opt_in_from_the_environment(self, monkeypatch):
+        """A child pytest a test starts must not inherit it, or its floor differs by venue."""
+        monkeypatch.delenv(sharding.ENV_VAR, raising=False)
+        monkeypatch.setenv(sharding.FLOOR_ENV_VAR, "1")
+        config = self._config()
+        sharding.configure(config)
+        assert sharding.FLOOR_ENV_VAR not in os.environ
+        assert config.stash[sharding._FLOOR_KEY] is True
+
+    @pytest.mark.unit
+    def test_a_worker_takes_the_floor_opt_in_from_its_workerinput(self, monkeypatch):
+        """The e2e tools test runs in a worker and asks ``is_ci_tier_run`` there."""
+        monkeypatch.delenv(sharding.ENV_VAR, raising=False)
+        monkeypatch.delenv(sharding.FLOOR_ENV_VAR, raising=False)
+        controller = self._config()
+        controller.stash[sharding._TEXT_KEY] = ""
+        controller.stash[sharding._FLOOR_KEY] = True
+        node = SimpleNamespace(config=controller, workerinput={})
+        sharding.pytest_configure_node(node)
+        assert node.workerinput[sharding.WORKERINPUT_FLOOR_KEY] is True
+
+        worker = self._config(
+            workerinput=dict(node.workerinput), getoption=lambda name, default="": "e2e"
+        )
+        sharding.configure(worker)
+        assert worker.stash[sharding._FLOOR_KEY] is True
+        assert sharding.is_ci_tier_run(worker) is True
+        assert sharding.FLOOR_ENV_VAR not in os.environ
 
     @pytest.mark.unit
     def test_a_malformed_setting_is_a_usage_error(self, monkeypatch):
@@ -1261,6 +1300,12 @@ class TestTheActionRunsATier:
         assert sharding.ENV_VAR == "ASH_TEST_SHARD"
         assert step["env"]["MARKER"] == "${{ inputs.marker }}"
         assert '-m "$MARKER"' in str(step["run"])
+
+    def test_the_step_opts_the_run_in_to_the_executed_test_floor(self):
+        """Without the variable the floor never runs, on any leg."""
+        step = _action_step("Run PyTest")
+        assert sharding.FLOOR_ENV_VAR == "ASH_TEST_TIER_FLOOR"
+        assert step["env"][sharding.FLOOR_ENV_VAR] == "1"
 
     def test_the_step_names_no_test_file_on_the_command_line(self):
         """A file named there skips pytest's ignore rules and its python_files match."""

@@ -153,6 +153,13 @@ runs:
     # pytest_configure, and removed from the environment there, so a pytest a test starts
     # does not inherit it. xdist workers get the setting through workerinput instead.
     #
+    # ASH_TEST_TIER_FLOOR=1 turns on the executed-test floor (tests/utils/sharding.py,
+    # fail_a_tier_run_that_executed_no_test): a tier leg that selected tests and executed
+    # none of them, because every one was skipped, exits 1 instead of reading green. It
+    # is an explicit opt-in, not a reading of GITHUB_ACTIONS, so that a pytest a test
+    # starts, and a run under act, behave the same everywhere. The variable is read once
+    # and removed from the environment in pytest_configure, like ASH_TEST_SHARD.
+    #
     # --junit-xml names test-results/pytest.junit.xml; the report step's glob matches it.
     #
     # PYTEST_DEBUG_TEMPROOT moves pytest's basetemp (tmp_path and friends) off the
@@ -173,6 +180,7 @@ runs:
         ASH_REQUIRE_CDK_EXTRA: "1"
         PYTEST_DEBUG_TEMPROOT: ${{ runner.temp }}
         ASH_TEST_SHARD: ${{ inputs.shard }}
+        ASH_TEST_TIER_FLOOR: "1"
         MARKER: ${{ inputs.marker }}
       run: |
         # A tier run, and each shard of the integration tier, sees only part of the
