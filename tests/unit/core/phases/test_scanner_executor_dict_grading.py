@@ -139,9 +139,7 @@ class TestAResultThatCannotBeReadIsThisRowsError:
         assert row.status == ScannerStatus.ERROR
         assert "could not be graded" in _reason(row)
 
-    def test_a_finding_whose_severity_is_not_text_counts_as_info(
-        self, plugin_context
-    ):
+    def test_a_finding_whose_severity_is_not_text_counts_as_info(self, plugin_context):
         row = _row(
             plugin_context, {"findings": [{"severity": 5}, {"severity": "high"}]}
         )

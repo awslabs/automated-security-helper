@@ -100,9 +100,7 @@ def test_a_system_exit_from_scan_is_the_rows_error(plugin_context):
 
     assert row.status == ScannerStatus.ERROR
     assert row.raw_results["status"] == "failed"
-    assert any("Failed to execute shape-tool" in str(e) for e in row.errors), (
-        row.errors
-    )
+    assert any("Failed to execute shape-tool" in str(e) for e in row.errors), row.errors
 
 
 def test_a_system_exit_outside_the_per_target_handler_is_a_failure_container(
