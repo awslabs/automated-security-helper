@@ -126,7 +126,7 @@ import re
 import shutil
 import stat
 from pathlib import Path, PurePosixPath
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from automated_security_helper.core.committed_output import WORKSPACE_SPOOL_DIR_NAME
 from automated_security_helper.core.exceptions import WorkspacePatternError
@@ -511,49 +511,108 @@ def rebase_run_for_project(
     return rebased, unconvertible
 
 
-def count_actionable_results(
-    results: Iterable[Mapping[str, Any]], threshold: Optional[str]
-) -> int:
-    """Count findings at or above *threshold*, the way ``_compute_exit_code`` does.
+#: Resolves the threshold governing one scanner's findings from the scanner's
+#: name as ``properties.scanner_name`` records it (``None`` for a finding that
+#: names none). An answer of ``None`` means "the project-wide threshold".
+ThresholdResolver = Callable[[Optional[str]], Optional[str]]
 
-    Mirrors ``run_ash_scan._compute_exit_code``'s SARIF pass exactly:
-    ``properties.issue_severity`` decides when it names a severity ASH knows,
-    otherwise the SARIF ``level`` does, and a suppressed finding never counts.
-    Both arms go through Phase 0's severity ladder, which was verified to gate
-    identically to the inline tables in ``_compute_exit_code`` for all five real
-    threshold values.
+#: The scanner a finding with no ``properties.scanner_name`` is credited to, in
+#: the per-scanner counts and in the rollup alike.
+UNATTRIBUTED_SCANNER = "unattributed"
+
+
+def actionable_results_by_scanner(
+    results: Iterable[Mapping[str, Any]],
+    threshold: Optional[str],
+    *,
+    threshold_for: Optional[ThresholdResolver] = None,
+) -> Dict[str, int]:
+    """Per scanner, the findings at or above that scanner's own threshold.
+
+    Mirrors ``run_ash_scan._compute_exit_code``'s SARIF pass: the threshold is
+    resolved per result from its scanner (``properties.scanner_name``), the
+    project-wide *threshold* governing a scanner that has no setting of its own
+    and a finding that names no scanner; ``properties.issue_severity`` decides
+    when it names a severity ASH knows, otherwise the SARIF ``level`` does; and a
+    suppressed finding never counts. Both arms go through Phase 0's severity
+    ladder, which was verified to gate identically to the inline tables in
+    ``_compute_exit_code`` for all five real threshold values.
+
+    Every scanner that produced a result is a key, counted or not, so a caller
+    can tell "no actionable findings" from "no findings".
 
     Args:
         results: The SARIF results of one run.
-        threshold: A configured severity threshold. Upper-cased here because
-            ``_compute_exit_code`` upper-cases the configured value and the
-            ladder is case-sensitive; without this a lowercase threshold would
-            gate like CRITICAL in one path and MEDIUM in the other.
+        threshold: The project-wide threshold. Upper-cased here, as every
+            resolved value is, because ``_compute_exit_code`` upper-cases the
+            configured value and the ladder is case-sensitive; without this a
+            lowercase threshold would gate like CRITICAL in one path and MEDIUM
+            in the other.
+        threshold_for: Resolves a scanner's own threshold from its name; ``None``
+            (the default, and the resolver's answer for a scanner with no setting
+            of its own) falls back to *threshold*. Without one, every finding is
+            judged against *threshold*, which is what the single-scan code did
+            before it honoured per-scanner ``options.severity_threshold`` and what
+            left a project's workspace verdict disagreeing with its own.
 
     Returns:
-        The number of actionable findings. Zero when *threshold* is falsy, which
-        is how an operator turns the gate off.
+        Scanner name to actionable count. A falsy effective threshold counts
+        nothing for that scanner, which is how an operator turns the gate off.
     """
-    if not threshold:
-        return 0
-    normalized = threshold.upper()
+    resolved: Dict[Optional[str], Optional[str]] = {}
 
-    actionable = 0
+    def effective(scanner: Optional[str]) -> Optional[str]:
+        if scanner not in resolved:
+            own = threshold_for(scanner) if threshold_for is not None else None
+            value = own or threshold
+            resolved[scanner] = value.upper() if value else None
+        return resolved[scanner]
+
+    counts: Dict[str, int] = {}
     for result in results:
         if not isinstance(result, Mapping):
             continue
-        if result.get("suppressions"):
-            continue
         properties = result.get("properties")
+        scanner: Optional[str] = None
         issue_severity = ""
         if isinstance(properties, Mapping):
+            raw_name = properties.get("scanner_name")
+            scanner = str(raw_name) if raw_name else None
             issue_severity = str(properties.get("issue_severity") or "").upper()
+        name = scanner or UNATTRIBUTED_SCANNER
+        counts.setdefault(name, 0)
+        if result.get("suppressions"):
+            continue
+        gate = effective(scanner)
+        if not gate:
+            continue
         if issue_severity in SEVERITIES:
-            if severity_fails_threshold(issue_severity, normalized):
-                actionable += 1
-        elif sarif_level_fails_threshold(result.get("level"), normalized):
-            actionable += 1
-    return actionable
+            if severity_fails_threshold(issue_severity, gate):
+                counts[name] += 1
+        elif sarif_level_fails_threshold(result.get("level"), gate):
+            counts[name] += 1
+    return counts
+
+
+def count_actionable_results(
+    results: Iterable[Mapping[str, Any]],
+    threshold: Optional[str],
+    *,
+    threshold_for: Optional[ThresholdResolver] = None,
+) -> int:
+    """Count findings at or above their scanner's threshold, as ``_compute_exit_code`` does.
+
+    The sum of :func:`actionable_results_by_scanner`; see it for the rules.
+
+    Returns:
+        The number of actionable findings. Zero when *threshold* is falsy and no
+        resolver names a threshold, which is how an operator turns the gate off.
+    """
+    return sum(
+        actionable_results_by_scanner(
+            results, threshold, threshold_for=threshold_for
+        ).values()
+    )
 
 
 def has_finding_at_min_severity(
@@ -923,36 +982,47 @@ class WorkspaceAggregator:
             scanner = None
             if isinstance(properties, Mapping):
                 scanner = properties.get("scanner_name")
-            name = str(scanner) if scanner else "unattributed"
+            name = str(scanner) if scanner else UNATTRIBUTED_SCANNER
             by_scanner.setdefault(name, []).append(result)
             self._scanner_status.setdefault(name, None)
             if result.get("suppressions"):
                 continue
             self._scanner_findings[name] = self._scanner_findings.get(name, 0) + 1
 
-        # Actionable counts, per scanner, against THIS project's own threshold.
+        # Actionable counts, per scanner: the split the project's own verdict
+        # carried, when it carried one. The verdict graded each finding against
+        # its scanner's own threshold and saw only the findings it is allowed to
+        # (a policy scanner's findings decide nothing unless policy_scanners_gate
+        # is set), so summing the split here is the one derivation. Re-deriving it
+        # from the run against one project-wide threshold made the two
+        # derivations of one number disagree the moment a scanner had a threshold
+        # of its own, and counted policy-origin findings the project's own total
+        # excluded, so the rollup exceeded the per-project totals it claims to sum.
         #
-        # Derived here rather than carried on the outcome, because the outcome
-        # holds one number for the whole project and the rollup needs it split.
-        # Zeroed wholesale when the project's own actionable count is zero: that
-        # is how the --min-severity gate reaches this layer, since it is a
-        # whole-scan switch in _compute_exit_code rather than a per-finding
-        # filter, and a per-scanner sum that ignored it would exceed the
-        # project's own total.
-        if outcome.actionable_finding_count:
+        # Zeroed wholesale when the project's own actionable count is zero, which
+        # the carried split already is: that is how the --min-severity gate reaches
+        # this layer, since it is a whole-scan switch in _compute_exit_code rather
+        # than a per-finding filter.
+        for name in by_scanner:
+            self._scanner_actionable.setdefault(name, 0)
+        carried = outcome.carried_scanner_actionable_counts
+        if carried is not None:
+            if outcome.actionable_finding_count:
+                for name, actionable in carried.items():
+                    self._scanner_actionable[name] = (
+                        self._scanner_actionable.get(name, 0) + actionable
+                    )
+        elif outcome.actionable_finding_count:
+            # An outcome built without the split (a results file read back, a
+            # caller that assembled it by hand): derived from the run against the
+            # threshold the verdict was computed from, as before the split was
+            # carried. gate_threshold, not severity_threshold, so a workspace
+            # ceiling that tightened the project is honoured here too.
             for name, results in by_scanner.items():
-                # gate_threshold, matching what the project's own verdict was
-                # computed from. Using severity_threshold here made the two
-                # derivations of one number disagree the moment a workspace
-                # ceiling tightened anything: the project reported 1 actionable
-                # and this split summed to 0, with no rule for which to trust.
                 actionable = count_actionable_results(results, project.gate_threshold)
                 self._scanner_actionable[name] = (
                     self._scanner_actionable.get(name, 0) + actionable
                 )
-        else:
-            for name in by_scanner:
-                self._scanner_actionable.setdefault(name, 0)
 
         self._make_spool_dir()
         # The project key is a path-derived value with separators already

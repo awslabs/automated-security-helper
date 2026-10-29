@@ -368,8 +368,9 @@ from automated_security_helper.utils.secret_masking import (
 )
 from automated_security_helper.workspace.aggregation import (
     RESULTS_FILENAME,
+    ThresholdResolver,
     WorkspaceAggregator,
-    count_actionable_results,
+    actionable_results_by_scanner,
     has_finding_at_min_severity,
     incomplete_converters_for_project,
     inputs_not_scanned_for_project,
@@ -1027,6 +1028,54 @@ def changed_file_set(
     return inside
 
 
+def _scanner_threshold_resolver(
+    results: Any, project: ProjectPlan
+) -> ThresholdResolver:
+    """The threshold governing each of this project's scanners, by scanner name.
+
+    The same resolution ``_compute_exit_code`` makes for a single scan, read from
+    the configuration the results record: a scanner with its own
+    ``options.severity_threshold`` is judged by it (source ``"config"``), and every
+    other scanner, and a finding naming no scanner, by the project-wide threshold
+    (``None`` here, which the counter reads as ``project.gate_threshold``).
+
+    The workspace ceiling still binds a scanner's own setting when the policy
+    tightened this project: a ceiling that could be stepped under by one scanner's
+    looser option would not be a ceiling. ``stricter_of`` is the same combination
+    the resolver used for the project-wide threshold.
+
+    Memoised per name because the resolver dumps the scanners config on every
+    call and a project's run carries one result per finding. Imported inside the
+    function because the calculator imports the models this module imports.
+    """
+    from automated_security_helper.core.scanner_statistics_calculator import (
+        ScannerStatisticsCalculator,
+    )
+    from automated_security_helper.utils.severity_ladder import stricter_of
+
+    cache: Dict[str, Optional[str]] = {}
+
+    def resolve(scanner_name: Optional[str]) -> Optional[str]:
+        if not scanner_name:
+            return None
+        if scanner_name not in cache:
+            own: Optional[str] = None
+            try:
+                value, source = ScannerStatisticsCalculator.get_scanner_threshold_info(
+                    results, scanner_name
+                )
+            except Exception:  # noqa: BLE001 -- an unreadable config grades as the project does
+                value, source = None, "unavailable"
+            if source == "config" and isinstance(value, str) and value:
+                own = value.upper()
+                if project.threshold_tightened_by_policy:
+                    own = stricter_of(own, project.gate_threshold)
+            cache[scanner_name] = own
+        return cache[scanner_name]
+
+    return resolve
+
+
 def _coverage_fields(results: Any) -> Dict[str, Any]:
     """The six ``WorkspaceProjectResult`` coverage fields, from one read of *results*.
 
@@ -1243,13 +1292,25 @@ def _scan_one_project(
     # leave the ceiling visible in the plan and in --dry-run while changing
     # nothing about which projects fail.
     threshold = project.gate_threshold
-    actionable = count_actionable_results(gating_results, threshold)
+    # Graded per scanner, as _compute_exit_code grades a single scan: a scanner
+    # with its own options.severity_threshold is judged by it, every other one by
+    # the project's threshold. Judging every finding against the one project
+    # threshold gave a project a workspace verdict that differed from
+    # `ash --source-dir P` the moment its config tightened or relaxed one scanner.
+    actionable_by_scanner = actionable_results_by_scanner(
+        gating_results,
+        threshold,
+        threshold_for=_scanner_threshold_resolver(results, project),
+    )
+    actionable = sum(actionable_by_scanner.values())
     if actionable and not has_finding_at_min_severity(
         gating_results, settings.min_severity
     ):
         # --min-severity is a whole-scan switch in _compute_exit_code, not a
-        # per-finding filter. Mirrored here so the verdict matches.
+        # per-finding filter. Mirrored here so the verdict matches, and the
+        # split carried to the rollup is zeroed with it.
         actionable = 0
+        actionable_by_scanner = dict.fromkeys(actionable_by_scanner, 0)
 
     fail_on_findings = _resolve_fail_on_findings(settings, results)
 
@@ -1387,6 +1448,7 @@ def _scan_one_project(
         ignore_file_exclusions=_ignore_file_exclusions_of(results),
     )
     outcome.carry_scanner_exit_codes(_scanner_exit_codes(results))
+    outcome.carry_scanner_actionable_counts(actionable_by_scanner)
     return _ProjectRun(
         outcome=outcome,
         run=run,

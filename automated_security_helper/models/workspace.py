@@ -683,6 +683,28 @@ class WorkspaceProjectResult(RecordModel):
         """The codes :meth:`carry_scanner_exit_codes` recorded; empty when none were."""
         return self._scanner_exit_codes
 
+    # Carried the same way: the per-scanner split of actionable_finding_count,
+    # graded by each scanner's own threshold and over the same findings the
+    # verdict saw, so the rollup sums what the verdict counted instead of
+    # re-deriving it from the run against one threshold. None, not empty, when
+    # the outcome was built without it, so the rollup can tell "nothing carried"
+    # from "every scanner counted zero".
+    _scanner_actionable_counts: Optional[Dict[str, int]] = PrivateAttr(default=None)
+
+    def carry_scanner_actionable_counts(self, counts: Dict[str, int]) -> None:
+        """Record how actionable_finding_count splits across this project's scanners.
+
+        Keyed as ``properties.scanner_name`` records the scanner, with the
+        aggregator's name for a finding that names none. Set after construction,
+        as :meth:`carry_scanner_exit_codes` is.
+        """
+        self._scanner_actionable_counts = dict(counts)
+
+    @property
+    def carried_scanner_actionable_counts(self) -> Optional[Dict[str, int]]:
+        """The split :meth:`carry_scanner_actionable_counts` recorded; None when none was."""
+        return self._scanner_actionable_counts
+
 
 class WorkspaceResults(RecordModel):
     """Everything a workspace scan concluded, keyed under ``workspace``."""
