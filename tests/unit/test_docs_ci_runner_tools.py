@@ -2449,7 +2449,7 @@ def test_an_events_line_that_is_not_json_fails(tmp_path):
     assert any("line 2" in p for p in problems), problems
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 def test_the_allowlist_check_runs_standalone_and_fails_the_step(tmp_path):
     script = _script("image_allowlist")
     events_path, pulls_path = _files(tmp_path, [_event("python:3.12")], [])
