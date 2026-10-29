@@ -475,12 +475,14 @@ When testing the scan workflow, you must mock multiple methods:
 
 <!-- doctest: illustrative reason="a fragment of plugin code that names objects defined elsewhere" -->
 ```python
-with patch.object(scanner, '_pre_scan', return_value=True), \
-     patch.object(scanner, '_post_scan'), \
-     patch.object(scanner, '_run_subprocess') as mock_subprocess, \
-     patch.object(scanner, '_plugin_log'), \
-     patch("builtins.open", mock_open(read_data=json.dumps(mock_sarif_response))), \
-     patch("pathlib.Path.exists", return_value=True):
+with (
+    patch.object(scanner, "_pre_scan", return_value=True),
+    patch.object(scanner, "_post_scan"),
+    patch.object(scanner, "_run_subprocess") as mock_subprocess,
+    patch.object(scanner, "_plugin_log"),
+    patch("builtins.open", mock_open(read_data=json.dumps(mock_sarif_response))),
+    patch("pathlib.Path.exists", return_value=True),
+):
     ...  # run the scan under test here
 ```
 

@@ -24,8 +24,8 @@ Call `run_ash_scan` with the absolute path to the project. The call returns imme
 ```python
 run_ash_scan(
     source_dir="/absolute/path/to/project",
-    config_path=None,              # Optional path to .ash.yaml
-    clean_output=True
+    config_path=None,  # Optional path to .ash.yaml
+    clean_output=True,
 )
 ```
 
