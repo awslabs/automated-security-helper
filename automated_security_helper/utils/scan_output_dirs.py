@@ -91,7 +91,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 from urllib.parse import unquote
 
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
@@ -1412,6 +1412,131 @@ def mark_converted_results(sarif_report: Any, context: Any) -> int:
                 marked += 1
                 break
     return marked
+
+
+#: Written by a converter beside its output, at the top of its results directory:
+#: a JSON object mapping each path it wrote, relative to the work directory with
+#: ``/`` (the form ``mark_converted_results`` records as ``converted_path``), to the
+#: path in the scanned tree it was converted from. A key ending in ``/`` names a
+#: directory, and every file below it was converted from that one source (the
+#: members of an extracted archive). ``converted_sources_of`` reads every
+#: converter's file back for the ``--changed-files-only`` filter, which places a
+#: finding in a converted file by the source named here.
+CONVERTED_SOURCES_FILE_NAME = "converted-sources.json"
+
+
+def record_converted_sources(
+    results_dir: str | Path, work_dir: str | Path, sources: Mapping[Path, str]
+) -> Optional[Path]:
+    """Write a converter's converted-path -> source mapping beside its output.
+
+    *sources* maps each file or directory the converter wrote, as it wrote it, to
+    the path in the scanned tree it was converted from (relative to the tree with
+    ``/``, as ``scanned_tree.relative_display`` gives it). The file is
+    :data:`CONVERTED_SOURCES_FILE_NAME` under *results_dir*; its keys are the
+    written paths relative to *work_dir*, a directory's with a trailing ``/``, so
+    they are the ``converted_path`` a finding in that file carries. A path outside
+    *work_dir* is left out, since no finding carries it. Nothing is written for an
+    empty mapping.
+
+    Returns:
+        The file written, or None when nothing was written: an empty mapping, or a
+        write that failed. A failed write is logged and never fails the
+        conversion: the converted files are still scanned, and the filter then
+        keeps their findings and says so, which is the behavior before this file.
+    """
+    from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
+    work = Path(work_dir).resolve()
+    recorded: Dict[str, str] = {}
+    for written, source in sources.items():
+        try:
+            relative = Path(written).resolve().relative_to(work).as_posix()
+        except (OSError, ValueError):
+            continue
+        if not relative or relative == ".":
+            continue
+        if Path(written).is_dir():
+            relative += "/"
+        recorded[relative] = source
+    if not recorded:
+        return None
+    target = Path(results_dir).joinpath(CONVERTED_SOURCES_FILE_NAME)
+    try:
+        # UTF-8 with its escapes: a name that is not UTF-8 is read with surrogates
+        # (utils/undecodable_text.py), which the escaped form carries and reads
+        # back as the same text.
+        data = json.dumps(recorded, sort_keys=True, indent=2).encode("utf-8")
+        with open_for_write(target, binary=True, mode=0o644, make_parents=True) as out:
+            out.write(data)
+    except OSError as error:
+        ASH_LOGGER.warning(
+            f"Could not record the sources of the converted files in "
+            f"{Path(results_dir).name}/{CONVERTED_SOURCES_FILE_NAME} "
+            f"({type(error).__name__}: {error.strerror or error}); a "
+            "--changed-files-only scan keeps their findings rather than placing "
+            "them by their sources"
+        )
+        return None
+    return target
+
+
+def converted_sources_of(context: Any) -> Dict[str, str]:
+    """Every converter's converted-path -> source mapping of the run, merged.
+
+    Read from :data:`CONVERTED_SOURCES_FILE_NAME` at the top of each directory
+    under the work directory (one per converter, as :func:`record_converted_sources`
+    writes it). The keys are ``converted_path`` values (relative to the work
+    directory, ``/``-separated, a directory's with a trailing ``/``) and the
+    values paths in the scanned tree. A file that cannot be read or is not a JSON
+    object of strings is skipped with a warning, and an entry that is not a pair
+    of non-empty strings is left out: the filter then keeps the findings it cannot
+    place and says so, rather than one bad file failing the scan.
+
+    Empty for a context with no work directory and no output directory to derive
+    one from, and for a work directory that does not exist.
+    """
+    if (
+        getattr(context, "work_dir", None) is None
+        and getattr(context, "output_dir", None) is None
+    ):
+        return {}
+    work = _work_dir_of(context)
+    try:
+        converter_dirs = sorted(
+            entry
+            for entry in work.iterdir()
+            if entry.is_dir() and not entry.is_symlink()
+        )
+    except OSError:
+        return {}
+    mapping: Dict[str, str] = {}
+    for converter_dir in converter_dirs:
+        file = converter_dir.joinpath(CONVERTED_SOURCES_FILE_NAME)
+        if file.is_symlink() or not file.is_file():
+            continue
+        try:
+            data = json.loads(file.read_bytes().decode("utf-8"))
+        except (OSError, ValueError) as error:
+            ASH_LOGGER.warning(
+                f"Skipped {converter_dir.name}/{CONVERTED_SOURCES_FILE_NAME}: it "
+                f"could not be read as the converter's record of what it "
+                f"converted ({type(error).__name__}); the --changed-files-only "
+                "filter keeps that converter's findings rather than placing them "
+                "by their sources"
+            )
+            continue
+        if not isinstance(data, dict):
+            ASH_LOGGER.warning(
+                f"Skipped {converter_dir.name}/{CONVERTED_SOURCES_FILE_NAME}: it "
+                "is not a JSON object; the --changed-files-only filter keeps that "
+                "converter's findings rather than placing them by their sources"
+            )
+            continue
+        for key, value in data.items():
+            if isinstance(key, str) and key and isinstance(value, str) and value:
+                mapping[key] = value
+    return mapping
 
 
 def scan_set_of(context: Any) -> List[str]:

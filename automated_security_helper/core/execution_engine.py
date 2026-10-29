@@ -673,9 +673,19 @@ class ScanExecutionEngine:
         from automated_security_helper.utils.changed_files import (
             filter_results_to_changed_files,
         )
+        from automated_security_helper.utils.scan_output_dirs import (
+            converted_sources_of,
+        )
 
+        # A finding in a converted file (a notebook's Python, an archive member)
+        # is placed by the source the converter read, which the converters
+        # recorded beside their output; the converted file itself is in the
+        # output directory and never in the changed set.
         self._results = filter_results_to_changed_files(
-            self._results, self._changed_files, self._context.source_dir
+            self._results,
+            self._changed_files,
+            self._context.source_dir,
+            converted_sources=converted_sources_of(self._context),
         )
         self._asharp_model = self._results
 

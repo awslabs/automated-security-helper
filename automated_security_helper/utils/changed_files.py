@@ -70,6 +70,28 @@ def _converted_path(result) -> Optional[str]:
     return value if isinstance(value, str) and value else None
 
 
+def _converted_source(
+    converted: str, converted_sources: Mapping[str, str]
+) -> Optional[str]:
+    """The source *converted* was converted from, by *converted_sources*, or None.
+
+    The mapping is what the converters recorded
+    (``utils.scan_output_dirs.record_converted_sources``): a file's own path, or a
+    directory's with a trailing ``/`` for every file below it, as an extracted
+    archive's members are all from the one archive. The file's own entry wins;
+    else the nearest directory entry above it.
+    """
+    source = converted_sources.get(converted)
+    if source is not None:
+        return source
+    parts = converted.split("/")
+    for depth in range(len(parts) - 1, 0, -1):
+        source = converted_sources.get("/".join(parts[:depth]) + "/")
+        if source is not None:
+            return source
+    return None
+
+
 def filter_results_to_changed_files(
     results: "AshAggregatedResults",
     changed_files: Set[Path],
@@ -89,11 +111,14 @@ def filter_results_to_changed_files(
     set) is placed by the source file the converter read, not by the converted
     file, which sits in the output directory and so is never in the changed set.
     *converted_sources* maps each ``converted_path`` to that source, relative to
-    *source_dir* or absolute. A converted result whose source the mapping does
-    not name is kept, and the run says once how many were: before this, every
-    finding in a converted file was dropped from a ``--changed-files-only``
-    report, including those from a notebook or archive that was in the diff, and
-    nothing said so.
+    *source_dir* or absolute: the mapping the converters record beside their
+    output and the engine reads back (``utils.scan_output_dirs``); a directory
+    entry, keyed with a trailing ``/``, covers every file below it
+    (:func:`_converted_source`). A converted result whose source no entry names
+    (a converter that records none) is kept, and the run says once how many
+    were: before this, every finding in a converted file was dropped from a
+    ``--changed-files-only`` report, including those from a notebook or archive
+    that was in the diff, and nothing said so.
 
     A URI holds a file name that is not UTF-8 in its record form, each lone surrogate
     as ``\\udcNN`` (utils/undecodable_text.py), and git's names hold the surrogate.
@@ -123,7 +148,7 @@ def filter_results_to_changed_files(
                 continue
             converted = _converted_path(result)
             if converted is not None:
-                source = (converted_sources or {}).get(converted)
+                source = _converted_source(converted, converted_sources or {})
                 if source is None:
                     unplaced_converted += 1
                     filtered.append(result)
@@ -149,8 +174,8 @@ def filter_results_to_changed_files(
     if unplaced_converted and _not_yet_said(results, unplaced_converted):
         ASH_LOGGER.warning(
             "Kept %d finding(s) located in converted files (notebooks, archive "
-            "members): the changed-file filter has no record of the source file "
-            "each was converted from, so it cannot tell whether that source "
+            "members): no converter recorded the source file each was converted "
+            "from, so the changed-file filter cannot tell whether that source "
             "changed. They are reported rather than dropped.",
             unplaced_converted,
         )

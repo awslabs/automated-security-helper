@@ -529,6 +529,57 @@ class TestFindingsInConvertedFiles:
             for message in ash_warnings()
         ), ash_warnings()
 
+    def test_a_finding_in_an_extracted_member_is_placed_by_its_archive(self, tmp_path):
+        """The archive converter records its extraction directory once, with a
+        trailing slash, for every member below it; a member's finding is placed by
+        the archive, which is what the diff can name."""
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        member = tmp_path / "out" / "work" / "archive" / "lib__bundle__zip" / "m.js"
+        results = _make_results_with_sarif(
+            [_converted_result(str(member), "archive/lib__bundle__zip/m.js")]
+        )
+        mapping = {"archive/lib__bundle__zip/": "lib/bundle.zip"}
+
+        unchanged = filter_results_to_changed_files(
+            results,
+            {(source_dir / "other.py").resolve()},
+            source_dir,
+            converted_sources=mapping,
+        )
+        assert unchanged.sarif.runs[0].results == []
+
+        results = _make_results_with_sarif(
+            [_converted_result(str(member), "archive/lib__bundle__zip/m.js")]
+        )
+        changed = filter_results_to_changed_files(
+            results,
+            {(source_dir / "lib" / "bundle.zip").resolve()},
+            source_dir,
+            converted_sources=mapping,
+        )
+        assert len(changed.sarif.runs[0].results) == 1
+
+    def test_a_files_own_entry_wins_over_its_directorys(self, tmp_path):
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        member = tmp_path / "out" / "work" / "archive" / "a__zip" / "m.js"
+        results = _make_results_with_sarif(
+            [_converted_result(str(member), "archive/a__zip/m.js")]
+        )
+
+        filtered = filter_results_to_changed_files(
+            results,
+            {(source_dir / "own.js").resolve()},
+            source_dir,
+            converted_sources={
+                "archive/a__zip/": "a.zip",
+                "archive/a__zip/m.js": "own.js",
+            },
+        )
+
+        assert len(filtered.sarif.runs[0].results) == 1
+
 
 @pytest.mark.unit
 class TestLocationReadings:
