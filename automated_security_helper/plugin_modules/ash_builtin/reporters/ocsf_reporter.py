@@ -83,6 +83,75 @@ ACTIVITY_NAME = "Create"
 #: A CVE identifier, the only value OCSF's ``cve.uid`` is defined to hold.
 _CVE_ID = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
 
+#: The namespace every finding's ``finding_info.uid`` is derived under. A uid was
+#: a fresh uuid4 on every run, so the same finding reached a SIEM under a new
+#: identifier each scan: the SIEM accumulated duplicates and could never update or
+#: close one. A uuid5 over the finding's identity is a UUID (what consumers and the
+#: existing tests expect) and the same across runs for the same finding.
+_FINDING_UID_NAMESPACE = uuid.uuid5(
+    uuid.NAMESPACE_URL, "https://github.com/awslabs/automated-security-helper/ocsf"
+)
+
+
+def _finding_uid(key: str) -> str:
+    """The deterministic ``finding_info.uid`` for an identity *key*."""
+    return str(uuid.uuid5(_FINDING_UID_NAMESPACE, key))
+
+
+def _identity_key(result: Any, rule_id: str, message_text: Optional[str] = None) -> str:
+    """A finding's identity from the result alone: rule, message, file and lines.
+
+    The fallback for a result the run-level flattening did not give an id (a
+    direct call of the finding builder, or a model that cannot be flattened).
+    Every read is guarded, because this is called on the error paths too.
+    """
+    parts: List[str] = [str(rule_id)]
+    try:
+        text = message_text
+        if text is None:
+            root = getattr(getattr(result, "message", None), "root", None)
+            text = getattr(root, "text", None)
+        parts.append(str(text or ""))
+    except Exception:  # noqa: BLE001 -- see the docstring
+        parts.append("")
+    try:
+        for location in getattr(result, "locations", None) or []:
+            physical = getattr(location, "physicalLocation", None)
+            loc = getattr(physical, "root", physical)
+            artifact = getattr(loc, "artifactLocation", None)
+            region = getattr(loc, "region", None)
+            parts.append(str(getattr(artifact, "uri", None) or ""))
+            parts.append(str(getattr(region, "startLine", None) or ""))
+            parts.append(str(getattr(region, "endLine", None) or ""))
+    except Exception:  # noqa: BLE001 -- see the docstring
+        pass
+    return "|".join(parts)
+
+
+def _shared_finding_ids(
+    model: "AshAggregatedResults", all_results: List[Any]
+) -> List[Optional[str]]:
+    """The id every other ASH report gives each result, by position, else None.
+
+    ``to_flat_vulnerabilities`` builds one flattened finding per SARIF result in
+    ``get_all_results`` order (``utils/finding_identity``: scanner, rule, file,
+    line, column, fingerprints, message, an occurrence counter for findings that
+    still collide), so the uid derived from it is the same string the GitLab
+    SAST report and the flat JSON report carry, and distinct for two identical
+    results in one run.
+    """
+    try:
+        flat = model.to_flat_vulnerabilities()
+    except Exception as e:  # noqa: BLE001 -- a fallback, see _identity_key
+        ASH_LOGGER.debug(f"Could not derive shared finding ids: {str(e)}")
+        return [None] * len(all_results)
+    ids = [getattr(item, "id", None) for item in flat[: len(all_results)]]
+    if len(ids) != len(all_results) or not all(
+        isinstance(item, str) and item for item in ids
+    ):
+        return [None] * len(all_results)
+    return ids
+
 
 def _rule_id(result: Any) -> Optional[str]:
     """The id of the rule *result* names: its ruleId, else its rule.id.
@@ -479,7 +548,11 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             return StatusId.integer_0, "Unknown suppression status", "Unknown"
 
     def _create_vulnerability_finding(
-        self, result: Result, metadata: Metadata, current_time_ms: int
+        self,
+        result: Result,
+        metadata: Metadata,
+        current_time_ms: int,
+        shared_id: Optional[str] = None,
     ) -> VulnerabilityFinding:
         """Build individual VulnerabilityFinding object.
 
@@ -487,6 +560,9 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             result: SARIF result object
             metadata: OCSF metadata object
             current_time_ms: Current timestamp in milliseconds
+            shared_id: the finding's id in every other report
+                (:func:`_shared_finding_ids`); the uid is derived from it, else
+                from the result's own identity (:func:`_identity_key`)
 
         Returns:
             VulnerabilityFinding object for the individual result
@@ -585,8 +661,9 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
 
             # Create finding info with error handling
             ASH_LOGGER.debug(f"Creating FindingInfo object for {rule_id}")
+            identity = shared_id or _identity_key(result, rule_id, message_text)
             try:
-                finding_uid = str(uuid.uuid4())
+                finding_uid = _finding_uid(identity)
                 finding_info = FindingInfo(
                     uid=finding_uid,
                     title=title,
@@ -599,7 +676,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 ASH_LOGGER.warning(
                     f"Error creating FindingInfo for {rule_id}, using minimal version: {str(e)}"
                 )
-                fallback_uid = str(uuid.uuid4())
+                fallback_uid = _finding_uid(f"{identity}|fallback-info")
                 finding_info = FindingInfo(
                     uid=fallback_uid,
                     title="Error creating finding title",
@@ -646,19 +723,36 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             ASH_LOGGER.error(
                 f"Critical error creating VulnerabilityFinding for {rule_id}: {str(e)}"
             )
-            # Create minimal fallback finding
+            # Create minimal fallback finding. It keeps what can still be read
+            # of the finding: the gate's severity and the workspace project,
+            # each guarded on its own. A fallback that hardcoded LOW and the
+            # shared metadata turned a CRITICAL finding of one project into a
+            # LOW record of no project.
             try:
                 ASH_LOGGER.debug(
                     f"Creating fallback VulnerabilityFinding for {rule_id}"
                 )
+                try:
+                    fallback_severity = result_severity(result)
+                    fallback_severity_id = _OCSF_SEVERITY_ID[fallback_severity]
+                except Exception:  # noqa: BLE001 -- the fallback's own fallback
+                    fallback_severity = "LOW"
+                    fallback_severity_id = SeverityId.integer_2
+                try:
+                    fallback_metadata = _metadata_for_project(metadata, result)
+                except Exception:  # noqa: BLE001 -- the fallback's own fallback
+                    fallback_metadata = metadata
+
                 fallback_vulnerability = Vulnerability(
                     desc="Error processing vulnerability details",
                     title=rule_id if rule_id != "Unknown Rule" else "Unknown Rule",
-                    severity="MEDIUM",
+                    severity=fallback_severity,
                 )
 
                 fallback_finding_info = FindingInfo(
-                    uid=str(uuid.uuid4()),
+                    uid=_finding_uid(
+                        f"{shared_id or _identity_key(result, rule_id)}|fallback"
+                    ),
                     title=f"Error processing finding {rule_id}",
                     desc="An error occurred while processing this security finding",
                 )
@@ -666,14 +760,14 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 fallback_finding = VulnerabilityFinding(
                     activity_id=ActivityId.integer_1,
                     activity_name=ACTIVITY_NAME,
-                    severity_id=SeverityId.integer_2,  # LOW
+                    severity_id=fallback_severity_id,
                     status_id=StatusId.integer_0,  # Unknown
                     type_uid=200201,
                     class_uid=2002,
                     category_uid=2,
                     category_name="Findings",
                     time=current_time_ms,
-                    metadata=metadata,
+                    metadata=fallback_metadata,
                     finding_info=fallback_finding_info,
                     vulnerabilities=[fallback_vulnerability],
                 )
@@ -831,6 +925,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         ASH_LOGGER.info(
             f"Processing {total_results_count} SARIF results for OCSF report"
         )
+        shared_ids = _shared_finding_ids(model, all_results)
 
         for i, result in enumerate(all_results):
             rule_id = _rule_id(result) or f"result_{i}"
@@ -841,7 +936,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             try:
                 # Create individual VulnerabilityFinding for this result
                 finding = self._create_vulnerability_finding(
-                    result, metadata, current_time_ms
+                    result, metadata, current_time_ms, shared_id=shared_ids[i]
                 )
                 vulnerability_findings.append(finding)
 

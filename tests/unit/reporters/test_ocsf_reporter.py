@@ -525,8 +525,10 @@ class TestOcsfReporterHelperMethods:
         # The schema default is MISSING_SARIF_LEVEL, warning (SARIF 3.27.10)
         assert finding.severity_id == SeverityId.integer_3  # MEDIUM (warning default)
 
-    def test_create_vulnerability_finding_unique_ids(self, reporter, sample_metadata):
-        """Test that each vulnerability finding gets a unique ID."""
+    def test_create_vulnerability_finding_deterministic_ids(
+        self, reporter, sample_metadata
+    ):
+        """The same finding gets the same UID every time, so a SIEM can update it."""
         current_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         result = Result(
             ruleId="TEST_UNIQUE",
@@ -541,8 +543,8 @@ class TestOcsfReporterHelperMethods:
             result, sample_metadata, current_time_ms
         )
 
-        # Each finding should have a unique UID
-        assert finding1.finding_info.uid != finding2.finding_info.uid
+        # One finding, one UID, across runs
+        assert finding1.finding_info.uid == finding2.finding_info.uid
 
         # Verify UIDs are valid UUIDs
         uuid.UUID(finding1.finding_info.uid)  # Should not raise exception
@@ -702,18 +704,18 @@ class TestOcsfReporterHelperMethods:
         # Extract all UIDs
         uids = [finding.finding_info.uid for finding in findings]
 
-        # All UIDs should be unique
-        assert len(uids) == len(set(uids)), "All UIDs should be unique"
+        # One finding built many times is one UID
+        assert len(set(uids)) == 1, "the same finding keeps one UID"
 
         # All UIDs should be valid UUIDs
         for uid in uids:
             uuid.UUID(uid)  # Should not raise exception
 
-        # All findings should have the same content except UID
+        # All findings should have the same content, UID included
         for i in range(1, len(findings)):
             assert findings[i].finding_info.title == findings[0].finding_info.title
             assert findings[i].finding_info.desc == findings[0].finding_info.desc
-            assert findings[i].finding_info.uid != findings[0].finding_info.uid
+            assert findings[i].finding_info.uid == findings[0].finding_info.uid
 
     def test_create_vulnerability_finding_complete_metadata_validation(
         self, reporter, sample_metadata
@@ -809,9 +811,9 @@ class TestOcsfReporterHelperMethods:
             )
             findings.append(finding)
 
-        # All findings should have unique UIDs even with errors
+        # The same faulty result keeps one UID even with errors
         uids = [finding.finding_info.uid for finding in findings]
-        assert len(uids) == len(set(uids)), "All UIDs should be unique even with errors"
+        assert len(set(uids)) == 1, "the same finding keeps one UID even with errors"
 
         # All UIDs should be valid UUIDs
         for uid in uids:

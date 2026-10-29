@@ -478,7 +478,9 @@ class TestVulnerabilityFindingFaults:
 
         finding = reporter._create_vulnerability_finding(good_result(), metadata, 7)
 
-        assert finding.severity_id == SeverityId.integer_2, "fallback severity is LOW"
+        assert finding.severity_id == SeverityId.integer_5, (
+            "the fallback keeps the gate's severity (error is CRITICAL)"
+        )
         assert finding.status_id == StatusId.integer_0, "fallback status is Unknown"
         assert finding.time == 7
         assert finding.finding_info.title == "Error processing finding R1"

@@ -14,12 +14,14 @@
 """
 
 import json
+import uuid
 from datetime import datetime, timezone
 
 import pytest
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugin_modules.ash_builtin.reporters.ocsf_reporter import (
+    _FINDING_UID_NAMESPACE,
     ACTIVITY_NAME,
     OcsfReporter,
 )
@@ -27,10 +29,12 @@ from automated_security_helper.schemas.ocsf.ocsf_vulnerability_finding import (
     ActivityId,
     Metadata,
     Product,
+    SeverityId,
 )
 from automated_security_helper.schemas.sarif_schema_model import (
     Level,
     Message,
+    PropertyBag,
     Result,
 )
 
@@ -139,3 +143,78 @@ class TestTheErrorResponseCountsOnce:
         assert stats["processed_results_count"] == 0
         assert stats["failed_results_count"] == 2
         assert stats["success_rate_percent"] == 0
+
+
+class TestFindingUidIsStableAcrossRuns:
+    """``finding_info.uid`` was a fresh uuid4 per run, so a SIEM accumulated one
+    record per scan for one finding and could never update or close it."""
+
+    def test_the_same_result_gets_the_same_uid_in_two_reporters(
+        self, test_plugin_context, metadata
+    ):
+        result = Result(ruleId="R", level=Level.error, message=Message(text="same"))
+
+        first = OcsfReporter(context=test_plugin_context)._create_vulnerability_finding(
+            result, metadata, 1
+        )
+        second = OcsfReporter(
+            context=test_plugin_context
+        )._create_vulnerability_finding(result, metadata, 2)
+
+        assert first.finding_info.uid == second.finding_info.uid
+        uuid.UUID(first.finding_info.uid)
+
+    def test_different_findings_get_different_uids(self, reporter, metadata):
+        first = reporter._create_vulnerability_finding(
+            Result(ruleId="R", level=Level.error, message=Message(text="one")),
+            metadata,
+            1,
+        )
+        second = reporter._create_vulnerability_finding(
+            Result(ruleId="R", level=Level.error, message=Message(text="two")),
+            metadata,
+            1,
+        )
+
+        assert first.finding_info.uid != second.finding_info.uid
+
+    def test_the_report_derives_the_uid_from_the_shared_finding_id(self, reporter):
+        model = AshAggregatedResults()
+        model.sarif.runs[0].results = [
+            Result(ruleId="R1", level=Level.error, message=Message(text="a")),
+            Result(ruleId="R1", level=Level.error, message=Message(text="a")),
+        ]
+
+        records = json.loads(reporter.report(model))
+
+        flat_ids = [item.id for item in model.to_flat_vulnerabilities()]
+        assert [r["finding_info"]["uid"] for r in records] == [
+            str(uuid.uuid5(_FINDING_UID_NAMESPACE, flat_id)) for flat_id in flat_ids
+        ]
+        # Two identical results in one run are two findings (the flattened id's
+        # occurrence counter), so their uids differ.
+        assert records[0]["finding_info"]["uid"] != records[1]["finding_info"]["uid"]
+
+
+class TestTheFallbackRecordKeepsWhatItCanRead:
+    def test_severity_and_project_survive_a_failed_primary_build(
+        self, reporter, metadata, monkeypatch
+    ):
+        result = Result(
+            ruleId="R",
+            level=Level.error,
+            message=Message(text="m"),
+            properties=PropertyBag(workspace_project="api"),
+        )
+
+        def explode(*args, **kwargs):
+            raise RuntimeError("status failed")
+
+        monkeypatch.setattr(reporter, "_determine_status_from_suppressions", explode)
+
+        finding = reporter._create_vulnerability_finding(result, metadata, 1)
+
+        assert finding.finding_info.title == "Error processing finding R"
+        assert finding.severity_id == SeverityId.integer_5
+        assert finding.vulnerabilities[0].severity == "CRITICAL"
+        assert "workspace_project:api" in (finding.metadata.labels or [])
