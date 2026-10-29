@@ -2323,13 +2323,18 @@ def execute_workspace(
                 f"exclude them, or scan the projects separately."
             )
         # Here for the same two reasons: a link at a workspace report path
-        # refuses the run before any project is scanned.
+        # refuses the run before any project is scanned. With the workspace's
+        # plugin modules, as the two calls beside it pass them: without them only
+        # the built-in reporters were built here, and a plugin-module reporter's
+        # bad file name, collision or link was refused only after every project
+        # had been scanned.
         refuse_linked_workspace_report_paths(
             plan,
             output_dir,
             output_formats=settings.output_formats,
             python_based_plugins_only=settings.python_based_plugins_only,
             reporter_classes=reporter_classes,
+            plugin_modules=workspace_plugin_modules(plan, settings),
         )
 
     raise_if_cancelled()
