@@ -126,11 +126,36 @@ def scanned_directory(report_file: Path) -> Optional[Path]:
 
 
 def _line_text(head: bytes) -> str:
-    """A line's kept bytes as text, without its line end, cut after
-    SNIPPET_LINE_CHARS + 1 characters."""
+    """A line's kept bytes as text, without its line end.
+
+    Not cut to the cap here: the lines are masked first (``mask_source``) and cut
+    to SNIPPET_LINE_CHARS + 1 characters after (``_cut_excerpt_lines``). Cut before
+    the masking, a secret value or shape that started inside the cap and ended past
+    it was no longer whole, so the masker did not match it and its head was shown.
+    The head is at most _LINE_HEAD_BYTES bytes, so the text here is bounded too.
+    """
     text = head.decode("utf-8", errors="replace")
-    text = text.removesuffix("\n").removesuffix("\r")
-    return text[: SNIPPET_LINE_CHARS + 1]
+    return text.removesuffix("\n").removesuffix("\r")
+
+
+#: The most characters of a source line kept in an excerpt, after its number and
+#: marker: one more than the cap, so _capped still reads it as cut.
+_EXCERPT_LINE_CHARS = SNIPPET_LINE_CHARS + 1
+
+
+def _cut_excerpt_lines(excerpt: str) -> str:
+    """*excerpt* (``_source_excerpt``'s text) with each line cut to its number,
+    its marker and _EXCERPT_LINE_CHARS characters of source.
+
+    After the masking, so a value the masker replaces is matched whole; see
+    ``_line_text``. A line the masker replaced is shorter than the cap already."""
+    cut = []
+    for line in excerpt.split("\n"):
+        marker, separator, text = line.partition(": ")
+        if separator and len(text) > _EXCERPT_LINE_CHARS:
+            line = f"{marker}{separator}{text[:_EXCERPT_LINE_CHARS]}"
+        cut.append(line)
+    return "\n".join(cut)
 
 
 def _offset_of_line(handle: BinaryIO, line: int, budget: int) -> Optional[int]:
@@ -1403,7 +1428,9 @@ class FindingsExplorerApp(App):
                     except (KeyError, TypeError, ValueError):
                         first = None
                     excerpt = self.mask_source(finding.get("file"), first, excerpt)
-                finding["code_snippet"] = excerpt
+                # Cut after the masking, so a value that straddles the cap is
+                # masked whole (_line_text).
+                finding["code_snippet"] = _cut_excerpt_lines(excerpt)
         self.push_screen(FindingDetailScreen(finding))
 
     def on_select_changed(self, event) -> None:
