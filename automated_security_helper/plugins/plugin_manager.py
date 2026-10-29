@@ -402,16 +402,18 @@ class AshPluginManager(BaseModel):
             )
             return []
 
-        if event_type not in self.plugin_library.event_handlers:
+        # Snapshot under the lock, the membership test included. An undo on
+        # another thread (undo_registrations_since) deletes an event's key once
+        # its last handler is gone, so a membership test outside the lock
+        # followed by an index inside it raised KeyError. A callback subscribed
+        # from another project's thread while this loop ran would otherwise
+        # raise "list changed size during iteration", and the same handler list
+        # is shared by every project in a workspace.
+        with self._event_lock:
+            handlers = list(self.plugin_library.event_handlers.get(event_type, ()))
+        if not handlers:
             ASH_LOGGER.debug(f"No subscribers for event {event_type}")
             return []
-
-        # Snapshot under the lock. A callback subscribed from another project's
-        # thread while this loop ran would otherwise raise "list changed size
-        # during iteration", and the same handler list is shared by every project
-        # in a workspace.
-        with self._event_lock:
-            handlers = list(self.plugin_library.event_handlers[event_type])
         if handler_filter is not None:
             handlers = [callback for callback in handlers if handler_filter(callback)]
         if _scope is not None:
@@ -470,6 +472,7 @@ class AshPluginManager(BaseModel):
             return
 
         registrations = self._registrations(plugin_type)
+        untrusted = getattr(self._importing, "module", None)
         with self._registry_lock:
             key = plugin_module_name
             existing = None
@@ -491,6 +494,20 @@ class AshPluginManager(BaseModel):
                 )
                 registration._masked_forms = _MASKED_MODULE_FORMS.get()
                 registrations[key] = registration
+                # By the key it was registered under, which plugins_loaded_by
+                # reads back. Recorded before the registry lock is released:
+                # plugins_loaded_by copies the untrusted record and then reads
+                # the registry, so a record written after the release let a
+                # concurrent reader see the registration without its
+                # attribution and keep a class its scan should not be offered.
+                # The provenance lock nests inside the registry lock here and
+                # nowhere is the order reversed.
+                if untrusted is not None:
+                    with self._provenance_lock:
+                        self._untrusted_registrations[(plugin_type, key)] = (
+                            untrusted,
+                            registration,
+                        )
         if already_registered:
             ASH_LOGGER.warning(
                 without_masked_modules(
@@ -499,15 +516,6 @@ class AshPluginManager(BaseModel):
                 )
             )
             return
-
-        # By the key it was registered under, which plugins_loaded_by reads back.
-        untrusted = getattr(self._importing, "module", None)
-        if untrusted is not None and registrations is not None:
-            with self._provenance_lock:
-                self._untrusted_registrations[(plugin_type, key)] = (
-                    untrusted,
-                    registrations[key],
-                )
 
         ASH_LOGGER.verbose(f"Registered plugin module '{plugin_module_name}'")
 
@@ -911,6 +919,7 @@ class AshPluginManager(BaseModel):
             )
 
         plugins: List[type] = []
+        import_failed = False
         for _name, registration in registered:
             if not registration.enabled:
                 continue
@@ -931,6 +940,7 @@ class AshPluginManager(BaseModel):
                     ):
                         plugins.append(attr)
             except ImportError as e:
+                import_failed = True
                 ASH_LOGGER.warning(
                     registration.hide_masked_modules(
                         f"Failed to import plugin module {registration.plugin_module_path}: {e}"
@@ -938,8 +948,13 @@ class AshPluginManager(BaseModel):
                 )
 
         # Memoise the unfiltered result, keyed by the registrations it came from,
-        # so repeat calls skip the import work until something new registers
-        self._resolved_plugins[cache_key] = _Resolution(resolved_from, plugins)
+        # so repeat calls skip the import work until something new registers.
+        # Not when an import failed: the key is the registrations, which do not
+        # change when the module becomes importable (a dependency installed, a
+        # file fixed in a long-lived server), so a memoised partial list would
+        # keep leaving that module's classes out of every later scan.
+        if not import_failed:
+            self._resolved_plugins[cache_key] = _Resolution(resolved_from, plugins)
 
         # Apply filter callback
         return self.filter_plugin_modules(plugins, filter_callback, *args, **kwargs)
