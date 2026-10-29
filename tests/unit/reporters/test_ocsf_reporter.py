@@ -1750,18 +1750,24 @@ class TestOcsfReporterSeverityMapping:
         self, reporter, sample_ash_model, monkeypatch
     ):
         """Test error handling when JSON serialization fails."""
-        # Mock json.dumps to raise an exception only for the main findings array
+        # Mock json.dumps to raise an exception only for the main findings
+        # array: a list whose items are OCSF findings (they carry finding_info).
+        # The error response is a list of one dict without finding_info, and
+        # the finding-identity helpers the reporter now calls first serialize
+        # tags and properties through json.dumps too, so the array is picked by
+        # shape, not by call order.
         import json
 
         original_dumps = json.dumps
 
-        call_count = 0
-
         def mock_dumps(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            # Fail on first call (main findings array), succeed on second call (error response)
-            if call_count == 1 and isinstance(args[0], list) and len(args[0]) > 0:
+            payload = args[0] if args else kwargs.get("obj")
+            if (
+                isinstance(payload, list)
+                and payload
+                and all(isinstance(item, dict) for item in payload)
+                and any("finding_info" in item for item in payload)
+            ):
                 raise Exception("JSON serialization error")
             return original_dumps(*args, **kwargs)
 

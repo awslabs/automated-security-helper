@@ -70,11 +70,17 @@ def test_the_first_located_location_is_reported_whole(reporter):
 
 
 def test_a_location_without_a_file_is_passed_over(reporter):
+    # A SARIF physical location names an artifact location or an address; one
+    # whose artifact location carries no uri is a location without a file.
     result = Result(
         ruleId="B105",
         message=Message(text="m"),
         locations=[
-            Location(physicalLocation=PhysicalLocation(region=Region(startLine=9))),
+            Location(
+                physicalLocation=PhysicalLocation(
+                    artifactLocation=ArtifactLocation(), region=Region(startLine=9)
+                )
+            ),
             Location(
                 physicalLocation=PhysicalLocation(
                     artifactLocation=ArtifactLocation(uri="src/real.py"),
