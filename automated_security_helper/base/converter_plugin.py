@@ -56,6 +56,12 @@ class ConverterPluginConfigBase(PluginConfigBase):
 
 T = TypeVar("T", bound=ConverterPluginConfigBase)
 
+#: What an accepted input's record and log line carry as the suppression's
+#: reason when the config's environment record cannot be read: a reason the
+#: config file read from the environment is quoted by its reference, never its
+#: value, and without the record the two cannot be told apart.
+REASON_NOT_RENDERED = "the suppression's reason could not be rendered as written"
+
 
 class ConverterPluginBase(PluginBase, Generic[T]):
     """Base converter plugin with some methods of the IConverter abstract class
@@ -292,15 +298,18 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         # the log line and the record both reach the results and the reports.
         # Guarded as the id bookkeeping below is: recording a failure must not
         # itself fail, and this reads the same environment record. Without the
-        # guard an error here lost the accepted input's record.
+        # guard an error here lost the accepted input's record. With the record
+        # unreadable nothing says whether the reason was read from the
+        # environment, so the expanded value never stands in for the written
+        # one: a fixed text does.
         accepted_reason = None
         if accepting is not None:
-            accepted_reason = accepting.reason
             try:
                 accepted_reason = written_suppression_reasons(config).get(
                     id(accepting), accepting.reason
                 )
             except Exception as error:
+                accepted_reason = REASON_NOT_RENDERED
                 ASH_LOGGER.debug(
                     "could not read an accepted input's suppression reason as "
                     f"written: {type(error).__name__}"

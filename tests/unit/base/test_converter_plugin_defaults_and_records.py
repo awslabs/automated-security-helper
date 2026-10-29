@@ -12,11 +12,15 @@ the class. The default is now an instance of the model the converter declares.
 record_failed_input guarded the suppression-id bookkeeping of an accepted input
 but read the same environment record unguarded first, for the suppression's
 written reason, so a failure there lost the accepted input's record. Both reads
-are guarded; the record lands either way.
+are guarded; the record lands either way, and on that error path it carries a
+fixed text, not the suppression's expanded reason: a reason the config file read
+from the environment is quoted by its reference, never its value, and with the
+record unreadable the two cannot be told apart.
 """
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import List, Literal
 
@@ -24,6 +28,7 @@ import pytest
 from pydantic import Field
 
 from automated_security_helper.base.converter_plugin import (
+    REASON_NOT_RENDERED,
     ConverterPluginBase,
     ConverterPluginConfigBase,
 )
@@ -80,12 +85,36 @@ def test_a_converter_given_its_config_keeps_it(test_plugin_context):
     assert converter.config.enabled is True
 
 
+@pytest.fixture
+def ash_records():
+    """Every record the 'ash' logger emits at INFO or above during the test."""
+    records: list[logging.LogRecord] = []
+
+    class _Collector(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    handler = _Collector(level=logging.INFO)
+    logger = logging.getLogger("ash")
+    logger.addHandler(handler)
+    try:
+        yield records
+    finally:
+        logger.removeHandler(handler)
+
+
+#: Stands for a reason the config file read from the environment: the value,
+#: which must reach neither the record nor the log when the written form cannot
+#: be looked up.
+EXPANDED_REASON = "ENVCANARY reviewed fixture"
+
+
 def test_an_accepted_input_is_recorded_when_its_written_reason_cannot_be_read(
-    test_plugin_context, monkeypatch
+    test_plugin_context, monkeypatch, ash_records
 ):
     test_plugin_context.config.global_settings.suppressions = [
         AshSuppression(
-            rule_id="ash-unconverted-input", path="a.zip", reason="reviewed fixture"
+            rule_id="ash-unconverted-input", path="a.zip", reason=EXPANDED_REASON
         )
     ]
 
@@ -103,5 +132,32 @@ def test_an_accepted_input_is_recorded_when_its_written_reason_cannot_be_read(
 
     (failed,) = converter.failed_inputs
     assert failed.path == "a.zip"
+    assert failed.accepted is True
+    # The record lands, and carries the fixed text, not the expanded reason.
+    assert failed.accepted_reason == REASON_NOT_RENDERED
+    assert "ENVCANARY" not in failed.accepted_reason
+    shown = [record.getMessage() for record in ash_records]
+    assert any("Could not convert 'a.zip'" in message for message in shown), shown
+    assert not any("ENVCANARY" in message for message in shown), shown
+
+
+def test_an_accepted_inputs_written_reason_is_recorded_when_it_can_be_read(
+    test_plugin_context,
+):
+    """The control: with the record readable, the reason is the written one."""
+    test_plugin_context.config.global_settings.suppressions = [
+        AshSuppression(
+            rule_id="ash-unconverted-input", path="a.zip", reason="reviewed fixture"
+        )
+    ]
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+
+    converter.record_failed_input(
+        Path(test_plugin_context.source_dir) / "a.zip", "it is damaged", kind="input"
+    )
+
+    (failed,) = converter.failed_inputs
     assert failed.accepted is True
     assert failed.accepted_reason == "reviewed fixture"
