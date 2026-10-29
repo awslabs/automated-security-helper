@@ -25,8 +25,14 @@ flags that become overrides, are taken from the working directory ASH runs in
 ``TRIVY_SECRET_CONFIG``, which trivy and trivy-repo read in place of their
 ``ignore_file`` and ``secret_config_file`` (``_trivy_scanner_base``), and
 ``TRIVY_CONFIG``, the trivy config file trivy-repo passes with ``--config``. A
-value that is already absolute, starts with ``~`` (the scanner expands it), holds
-``$`` (the sandbox expands it) or is a URL is left as written. The three
+value that is already absolute, starts with ``~`` (the scanner expands it) or is
+a URL is left as written, and so is a ``sandbox.extra_read_paths`` entry holding
+``$`` (the sandbox expands it). No scanner expands a ``$`` in its path options,
+so there it is a character of the file's name and the value is anchored like any
+other. opengrep's and semgrep's ``config`` is anchored when a file or directory
+is there, or when the value is spelled as a path (a rules-file suffix, or
+``./``/``../``): left as written, a missing file would be read from the tool's
+working directory, the scanned tree. The three
 environment variables are anchored by ``anchored_environment_path``: nothing
 expands them, so a relative value is joined as written, ``$`` and ``://``
 included, and its ``..`` is left for the lookup, which goes up from where a
@@ -198,30 +204,74 @@ def _names_a_root(value: str) -> bool:
     return os.name == "nt" and value[:1] in ("/", "\\")
 
 
-def anchored_path(value: Any, base_dir: Path, *, only_if_there: bool = False) -> Any:
+#: Suffixes a rules file opengrep or semgrep reads carries; a registry entry
+#: (``p/ci``, ``r/python.lang.security``, ``auto``) carries none.
+_RULES_FILE_SUFFIXES: Tuple[str, ...] = (".yaml", ".yml", ".json")
+
+
+def _names_a_rules_file(value: str) -> bool:
+    """Whether a relative ``config`` value is spelled as a path, not a registry entry.
+
+    A value with a rules-file suffix, or one written from the current or parent
+    directory (``./rules``, ``../rules``), names a file or directory wherever it
+    is read from, so it is anchored even when nothing is there yet: left as
+    written, the tool would read it from its working directory, the scanned
+    tree, and run a same-named rules file the repository put there.
+    """
+    if value.lower().endswith(_RULES_FILE_SUFFIXES):
+        return True
+    return value.startswith(("./", ".\\", "../", "..\\"))
+
+
+def anchored_path(
+    value: Any,
+    base_dir: Path,
+    *,
+    only_if_there: bool = False,
+    expands_variables: bool = True,
+) -> Any:
     """``value`` made absolute against ``base_dir``, when it is a relative path.
 
     Anything else (not a string, empty, absolute, starting with ``~``, holding
-    ``$`` or ``://``) is returned as it is. With ``only_if_there``, a relative
-    value that names nothing under ``base_dir`` is returned as it is too.
+    ``://``) is returned as it is, and so is a value holding ``$`` when
+    ``expands_variables`` is true, the default: its reader expands the variable
+    after this (the sandbox does for ``extra_read_paths``), and anchoring the
+    text first would put ``base_dir`` in front of the expansion. A scanner's
+    tool reads its path options as written, so those are anchored with
+    ``expands_variables`` false and a ``$`` is a character of the file's name.
+    With ``only_if_there``, a relative value that names nothing under
+    ``base_dir`` is returned as it is too, unless it is spelled as a path
+    (``_names_a_rules_file``).
     """
     if not isinstance(value, str) or not value.strip():
         return value
-    if value.startswith("~") or "$" in value or "://" in value or "\x00" in value:
+    if value.startswith("~") or "://" in value or "\x00" in value:
+        return value
+    if expands_variables and "$" in value:
         return value
     if _names_a_root(value):
         return value
     candidate = os.path.normpath(os.path.join(os.fspath(base_dir), value))
-    if only_if_there and not os.path.exists(candidate):
+    if (
+        only_if_there
+        and not os.path.exists(candidate)
+        and not _names_a_rules_file(value)
+    ):
         return value
     return candidate
 
 
 def _anchored_path_option(value: Any, base_dir: Path) -> Any:
-    """A ``SCANNER_PATH_OPTIONS`` value anchored: one path, or each path of a list."""
+    """A ``SCANNER_PATH_OPTIONS`` value anchored: one path, or each path of a list.
+
+    No scanner expands a variable in these options, so a ``$`` is part of the
+    name and the value is anchored like any other relative path.
+    """
     if isinstance(value, list):
-        return [anchored_path(entry, base_dir) for entry in value]
-    return anchored_path(value, base_dir)
+        return [
+            anchored_path(entry, base_dir, expands_variables=False) for entry in value
+        ]
+    return anchored_path(value, base_dir, expands_variables=False)
 
 
 def _anchored_file_entry(value: Any, base_dir: Path) -> Any:
@@ -259,7 +309,10 @@ def _anchor_options(key: str, options: Dict[str, Any], base_dir: Path) -> None:
             for name in names:
                 for spelling in _spellings(options, name):
                     options[spelling] = anchored_path(
-                        options[spelling], base_dir, only_if_there=True
+                        options[spelling],
+                        base_dir,
+                        only_if_there=True,
+                        expands_variables=False,
                     )
     if not _scanner_matches(key, "detect-secrets"):
         return
@@ -352,6 +405,10 @@ def anchor_patch_operations(ops: Any, base_dir: Union[str, Path]) -> Any:
             not isinstance(pointer, str)
             or not pointer.startswith("/")
             or "value" not in op
+            # A ``test`` operation compares its value with what the document
+            # holds and sets nothing: anchored, a test of a relative path a base
+            # in another directory set would fail and abort the load.
+            or op.get("op") == "test"
         ):
             anchored_ops.append(op)
             continue
