@@ -156,10 +156,14 @@ def _sections_in(
     )
 
     wanted = reduced_plugin_name(reporter)
+    # A key that is not a string (a YAML `1:` under reporters in a file the
+    # repository wrote) is no spelling of any reporter: skipped, where the name
+    # lookup would raise and abort a scan that should only skip the file.
     return [
         (key, section)
         for key, section in reporters.items()
-        if isinstance(section, dict)
+        if isinstance(key, str)
+        and isinstance(section, dict)
         and (key == reporter or wanted in plugin_key_lookup_names(key))
     ]
 
@@ -1038,27 +1042,55 @@ def _marker_value(
         environment_marker,
     )
 
-    if isinstance(value, str):
-        wanted = (kind, folded_section_name(key), "options", option)
+    wanted = (kind, folded_section_name(key), "options", option)
 
-        def at_place(reference: Any) -> bool:
-            path = tuple(reference.path)
-            return (
-                len(path) == 4
-                and path[0] == kind
-                and isinstance(path[1], str)
-                and folded_section_name(path[1]) == wanted[1]
-                and path[2:] == ("options", option)
-            )
+    def at_place(reference: Any, *, within: bool) -> bool:
+        # The option's own place, or (``within``) a place under it: an entry
+        # of a list or a mapping the option holds, which the loader records at
+        # the place the read value landed.
+        path = tuple(reference.path)
+        return (
+            (len(path) == 4 or (within and len(path) > 4))
+            and path[0] == kind
+            and isinstance(path[1], str)
+            and folded_section_name(path[1]) == wanted[1]
+            and path[2:4] == ("options", option)
+        )
 
+    def read_as(text: Any, *, within: bool) -> Optional[str]:
+        if not isinstance(text, str):
+            return None
         for reference in references:
             if (
                 not reference.key
-                and reference.resolved == value
-                and at_place(reference)
+                and reference.resolved == text
+                and at_place(reference, within=within)
             ):
                 return environment_marker(reference.written)
-    return shown_on_one_line(json.dumps(value))
+        return None
+
+    if isinstance(value, str):
+        marker = read_as(value, within=False)
+        if marker is not None:
+            return marker
+        return shown_on_one_line(json.dumps(value))
+
+    # A list or mapping the file wrote holds its read values as leaves: each
+    # leaf a reference at or under this place resolved to is shown as the
+    # reference, never the value.
+    def shown_leaves(node: Any) -> Any:
+        if isinstance(node, dict):
+            return {name: shown_leaves(item) for name, item in node.items()}
+        if isinstance(node, (list, tuple)):
+            return [shown_leaves(item) for item in node]
+        if isinstance(node, str):
+            marker = read_as(node, within=True)
+            return node if marker is None else marker
+        return node
+
+    # A date, time, bytes or set a YAML or TOML file writes is not JSON: it is
+    # shown as text (``default=str``) instead of raising out of the marking.
+    return shown_on_one_line(json.dumps(shown_leaves(value), default=str))
 
 
 def mark_operator_only_options(
@@ -1104,8 +1136,13 @@ def mark_operator_only_options(
         if not isinstance(sections, dict):
             continue
         wrote = None if written is None else written.written(kind)
+        # A scanners section is read as the model reads it: the declared
+        # section, or a spelling that folds to it (_scanner_sections_in); the
+        # reporter lookup would also mark an extra scanner section the plugin
+        # never reads and show its values as plain JSON.
+        sections_in = _scanner_sections_in if kind == "scanners" else _sections_in
         for plugin, names in listed.items():
-            for key, section in _sections_in(sections, plugin):
+            for key, section in sections_in(sections, plugin):
                 options = section.get("options")
                 if not isinstance(options, dict):
                     continue
