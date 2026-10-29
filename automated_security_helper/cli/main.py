@@ -531,6 +531,19 @@ def get_genai_guide(
     )
 
     output_file = Path(output_path)
+    # A destination whose directory is not there yet is made, as `ash scan
+    # --output-dir` and `ash config init` make theirs. Without this the guarded
+    # create below ran in a directory that did not exist and ended in an uncaught
+    # FileNotFoundError traceback. A file, or a link to nothing, in the directory's
+    # place is a refusal in the command's own words, not a traceback either.
+    try:
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        echo(
+            f"Error: cannot create the directory for {output_file.absolute()}: {e}",
+            err=True,
+        )
+        raise typer.Exit(1)
     # Written as it was read: UTF-8, because the guide holds characters a C,
     # latin-1 or Windows ANSI locale's codec cannot encode.
     try:
