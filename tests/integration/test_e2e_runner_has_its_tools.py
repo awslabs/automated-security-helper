@@ -20,7 +20,10 @@ three console scripts in the environment's own scripts directory: ``ash``,
 
 The console scripts are looked up in the running interpreter's scripts directory and
 not on PATH, so the check does not depend on how the leg's PATH was built. The system
-tools are looked up on PATH.
+tools are looked up on PATH. The test runs from an empty directory, and a console
+script counts only if it was found in the scripts directory itself, because on Windows
+``shutil.which`` also reads the current directory, where the checkout's own ``ash`` file
+would answer for a missing ``ash.exe``.
 
 Not asserted here: the third-party scanner binaries (grype, trivy, syft, semgrep,
 opengrep, checkov, bandit, gitleaks, actionlint, zizmor, cfn-guard, ferret-scan and the
@@ -39,6 +42,7 @@ developer's machine it skips and names the tools.
 
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 import sysconfig
@@ -62,12 +66,39 @@ def _missing(names: Sequence[str], search_path: Optional[str]) -> list[str]:
     return [name for name in names if shutil.which(name, path=search_path) is None]
 
 
-def test_the_e2e_runner_has_the_tools_its_tests_drive(request):
+def _not_in_directory(names: Sequence[str], directory: str) -> list[str]:
+    """The names not found in ``directory`` itself.
+
+    On Windows with Python 3.12, ``shutil.which`` looks in the current directory before an
+    explicit ``path`` and takes names with no extension, and the repository root holds a
+    file named ``ash``, so ``ash.exe`` could be missing from the scripts directory while
+    the lookup still found ``.\\ash``. The test changes into an empty directory first, and
+    this also requires that what was found sits in ``directory``.
+    """
+    wanted = os.path.normcase(os.path.abspath(directory))
+    absent = []
+    for name in names:
+        found = shutil.which(name, path=directory)
+        if found is None:
+            absent.append(name)
+            continue
+        found_in = os.path.normcase(os.path.dirname(os.path.abspath(found)))
+        if found_in != wanted:
+            absent.append(name)
+    return absent
+
+
+def test_the_e2e_runner_has_the_tools_its_tests_drive(request, monkeypatch, tmp_path):
+    # Nothing in the current directory may answer a lookup, whatever the platform's rule.
+    monkeypatch.chdir(tmp_path)
     # The control comes first and runs everywhere: the lookup must be able to find a
     # program that is there and to miss one that is not, or the assertion below proves
     # nothing in either direction.
     interpreter = Path(sys.executable)
-    assert _missing([interpreter.name], str(interpreter.parent)) == []
+    assert _not_in_directory([interpreter.name], str(interpreter.parent)) == []
+    assert _not_in_directory(["no-such-tool-7c41e2"], str(interpreter.parent)) == [
+        "no-such-tool-7c41e2"
+    ]
     assert _missing(["no-such-tool-7c41e2"], None) == ["no-such-tool-7c41e2"]
 
     wanted = ", ".join((*ENVIRONMENT_SCRIPTS, *SYSTEM_TOOLS))
@@ -78,7 +109,7 @@ def test_the_e2e_runner_has_the_tools_its_tests_drive(request):
         )
 
     scripts_directory = sysconfig.get_path("scripts")
-    missing_scripts = _missing(ENVIRONMENT_SCRIPTS, scripts_directory)
+    missing_scripts = _not_in_directory(ENVIRONMENT_SCRIPTS, scripts_directory)
     missing_system = _missing(SYSTEM_TOOLS, None)
     assert not (missing_scripts or missing_system), (
         "this e2e leg lacks tools its tests drive. "
