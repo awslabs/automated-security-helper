@@ -14,8 +14,10 @@ expression evaluator runs here:
   jobs run on the runner images of their unit job, and one switch keeps that so.
 - The switch is ``vars.ASH_CI_SELF_HOSTED_LINUX`` compared to the string ``true``.
 - The repository is public, so the switch admits only ``push``, ``workflow_dispatch``
-  and a ``pull_request`` whose head repository is this repository. ``merge_group`` and
-  forks are not admitted, whatever the variable says.
+  and a ``pull_request`` whose head repository is this repository and whose author is
+  not a bot account. ``merge_group``, forks and bot pull requests (Dependabot's branches
+  live in this repository, but they change what the runner would install) are not
+  admitted, whatever the variable says.
 - The two runner labels encode the architecture, and ``matrix.os`` selects between them.
 - The macOS and Windows jobs of both tiers, every e2e job and ``unit-coverage`` keep the
   literal ``${{ matrix.os }}``. The coverage combine reads the unit tier's data by absolute
@@ -64,6 +66,9 @@ ADMITTED_EVENTS = ("push", "workflow_dispatch", "pull_request")
 HEAD_REPOSITORY_CHECK = (
     "github.event.pull_request.head.repo.full_name == github.repository"
 )
+#: Keeps a bot's pull request (Dependabot's, an app's) on the hosted image: its branch
+#: lives in this repository, but what it changes is the packages the runner would install.
+NOT_A_BOT_CHECK = "github.event.pull_request.user.type != 'Bot'"
 
 #: A runs-on that looks switched but has none of the properties: the planted negative.
 PLANTED = "${{ github.event_name == 'push' && 'some-label' || 'ubuntu-latest' }}"
@@ -135,16 +140,20 @@ class TestTheLinuxJobsAreSwitchedBehindAVariable:
 
     def test_a_pull_request_is_admitted_only_from_this_repository(self, expression):
         assert HEAD_REPOSITORY_CHECK in expression, expression
-        # The comparison guards the pull_request arm specifically: both sit inside the
-        # same parenthesized operand, joined by &&.
+        assert NOT_A_BOT_CHECK in expression, expression
+        # Both comparisons guard the pull_request arm specifically: the three sit inside
+        # the same parenthesized operand, joined by &&.
         arm = re.search(
             r"\(github\.event_name == 'pull_request' && "
             + re.escape(HEAD_REPOSITORY_CHECK)
+            + r" && "
+            + re.escape(NOT_A_BOT_CHECK)
             + r"\)",
             expression,
         )
         assert arm, expression
         assert HEAD_REPOSITORY_CHECK not in PLANTED
+        assert NOT_A_BOT_CHECK not in PLANTED
 
     def test_the_labels_encode_the_architecture(self, expression):
         for label in LABELS:
