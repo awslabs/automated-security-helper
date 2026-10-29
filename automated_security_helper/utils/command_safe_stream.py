@@ -33,8 +33,21 @@ import re
 import threading
 from typing import Any, Callable, TextIO
 
-#: A terminal sequence: Rich's color codes, a cursor move.
-_CSI = r"\x1b\[[0-9;?]*[ -/]*[@-~]"
+#: A CSI terminal sequence (Rich's color codes, a cursor move), in the full
+#: ECMA-48 grammar utils/error_text.py's CSI_CODES reads: parameter bytes
+#: "0"-"?" (colon-form SGR and private modes included), intermediate bytes
+#: " "-"/", one final byte "@"-"~". The same set on both sides, so a sequence
+#: error_text strips before a runner reads the line is one this check skips too.
+_CSI = r"\x1b\[[0-?]*[ -/]*[@-~]"
+
+#: An OSC sequence (a terminal hyperlink, a title), ended by BEL, ESC-backslash
+#: or U+009C; its body excludes all three so an unterminated one swallows
+#: nothing. A runner that drops terminal sequences before it reads a line
+#: drops these as well as color codes.
+_OSC = r"\x1b\][^\x1b\x07\x9c]*(?:\x07|\x1b\\|\x9c)"
+
+#: Any terminal sequence a runner drops before it reads a command.
+_TERMINAL_SEQUENCE = rf"(?:{_CSI}|{_OSC})"
 
 #: What a runner skips at a line start before it reads a command: whitespace other
 #: than a line break, and terminal sequences. Also a byte the checked buffer could
@@ -42,19 +55,26 @@ _CSI = r"\x1b\[[0-9;?]*[ -/]*[@-~]"
 #: whose bytes reach the buffer in two writes is checked in two parts, and its
 #: first part, emitted alone, must not end the lead, so such a byte leads the
 #: line too, which errs on the side of breaking a command.
-_LINE_LEAD = re.compile(rf"(?:[^\S\r\n]|{_CSI}|[\udc80-\udcff])*")
+_LINE_LEAD = re.compile(rf"(?:[^\S\r\n]|{_TERMINAL_SEQUENCE}|[\udc80-\udcff])*")
 
 #: The first character of a line start's command prefix, "::", with any terminal
 #: sequences between its two characters: Rich's highlighter colors parts of a
 #: word, and a runner that drops color codes before it reads the line reads the
 #: prefix whole. A line-start "##" with no name and "[" after it, a Markdown
 #: heading's, is no command.
-_LINE_START_PREFIX = re.compile(rf"(:)(?=(?:{_CSI})*:)")
+_LINE_START_PREFIX = re.compile(rf"(:)(?=(?:{_TERMINAL_SEQUENCE})*:)")
 
 #: The first "#" of "##" followed by a name and "[" anywhere in a line ("##[cmd]",
 #: "##vso["), with terminal sequences allowed anywhere in it, as the highlighter
 #: puts a code before a "[" it colors on its own: "##vso\x1b[0m\x1b[32m[".
-_NAMED_HASH_COMMAND = re.compile(rf"(\\*)#(?=(?:{_CSI})*#(?:[A-Za-z]|{_CSI})*\[)")
+#: The backslashes before the "#" are taken only from the start of their run
+#: (the lookbehind): a match attempted from inside a run reads the same "#"
+#: the attempt from its start read, so it can add nothing, and without the
+#: lookbehind a line holding a long run of backslashes and no command was
+#: scanned once per backslash, each scan walking the rest of the run.
+_NAMED_HASH_COMMAND = re.compile(
+    rf"(?<!\\)(\\*)#(?=(?:{_TERMINAL_SEQUENCE})*#(?:[A-Za-z]|{_TERMINAL_SEQUENCE})*\[)"
+)
 
 #: What a line start's command prefix has its first character written as.
 _LINE_START_ESCAPES = {":": "\\x3a"}
@@ -110,6 +130,32 @@ def _is_terminal(stream: Any) -> bool:
 
 def _under_a_command_reading_runner() -> bool:
     return any(os.environ.get(name) for name in COMMAND_READING_RUNNERS)
+
+
+class _NullStream:
+    """Where a wrap writes when its target is None.
+
+    sys.stdout and sys.stderr are None in a process started with no standard
+    streams (pythonw, a service with its descriptors closed). Rich's Console
+    discards its output then (its NULL_FILE); a wrap whose target lookup
+    returns None discards the same way instead of raising AttributeError from
+    None's missing ``write``.
+    """
+
+    encoding = "utf-8"
+    closed = False
+
+    def write(self, text: str) -> int:
+        return len(text)
+
+    def flush(self) -> None:
+        return None
+
+    def isatty(self) -> bool:
+        return False
+
+
+_NULL_STREAM = _NullStream()
 
 
 class CommandSafeStream:
@@ -168,6 +214,10 @@ class CommandSafeStream:
     @property
     def target(self) -> TextIO:
         target = self._target()
+        if target is None:
+            # A process with no standard stream: the writes are discarded, as
+            # Rich discards them, rather than raised from None.
+            return _NULL_STREAM  # type: ignore[return-value]
         return getattr(target, "rich_proxied_file", target)
 
     @property
@@ -206,6 +256,17 @@ class CommandSafeStream:
                 raise
             self._end_write(failed=False)
             return written
+
+    def writelines(self, lines: Any) -> None:
+        """Each line through ``write``, under one hold of the lock.
+
+        Defined here rather than left to ``__getattr__``: forwarded, the
+        target's own writelines wrote the lines past the check and left this
+        wrap's line state where the last ``write`` had put it.
+        """
+        with self._lock:
+            for line in lines:
+                self.write(line)
 
     def _write_text(self, text: str) -> int:
         """Check *text* from the line state and write it, committing the state
