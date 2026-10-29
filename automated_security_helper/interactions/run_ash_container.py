@@ -707,20 +707,36 @@ def run_cmd_direct(
         stream = CommandSafeStream(
             (lambda: sys.stderr) if is_stderr else (lambda: sys.stdout)
         )
+        # The pipe is drained to its end whatever the console does with the
+        # copy: a reader that stopped at the first failed console write (a
+        # closed stdout, a terminal gone) left the child blocked on a full
+        # pipe, and the wait below then never ended. The failure is reported
+        # once; later lines are kept in the buffer and not shown.
+        console_failed = False
         try:
             for line in iter(pipe.readline, ""):
                 buffer.write(line)
-                stream.write(
-                    _streamed_line(
-                        line,
-                        hidden_values,
-                        strict_values,
-                        # The runtime's own stderr is never the scan's report:
-                        # a mount failure can quote an environment value as a
-                        # path segment, so it keeps the strict band.
-                        scan_report=scan_report_stream and not is_stderr,
+                if console_failed:
+                    continue
+                try:
+                    stream.write(
+                        _streamed_line(
+                            line,
+                            hidden_values,
+                            strict_values,
+                            # The runtime's own stderr is never the scan's report:
+                            # a mount failure can quote an environment value as a
+                            # path segment, so it keeps the strict band.
+                            scan_report=scan_report_stream and not is_stderr,
+                        )
                     )
-                )
+                except Exception as e:
+                    console_failed = True
+                    echo(
+                        f"Error writing {'stderr' if is_stderr else 'stdout'} to the "
+                        f"console: {str(e)}",
+                        err=True,
+                    )
         except Exception as e:
             error_msg = f"Error reading {'stderr' if is_stderr else 'stdout'}: {str(e)}"
             echo(error_msg, err=True)
@@ -800,6 +816,16 @@ def run_cmd_direct(
             # The caller reports the interrupt and exits 130, as an interrupted local
             # scan does. Returning the runtime's status instead made a Ctrl-C read as
             # the container's own failure: -15, which sys.exit turned into 241.
+            raise
+        except SystemExit:
+            # A SIGTERM relayed as an exit by the run step's _termination_raises:
+            # the signal was delivered to this process alone, so the runtime has
+            # received nothing. Without this arm the exit unwound past the wait
+            # with the runtime left running.
+            _stop_after_interrupt(process, child_got_the_interrupt=False)
+            for reader in readers:
+                if reader.ident is not None:
+                    reader.join(timeout=5.0)
             raise
         finally:
             # The stop paths and the loop above discard the record themselves;
@@ -885,12 +911,12 @@ def _get_oci_wrapper_prefix() -> List[str]:
     oci_wrapper = os.environ.get("OCI_RUNNER_WRAPPER", "").strip(" \t\n")
     if not oci_wrapper:
         return []
-    # shlex.split, with the whitespace narrowed to IFS's.
-    lexer = shlex.shlex(oci_wrapper, posix=True)
-    lexer.whitespace = " \t\n"
-    lexer.whitespace_split = True
-    lexer.commenters = ""
-    return list(lexer)
+    # A plain split on those three characters, as the wrappers split it: no quote
+    # or backslash processing. A POSIX shlex removed backslashes (a Windows path
+    # lost its separators), read quotes as grouping (a quoted word differed from
+    # ./ash's) and raised ValueError on an unbalanced quote, which escaped
+    # run_ash_container after the previous run's output had been cleared.
+    return [word for word in re.split(r"[ \t\n]+", oci_wrapper) if word]
 
 
 def sweep_leftovers_before_run(oci_runner: str | None) -> List[str]:
@@ -2203,6 +2229,18 @@ def _refuse_absolute_extends(config: str) -> None:
         ENVIRONMENT_VALUE_SHOWN,
     )
 
+    def real_path_of(file: Path, ref: str, in_file: str) -> Path:
+        # A NUL in an entry cannot name a file on any host, and os.path.realpath
+        # raises ValueError for it; refused as the chain's other unusable
+        # entries are, instead of escaping the host's checks uncaught.
+        try:
+            return _real_path(file.parent / ref)
+        except ValueError:
+            raise ContainerInputError(
+                f"'{EXTENDS_KEY}: {ref!r}' in {in_file} holds a NUL character, "
+                "which cannot name a file. Remove it from the entry."
+            ) from None
+
     start = _real_path(config)
     # The entries of each file, read once: a file that cannot be read maps to
     # None and ends the walk there.
@@ -2229,7 +2267,12 @@ def _refuse_absolute_extends(config: str) -> None:
         for ref, _, env_read in entries[current] or ():
             if Path(ref).is_absolute() or Path(ref).drive:
                 continue
-            walk.append((_real_path(current.parent / ref), hidden or env_read))
+            in_file = (
+                ENVIRONMENT_VALUE_SHOWN
+                if hidden
+                else (str(config) if current == start else str(current))
+            )
+            walk.append((real_path_of(current, ref, in_file), hidden or env_read))
 
     def shown(file: Path) -> str:
         if file in hidden_files:
@@ -2252,7 +2295,7 @@ def _refuse_absolute_extends(config: str) -> None:
                     "mounted at their place relative to the config. Write the "
                     "base relative to the file that extends it."
                 )
-            pending.append(_real_path(current.parent / ref))
+            pending.append(real_path_of(current, ref, shown(current)))
 
 
 def _refuse_output_over_the_source(
@@ -4771,21 +4814,47 @@ def _execute_container(cmd: List[str], debug: bool, env: Dict[str, str] | None =
     shown = text_without_values(shown, subprocess_utils._SPAWN_VALUES.get())
     if debug:
         echo(f"Running container command: {shown}")
+    # The values the run carries (the spawn's recorded values) are hidden in the
+    # streamed copy of the child's output line by line; the copy kept on the
+    # result is hidden the same way, so a caller that prints or logs it after
+    # the run, when the record is gone, cannot show them.
+    carried = tuple(subprocess_utils._SPAWN_VALUES.get()) + tuple(
+        subprocess_utils._SPAWN_STRICT_VALUES.get()
+    )
+
+    def hidden(text):
+        return text_without_values(text, carried) if isinstance(text, str) else text
+
     try:
         result = run_cmd_direct(cmd, debug=debug, env=env)
+        result.stdout = hidden(result.stdout)
+        result.stderr = hidden(result.stderr)
         result.shown_command = shown
         if debug:
             echo(f"Container execution completed with return code: {result.returncode}")
         return result
     except CalledProcessError as e:
+        e.output = hidden(e.output)
+        e.stderr = hidden(e.stderr)
         e.shown_command = shown
         if debug:
-            # str(e) names the command, which carries the same values.
+            # The command as it may be shown (each --config-overrides value as its
+            # key): str(e) quotes the raw argv, override values included.
             echo(
-                "Container execution failed with error: "
-                f"{text_without_values(str(e), subprocess_utils._SPAWN_VALUES.get())}"
+                f"Container execution failed with code {e.returncode}: "
+                f"Command '{shown}' returned non-zero exit status {e.returncode}."
             )
         return e
+    except OSError as e:
+        # The runtime could not be started (a runner path that is gone, a
+        # permission the host refuses). Reported as a run that never started,
+        # so the caller exits with the refusal's code instead of a traceback
+        # and drops the record of a container that never existed.
+        message = f"The container runtime could not be started: {hidden(str(e))}"
+        echo(message, err=True)
+        return _not_started(
+            create_completed_process(args=[], returncode=1, stdout="", stderr=message)
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -5012,7 +5081,10 @@ def run_ash_container(
     else:
         resolved_revision = get_ash_revision()
 
-    if resolved_revision is not None and resolved_revision != "LOCAL":
+    # Only a build installs the revision, so only a build is refused for one the
+    # build cannot take. A revision derived from the install (a direct_url.json
+    # with an odd ref) refused a --no-build run that would have installed nothing.
+    if build and resolved_revision is not None and resolved_revision != "LOCAL":
         if not _validate_ash_revision(resolved_revision):
             message = _invalid_revision_message(resolved_revision)
             secho(message, fg=typer.colors.RED)
@@ -5038,6 +5110,17 @@ def run_ash_container(
         os.environ.get("ASH_IMAGE_NAME")
         or f"automated-security-helper:{resolved_build_target}"
     )
+    if (
+        not build
+        and custom_containerfile is not None
+        and not os.environ.get("ASH_IMAGE_NAME")
+    ):
+        # A build with --custom-containerfile tags its result as the custom
+        # image (_build_custom_image) and runs that. With --no-build the same
+        # option names the image a build produced, so the run uses it too: the
+        # stock ci image it ran instead is the custom image's base, as root and
+        # without the custom tooling.
+        ash_base_image_name = "automated-security-helper:custom"
     # Held to the characters ./ash and Invoke-ASH take, with their message and code,
     # before anything is built or run: a name that starts with '-' reaches the runner
     # as an option of its own, and no image name holds any other character. The whole
