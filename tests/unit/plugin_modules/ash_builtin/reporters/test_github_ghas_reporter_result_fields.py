@@ -1,0 +1,229 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""The slim GHAS result keeps the SARIF fields GitHub reads to classify it.
+
+* ``kind``: dropped, a result ASH marked notApplicable (a cdk-nag rule that was
+  not evaluated) was uploaded under SARIF's default kind, fail, as an alert.
+* ``suppressions``: dropped, a suppressed result the file keeps (exclude_suppressed
+  off) reached GitHub as an open alert like any other.
+* ``uriBaseId`` and the run's ``originalUriBaseIds``: dropped, a URI a scanner
+  anchored to a declared base read as relative to the repository root.
+* ``automationDetails.id``: absent, the per-project documents of a workspace
+  were identical in tool identity, so each upload replaced the previous
+  project's analysis. The project key becomes the category.
+"""
+
+import json
+
+import pytest
+
+from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.plugin_modules.ash_builtin.reporters.github_ghas_reporter import (
+    GHASReporter,
+    GHASReporterConfig,
+    GHASReporterConfigOptions,
+)
+from automated_security_helper.schemas.sarif_schema_model import (
+    ArtifactLocation,
+    Kind,
+    Kind1,
+    Level,
+    Location,
+    Message,
+    PhysicalLocation,
+    PropertyBag,
+    Region,
+    Result,
+    Run,
+    SarifReport,
+    State,
+    Suppression,
+    Tool,
+    ToolComponent,
+)
+
+pytestmark = pytest.mark.unit
+
+AshAggregatedResults.model_rebuild()
+
+
+@pytest.fixture
+def reporter(test_plugin_context):
+    return GHASReporter(context=test_plugin_context)
+
+
+def _model(*runs: Run) -> AshAggregatedResults:
+    model = AshAggregatedResults()
+    model.sarif = SarifReport(version="2.1.0", runs=list(runs))
+    return model
+
+
+def _run(*results: Result, **run_kwargs) -> Run:
+    return Run(
+        tool=Tool(driver=ToolComponent(name="ASH")), results=list(results), **run_kwargs
+    )
+
+
+class TestKind:
+    def test_a_not_applicable_result_keeps_its_kind(self, reporter):
+        result = Result(
+            ruleId="CDK-NAG-1",
+            level=Level.none,
+            kind=Kind.notApplicable,
+            message=Message(text="not evaluated"),
+        )
+
+        (slim,) = json.loads(reporter.report(_model(_run(result))))["runs"][0][
+            "results"
+        ]
+
+        assert slim["kind"] == "notApplicable"
+
+    def test_a_failing_result_carries_no_kind_key(self, reporter):
+        result = Result(ruleId="R", level=Level.error, message=Message(text="m"))
+
+        (slim,) = json.loads(reporter.report(_model(_run(result))))["runs"][0][
+            "results"
+        ]
+
+        assert "kind" not in slim
+
+
+class TestSuppressions:
+    def test_a_kept_suppressed_result_carries_its_suppressions(
+        self, test_plugin_context
+    ):
+        reporter = GHASReporter(
+            context=test_plugin_context,
+            config=GHASReporterConfig(
+                options=GHASReporterConfigOptions(exclude_suppressed=False)
+            ),
+        )
+        result = Result(
+            ruleId="R",
+            level=Level.error,
+            message=Message(text="m"),
+            suppressions=[
+                Suppression(
+                    kind=Kind1.external,
+                    state=State.accepted,
+                    justification="reviewed",
+                )
+            ],
+        )
+
+        (slim,) = json.loads(reporter.report(_model(_run(result))))["runs"][0][
+            "results"
+        ]
+
+        assert slim["suppressions"] == [
+            {"kind": "external", "state": "accepted", "justification": "reviewed"}
+        ]
+
+    def test_an_unsuppressed_result_carries_no_suppressions_key(self, reporter):
+        result = Result(ruleId="R", level=Level.error, message=Message(text="m"))
+
+        (slim,) = json.loads(reporter.report(_model(_run(result))))["runs"][0][
+            "results"
+        ]
+
+        assert "suppressions" not in slim
+
+
+class TestUriBaseIds:
+    def test_an_anchored_uri_keeps_its_base_id_and_the_run_its_bases(self, reporter):
+        result = Result(
+            ruleId="R",
+            level=Level.error,
+            message=Message(text="m"),
+            locations=[
+                Location(
+                    physicalLocation=PhysicalLocation(
+                        artifactLocation=ArtifactLocation(
+                            uri="src/a.py", uriBaseId="%SRCROOT%"
+                        ),
+                        region=Region(startLine=1),
+                    )
+                )
+            ],
+        )
+        run = _run(
+            result,
+            originalUriBaseIds={"%SRCROOT%": ArtifactLocation(uri="file:///repo/")},
+        )
+
+        out = json.loads(reporter.report(_model(run)))["runs"][0]
+
+        artifact = out["results"][0]["locations"][0]["physicalLocation"][
+            "artifactLocation"
+        ]
+        assert artifact == {"uri": "src/a.py", "uriBaseId": "%SRCROOT%"}
+        assert out["originalUriBaseIds"] == {"%SRCROOT%": {"uri": "file:///repo/"}}
+
+    def test_a_rebased_workspace_uri_carries_no_base_id(self, reporter):
+        def project_run(path: str) -> Run:
+            return Run(
+                tool=Tool(driver=ToolComponent(name="ASH")),
+                results=[
+                    Result(
+                        ruleId="R",
+                        level=Level.error,
+                        message=Message(text="m"),
+                        locations=[
+                            Location(
+                                physicalLocation=PhysicalLocation(
+                                    artifactLocation=ArtifactLocation(
+                                        uri="src/a.py", uriBaseId="PROJECTROOT"
+                                    )
+                                )
+                            )
+                        ],
+                    )
+                ],
+                properties=PropertyBag.model_validate(
+                    {"workspace_project": path, "workspace_project_path": path}
+                ),
+            )
+
+        out = json.loads(reporter.report(_model(project_run("a"), project_run("b"))))[
+            "runs"
+        ][0]
+
+        artifacts = [
+            r["locations"][0]["physicalLocation"]["artifactLocation"]
+            for r in out["results"]
+        ]
+        assert artifacts == [{"uri": "a/src/a.py"}, {"uri": "b/src/a.py"}]
+        assert "originalUriBaseIds" not in out
+
+
+class TestAutomationDetails:
+    def test_a_per_project_scan_names_its_project_as_the_category(self, reporter):
+        model = _model(
+            _run(Result(ruleId="R", level=Level.error, message=Message(text="m")))
+        )
+        model.metadata.workspace_project = "api"
+
+        out = json.loads(reporter.report(model))["runs"][0]
+
+        assert out["automationDetails"] == {"id": "ash/api/"}
+
+    def test_a_single_project_run_names_its_project(self, reporter):
+        run = _run(
+            Result(ruleId="R", level=Level.error, message=Message(text="m")),
+            properties=PropertyBag.model_validate({"workspace_project": "web"}),
+        )
+
+        out = json.loads(reporter.report(_model(run)))["runs"][0]
+
+        assert out["automationDetails"] == {"id": "ash/web/"}
+
+    def test_a_single_directory_scan_carries_no_automation_details(self, reporter):
+        model = _model(
+            _run(Result(ruleId="R", level=Level.error, message=Message(text="m")))
+        )
+
+        out = json.loads(reporter.report(model))["runs"][0]
+
+        assert "automationDetails" not in out

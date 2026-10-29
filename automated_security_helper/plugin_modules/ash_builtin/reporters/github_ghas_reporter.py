@@ -297,23 +297,42 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             slim_rules = self._build_slim_rules(rules_map, rule_level_from_results)
 
             # 5. Assemble the final SARIF structure
+            out_run: Dict[str, Any] = {
+                "tool": {
+                    "driver": {
+                        "name": "ASH - Automated Security Helper",
+                        "organization": "Amazon Web Services",
+                        "version": get_ash_version(),
+                        "informationUri": "https://github.com/awslabs/automated-security-helper",
+                        "rules": slim_rules,
+                    }
+                },
+                "results": slim_results,
+            }
+
+            # The base ids the run's locations may refer to, for a document
+            # whose URIs were not rebased (one run, no project path). A
+            # multi-run document's URIs are workspace-relative and refer to
+            # none.
+            if len(runs) == 1 and not _run_project_path(runs[0]):
+                bases = self._original_uri_base_ids(runs[0])
+                if bases:
+                    out_run["originalUriBaseIds"] = bases
+
+            # automationDetails.id is the category GitHub files an upload
+            # under. The N per-project documents a workspace scan writes were
+            # identical in tool identity and carried none, so uploading them
+            # for one repository made each replace the previous project's
+            # analysis. The project's key, when the scan has one, keeps them
+            # apart; a single-directory scan is unchanged.
+            category = self._workspace_project(model, runs)
+            if category:
+                out_run["automationDetails"] = {"id": f"ash/{category}/"}
+
             report_dict = {
                 "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
                 "version": "2.1.0",
-                "runs": [
-                    {
-                        "tool": {
-                            "driver": {
-                                "name": "ASH - Automated Security Helper",
-                                "organization": "Amazon Web Services",
-                                "version": get_ash_version(),
-                                "informationUri": "https://github.com/awslabs/automated-security-helper",
-                                "rules": slim_rules,
-                            }
-                        },
-                        "results": slim_results,
-                    }
-                ],
+                "runs": [out_run],
             }
 
             return json.dumps(report_dict, separators=(",", ":"))
@@ -325,6 +344,43 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             # failure legible; see this method's docstring.
             ASH_LOGGER.error(f"Failed to create GHAS SARIF report: {e}")
             return None
+
+    @staticmethod
+    def _original_uri_base_ids(run: Any) -> Dict[str, Dict[str, str]]:
+        """The run's ``originalUriBaseIds`` as plain dicts, uri only."""
+        bases = getattr(run, "originalUriBaseIds", None)
+        if not isinstance(bases, dict):
+            return {}
+        out: Dict[str, Dict[str, str]] = {}
+        for key, location in bases.items():
+            uri = getattr(location, "uri", None)
+            if uri:
+                out[str(key)] = {"uri": str(uri)}
+        return out
+
+    @staticmethod
+    def _workspace_project(model: "AshAggregatedResults", runs: list) -> Optional[str]:
+        """The workspace project this document describes, or None.
+
+        A per-project scan records it on the model's metadata; a project's own
+        run in a unified model carries it on the run's properties. A document
+        over several projects is one analysis of the workspace and names none.
+        """
+        project = getattr(getattr(model, "metadata", None), "workspace_project", None)
+        if isinstance(project, str) and project.strip():
+            return project.strip()
+        if len(runs) != 1:
+            return None
+        props = getattr(runs[0], "properties", None)
+        if props is None:
+            return None
+        value = getattr(props, "workspace_project", None)
+        if value is None:
+            extra = getattr(props, "model_extra", None)
+            value = extra.get("workspace_project") if isinstance(extra, dict) else None
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return None
 
     def _collect_rules(
         self, tool_component, rules_map: Dict[str, Dict[str, Any]]
@@ -515,6 +571,25 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             level_val = effective_sarif_level(result)
             result_dict["level"] = level_val
 
+            # Kind, when it is not the default. SARIF reads an absent kind as
+            # "fail", so a result ASH marked notApplicable (a cdk-nag rule that
+            # was not evaluated) or pass was uploaded as a failing alert when
+            # the slim copy dropped it.
+            kind = getattr(result, "kind", None)
+            if kind is not None:
+                kind_val = _level_value(kind)
+                if kind_val != "fail":
+                    result_dict["kind"] = kind_val
+
+            # Suppressions, when the file keeps a suppressed result
+            # (exclude_suppressed off). Dropped, the result reached GitHub as an
+            # open alert indistinguishable from an unsuppressed one.
+            suppressions = getattr(result, "suppressions", None)
+            if suppressions:
+                result_dict["suppressions"] = [
+                    self._slim_suppression(suppression) for suppression in suppressions
+                ]
+
             # Message
             if result.message and result.message.root and result.message.root.text:
                 result_dict["message"] = {"text": result.message.root.text}
@@ -529,6 +604,20 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             slim_results.append(result_dict)
 
         return slim_results
+
+    @staticmethod
+    def _slim_suppression(suppression: Any) -> Dict[str, Any]:
+        """The SARIF suppression object's kind, state and justification."""
+        slim: Dict[str, Any] = {
+            "kind": _level_value(getattr(suppression, "kind", None))
+        }
+        state = getattr(suppression, "state", None)
+        if state is not None:
+            slim["state"] = _level_value(state)
+        justification = getattr(suppression, "justification", None)
+        if justification:
+            slim["justification"] = str(justification)
+        return slim
 
     def _build_slim_locations(
         self, locations: Optional[list], project_path: Optional[str] = None
@@ -560,14 +649,25 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                 continue
 
             uri = str(artifact_loc.uri)
+            artifact_dict: Dict[str, Any] = {"uri": uri}
             if project_path:
                 from automated_security_helper.workspace.aggregation import (
                     to_workspace_uri,
                 )
 
-                uri = to_workspace_uri(uri, project_path) or uri
+                # Rebased below the workspace root, so the base id the
+                # aggregator anchored the project-relative URI to no longer
+                # applies and is dropped with the rebase.
+                artifact_dict["uri"] = to_workspace_uri(uri, project_path) or uri
+            else:
+                # A base id a scanner anchored its own output to is kept with
+                # the URI it qualifies; dropped, a URI relative to a declared
+                # base read as relative to the repository root.
+                base_id = getattr(artifact_loc, "uriBaseId", None)
+                if base_id:
+                    artifact_dict["uriBaseId"] = str(base_id)
 
-            phys_dict: Dict[str, Any] = {"artifactLocation": {"uri": uri}}
+            phys_dict: Dict[str, Any] = {"artifactLocation": artifact_dict}
 
             if region:
                 region_dict: Dict[str, Any] = {}
