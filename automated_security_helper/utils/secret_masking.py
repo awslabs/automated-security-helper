@@ -1810,7 +1810,30 @@ _TEXT_ENCODINGS: Tuple[Callable[[str], str], ...] = (
     lambda value: value.replace("\\", "\\\\").replace("'", "\\'"),
     lambda value: quote(value, safe=""),
     lambda value: quote_plus(value, safe=""),
+    # The Markdown reporter: HTML-escaped, then every Markdown character
+    # backslash-escaped (markdown_reporter._text).
+    lambda value: _MARKDOWN_CHARACTER.sub(r"\\\1", html.escape(value, quote=False)),
 )
+
+#: The characters the Markdown reporter backslash-escapes in a value.
+_MARKDOWN_CHARACTER = re.compile(r"([\\`*_\[\]{}#|~])")
+
+#: In a JSON or YAML string the character before a value can be the letter of
+#: an escape (``\n``, ``\t``, ``\r``, ``\b``, ``\f``, ``\uXXXX``); a token
+#: boundary that read it as part of a word kept the value.
+_AFTER_AN_ESCAPE = r"(?<=\\[ntrbf])|(?<=\\u[0-9a-fA-F]{4})"
+
+
+def _text_token_pattern(form: str) -> str:
+    """``form`` as a whole token in rendered text (see ``_token_pattern``), where a
+    word character before it may be the tail of an escape sequence."""
+    left = (
+        r"(?:(?<!\w)|" + _AFTER_AN_ESCAPE + ")"
+        if _WORD_CHARACTER.match(form[0])
+        else ""
+    )
+    right = r"(?!\w)" if _WORD_CHARACTER.match(form[-1]) else ""
+    return left + re.escape(form) + right
 
 
 def mask_secret_values_in_text(text: str, values: Iterable[str]) -> str:
@@ -1832,7 +1855,7 @@ def mask_secret_values_in_text(text: str, values: Iterable[str]) -> str:
         return text
     pattern = re.compile(
         "|".join(
-            _token_pattern(re.escape(form), form[0], form[-1])
+            _text_token_pattern(form)
             for form in sorted(replacements, key=len, reverse=True)
         )
     )
