@@ -4,6 +4,7 @@ import html
 import json
 import math
 import re
+from enum import Enum
 from typing import (
     AbstractSet,
     Any,
@@ -281,9 +282,30 @@ _WORD_LIKE = re.compile(r"[A-Za-z]+(?:[\s._-]+[A-Za-z]+)*")
 #: ``<value>``.
 _PLACEHOLDER = re.compile(r"\$\{?\w+\}?|\{\w*\}|%\(\w+\)[a-z]|<[^<>]*>")
 
-#: Fields that name things rather than hold text a finding reports.
+#: Fields that name things rather than hold text a finding reports: identifiers,
+#: and ASH's own bookkeeping on a result (``scanner_name`` and
+#: ``scanner_version``, which decide the result's tool type).
 _SKIPPED_FIELDS = frozenset(
-    {"uri", "uriBaseId", "ruleId", "guid", "correlationGuid", "baselineState"}
+    {
+        "uri",
+        "uriBaseId",
+        "ruleId",
+        "guid",
+        "correlationGuid",
+        "baselineState",
+        "scanner_name",
+        "scanner_version",
+    }
+)
+#: Enum-valued SARIF fields: ``Result.level`` and ``Result.kind``,
+#: ``Suppression.kind`` and ``Suppression.status``, ``Run.columnKind``,
+#: ``ThreadFlowLocation.importance`` and ``Artifact.roles``. A model holds them
+#: as ``Enum`` members, which ``_mask_tree`` leaves alone by type; these names
+#: cover a report already reduced to plain JSON. A value or shape that matched
+#: one (``warning``, ``inSource``) rewrote a result's severity and wrote a value
+#: the model refuses on the next load.
+_ENUM_FIELDS = frozenset(
+    {"level", "kind", "status", "columnKind", "importance", "roles"}
 )
 #: Fields under which nothing is masked by value: a tool's rule metadata,
 #: taxonomies and policies, a result's rule reference and every ``tags`` list.
@@ -292,6 +314,12 @@ _SKIPPED_FIELDS = frozenset(
 _METADATA_FIELDS = frozenset(
     {"tool", "taxonomies", "translations", "policies", "rule", "tags"}
 )
+
+
+def _is_skipped(name: str) -> bool:
+    """Whether nothing under a field or key of this name is masked by value."""
+    return name in _SKIPPED_FIELDS or name in _METADATA_FIELDS or name in _ENUM_FIELDS
+
 
 _WORD_CHARACTER = re.compile(r"\w")
 
@@ -1093,6 +1121,10 @@ def _mask_region(region: Any, placed: Tuple[bool, _LineRanges]) -> None:
 
 def _mask_tree(node: Any, index: _SecretIndex, seen: Set[int]) -> Any:
     """Mask ``node`` in place; returns the replacement for a string node."""
+    if isinstance(node, Enum):
+        # An enum member (Result.level, Suppression.kind) is a str as well, and
+        # masking it wrote a value the model refuses (_ENUM_FIELDS).
+        return node
     if isinstance(node, str):
         return index.mask_values(node)
     if id(node) in seen:
@@ -1117,7 +1149,7 @@ def _mask_tree(node: Any, index: _SecretIndex, seen: Set[int]) -> Any:
         names = list(fields)
         names.extend((node.__pydantic_extra__ or {}).keys())
         for name in names:
-            if name in _SKIPPED_FIELDS or name in _METADATA_FIELDS:
+            if _is_skipped(name):
                 continue
             value = getattr(node, name, None)
             if value is None:
@@ -1134,7 +1166,7 @@ def _mask_tree(node: Any, index: _SecretIndex, seen: Set[int]) -> Any:
         return node
     if isinstance(node, dict):
         for key in list(node):
-            if key in _SKIPPED_FIELDS or key in _METADATA_FIELDS:
+            if isinstance(key, str) and _is_skipped(key):
                 continue
             item = node[key]
             masked = _mask_tree(item, index, seen)
@@ -1204,9 +1236,7 @@ def _mask_report(
             for name in list(type(result).model_fields) + list(
                 (result.__pydantic_extra__ or {}).keys()
             ):
-                if name == "message" or name in _SKIPPED_FIELDS:
-                    continue
-                if name in _METADATA_FIELDS:
+                if name == "message" or _is_skipped(name):
                     continue
                 value = getattr(result, name, None)
                 if value is None:
