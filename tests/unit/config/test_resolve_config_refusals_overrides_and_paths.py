@@ -225,3 +225,42 @@ def test_the_trusted_bases_tool_path_is_the_operators_over_a_repository_file(
     config = resolve_config(config_path=project, source_dir=tmp_path / "repo")
 
     assert config._operator_paths.named(TOOL_PATH_KEY, tool_path) is True
+
+
+def test_the_own_writes_arm_records_the_anchored_tool_path(tmp_path):
+    """An operator root that extends a repository file: only the root's own
+    writes count, read as the merged configuration holds them (the relative
+    tool path anchored to the root's directory), never as the raw file text."""
+    from automated_security_helper.config.resolve_config import _operator_paths
+
+    repo = tmp_path / "repo"
+    base = _write(repo / ".ash" / "base.yaml", "project_name: base\n")
+    root = _write(
+        tmp_path / "operator" / "ash.yaml",
+        f"extends: {base}\nscanners:\n  bandit:\n    options:\n"
+        "      config_file: bandit.yaml\n",
+    )
+    anchored = tmp_path / "operator" / "bandit.yaml"
+    written = {
+        "extends": str(base),
+        "scanners": {"bandit": {"options": {"config_file": "bandit.yaml"}}},
+    }
+    merged = {
+        "project_name": "base",
+        "scanners": {"bandit": {"options": {"config_file": str(anchored)}}},
+    }
+
+    record = _operator_paths(
+        [base, root],
+        [root, base],
+        [root],
+        repo,
+        merged,
+        untrusted=False,
+        overrides=None,
+        reads={root.resolve(): written},
+    )
+
+    assert record.named(TOOL_PATH_KEY, anchored) is True
+    (document,) = record.documents
+    assert "project_name" not in document, document

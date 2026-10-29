@@ -144,6 +144,18 @@ def test_a_rewrite_into_a_mapping_keyed_by_digits_finds_its_place():
     assert recorded_value_at(document, document, ("a", "123")) == "v"
 
 
+def test_a_rewrite_under_a_bases_plugin_spelling_finds_the_merged_section():
+    """The extends merge joins ``s3`` and ``S3Reporter`` under the child's
+    spelling; a base's rewrite path keeps the base's spelling and still finds
+    the merged section."""
+    document = {"reporters": {"S3Reporter": {"options": {"bucket": "v"}}}}
+
+    assert (
+        recorded_value_at(document, document, ("reporters", "s3", "options", "bucket"))
+        == "v"
+    )
+
+
 def test_path_pattern_advice_survives_a_stat_that_raises(tmp_path, monkeypatch):
     """A pattern whose stat raises (a parent that cannot be searched, a name
     past the system's length) is advised on as "fine", not raised through

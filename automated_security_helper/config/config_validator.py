@@ -37,6 +37,7 @@ from pydantic_core import core_schema as _core_schema
 
 from automated_security_helper.config.ash_config import (
     ENV_REFERENCE_PATTERN,
+    plugin_key_lookup_names,
     resolve_env_references,
 )
 from automated_security_helper.config.environment_record import (
@@ -2577,9 +2578,23 @@ def _record_key(record: Dict[Any, Any], segment: Any) -> Any:
     is placed (_placed_rewrites), before anything says whether a list or a
     mapping holds it. Looked up as an index alone, a rewrite into a mapping
     keyed by a numeric string found no place, and the record kept the value
-    read from the environment."""
+    read from the environment.
+
+    A string segment the merge's spelling rule does not find is looked up
+    as a plugin section too (ash_config.plugin_key_lookup_names): the extends
+    merge joins two spellings of an undeclared plugin section (``s3`` and
+    ``S3Reporter``) under the child's spelling, while a base's reference keeps
+    the base's spelling in its path, so the record found no place for the
+    rewrite and kept the value read from the environment."""
     if isinstance(segment, str):
-        return _resolve_dict_key(record, segment)
+        key = _resolve_dict_key(record, segment)
+        if key in record:
+            return key
+        names = plugin_key_lookup_names(segment)
+        for other in record:
+            if isinstance(other, str) and plugin_key_lookup_names(other) & names:
+                return other
+        return key
     if segment not in record and str(segment) in record:
         return str(segment)
     return segment

@@ -2053,6 +2053,7 @@ def resolve_config(
         merged_documents[0] if merged_documents else None,
         untrusted=untrusted_config,
         overrides=list(operator_overrides),
+        reads=reads,
     )
     if overlay is not None and isinstance(overlay.data, dict):
         # The overlay's merged document is the operator's by construction
@@ -5512,15 +5513,24 @@ def _operator_paths(
     *,
     untrusted: bool,
     overrides: Optional[List[str]],
+    reads: Optional[Dict[Path, Any]] = None,
 ) -> OperatorPaths:
     """Which tool paths in the config the operator named; see path_trust.
 
     The chain's merged ``document`` (or, with no config file, the default
     config's) when every file of the chain is the operator's
     (:func:`_operator_wrote`, under every name); only the selected file's own
-    document when that file is the operator's and a base it extends is not; and
+    writes when that file is the operator's and a base it extends is not; and
     what ``overrides`` set. With no ``scan_root`` there is nothing to judge the
     files against, so only the overrides are recorded, which fails closed.
+
+    The own-writes arm takes the root's document from ``reads``, the load's
+    cache of each file's one parse, and records the merged ``document``'s
+    values at the keys the root wrote (``_own_writes``): the merged document
+    holds each relative tool path anchored and each plugin section folded as
+    the configuration holds them, where a raw re-read of the file held the
+    path as written, which never equaled the anchored value a scanner passes,
+    so an operator's relative tool path was judged repository-named.
     """
     record = OperatorPaths(overrides=parse_overrides(overrides))
     if untrusted or scan_root is None:
@@ -5532,13 +5542,40 @@ def _operator_paths(
     elif chain and all(
         _operator_wrote(path, scan_root) for path in [chain[-1], *root_names]
     ):
-        try:
-            own = read_config_file(chain[-1])
-        except Exception:  # noqa: BLE001 - the chain was read already; nothing to add
-            own = None
+        # The selected root by the name it was given, so an overlay root at
+        # the chain's end does not stand in for it.
+        own_root = Path(root_names[0] if root_names else chain[-1]).resolve()
+        own = (reads or {}).get(own_root)
+        if own is None:
+            try:
+                own = read_config_file(own_root)
+            except Exception:  # noqa: BLE001 - the chain was read already; nothing to add
+                own = None
         if isinstance(own, dict):
-            record.documents = [own]
+            own = fold_known_plugin_sections(own)
+            record.documents = [
+                _own_writes(document, own) if isinstance(document, dict) else own
+            ]
     return record
+
+
+def _own_writes(merged: Any, written: Any) -> Any:
+    """``merged``, a chain's merged document, restricted to what ``written``,
+    one file's own document, wrote: the file's keys (spelled as the merged
+    document spells them, config_sources._resolve_dict_key) with the merged
+    document's values under them, so a value the file wrote is read as the
+    configuration holds it (anchored, folded), and a key only a base wrote is
+    left out. A key the merged document lacks keeps the file's own value."""
+    if not isinstance(written, dict) or not isinstance(merged, dict):
+        return merged
+    own: Dict[Any, Any] = {}
+    for key, value in written.items():
+        target = _resolve_dict_key(merged, key) if isinstance(key, str) else key
+        if target in merged:
+            own[target] = _own_writes(merged[target], value)
+        else:
+            own[key] = value
+    return own
 
 
 def _operator_wrote(path: Path, scan_root: Path) -> bool:
