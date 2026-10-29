@@ -1658,16 +1658,35 @@ def stop_after_interrupt(
     try:
         _wait_out(process, grace)
     except KeyboardInterrupt:
-        process.kill()
-        # Observed, discarded, then reaped: the die-now record must not
-        # outlive the reap (discard_tool_pid_before_reap).
-        discard_tool_pid_before_reap(process)
-        process.wait()
+        if _kill_unless_refused(process):
+            # Observed, discarded, then reaped: the die-now record must not
+            # outlive the reap (discard_tool_pid_before_reap).
+            discard_tool_pid_before_reap(process)
+            process.wait()
         raise
     except Exception:
+        if _kill_unless_refused(process):
+            discard_tool_pid_before_reap(process)
+            process.wait()
+
+
+def _kill_unless_refused(process: "subprocess.Popen[Any]") -> bool:
+    """Kill *process*; False, logged, when the kernel refuses the signal.
+
+    ``kill`` raises PermissionError on a child this process may not signal,
+    such as a setuid program the tool became. Raised from a stop arm it
+    replaced the KeyboardInterrupt or the cancel the caller re-raises with an
+    OSError, and a child the kernel would not kill is not waited for either:
+    it stays recorded for kill_running_groups, as a refused group stop does.
+    """
+    try:
         process.kill()
-        discard_tool_pid_before_reap(process)
-        process.wait()
+    except OSError as error:
+        ASH_LOGGER.warning(
+            f"Could not kill pid {process.pid}: {error}", extra=NO_MARKUP
+        )
+        return False
+    return True
 
 
 def _wait_out(process: "subprocess.Popen[Any]", grace: float) -> None:
