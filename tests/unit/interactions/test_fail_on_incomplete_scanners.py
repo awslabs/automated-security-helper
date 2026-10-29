@@ -1104,11 +1104,19 @@ class TestConfigFileResolution:
         """The pre-read loads the file as the scan loads it, patch-pointer
         ownership included: the scanned repository's file holds a
         case-variant twin of the section the operator's own base writes, and
-        the operator's root patches it under a third spelling. The scan's
-        own resolve folds the patch onto the operator's section and runs
-        with the file's gate; a pre-read without the ownership refused the
-        chain as ambiguous and answered None, so the operator's explicit
-        False was silently replaced by the caller's default."""
+        the operator's root patches it under a third spelling. The root
+        extends the repository's file first, so ``extends`` joins the two
+        spellings into one section under the operator's spelling, and the
+        scan's own resolve folds the patch onto it and runs with the file's
+        gate. The pre-read has to read the operator's explicit False there,
+        not fall back to the caller's default.
+
+        Extended the other way, the join keeps the repository's spelling,
+        which the operator's files never wrote, and the scan refuses the
+        patch as a path that does not fit the document
+        (test_a_repository_twin_neither_blocks_nor_captures_the_operators_patch).
+        The pre-read then answers None, as it does for every config the scan
+        refuses."""
         from automated_security_helper.interactions.run_ash_scan import (
             _resolve_config_fail_on_incomplete_scanners,
         )
@@ -1131,7 +1139,7 @@ class TestConfigFileResolution:
         )
         root = tmp_path / "operator.yaml"
         root.write_text(
-            f"extends:\n  - {own.as_posix()}\n  - {repository.as_posix()}\n"
+            f"extends:\n  - {repository.as_posix()}\n  - {own.as_posix()}\n"
             "fail_on_incomplete_scanners: false\n"
             "patch:\n"
             "  - op: replace\n"
