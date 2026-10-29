@@ -201,7 +201,11 @@ def _copy_manifest(
         _write_copy(target, data, private)
         return
     try:
-        manifest = json.loads(data.decode("utf-8"))
+        # utf-8-sig: a manifest that starts with a byte order mark is JSON to
+        # the package managers, and json.loads refuses the mark, so the
+        # auditConfig stayed in the copy of such a manifest and pnpm applied
+        # the repository's ignore lists under the flag that lifts them.
+        manifest = json.loads(data.decode("utf-8-sig"))
     except ValueError:
         # Not JSON (or not UTF-8): the tool reports it as it would.
         _write_copy(target, data, private)
@@ -214,19 +218,37 @@ def _copy_manifest(
 
 
 def package_manager_inputs(
-    binary: str, package_dir: Path, *, skip: Iterable[Path] = ()
+    binary: str,
+    package_dir: Path,
+    *,
+    skip: Iterable[Path] = (),
+    roots: Iterable[Path] = (),
 ) -> List[Path]:
     """Every file ``binary`` reads from the package, named as it sits in the tree.
 
     npm and pnpm: the manifest and each lockfile they read that is present
     (``_PACKAGE_MANAGER_INPUTS``; npm reads ``npm-shrinkwrap.json`` ahead of
     ``package-lock.json``). yarn: its lockfile and every ``package.json`` below the
-    package, a linked one and one in a linked directory included, since yarn follows
-    both when it looks for a workspace's members; ``node_modules``, ``.git`` and the
-    ``skip`` directories are left out. A name that resolves to nothing is not listed:
-    no tool can read it. The package's own ``package.json`` is the exception: it is
-    listed when it is a link, even one to nothing, so that a dangling link is
-    refused with its reason rather than the tool started without a manifest.
+    package, a linked one and those in a linked directory included, since yarn
+    follows both when it looks for a workspace's members; ``node_modules``,
+    ``.git`` and the ``skip`` directories are left out. A name that resolves to
+    nothing is not listed: no tool can read it. The package's own ``package.json``
+    is the exception: it is listed when it is a link, even one to nothing, so that
+    a dangling link is refused with its reason rather than the tool started
+    without a manifest.
+
+    A ``skip`` directory that holds the package itself (ASH's output directory,
+    when the package sits in the converted work directory below it) skips nothing:
+    pruning it pruned every directory of the package, so a workspace's member
+    manifests there were neither refusal-checked nor copied.
+
+    ``roots`` are the trees a linked directory may be walked into (the scanned
+    tree): yarn walks a linked directory for members like any other, so one that
+    resolves inside a root is walked here too, and a member manifest two levels
+    below the link is listed. A linked directory that resolves outside every root
+    has only its own ``package.json`` listed, which ``input_refusal`` then refuses,
+    so nothing below it is read and a link to a large tree elsewhere is never
+    walked. With no ``roots`` no linked directory is walked.
     """
     package_dir = Path(package_dir)
     manifest = package_dir / "package.json"
@@ -240,23 +262,42 @@ def package_manager_inputs(
         ]
     if (package_dir / "yarn.lock").exists():
         inputs.append(package_dir / "yarn.lock")
-    skipped = [Path(os.path.realpath(p)) for p in skip]
-    for root, dirs, files in os.walk(package_dir, followlinks=False):
-        here = Path(root)
-        dirs[:] = [
-            d
-            for d in dirs
-            if d not in _SKIPPED_DIR_NAMES
-            and not any(_within(here / d, s) for s in skipped)
-        ]
-        if "package.json" in files and (here / "package.json").exists():
-            inputs.append(here / "package.json")
-        # os.walk does not descend a linked directory; yarn does.
-        inputs.extend(
-            here / d / "package.json"
-            for d in dirs
-            if (here / d).is_symlink() and (here / d / "package.json").exists()
-        )
+    skipped = [
+        Path(os.path.realpath(p)) for p in skip if not _within(package_dir, Path(p))
+    ]
+    bounds = [Path(r) for r in roots]
+    # Directories already walked, by real path: a link back into the walked
+    # tree, or two links to one directory, would otherwise list a manifest
+    # twice or never end.
+    seen: set = set()
+
+    def _walk(start: Path) -> None:
+        for root, dirs, files in os.walk(start, followlinks=False):
+            here = Path(root)
+            real = os.path.realpath(here)
+            if real in seen:
+                dirs[:] = []
+                continue
+            seen.add(real)
+            dirs[:] = [
+                d
+                for d in dirs
+                if d not in _SKIPPED_DIR_NAMES
+                and not any(_within(here / d, s) for s in skipped)
+            ]
+            if "package.json" in files and (here / "package.json").exists():
+                inputs.append(here / "package.json")
+            # os.walk does not descend a linked directory; yarn does.
+            for d in dirs:
+                linked = here / d
+                if not linked.is_symlink():
+                    continue
+                if bounds and any(_within(linked, bound) for bound in bounds):
+                    _walk(linked)
+                elif (linked / "package.json").exists():
+                    inputs.append(linked / "package.json")
+
+    _walk(package_dir)
     return inputs
 
 
@@ -291,7 +332,7 @@ def refused_inputs(
     """Each file ``binary`` would read from the package that it must not, and why."""
     roots = list(roots)
     refused = []
-    for path in package_manager_inputs(binary, package_dir, skip=skip):
+    for path in package_manager_inputs(binary, package_dir, skip=skip, roots=roots):
         reason = input_refusal(path, roots)
         if reason is not None:
             refused.append((path, reason))
@@ -313,7 +354,7 @@ def _copy_inputs(
     Written through fs_guard (``_write_copy``), which makes the parents and refuses
     a link on the way, with ``private`` as the guarded root.
     """
-    for source in package_manager_inputs(binary, package_dir, skip=skip):
+    for source in package_manager_inputs(binary, package_dir, skip=skip, roots=roots):
         if input_refusal(source, roots) is not None:
             continue
         target = project / source.relative_to(package_dir)
