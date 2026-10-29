@@ -15,9 +15,11 @@ from rich.table import Table
 
 from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.base.reporter_plugin import off_host_reporter_refused
 from automated_security_helper.config.named_config import (
     refuse_a_named_config_that_does_not_exist,
 )
+from automated_security_helper.config.operator_only_options import reporter_section
 from automated_security_helper.config.plugin_option_check import (
     refuse_unknown_options_of_registered,
 )
@@ -32,6 +34,7 @@ from automated_security_helper.plugins.loader import (
     PluginModuleNamespaceError,
     load_plugins,
     plugin_module_fix,
+    scan_plugin_filter,
 )
 from automated_security_helper.utils.console import ash_console, secho
 from automated_security_helper.utils.error_text import error_text, text_without_values
@@ -147,6 +150,7 @@ def list_plugins(
         # Split on commas and stripped, from the config and the flag alike, the way
         # a scan reads them: "a_ash_plugins, b_ash_plugins" names two modules.
         from automated_security_helper.config.plugin_module_trust import (
+            drop_untrusted_off_host_plugins,
             reindex_plugin_module_references,
             split_plugin_modules,
         )
@@ -181,8 +185,25 @@ def list_plugins(
         # value or key read from the environment.
         refuse_unknown_options_of_registered(ash_config, ash_plugin_manager)
 
+        # Selected as a scan with this configuration selects them, in the engine's
+        # three steps (core/execution_engine.py): of the registered classes, the
+        # built-in plugins plus those the run's ash_plugin_modules define, bind
+        # or list (plugins.loader.scan_plugin_filter); minus what only another
+        # run's untrusted import registered; minus the off-host classes the
+        # trusted modules do not load. Listing everything registered named
+        # plugins, as Enabled, that no scan with the same configuration runs.
+        admits = scan_plugin_filter(split_modules)
+        selected = {
+            kind: list(ash_plugin_manager.plugin_modules(kind, admits))
+            for kind in ("scanner", "converter", "reporter")
+        }
+        selected = ash_plugin_manager.plugins_loaded_by(selected, split_modules)
+        selected = drop_untrusted_off_host_plugins(
+            ash_config, selected, ash_plugin_modules
+        )
+
         def _registered(plugin_type: str, declared: List) -> List:
-            registered = list(ash_plugin_manager.plugin_modules(plugin_type))
+            registered = list(selected[plugin_type])
             order = {cls: index for index, cls in enumerate(declared)}
             return sorted(
                 registered,
@@ -207,27 +228,31 @@ def list_plugins(
         # tree would let a stray file change the answer to a deployment question.
         # The CLI therefore delegates to that isolated path rather than re-probing
         # against Path.cwd() -- both surfaces now share one probe context, and the
-        # parity test exercises this exact call. Keyed by the scanner's snake_cased
-        # config name so each per-class row can look up its own entry.
+        # parity test exercises this exact call. The inventory describes the
+        # classes it is given, one entry each in the order given, so each row's
+        # entry is the one at its class's position. A lookup by a name derived
+        # from the class name missed every scanner whose config name differs from
+        # it (the inventory keys its entries by the config name), and those rows
+        # read Version and Reachable Unknown with the probe's answer in hand.
         scanner_inventory_by_class: dict = {}
         if show_versions:
             from automated_security_helper.core.scanner_inventory import (
                 list_scanner_inventory,
-                _scanner_name_from_class,
             )
 
+            scanner_classes = list(plugin_types["scanners"])
             try:
                 inventory = list_scanner_inventory(
-                    scanner_classes_provider=lambda: plugin_types["scanners"]
+                    scanner_classes_provider=lambda: scanner_classes
                 )
-                by_name = {entry.get("name"): entry for entry in inventory}
-                for scanner_class in plugin_types["scanners"]:
-                    scanner_inventory_by_class[scanner_class] = by_name.get(
-                        _scanner_name_from_class(scanner_class)
+                if len(inventory) != len(scanner_classes):  # pragma: no cover
+                    raise ValueError(
+                        f"{len(inventory)} entries for {len(scanner_classes)} scanners"
                     )
+                scanner_inventory_by_class = dict(zip(scanner_classes, inventory))
             except Exception as exc:  # pragma: no cover - defensive
                 logger.debug(f"Could not build scanner inventory: {exc}")
-                for scanner_class in plugin_types["scanners"]:
+                for scanner_class in scanner_classes:
                     scanner_inventory_by_class[scanner_class] = None
 
         def _reachable_label(entry) -> str:
@@ -272,43 +297,60 @@ def list_plugins(
 
                     inventory_entry = scanner_inventory_by_class.get(plugin_class)
 
-                    # Create an instance to get the config name
+                    # Build the plugin from its section, as a scan builds it
                     try:
-                        plugin_config = plugin_context.config.get_plugin_config(
-                            plugin_type=plugin_type.rstrip("s"),  # Remove 's' from end
-                            plugin_name=plugin_config_key(plugin_class),
-                        )
-                        if hasattr(plugin_config, "model_dump"):
-                            plugin_config = plugin_config.model_dump()
-
-                        # Get the actual name from the config
-                        if isinstance(plugin_config, dict):
-                            plugin_name = plugin_config.get("name", plugin_class_name)
+                        kind = plugin_type.rstrip("s")  # Remove 's' from end
+                        if kind == "reporter":
+                            # The section a scan builds the reporter from: for a
+                            # reporter that sends findings off the host, the
+                            # operator's when the scanned repository's file wrote
+                            # this one (config/operator_only_options.reporter_section),
+                            # as the report phase and ash report read it.
+                            plugin_config = reporter_section(ash_config, plugin_class)
                         else:
-                            plugin_instance = plugin_class(
-                                context=plugin_context,
-                                config=plugin_config,
+                            plugin_config = plugin_context.config.get_plugin_config(
+                                plugin_type=kind,
+                                plugin_name=plugin_config_key(plugin_class),
                             )
-                            try:
-                                plugin_name = plugin_instance.config.name
-                                plugin_config = plugin_instance.config
-                                if hasattr(plugin_config, "model_dump"):
-                                    plugin_config = plugin_config.model_dump()
-                            except AttributeError:
-                                plugin_name = plugin_class_name
+                        # An off-host reporter runs only when its section says
+                        # enabled: true, whatever its own default and whatever
+                        # else the section wrote there
+                        # (base/reporter_plugin.off_host_reporter_refused); the
+                        # report phase builds a refused one turned off, so the
+                        # listing shows it turned off.
+                        refused = kind == "reporter" and off_host_reporter_refused(
+                            plugin_class, plugin_config
+                        )
+                        if refused and isinstance(plugin_config, dict):
+                            plugin_config = {**plugin_config, "enabled": False}
 
-                        # Resolve the real enabled state. By this point
-                        # plugin_config has been model_dump()'d to a dict in every
-                        # reachable branch, so `hasattr(plugin_config, "enabled")`
-                        # was always False and the column previously rendered the
-                        # literal "True" for every plugin (incl. disabled ones).
-                        # Read the dict key (or an object attr, defensively),
-                        # falling back to True only when the flag is genuinely
-                        # absent.
+                        # The plugin's own config model reads the section, so a
+                        # key the section leaves out takes the model's default:
+                        # an opt-in plugin (enabled False by default) whose
+                        # section sets options only is listed as a scan runs it,
+                        # off. Read as a plain dict, a section without the key
+                        # defaulted the column to True.
+                        plugin_instance = plugin_class(
+                            context=plugin_context,
+                            config=plugin_config,
+                        )
+                        try:
+                            plugin_name = plugin_instance.config.name
+                            plugin_config = plugin_instance.config
+                            if hasattr(plugin_config, "model_dump"):
+                                plugin_config = plugin_config.model_dump()
+                        except AttributeError:
+                            plugin_name = plugin_class_name
+
+                        # Resolve the real enabled state from the dict the model
+                        # was dumped to (or an object attr, defensively), falling
+                        # back to True only when the flag is genuinely absent.
                         if isinstance(plugin_config, dict):
                             enabled_value = plugin_config.get("enabled", True)
                         else:
                             enabled_value = getattr(plugin_config, "enabled", True)
+                        if refused:
+                            enabled_value = False
 
                         # Assemble the row in column order. Version/Reachable are
                         # inserted only when the scanner version columns are shown.
