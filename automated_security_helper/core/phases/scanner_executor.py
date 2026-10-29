@@ -1322,18 +1322,24 @@ class ScannerExecutor:
                                     )
                                 elif isinstance(raw_results.get("findings"), list):
                                     for finding in raw_results["findings"]:
-                                        # A finding that is not a mapping, or whose
-                                        # severity is missing, is counted and grades
-                                        # nothing; one whose severity is not a known
-                                        # name (or not text) counts as info.
-                                        # increment raises ValueError for both.
+                                        # A finding that states no severity (the key
+                                        # is missing, or the finding is not a mapping)
+                                        # is read at the level SARIF gives a result
+                                        # that states none, warning, so it is MEDIUM
+                                        # here as a level-less SARIF result is above.
+                                        # Counted in finding_count alone, as before,
+                                        # such a finding never reached the severity
+                                        # gate and could not fail it. One whose
+                                        # severity is not a known name (or not text)
+                                        # counts as info; increment raises ValueError
+                                        # for both.
                                         severity = (
                                             finding.get("severity")
                                             if isinstance(finding, dict)
                                             else None
                                         )
                                         if severity is None:
-                                            continue
+                                            severity = "medium"
                                         try:
                                             container.severity_counts.increment(
                                                 severity

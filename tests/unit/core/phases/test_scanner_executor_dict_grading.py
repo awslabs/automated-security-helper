@@ -149,13 +149,25 @@ class TestAResultThatCannotBeReadIsThisRowsError:
         assert row.severity_counts.high == 1
         assert row.finding_count == 2
 
-    def test_a_finding_that_is_not_a_mapping_is_counted_and_grades_nothing(
-        self, plugin_context
-    ):
+    def test_a_finding_that_is_not_a_mapping_is_read_as_medium(self, plugin_context):
         row = _row(plugin_context, {"findings": [7, {"severity": "high"}]})
 
         assert row.status == ScannerStatus.FAILED
+        assert row.severity_counts.medium == 1
+        assert row.severity_counts.high == 1
         assert row.finding_count == 2
+
+    def test_a_finding_with_no_severity_reaches_the_gate_as_medium(
+        self, plugin_context
+    ):
+        """A severity-less finding used to count in finding_count only, so it could
+        never fail the gate; SARIF reads a level-less result as warning (MEDIUM)."""
+        row = _row(plugin_context, {"findings": [{"rule": "x"}]})
+
+        assert row.status == ScannerStatus.FAILED
+        assert row.severity_counts.medium == 1
+        assert row.severity_counts.total == 1
+        assert row.finding_count == 1
 
     def test_metadata_that_is_not_a_mapping_is_not_read(self, plugin_context):
         row = _row(plugin_context, {"tool": "its own json", "metadata": None})
