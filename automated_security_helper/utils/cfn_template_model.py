@@ -538,6 +538,23 @@ _CLOUDFORMATION_MARKER = re.compile(
     r"AWSTemplateFormatVersion|[\"']?\bType[\"']?\s*:\s*[\"']?AWS::"
 )
 
+#: What :func:`_could_be_a_template`'s lenient read may raise and still answer the
+#: question: the loader's own errors, the exceptions SafeLoader's explicit-tag
+#: constructors raise on a value they cannot build (``ValueError`` for ``!!int
+#: forty-two``, ``KeyError`` for ``!!bool maybe``, ``AttributeError`` for
+#: ``!!timestamp nonsense``, ``IndexError`` for ``!!float ""``), ``TypeError`` for a
+#: mapping used as a key, and ``RecursionError`` for a document nested past the
+#: recursion limit.
+_LENIENT_READ_FAILURES = (
+    YAMLError,
+    TypeError,
+    ValueError,
+    KeyError,
+    AttributeError,
+    IndexError,
+    RecursionError,
+)
+
 
 def _could_be_a_template(text: str) -> bool:
     """For a file the template parser rejected: could it be a damaged template?
@@ -563,11 +580,21 @@ def _could_be_a_template(text: str) -> bool:
         # cdk-nag's whole scan(), the good templates beside the file included.
         loader = _TagTolerantLoader(text)
         document = loader.get_single_data()
-    except (YAMLError, TypeError, ValueError, RecursionError):
+    except _LENIENT_READ_FAILURES as error:
         # ValueError: a scalar SafeLoader cannot construct, such as !!int
-        # forty-two. RecursionError: a document nested past the recursion limit.
-        # Either one escaping from here ended cfn-nag's whole scan(), since it asks
-        # this from inside the except arm that passes over a file it cannot parse.
+        # forty-two. KeyError, AttributeError and IndexError: what its other
+        # explicit-tag constructors raise on a value they cannot read (!!bool
+        # maybe, !!timestamp nonsense, !!float ""). RecursionError: a document
+        # nested past the recursion limit. Any one escaping from here ended
+        # cfn-nag's and cdk-nag's whole scan(), the good templates beside the
+        # file included, since both ask this from inside the except arm that
+        # passes over a file they cannot parse. Recorded, by type only: the
+        # error's text can quote the document.
+        ASH_LOGGER.debug(
+            "The lenient read of a candidate the template parser rejected could "
+            f"not build the document: {type(error).__name__}; deciding it from "
+            "its JSON reading or its text."
+        )
         document = None
         parsed = False
     else:
