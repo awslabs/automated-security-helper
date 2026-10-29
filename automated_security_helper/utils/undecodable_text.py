@@ -229,6 +229,14 @@ def _record_fields(model: BaseModel) -> None:
             new = texts_of_undecodable(value)
             if new is not value:
                 extra[key] = new
+        # The extra fields' NAMES too: a property bag's key is a name a tool or a
+        # repository chose, and a dump in JSON mode UTF-8-encodes the keys, so a
+        # lone surrogate in one stops the dump as one in a value would. Renamed in
+        # place, in the same order, only when a name changed.
+        renamed = {texts_of_undecodable(key): value for key, value in extra.items()}
+        if any(new_key is not key for new_key, key in zip(renamed, extra)):
+            extra.clear()
+            extra.update(renamed)
 
 
 #: Field values :func:`_record_fields` skips: they hold no str of their own.
@@ -381,12 +389,12 @@ def _tree_holds_a_lone_surrogate(value: Any, seen: set[int]) -> bool:
         if id(value) in seen:
             return False
         seen.add(id(value))
+        # The extra fields' names are read as a dict's keys are: a dump encodes
+        # them, so one holding a lone surrogate fails the dump as a value would.
+        extra = value.__pydantic_extra__ or {}
         return any(
             _tree_holds_a_lone_surrogate(item, seen)
-            for item in [
-                *value.__dict__.values(),
-                *(value.__pydantic_extra__ or {}).values(),
-            ]
+            for item in [*value.__dict__.values(), *extra.keys(), *extra.values()]
         )
     if isinstance(value, dict):
         return any(
