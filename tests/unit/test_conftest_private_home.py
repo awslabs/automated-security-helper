@@ -68,11 +68,17 @@ def _in_a_real_ash(path: Path, developer_home: Path) -> bool:
     )
 
 
-def _refused_events(operation) -> set:
-    """Run a write the guard must refuse; return the events it recorded for it."""
+def _refused_writes(operation) -> set:
+    """Run a write the guard must refuse; return the (event, path) records it kept,
+    the path spelled as the guard spells it (absolute, as written)."""
     with pytest.raises(PermissionError, match="refused by the test guard"):
         operation()
-    return {event for event, _ in real_home_guard.drain()}
+    return set(real_home_guard.drain())
+
+
+def _written(path: Path) -> str:
+    """``path`` as the guard records a refused write to it."""
+    return os.path.abspath(path)
 
 
 def test_home_is_the_sessions_private_directory(developer_home, tmp_path_factory):
@@ -100,9 +106,19 @@ def test_the_receipt_store_and_default_bin_dir_are_inside_it(developer_home):
     assert not _in_a_real_ash(receipt_root(), developer_home), receipt_root()
     assert _the_tests_home() in receipt_root().parents
     if not os.environ.get("ASH_BIN_PATH"):
-        session_directory = Path(os.environ["ASH_TEST_SESSION_TMPDIR"])
+        assert constants.ASH_BIN_PATH is not None
         assert not _in_a_real_ash(constants.ASH_BIN_PATH, developer_home)
-        assert _same_or_inside(constants.ASH_BIN_PATH, session_directory)
+        # The run's own home, not any path under the session directory: ``~/.ash/bin``
+        # of a directory the session made directly under its temp directory, named
+        # ``home`` (``_enter_session_home``), or ``home-<random>`` for a nested run.
+        bin_path = Path(constants.ASH_BIN_PATH)
+        assert bin_path.parts[-2:] == (".ash", "bin"), bin_path
+        run_home = bin_path.parent.parent
+        session_directory = Path(os.environ["ASH_TEST_SESSION_TMPDIR"])
+        assert Path(os.path.realpath(run_home.parent)) == Path(
+            os.path.realpath(session_directory)
+        ), bin_path
+        assert run_home.name == "home" or run_home.name.startswith("home-"), bin_path
 
 
 def test_a_receipt_written_with_no_home_of_its_own_stays_in_it(
@@ -122,23 +138,33 @@ def test_the_guard_records_writes_under_a_guarded_root(tmp_path):
 
     Watches a stand-in root and attempts each write that storing a receipt makes
     (mkdir, open for write, chmod, replace). The guard refuses every one, so nothing
-    lands, and records the event; a read of a file that is already there is neither.
-    Each record is drained as it is checked, so the teardown check does not fail this
-    test for them.
+    lands, and records the event with the path it refused; a read of a file that is
+    already there is neither. Each record is compared as the (event, path) pair, so a
+    guard that refused the right operation on another path would not pass, and a
+    rename is recorded at both of its ends. Each record is drained as it is checked,
+    so the teardown check does not fail this test for them.
     """
     root = tmp_path / "fake-real-home" / ".ash"
     store = root / "install-receipts"
     store.mkdir(parents=True)
     existing = store / "x.json"
     existing.write_text("{}", encoding="utf-8")
+    new_dir = store / "new"
+    new_file = store / "new.json"
+    renamed = store / "y.json"
     with real_home_guard.watching(root):
-        assert _refused_events(lambda: (store / "new").mkdir()) == {"os.mkdir"}
-        assert _refused_events(
-            lambda: (store / "new.json").write_text("{}", encoding="utf-8")
-        ) == {"open"}
-        assert _refused_events(lambda: os.chmod(existing, 0o600)) == {"os.chmod"}
-        assert _refused_events(lambda: os.replace(existing, store / "y.json")) == {
-            "os.rename"
+        assert _refused_writes(lambda: new_dir.mkdir()) == {
+            ("os.mkdir", _written(new_dir))
+        }
+        assert _refused_writes(lambda: new_file.write_text("{}", encoding="utf-8")) == {
+            ("open", _written(new_file))
+        }
+        assert _refused_writes(lambda: os.chmod(existing, 0o600)) == {
+            ("os.chmod", _written(existing))
+        }
+        assert _refused_writes(lambda: os.replace(existing, renamed)) == {
+            ("os.rename", _written(existing)),
+            ("os.rename", _written(renamed)),
         }
         # A read is not a write.
         assert existing.read_text(encoding="utf-8") == "{}"
@@ -189,13 +215,22 @@ def test_the_shared_caches_are_left_where_the_caller_put_them(
     have put it, so it is outside the run's own directories.
     """
     value = _SHARED_CACHES_AT_IMPORT[variable]
-    if value:
-        session_directory = Path(os.environ["ASH_TEST_SESSION_TMPDIR"])
-        assert not _same_or_inside(Path(value), session_directory), variable
-        if variable in developer_environment:
-            # A boolean, so a failure does not print the environment.
-            is_the_developers = value == developer_environment[variable]
-            assert is_the_developers, variable
+    if not value:
+        # The run pins the variable to the developer's cache unless uv keeps the cache
+        # somewhere moving HOME does not move (tests/conftest.py, _developer_uv_cache),
+        # which is Windows alone; anywhere else an unset value is the run not pinning
+        # it, and the test has to fail rather than pass with nothing checked.
+        assert os.name == "nt", f"the run did not pin {variable}"
+        pytest.skip(
+            f"{variable} is unset: uv's cache is under LOCALAPPDATA there, which the "
+            "run does not move"
+        )
+    session_directory = Path(os.environ["ASH_TEST_SESSION_TMPDIR"])
+    assert not _same_or_inside(Path(value), session_directory), variable
+    if variable in developer_environment:
+        # A boolean, so a failure does not print the environment.
+        is_the_developers = value == developer_environment[variable]
+        assert is_the_developers, variable
 
 
 def test_the_guard_watches_each_moved_xdg_directory(tmp_path):
@@ -243,30 +278,123 @@ def test_the_guard_ignores_writes_under_an_excluded_path(tmp_path):
     assert not (root / "uv" / "tools").exists()
 
 
+#: The compound statements whose arms bind names at the level they stand at. A def or
+#: a class binds its own name at that level and is a scope of its own inside.
+_COMPOUND = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.With, ast.AsyncWith, ast.Try)
+if hasattr(ast, "TryStar"):  # Python 3.11+
+    _COMPOUND = (*_COMPOUND, ast.TryStar)
+
+
+def _module_level_bindings(statements) -> list:
+    """Each ``(name, line)`` a block of statements binds at the module level.
+
+    A def, a class, an assignment and an annotated assignment with a value bind at the
+    line they stand on. A compound statement (if, try, with, for, while) binds what its
+    arms bind, at the lines inside it: the arms are read with this same walk, and a
+    name bound in several arms of ONE statement is counted from the arm that binds it
+    most often, since an ``if``/``else`` or a ``try``/``except`` that each bind a name
+    once bind it once at run time, while an arm that binds it twice is two bindings.
+    """
+    found = []
+    for node in statements:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            found.append((node.name, node.lineno))
+        elif isinstance(node, ast.Assign):
+            found.extend(
+                (target.id, node.lineno)
+                for target in node.targets
+                if isinstance(target, ast.Name)
+            )
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            if isinstance(node.target, ast.Name):
+                found.append((node.target.id, node.lineno))
+        elif isinstance(node, _COMPOUND):
+            arms = [
+                getattr(node, field)
+                for field in ("body", "orelse", "finalbody")
+                if getattr(node, field, None)
+            ]
+            arms += [handler.body for handler in getattr(node, "handlers", [])]
+            most: dict = {}
+            for arm in arms:
+                lines_by_name: dict = {}
+                for name, line in _module_level_bindings(arm):
+                    lines_by_name.setdefault(name, []).append(line)
+                for name, lines in lines_by_name.items():
+                    if len(lines) > len(most.get(name, [])):
+                        most[name] = lines
+            for name, lines in most.items():
+                found.extend((name, line) for line in lines)
+    return found
+
+
+def _bound_more_than_once(source: str) -> dict:
+    """``{name: [lines]}`` for each module-level name ``source`` binds twice or more."""
+    lines_by_name: dict = {}
+    for name, line in _module_level_bindings(ast.parse(source).body):
+        lines_by_name.setdefault(name, []).append(line)
+    return {name: lines for name, lines in lines_by_name.items() if len(lines) > 1}
+
+
 def test_the_root_conftest_binds_each_top_level_name_once():
     """A second ``def`` or assignment of a name silently replaces the first.
 
     The later one is what every caller gets, so the earlier is code that reads as live
     and is not. This module once tested a session-home setup that the conftest's own
-    second definitions of the same functions had already replaced.
+    second definitions of the same functions had already replaced. The walk looks into
+    a top-level if, try, with or loop too: a def inside one replaces a top-level def
+    of the same name just as a second top-level def does.
     """
     source = (Path(__file__).resolve().parents[1] / "conftest.py").read_text(
         encoding="utf-8"
     )
-    lines_by_name: dict = {}
-    for node in ast.parse(source).body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            names = [node.name]
-        elif isinstance(node, ast.Assign):
-            names = [t.id for t in node.targets if isinstance(t, ast.Name)]
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            names = [node.target.id] if isinstance(node.target, ast.Name) else []
-        else:
-            continue
-        for name in names:
-            lines_by_name.setdefault(name, []).append(node.lineno)
-    twice = {name: lines for name, lines in lines_by_name.items() if len(lines) > 1}
+    twice = _bound_more_than_once(source)
     assert not twice, twice
+
+
+_PLANTED_SECOND_BINDINGS = """\
+import os
+
+
+def helper():
+    return 1
+
+
+if os.name == "nt":
+
+    def helper():
+        return 2
+
+
+try:
+    import pwd
+except ImportError:
+    pwd = None
+
+with open("settings") as handle:
+    SETTING = handle.read()
+SETTING = "again"
+"""
+
+
+def test_the_binding_walk_sees_into_a_top_level_compound_statement():
+    """Control: a def inside a top-level ``if`` that replaces a top-level def, and an
+    assignment inside a ``with`` repeated at the top level, are each two bindings;
+    the ``try``/``except`` import idiom, which binds one name once at run time
+    whichever arm runs, is one."""
+    twice = _bound_more_than_once(_PLANTED_SECOND_BINDINGS)
+
+    assert set(twice) == {"helper", "SETTING"}, twice
+    assert twice["helper"] == [4, 10]
+    assert twice["SETTING"] == [20, 21]
+
+
+def test_the_binding_walk_counts_an_arm_that_binds_twice_as_twice():
+    """Control: two bindings of one name inside one arm are a replacement even
+    though the other arm binds it once."""
+    source = "if x:\n    A = 1\n    A = 2\nelse:\n    A = 3\n"
+
+    assert _bound_more_than_once(source) == {"A": [2, 3]}
 
 
 @pytest.mark.skipif(os.name == "nt", reason="the guard's roots are POSIX paths here")
