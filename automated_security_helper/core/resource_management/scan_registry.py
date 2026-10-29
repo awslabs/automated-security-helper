@@ -53,15 +53,21 @@ def _canonical_directory(directory_path: str) -> Path:
     directories; resolve() also follows symlinks and collapses ``..``, which a
     string rule cannot.
 
-    Returns the path unresolved on an OSError rather than raising. Callers here
-    have already run ``validate_directory_path``, which requires the directory to
-    exist, so this is a guard against a platform refusing to resolve a path that
-    exists rather than an expected branch -- and falling back to the raw form
-    restores the old comparison for that one entry instead of failing the call.
+    Returns the path unresolved rather than raising. Callers here have already
+    run ``validate_directory_path``, which requires the directory to exist, so
+    this is a guard against a platform refusing to resolve a path that exists
+    rather than an expected branch -- and falling back to the raw form restores
+    the old comparison for that one entry instead of failing the call.
+
+    ``RuntimeError`` is what ``Path.resolve`` raises for a symlink loop on
+    Python 3.10 to 3.12 (``OSError`` with ELOOP from 3.13), and ``ValueError``
+    what it raises for a NUL byte in the string. Caught too: this used to run
+    over every entry at each registration, so one historical entry whose
+    directory had since become a loop made every later ``register_scan`` raise.
     """
     try:
         return Path(directory_path).resolve()
-    except OSError:
+    except (OSError, RuntimeError, ValueError):
         return Path(directory_path)
 
 
@@ -179,6 +185,13 @@ class ScanRegistryEntry:
         self.slot = slot
         self.environment_values = tuple(environment_values)
         self.directory_path = directory_path
+        # The directory as one comparable form, fixed at registration. Every
+        # directory-keyed decision compares this, not a re-resolution of the raw
+        # string: resolved again at each lookup, a symlink retargeted after the
+        # scan started made the entry occupy whatever the link pointed at now,
+        # admitting a second scan of the directory it was scanning and blocking
+        # an unrelated one.
+        self.canonical_directory = _canonical_directory(directory_path)
         self.output_directory = output_directory
         self.start_time = datetime.now()
         self.end_time: Optional[datetime] = None
@@ -493,7 +506,7 @@ class ScanRegistry:
             requested = _canonical_directory(directory_path)
             for entry in self._registry.values():
                 if (
-                    _canonical_directory(entry.directory_path) == requested
+                    entry.canonical_directory == requested
                     and entry.occupies_its_directory()
                 ):
                     owned = entry.session_id == _owner(session_id)
@@ -617,12 +630,30 @@ class ScanRegistry:
         requested = _canonical_directory(directory_path)
         with self._registry_lock:
             for entry in self._registry.values():
-                if (
-                    _canonical_directory(entry.directory_path) == requested
-                    and entry.is_active()
-                ):
+                if entry.canonical_directory == requested and entry.is_active():
                     return entry
             return None
+
+    def occupants_of_directory(
+        self, directory_path: str, except_scan_id: Optional[str] = None
+    ) -> List[str]:
+        """The ids of the scans that still occupy ``directory_path``.
+
+        Occupying is :meth:`ScanRegistryEntry.occupies_its_directory`: active, or
+        closed with a runner that has not settled the output directory yet. The
+        output directory of every scan of one source directory is the same
+        tree, so a caller about to remove it asks this first. ``except_scan_id``
+        leaves one scan out, the caller's own.
+        """
+        requested = _canonical_directory(directory_path)
+        with self._registry_lock:
+            return [
+                entry.scan_id
+                for entry in self._registry.values()
+                if entry.scan_id != except_scan_id
+                and entry.canonical_directory == requested
+                and entry.occupies_its_directory()
+            ]
 
     def update_scan_status(
         self, scan_id: str, status: MCScanStatus, error_message: Optional[str] = None
@@ -768,10 +799,7 @@ class ScanRegistry:
             for entry in self._entries_for(session_id):
                 if active_only and not entry.is_active():
                     continue
-                if (
-                    requested is not None
-                    and _canonical_directory(entry.directory_path) != requested
-                ):
+                if requested is not None and entry.canonical_directory != requested:
                     continue
                 result.append(entry.to_dict())
             return result
@@ -845,14 +873,30 @@ class ScanRegistry:
             scan_id: ID of the scan to remove
 
         Returns:
-            True if the scan was removed, False if not found
+            True if the scan was removed, False if not found, or if its runner
+            has not finished.
+
+        An entry whose runner is still stopping is kept. The entry is what makes
+        ``register_scan`` refuse a second scan of the directory and count the
+        scan against ``max_concurrent_scans`` while the runner settles the output
+        directory (``occupies_its_directory``); deleted now, a new scan of the
+        directory would be admitted into the window in which that runner still
+        writes, and its restore of the previous results would remove what the
+        new scan had written. Remove it again once the runner is done.
         """
         with self._registry_lock:
-            if scan_id in self._registry:
-                del self._registry[scan_id]
-                self._logger.info(f"Removed scan {scan_id} from registry")
-                return True
-            return False
+            entry = self._registry.get(scan_id)
+            if entry is None:
+                return False
+            if entry.has_runner and not entry.runner_done.is_set():
+                self._logger.warning(
+                    f"Scan {scan_id} is kept in the registry: its runner has not "
+                    "finished settling the output directory"
+                )
+                return False
+            del self._registry[scan_id]
+            self._logger.info(f"Removed scan {scan_id} from registry")
+            return True
 
     def cleanup_completed_scans(self, max_age_hours: int = 24) -> int:
         """
@@ -870,7 +914,9 @@ class ScanRegistry:
             scans_to_remove = []
 
             for scan_id, entry in self._registry.items():
-                if not entry.is_active():
+                # A closed entry whose runner is still stopping stays, as in
+                # cleanup_scan: it still holds its directory.
+                if not entry.occupies_its_directory():
                     # Check if the scan is old enough to be removed
                     end_time = entry.end_time or entry.start_time
                     if end_time.timestamp() < cutoff_time:
@@ -1006,10 +1052,24 @@ class ScanRegistry:
                 # After a scan that ended without results and had the previous
                 # scan's results put back, the directory holds those: complete,
                 # parseable, and not this scan's. Nothing is read from it then.
+                #
+                # The same holds once a LATER scan of the same directory has been
+                # registered: every scan of a directory writes the one output
+                # tree under it, so after this scan ended the files there are the
+                # later scan's, whatever its state. Read as this scan's, they
+                # reported another scan's scanners and findings (another session's
+                # too) under this id, and could re-close this entry on them.
                 previous_only = entry.output_holds_previous_results
+                superseded = entry.status in ENDED and any(
+                    other.scan_id != scan_id
+                    and other.canonical_directory == entry.canonical_directory
+                    and other.start_time > entry.start_time
+                    for other in self._registry.values()
+                )
+                foreign_output = previous_only or superseded
                 scan_progress = (
                     ScanProgress(scan_id=scan_id)
-                    if previous_only
+                    if foreign_output
                     else create_scan_progress_from_files(scan_id, output_dir)
                 )
                 results_path = output_dir / "ash_aggregated_results.json"
@@ -1078,11 +1138,22 @@ class ScanRegistry:
                 if (
                     coverage is None
                     and entry.status in FINISHED_WITH_RESULTS
-                    and not previous_only
+                    and not foreign_output
                 ):
-                    model = load_aggregated_results_model(output_dir)
-                    if model is not None:
-                        _, coverage = assess_coverage(model)
+                    # Guarded: this runs on every poll of such an entry, and a
+                    # results set the assessment cannot read would otherwise
+                    # fail every progress call for the scan from here on. The
+                    # progress is still reported, with coverage unknown.
+                    try:
+                        model = load_aggregated_results_model(output_dir)
+                        if model is not None:
+                            _, coverage = assess_coverage(model)
+                    except Exception as e:
+                        self._logger.warning(
+                            f"Coverage of scan {scan_id} could not be assessed "
+                            f"from its results: {type(e).__name__}: {e}"
+                        )
+                        coverage = None
                 coverage_complete: Optional[bool] = None
                 if entry.status in FINISHED_WITH_RESULTS and coverage is not None:
                     coverage_complete = not coverage_has_gap(coverage)
@@ -1101,7 +1172,7 @@ class ScanRegistry:
                 # straight back to their callers.
                 status_summary = (
                     {"scanner_statuses": {}, "skipped_scanners": []}
-                    if previous_only
+                    if foreign_output
                     else summarize_scanner_statuses(output_dir)
                 )
 
