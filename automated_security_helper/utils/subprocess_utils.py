@@ -4197,13 +4197,20 @@ def run_command(
         ASH_LOGGER.error(_logged_without(timed_out, values), extra=NO_MARKUP)
         if check:
             raise
+        # TimeoutExpired carries what communicate had read undecoded, text mode
+        # or not, so a tool that wrote before the timeout handed a text-mode
+        # caller bytes; decoded as the finished run's streams would have been.
+        partial_stdout, partial_stderr = e.stdout, e.stderr
+        if text:
+            partial_stdout = _late_decoded(partial_stdout, encoding)
+            partial_stderr = _late_decoded(partial_stderr, encoding)
         # -1 rather than TIMEOUT_RETURNCODE because callers and tests already pin
         # it; the type carries the timeout so nothing has to infer it from the code.
         timed_out_result = TimedOutProcess(
             args=e.cmd,
             returncode=-1 if not_stopped is None else None,
-            stdout=e.stdout or "",
-            stderr=e.stderr
+            stdout=partial_stdout or "",
+            stderr=partial_stderr
             or f"Command timed out after {_timeout_token(e.timeout, values)}",
             error=timed_out,
         )
