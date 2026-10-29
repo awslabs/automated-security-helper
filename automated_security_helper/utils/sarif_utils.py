@@ -775,7 +775,9 @@ def _apply_config_suppression(
 
     if not result.suppressions:
         result.suppressions = []
-    if len(result.suppressions) >= 1:
+    # Only a suppression in effect stands in for the entry: one rejected or
+    # under review has not taken effect, so the entry is applied beside it.
+    if suppressions_in_effect(result.suppressions):
         ASH_LOGGER.debug(
             f"Suppressions already found for rule '{result.ruleId}' on location '{flat_finding.file_path}'. Only the first suppression will be applied to prevent SARIF ingestion issues.",
             extra=NO_MARKUP,
@@ -1569,13 +1571,17 @@ def apply_suppressions_to_sarif(
                         recorded_fields,
                         written_ids,
                     )
-                    if config_suppressed and len(result.suppressions or []) >= 1:
+                    if config_suppressed and suppressions_in_effect(
+                        result.suppressions
+                    ):
                         updated_results.append(result)
                         continue
 
             # --- Step 3: inline suppression ---
-            if not ignore_suppressions and not (
-                result.suppressions and len(result.suppressions) >= 1
+            # A result whose only suppression is rejected or under review is not
+            # suppressed, so the inline comment is still read for it.
+            if not ignore_suppressions and not suppressions_in_effect(
+                result.suppressions
             ):
                 if result.ruleId and result.locations:
                     for location in result.locations:
