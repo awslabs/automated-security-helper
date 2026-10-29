@@ -61,3 +61,23 @@ def test_a_target_name_a_plain_open_accepts_is_written_atomically(tmp_path):
     assert sorted(p.name for p in tmp_path.iterdir()) == [target.name], (
         "no staging file is left behind"
     )
+
+
+def test_replace_without_following_accepts_a_target_name_a_plain_open_accepts(
+    tmp_path,
+):
+    """The operator-named destination writer (``ash get-genai-guide --output``)
+    stages through the same name shape, so the same bound applies to it."""
+    target = tmp_path / _long_name(255)
+    try:
+        with open(target, "w") as handle:
+            handle.write("plain\n")
+    except OSError as error:
+        pytest.skip(f"this filesystem refuses a 255-byte name: {error}")
+
+    fs_guard.replace_without_following(target, "replaced\n")
+
+    assert target.read_text() == "replaced\n"
+    assert sorted(p.name for p in tmp_path.iterdir()) == [target.name], (
+        "no staging file is left behind"
+    )

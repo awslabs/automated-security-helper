@@ -716,9 +716,7 @@ def replace_without_following(
         status = None
     if status is not None and _is_link_status(status):
         raise OutputLinkRefused(path, path, where="at a destination it writes")
-    # secrets, not uuid.uuid4: the snapshot tests pin uuid.uuid4 to a counter that
-    # report ids are built from, and a staging name only has to be unique.
-    staging = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(16)}.tmp")
+    staging = path.with_name(_staging_name(path.name))
     fd = os.open(
         staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | _BINARY, 0o666
     )
