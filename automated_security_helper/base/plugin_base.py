@@ -181,15 +181,16 @@ _INSTALL_COMMAND_BUILDERS: Dict[
         "-y",
         _versioned(dep, "-"),
     ],
-    # choco's version flag lands inside the same argv element as the package name.
-    # Preserved verbatim from the chain this replaced: it is wrong (argv elements do
-    # not word-split), but correcting it is a behaviour change for chocolatey users
-    # and belongs in its own commit, not in a commit about a missing member.
+    # choco's version pin is its own argv element. Argv elements do not
+    # word-split, so a pin rendered inside the package-name element
+    # ("tool --version=1.2") was looked up as a package of that name, the
+    # install failed, and the pin was never applied.
     PackageManager.CHOCO: lambda dep: [
         "choco",
         "install",
         "-y",
-        f"{dep.name}{f' --version={dep.version}' if dep.version != 'latest' else ''}",
+        dep.name,
+        *([f"--version={dep.version}"] if dep.version != "latest" else []),
     ],
 }
 
@@ -371,9 +372,16 @@ def trimmed_at_read_edge(
             # O(tokens x text) passes: a match starting inside the window
             # was already excluded, so this fires at most once per
             # over-long code, and once at the loop's end.
+            # ANCHORED at the ESC (match, not search): the code this looks
+            # for starts there. An unanchored search tried the pattern at
+            # every position between the ESC and the end, and the
+            # replacement-run alternative scanned to the end from each of
+            # them: a long run of U+FFFD behind the last ESC that did not
+            # reach the end (a tail the sinks left after a bad decode)
+            # cost a quadratic walk inside a scan's failure handling.
             esc = text.rfind("\x1b", 0, end)
             if esc != -1:
-                cut = _TRAILING_JUNK.search(text, esc, end)
+                cut = _TRAILING_JUNK.match(text, esc, end)
                 if cut is None and text.startswith("\x1b\\", esc):
                     # The last ESC can be a string terminator's own: an OSC
                     # body holds no ESC, so a long ST-ended OSC ends
@@ -382,7 +390,7 @@ def trimmed_at_read_edge(
                     # opener; still at most two steps per over-long code.
                     opener = text.rfind("\x1b", 0, esc)
                     if opener != -1:
-                        cut = _TRAILING_JUNK.search(text, opener, end)
+                        cut = _TRAILING_JUNK.match(text, opener, end)
             if cut is None:
                 break
         end = cut.start()
@@ -810,6 +818,12 @@ class PluginBase(UVToolMixin, BaseModel):
     # through uv, or None. _run_subprocess reports it.
     _uv_run_failure: str | None = PrivateAttr(default=None)
 
+    # The ids of the responses _process_command_response has handled. The uv
+    # path hands some of its responses to it and not others (a failure after
+    # the child started, a response whose building raised), so _run_subprocess
+    # reads this to process a returned response exactly once.
+    _processed_response_ids: set = PrivateAttr(default_factory=set)
+
     # Whether this plugin's configuration was read from its context's resolved
     # configuration (a section ``AshConfig.get_plugin_config`` answered, as a
     # scan hands it over) rather than built by the embedding caller as a typed
@@ -1072,6 +1086,7 @@ class PluginBase(UVToolMixin, BaseModel):
         state set around the call let two concurrent responses on one
         instance erase each other's inputs mid-call.
         """
+        self._processed_response_ids.add(id(response))
         plugin_inputs: Tuple[str, ...] = ()
         if getattr(self, "use_uv_tool", False):
             inputs_getter = getattr(self, "_uv_run_inputs_for_records", None)
@@ -1682,6 +1697,35 @@ class PluginBase(UVToolMixin, BaseModel):
             if uv_overrides:
                 env = {**(snapshot_environ() if env is None else env), **uv_overrides}
 
+            # The ONE guarded read of the overridable values hook for this run
+            # (_values_to_redact's guarding rule). The runner prints the command
+            # line and the timeout limit with these, and the uv path reads them
+            # for its records. A hook that raised, or answered something that is
+            # no value set, gives nothing to redact with, and the runner read
+            # such an answer as "no values" and logged the command line in clear.
+            # The run is refused instead, as the uv path refuses it, and recorded
+            # as a tool that never started; the refusal names the hook.
+            values_read = guarded_values_read(self)
+            if values_read.values is None:
+                hook_failure = (
+                    f"the plugin's values hook {values_read.failure()}, so the "
+                    "run's records could not be redacted"
+                )
+                refused_run: Dict = {
+                    "stdout": "",
+                    "stderr": (
+                        f"{self.command or 'The tool'} was not run: {hook_failure}."
+                    ),
+                    "returncode": SPAWN_FAILURE_RETURNCODE,
+                    "spawn_failed": True,
+                    "error": hook_failure,
+                }
+                response = refused_run
+                self._process_command_response(refused_run)
+                self._record_response(refused_run, timeout, invoked)
+                return refused_run
+            run_values: Tuple[str, ...] = values_read.values
+
             # Attempt UV tool execution if enabled
             if self.use_uv_tool and self.command and len(command) > 0:
                 # Check if the first element of the command is our tool command
@@ -1702,10 +1746,20 @@ class PluginBase(UVToolMixin, BaseModel):
                         stderr_preference=stderr_preference,
                         env=env,
                         timeout=timeout,
-                        values=self._values_to_redact(),
+                        values=run_values,
                     )
                     if uv_result is not None:
                         response = uv_result
+                        # Processed exactly once. The uv path hands a run that
+                        # returned to _process_command_response itself, but a
+                        # failure after its child started, or a response whose
+                        # building raised, comes back unprocessed: the child's
+                        # exit code and stderr then never reached exit_code and
+                        # errors, so a scanner reading those judged such a run
+                        # accepted and reported none of the tool's text.
+                        if id(uv_result) not in self._processed_response_ids:
+                            self._process_command_response(uv_result)
+                        self._processed_response_ids.discard(id(uv_result))
                         self._record_response(uv_result, timeout, invoked)
                         return uv_result
                     # uv could not run it, and nothing runs in its place: the tool
@@ -1744,35 +1798,62 @@ class PluginBase(UVToolMixin, BaseModel):
                 timeout=timeout,
                 # The runner logs its own timeout line, and prints the limit
                 # with these: a limit read from the environment never reaches it.
-                values=self._values_to_redact(),
+                values=run_values,
             )
 
             self._process_command_response(response)
+            self._processed_response_ids.discard(id(response))
             self._record_response(response, timeout, invoked)
 
             return response
 
         except Exception as e:
-            # Show the full stack trace in debug, redacted: ``exc_info=True``
-            # would append the raw traceback, whose last line repeats the
-            # exception's message with any configured value in it.
-            environment_values = self._values_to_redact()
-            ASH_LOGGER.debug(
-                f"({self.config.name}) Full error details: "
-                f"{error_text(e, environment_values)}\n"
-                f"{traceback_text(e, values=environment_values)}"
-            )
+            # The ONE guarded read of the values hook for this handler
+            # (_values_to_redact's guarding rule). Read bare here, a hook that
+            # raised raised again out of the handler that was meant to record
+            # the run's failure, and one that answered no value set printed the
+            # error's text in clear; without the values the records below keep
+            # only the error's class and a note saying why.
+            read = guarded_values_read(self)
+            environment_values: Tuple[str, ...] = read.values or ()
+            withheld: str | None = None
+            if read.values is None:
+                withheld = (
+                    f"{type(e).__name__} (text not shown: the plugin's values "
+                    f"hook {read.failure()})"
+                )
+                ASH_LOGGER.debug(f"({self.config.name}) Full error details: {withheld}")
+            else:
+                # Show the full stack trace in debug, redacted: ``exc_info=True``
+                # would append the raw traceback, whose last line repeats the
+                # exception's message with any configured value in it.
+                ASH_LOGGER.debug(
+                    f"({self.config.name}) Full error details: "
+                    f"{error_text(e, environment_values)}\n"
+                    f"{traceback_text(e, values=environment_values)}"
+                )
             if response is None:
                 # Raised before any run returned, so the command never ran: recorded
                 # as a spawn failure the OS refused is, and ScannerExecutor reports
                 # ERROR from it. This answered exit code 1, which most scanners
                 # accept as "ran and found issues", so one that ignores the
                 # response was reported PASSED.
+                # Without the values the command line is not quoted (an
+                # argument can carry a value the config read from the
+                # environment): the stderr names the tool and the note.
                 spawn_failure: Dict = {
-                    "error": error_text(e, environment_values),
+                    "error": withheld or error_text(e, environment_values),
                     "returncode": SPAWN_FAILURE_RETURNCODE,
                     "spawn_failed": True,
-                    "stderr": spawn_failure_message(" ".join(map(str, command)), e),
+                    "stderr": (
+                        spawn_failure_message(" ".join(map(str, command)), e)
+                        if withheld is None
+                        else (
+                            f"Could not start {self.command or 'the tool'}: "
+                            f"{withheld}. The command never ran "
+                            f"(exit code {SPAWN_FAILURE_RETURNCODE})."
+                        )
+                    ),
                 }
                 self._process_command_response(spawn_failure)
                 self._record_spawn_failure(spawn_failure)
@@ -1786,7 +1867,7 @@ class PluginBase(UVToolMixin, BaseModel):
             # would let a scanner that ignores the response report PASSED.
             post_run: Dict = dict(response)
             earlier = response.get("error")
-            described = error_text(e, environment_values)
+            described = withheld or error_text(e, environment_values)
             # ``earlier`` is the response's own error text, so the joined text
             # is redacted whole: the run's error can carry a configured value
             # too, and this field is copied into the recorded post-run error,
@@ -1800,9 +1881,16 @@ class PluginBase(UVToolMixin, BaseModel):
                 post_run["spawn_failed"] = False
             # The tool's stderr: what the run returned, or under "write", where the
             # run returns none, its stderr log read back.
-            if not post_run.get("stderr") and (
-                stderr_log is not None
-                and _log_identity(stderr_log) not in (None, stderr_log_before)
+            # Not carried without the values: the log holds the tool's text in
+            # clear, and _carry_stderr_log takes this handler's one guarded
+            # read rather than reading the hook again.
+            if (
+                withheld is None
+                and not post_run.get("stderr")
+                and (
+                    stderr_log is not None
+                    and _log_identity(stderr_log) not in (None, stderr_log_before)
+                )
             ):
                 self._carry_stderr_log(post_run, stderr_log, environment_values)
             returncode = post_run.get("returncode")
