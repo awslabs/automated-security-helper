@@ -1350,7 +1350,12 @@ def _scan_one_project(
     # involved at all. Still reported in `incomplete_scanners`, because an
     # operator has not asked to be told a scan was complete when it was not.
     gating_incomplete = incomplete
-    if incomplete and project.policy_scanners and not project.policy_scanners_gate:
+    # The same exclusion for a stale content database: a scanner only the policy
+    # added, with the gate off, "cannot fail the project" (policy_origin_finding_count),
+    # and its database's age is no more the project's doing than its MISSING tool
+    # is. Still reported in stale_content_databases, as the incomplete scanner is.
+    gating_stale = stale
+    if project.policy_scanners and not project.policy_scanners_gate:
         policy_names = {
             normalise_scanner_name(name) for name in project.policy_scanners
         }
@@ -1358,6 +1363,12 @@ def _scan_one_project(
             name
             for name in incomplete
             if normalise_scanner_name(name) not in policy_names
+        ]
+        gating_stale = [
+            record
+            for record in stale
+            if normalise_scanner_name(str(record.get("scanner") or ""))
+            not in policy_names
         ]
 
     if abandoned is not None and abandoned.is_set():
@@ -1446,7 +1457,7 @@ def _scan_one_project(
             )
             and fail_on_incomplete
         )
-        or bool(stale)
+        or bool(gating_stale)
         or bool(coverage_fields["unevaluated_rules"])
         or bool(coverage_fields["unstoppable_tools"]),
         ceiling_unreachable_findings=unreachable,
@@ -1988,6 +1999,14 @@ def _mask_project_output(
             continue
         if path.is_symlink() or not path.is_file():
             continue
+        # rglob follows a linked directory, so a file reached through one is a
+        # regular file whose rewrite lands outside this tree. Refused like the
+        # link itself.
+        if any(
+            (project_output / Path(*relative.parts[: index + 1])).is_symlink()
+            for index in range(len(relative.parts) - 1)
+        ):
+            continue
         if path == results_file:
             _remask_results_file(path, values, shapes)
             continue
@@ -2277,10 +2296,22 @@ def execute_workspace(
     shapes = shapes_of_secret_values(exposed)
     if exposed:
         for project in plan.projects:
-            if project.key in collected:
-                _mask_project_output(
-                    _project_output_dir(settings, project), exposed, shapes
+            if project.key not in collected:
+                continue
+            project_output = _project_output_dir(settings, project)
+            # The same refusal the scan made before writing there. A project whose
+            # projects/<key> was a link was recorded FAILED without a scan, and is
+            # in `collected` all the same; walking and rewriting through that link
+            # would write into whatever it points at.
+            try:
+                refuse_linked_output_dir(settings.output_dir, project_output)
+            except OutputDirLinkRefused as refusal:
+                ASH_LOGGER.warning(
+                    f"Project '{project.key}': its output is not re-masked: {refusal}",
+                    extra=NO_MARKUP,
                 )
+                continue
+            _mask_project_output(project_output, exposed, shapes)
 
     for project in plan.projects:
         run = collected.get(project.key)
