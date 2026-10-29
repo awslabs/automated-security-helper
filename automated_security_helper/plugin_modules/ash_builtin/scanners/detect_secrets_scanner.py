@@ -1521,6 +1521,36 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             return path.relative_to(source).as_posix()
         return path.as_posix()
 
+    def _baseline_known(
+        self, baseline: Optional[Dict[str, Any]], scan_root: Path
+    ) -> Set[Tuple[str, Any, Any]]:
+        """The candidates the baseline marks known: (URI, hashed secret, type).
+
+        A baseline is the record of the findings its author has seen: the ones
+        audited as real and kept, the ones audited as false positives, and the
+        ones whose secret has since left the file. ``detect-secrets`` reports
+        against a baseline only what the baseline does not hold, by filename,
+        hash and type (``PotentialSecret.fields_to_compare``; line numbers
+        change and are not compared). The worker's collection starts from the
+        baseline's entries and adds what the scan found, so what comes back
+        holds every baseline entry under the baseline's spelling of its file
+        and every scanned secret under the scan's, which reported each entry
+        once as itself and a secret still in its file a second time. Each key
+        is the URI ``_finding_uri`` gives the file, so the two spellings meet.
+        """
+        known: Set[Tuple[str, Any, Any]] = set()
+        results = (baseline or {}).get("results")
+        if not isinstance(results, dict):
+            return known
+        for filename, entries in results.items():
+            if not isinstance(entries, list):
+                continue
+            uri = self._finding_uri(str(filename).replace("\\", "/"), scan_root)
+            for entry in entries:
+                if isinstance(entry, dict):
+                    known.add((uri, entry.get("hashed_secret"), entry.get("type")))
+        return known
+
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
         """Abstract stub — DetectSecrets overrides scan() directly; this is unreachable."""
         raise NotImplementedError(
@@ -1956,11 +1986,20 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 target_type=target_type,
             )
 
-            # Populate the Results list with findings from the scan
+            # Populate the Results list with findings from the scan. A candidate
+            # the baseline holds is known and leaves the report (_baseline_known):
+            # the baseline's own entries, which the collection carries, and a
+            # secret still in the file the baseline recorded it in. Nothing is
+            # reported at a line the baseline alone names: an entry without a
+            # line number (a --slim baseline's) has none, and a SARIF region
+            # starts at line 1 or later.
+            known = self._baseline_known(baseline_document, scan_root)
             results: List[Result] = []
             for filename, detections in self._secrets_collection.data.items():
                 uri = self._finding_uri(filename, scan_root)
                 for finding in detections:
+                    if (uri, finding.secret_hash, finding.type) in known:
+                        continue
                     rule_id = re.sub(
                         pattern=r"\W+", repl="-", string=finding.type
                     ).upper()
