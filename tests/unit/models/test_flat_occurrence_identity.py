@@ -228,7 +228,9 @@ def test_presentation_and_runtime_metadata_do_not_change_identity_or_source():
 def test_id_seed_uses_masked_description_and_excludes_raw_secrets(monkeypatch):
     payload = _payload()
     payload["ruleId"] = "B105"
-    payload["message"]["text"] = "Possible hardcoded password: 'synthetic-secret-only'"
+    payload["message"]["text"] = (
+        "Possible hardcoded password: 'synthetic-secret-only'"  # pragma: allowlist secret
+    )
     payload["properties"] = {"unrelated": "synthetic-private-property"}
     payload["locations"][0]["physicalLocation"]["region"]["snippet"] = {
         "text": "synthetic-private-snippet"
