@@ -3,8 +3,21 @@
 
 """Report generation: HTML reports, JQ queries, reporter mappings, field presence."""
 
+import html
 import json
-from typing import Any, Dict, Optional, Set
+import re
+import shlex
+from typing import Any, Dict, List, Optional, Set
+
+
+def _escaped(value: Any) -> str:
+    """*value* as text safe to place in HTML content or a quoted attribute.
+
+    Field paths, scanner names and original values come from SARIF files and
+    directory names ASH did not write, so a ``<`` or ``&`` in one is data, not
+    markup.
+    """
+    return html.escape(str(value), quote=True)
 
 
 # ---------------------------------------------------------------------------
@@ -16,32 +29,41 @@ def generate_jq_query(field_path: str) -> str:
     """
     Generate a JQ query to find results containing the specified field.
 
+    A path with no array segment becomes ``select(has("<first key>")) |
+    select(.<path> != null)``. A path with array segments (``runs[]``, or an
+    indexed ``runs[0]``, which is read as ``runs[]``) becomes one nested
+    ``select(.<array>[] | ...)`` per array segment around the final
+    ``select(.<rest> != null)``: ``has()`` takes a key name, and ``has("runs[]")``
+    named a key no document holds, so the command found nothing.
+
     Args:
         field_path: The field path to search for (e.g., 'runs[0].results[0].suppressions[0].kind')
 
     Returns:
         A JQ query string that will return findings containing the field
     """
-    # Handle specific test cases directly to match expected output
-    if field_path == "runs[].results[].ruleId":
-        return ". | select(.runs[] | select(.results[] | select(.ruleId != null)))"
+    normalized_path = re.sub(r"\[\d*\]", "[]", str(field_path))
 
-    elif (
-        field_path
-        == "runs[].results[].locations[].physicalLocation.artifactLocation.uri"
-    ):
-        return ". | select(.runs[] | select(.results[] | select(.locations[] | select(.physicalLocation.artifactLocation.uri != null))))"
+    if "[]" not in normalized_path:
+        first_key = normalized_path.split(".")[0]
+        return f'. | select(has("{first_key}")) | select(.{normalized_path} != null)'
 
-    elif field_path == "runs.tool.driver.name":
-        return '. | select(has("runs")) | select(.runs.tool.driver.name != null)'
+    # Group the dotted segments: each array segment opens a select over its
+    # elements, and the plain segments between them stay one dotted chunk.
+    segments = normalized_path.split(".")
+    chunks: List[str] = []
+    pending: List[str] = []
+    for segment in segments:
+        pending.append(segment)
+        if segment.endswith("[]"):
+            chunks.append(".".join(pending))
+            pending = []
+    tail = ".".join(pending)
 
-    # Handle simple path
-    elif "." not in field_path and "[" not in field_path:
-        return f'. | select(has("{field_path}")) | select(.{field_path} != null)'
-
-    # Default case for other paths
-    normalized_path = str(field_path).replace("[0]", "[]")
-    return f'. | select(has("{normalized_path.split(".")[0]}")) | select(.{normalized_path} != null)'
+    query = f"select(.{tail} != null)" if tail else "select(. != null)"
+    for chunk in reversed(chunks):
+        query = f"select(.{chunk} | {query})"
+    return f". | {query}"
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +315,7 @@ def generate_html_report(
     validation_results: Dict,
     output_path: str,
     field_presence: Dict[str, Dict[str, Any]] = None,
+    root: Optional[str] = None,
 ) -> None:
     """
     Generate a comprehensive HTML report showing SARIF field analysis and validation results.
@@ -301,6 +324,9 @@ def generate_html_report(
         validation_results: Validation results dictionary
         output_path: Path to write the HTML report
         field_presence: Optional dictionary with field presence information
+        root: The directory the report is written below, for a caller that has
+            registered no writable root (the ``ash inspect`` CLI): the write then
+            follows no link at any component below it
     """
     html = []
     html.append("<!DOCTYPE html>")
@@ -437,7 +463,7 @@ def generate_html_report(
     for scanner, stats in sorted(validation_results["match_statistics"].items()):
         html.append("    <div class='scanner'>")
         html.append("      <div class='scanner-header'>")
-        html.append(f"        <h3>{scanner}</h3>")
+        html.append(f"        <h3>{_escaped(scanner)}</h3>")
         html.append(
             f"        <div>Match Rate: {stats['matched_results']}/{stats['total_results']} ({stats['field_preservation_rate']:.2%})</div>"
         )
@@ -459,10 +485,10 @@ def generate_html_report(
                 for field in missing_fields:
                     html.append("          <tr>")
                     html.append(
-                        f"            <td class='field-path'>{field['path']}</td>"
+                        f"            <td class='field-path'>{_escaped(field['path'])}</td>"
                     )
                     html.append(
-                        f"            <td class='field-value'>{json.dumps(field['original_value'], indent=2)}</td>"
+                        f"            <td class='field-value'>{_escaped(json.dumps(field['original_value'], indent=2))}</td>"
                     )
                     html.append("          </tr>")
 
@@ -520,7 +546,7 @@ def generate_html_report(
     for scanner, stats in sorted(validation_results["match_statistics"].items()):
         match_rate = stats["field_preservation_rate"] * 100
         html.append("      <tr>")
-        html.append(f"        <td>{scanner}</td>")
+        html.append(f"        <td>{_escaped(scanner)}</td>")
         html.append(
             f"        <td>{stats['matched_results']}/{stats['total_results']}</td>"
         )
@@ -642,14 +668,6 @@ def generate_html_report(
         if info["type"]:
             field_type = ", ".join(sorted(info["type"]))
 
-        # Check for reporter mappings
-        mappings_html = ""
-        for reporter, mappings in reporter_mappings.items():
-            if path in mappings:
-                mappings_html += (
-                    f"<div class='reporter-mapping'>{reporter}: {mappings[path]}</div>"
-                )
-
         # Generate JQ query for this field
         jq_query = generate_jq_query(path)
 
@@ -661,13 +679,21 @@ def generate_html_report(
             # every run.
             for scanner in sorted(info["scanners"]):
                 if scanner != "ash-aggregated":
-                    example_file = f".ash/ash_output/scanners/{scanner}/**/*.sarif"
+                    # The scanner name is a directory name ASH did not choose;
+                    # quoted for the shell so a space or a quote in it stays one
+                    # argument. The glob is left outside the quotes so the shell
+                    # expands it.
+                    example_file = (
+                        f".ash/ash_output/scanners/{shlex.quote(scanner)}/**/*.sarif"
+                    )
                     break
 
         if len(info["scanners"]) == 1 and "ash-aggregated" in info["scanners"]:
             example_file = ".ash/ash_output/reports/ash.sarif"
 
-        jq_command = f"jq '{jq_query}' {example_file}"
+        # shlex.quote closes and reopens the single quotes around a quote in the
+        # query, which a field key can hold.
+        jq_command = f"jq {shlex.quote(jq_query)} {example_file}"
 
         # Create a unique ID for this field's JQ query. The row index is unique by
         # construction and stable across runs; hash(path) was neither, since
@@ -678,18 +704,18 @@ def generate_html_report(
         html.append("      <tr>")
         html.append(f"""
         <td class='field-path'>
-            {path}
+            {_escaped(path)}
             <div class='dropdown'>
                 <button class='dropbtn'>JQ</button>
                 <div class='dropdown-content'>
-                    <code id='{field_id}'>{jq_command}</code>
+                    <code id='{field_id}'>{_escaped(jq_command)}</code>
                     <button id='btn-{field_id}' class='copy-btn' onclick="copyToClipboard('{field_id}')">Copy</button>
                 </div>
             </div>
         </td>
         """)
-        html.append(f"        <td>{scanners_list}</td>")
-        html.append(f"        <td>{field_type}</td>")
+        html.append(f"        <td>{_escaped(scanners_list)}</td>")
+        html.append(f"        <td>{_escaped(field_type)}</td>")
 
         # In Aggregate column with proper styling
         in_agg_class = "present" if info.get("in_aggregate", False) else "missing"
@@ -710,7 +736,7 @@ def generate_html_report(
             ):
                 mapped_field = reporter_mappings[reporter_type][path]
 
-            html.append(f"        <td class='field-path'>{mapped_field}</td>")
+            html.append(f"        <td class='field-path'>{_escaped(mapped_field)}</td>")
         html.append("      </tr>")
 
     html.append("      </tbody>")
@@ -868,5 +894,5 @@ def generate_html_report(
     # Write the HTML file; below an output directory, never through a link there.
     from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 
-    with open_for_write(output_path) as f:
+    with open_for_write(output_path, root=root) as f:
         f.write("\n".join(html))
