@@ -1949,6 +1949,20 @@ def test_a_workflow_whose_local_references_stay_in_the_tree_is_linted(
         ("steps:\n  - uses: actions/checkout@v4\n", set()),
         ("steps:\n  - uses: ./${{ matrix.dir }}\n", set()),
         ("steps:\n  - run: ./build.sh\n", set()),
+        # The line scan is the fallback when PyYAML cannot read the file at all,
+        # so it has to read a quoted value whole and decode its escapes, as
+        # actionlint's parser does: a space, a comma, a bracket or a "#" inside
+        # the quotes does not end the value.
+        ('steps:\n  - uses: "./my action/x" # c\n  bad: [\n', {"./my action/x"}),
+        ("steps:\n  - uses: './b, c]#d'\n  bad: [\n", {"./b, c]#d"}),
+        ('steps:\n  - uses: "./a\\u0041\\x42"\n  bad: [\n', {"./aAB"}),
+        ("steps:\n  - uses: 'it''s/../x'\n  bad: [\n", set()),
+        # actionlint reads workflow keys case-insensitively.
+        ("steps:\n  - Uses: ./k\n  bad: [\n", {"./k"}),
+        ("x: &A ./f\nsteps:\n  - USES: *A\n", {"./f"}),
+        # A later document that fails to compose must not lose the ones before
+        # it; the folded value is found by the walk alone.
+        ("steps:\n  - uses: >-\n      ./n\n---\nbad: [\n", {"./n"}),
     ],
     ids=[
         "block",
@@ -1962,6 +1976,13 @@ def test_a_workflow_whose_local_references_stay_in_the_tree_is_linted(
         "remote",
         "expression",
         "not-uses",
+        "double-quoted-space",
+        "single-quoted-punctuation",
+        "double-quoted-escapes",
+        "single-quoted-not-local",
+        "capitalized-key",
+        "upper-key-alias",
+        "later-document-fails",
     ],
 )
 @pytest.mark.unit

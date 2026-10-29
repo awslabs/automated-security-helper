@@ -319,12 +319,29 @@ def is_workflow_file(relative_path: str, scan_root: Optional[Path] = None) -> bo
     )
 
 
-#: A ``uses:`` whose value starts with ``./``, on one line, plain or quoted, in
-#: block or flow style. Backs up the YAML walk in ``local_uses_references``.
+#: A ``uses:`` value on one line, in block or flow style: double-quoted (group 1,
+#: with its escapes still encoded), single-quoted (group 2, with ``''`` for a
+#: quote) or plain (group 3). The key is matched whatever its case, as actionlint
+#: reads workflow keys. Backs up the YAML walk in ``local_uses_references``.
 _LOCAL_USES_LINE = re.compile(
-    r"""(?:^|[\s{,])["']?uses["']?[ \t]*:[ \t]*["']?(\./[^\s"',}\]#]*)""",
-    re.MULTILINE,
+    r"""(?:^|[\s{,])["']?uses["']?[ \t]*:[ \t]*"""
+    r"""(?:"((?:[^"\\]|\\.)*)"|'((?:[^']|'')*)'|(\./[^\s"',}\]#]*))""",
+    re.MULTILINE | re.IGNORECASE,
 )
+
+
+def _uses_value_of(match: "re.Match[str]") -> str:
+    """The value a ``_LOCAL_USES_LINE`` match names, with YAML quoting decoded."""
+    double_quoted, single_quoted, plain = match.groups()
+    if double_quoted is not None:
+        try:
+            decoded = yaml.safe_load(f'"{double_quoted}"')
+        except yaml.YAMLError:
+            return double_quoted
+        return decoded if isinstance(decoded, str) else double_quoted
+    if single_quoted is not None:
+        return single_quoted.replace("''", "'")
+    return plain
 
 
 def local_uses_references(text: str) -> Set[str]:
@@ -332,21 +349,26 @@ def local_uses_references(text: str) -> Set[str]:
 
     actionlint reads what a ``uses: ./...`` names (an action's ``action.yml``, a
     reusable workflow) to check inputs, and quotes what it read in its findings.
-    Every mapping key named ``uses`` counts, wherever it sits, so this is a superset
-    of what actionlint resolves. Taken from PyYAML's node graph (aliases and merge
-    keys included, each node visited once) and from a line scan, so a file PyYAML
-    reads differently from actionlint's parser, or cannot read, is still covered.
-    A value holding an expression is left out: actionlint does not resolve it.
+    Every mapping key named ``uses`` counts, wherever it sits and whatever its
+    case, so this is a superset of what actionlint resolves. Taken from PyYAML's
+    node graph (aliases and merge keys included, each node visited once; the
+    documents before one PyYAML cannot compose are still walked) and from a line
+    scan, so a file PyYAML reads differently from actionlint's parser, or cannot
+    read, is still covered. A value holding an expression is left out: actionlint
+    does not resolve it.
     """
-    found: Set[str] = {match.group(1) for match in _LOCAL_USES_LINE.finditer(text)}
+    found: Set[str] = {
+        _uses_value_of(match) for match in _LOCAL_USES_LINE.finditer(text)
+    }
+    stack: List[Any] = []
     try:
-        stack: List[Any] = [
-            node
-            for node in yaml.compose_all(text, Loader=yaml.SafeLoader)
-            if node is not None
-        ]
+        # compose_all is a generator: the documents it composed before failing
+        # on a later one are kept, not thrown away with the error.
+        for node in yaml.compose_all(text, Loader=yaml.SafeLoader):
+            if node is not None:
+                stack.append(node)
     except (yaml.YAMLError, RecursionError):
-        stack = []
+        pass
     visited: Set[int] = set()
     while stack:
         node = stack.pop()
@@ -357,15 +379,14 @@ def local_uses_references(text: str) -> Set[str]:
             for key, value in node.value:
                 if (
                     isinstance(key, yaml.ScalarNode)
-                    and key.value == "uses"
+                    and str(key.value).lower() == "uses"
                     and isinstance(value, yaml.ScalarNode)
-                    and str(value.value).startswith("./")
                 ):
                     found.add(str(value.value))
                 stack.extend((key, value))
         elif isinstance(node, yaml.SequenceNode):
             stack.extend(node.value)
-    return {spec for spec in found if "${{" not in spec}
+    return {spec for spec in found if spec.startswith("./") and "${{" not in spec}
 
 
 def find_absolute_executable(name: str) -> Optional[str]:
